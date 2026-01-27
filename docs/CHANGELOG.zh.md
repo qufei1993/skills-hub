@@ -4,8 +4,12 @@
 
 ## [Unreleased]
 
-### 新增
+## [0.1.1] - 2026-01-26
+
+### 变更
 - GitHub Actions 发版工作流：macOS 打包并上传 `updater.json`（`.github/workflows/release.yml`）。
+- Cursor 同步固定使用 Copy：因为 Cursor 在发现 skills 时不会跟随 symlink：https://forum.cursor.com/t/cursor-doesnt-follow-symlinks-to-discover-skills/149693/4
+- 托管技能更新时：对 copy 模式目标使用“纯 copy 覆盖回灌”；并对 Cursor 目标强制回灌为 copy，避免误创建软链导致不可用。
 
 ## [0.1.0] - 2026-01-24
 

@@ -1,7 +1,8 @@
 use std::fs;
 
 use crate::core::sync_engine::{
-    copy_dir_recursive, sync_dir_hybrid, sync_dir_hybrid_with_overwrite, SyncMode,
+    copy_dir_recursive, sync_dir_for_tool_with_overwrite, sync_dir_hybrid,
+    sync_dir_hybrid_with_overwrite, SyncMode,
 };
 
 #[test]
@@ -56,4 +57,46 @@ fn hybrid_sync_with_overwrite_replaces_existing() {
 
     let out = sync_dir_hybrid_with_overwrite(src_dir.path(), &target, true).unwrap();
     assert!(out.replaced);
+}
+
+#[test]
+fn cursor_sync_forces_copy() {
+    let src_dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(src_dir.path().join("s")).unwrap();
+    fs::write(src_dir.path().join("s/a.txt"), b"ok").unwrap();
+
+    let dst_dir = tempfile::tempdir().unwrap();
+    let target = dst_dir.path().join("t");
+
+    let out = sync_dir_for_tool_with_overwrite("cursor", src_dir.path(), &target, false).unwrap();
+    assert!(matches!(out.mode_used, SyncMode::Copy));
+    assert!(target.join("s/a.txt").exists());
+    assert_eq!(fs::read(target.join("s/a.txt")).unwrap(), b"ok");
+}
+
+#[cfg(unix)]
+#[test]
+fn copy_overwrite_replaces_broken_symlink_target() {
+    use std::os::unix::fs::symlink;
+
+    let src_dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(src_dir.path().join("s")).unwrap();
+    fs::write(src_dir.path().join("s/a.txt"), b"ok").unwrap();
+
+    let dst_dir = tempfile::tempdir().unwrap();
+    let target = dst_dir.path().join("t");
+
+    // Create a broken symlink at the target path.
+    symlink(dst_dir.path().join("missing"), &target).unwrap();
+
+    let out = crate::core::sync_engine::sync_dir_copy_with_overwrite(
+        src_dir.path(),
+        &target,
+        true,
+    )
+    .unwrap();
+
+    assert!(matches!(out.mode_used, SyncMode::Copy));
+    assert!(target.join("s/a.txt").exists());
+    assert_eq!(fs::read(target.join("s/a.txt")).unwrap(), b"ok");
 }

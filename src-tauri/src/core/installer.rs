@@ -12,7 +12,7 @@ use super::content_hash::hash_dir;
 use super::git_fetcher::clone_or_pull;
 use super::skill_store::{SkillRecord, SkillStore};
 use super::sync_engine::copy_dir_recursive;
-use super::sync_engine::sync_dir_hybrid_with_overwrite;
+use super::sync_engine::sync_dir_copy_with_overwrite;
 use super::tool_adapters::adapter_by_key;
 use super::tool_adapters::is_tool_installed;
 
@@ -441,6 +441,7 @@ pub fn update_managed_skill_from_source<R: tauri::Runtime>(
     store.upsert_skill(&updated)?;
 
     // If any targets are "copy", re-sync them so changes propagate. Symlinks update automatically.
+    // Cursor 目前不支持软链/junction，因此无论历史 mode 如何，都需要强制 copy 回灌。
     let targets = store.list_skill_targets(skill_id)?;
     let mut updated_targets: Vec<String> = Vec::new();
     for t in targets {
@@ -450,21 +451,16 @@ pub fn update_managed_skill_from_source<R: tauri::Runtime>(
                 continue;
             }
         }
-        if t.mode == "copy" {
+        let force_copy = t.mode == "copy" || t.tool == "cursor";
+        if force_copy {
             let target_path = PathBuf::from(&t.target_path);
-            let sync_res = sync_dir_hybrid_with_overwrite(&central_path, &target_path, true)?;
+            let sync_res = sync_dir_copy_with_overwrite(&central_path, &target_path, true)?;
             let record = super::skill_store::SkillTargetRecord {
                 id: t.id.clone(),
                 skill_id: t.skill_id.clone(),
                 tool: t.tool.clone(),
                 target_path: sync_res.target_path.to_string_lossy().to_string(),
-                mode: match sync_res.mode_used {
-                    super::sync_engine::SyncMode::Auto => "auto",
-                    super::sync_engine::SyncMode::Symlink => "symlink",
-                    super::sync_engine::SyncMode::Junction => "junction",
-                    super::sync_engine::SyncMode::Copy => "copy",
-                }
-                .to_string(),
+                mode: "copy".to_string(),
                 status: "ok".to_string(),
                 last_error: None,
                 synced_at: Some(now),

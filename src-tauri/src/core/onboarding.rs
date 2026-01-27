@@ -40,12 +40,19 @@ pub fn build_onboarding_plan<R: tauri::Runtime>(
     let home =
         dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to resolve home directory"))?;
     let central = resolve_central_repo_path(app, store)?;
-    build_onboarding_plan_in_home(&home, Some(&central))
+    let managed_targets = store
+        .list_all_skill_target_paths()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(tool, path)| managed_target_key(&tool, Path::new(&path)))
+        .collect::<std::collections::HashSet<_>>();
+    build_onboarding_plan_in_home(&home, Some(&central), Some(&managed_targets))
 }
 
 fn build_onboarding_plan_in_home(
     home: &Path,
     exclude_root: Option<&Path>,
+    exclude_managed_targets: Option<&std::collections::HashSet<String>>,
 ) -> Result<OnboardingPlan> {
     let adapters = default_tool_adapters();
     let mut all_detected: Vec<DetectedSkill> = Vec::new();
@@ -58,7 +65,11 @@ fn build_onboarding_plan_in_home(
         scanned += 1;
         let dir = home.join(adapter.relative_skills_dir);
         let detected = scan_tool_dir(adapter, &dir)?;
-        all_detected.extend(filter_detected(detected, exclude_root));
+        all_detected.extend(filter_detected(
+            detected,
+            exclude_root,
+            exclude_managed_targets,
+        ));
     }
 
     let mut grouped: HashMap<String, Vec<OnboardingVariant>> = HashMap::new();
@@ -104,19 +115,26 @@ fn build_onboarding_plan_in_home(
 fn filter_detected(
     detected: Vec<DetectedSkill>,
     exclude_root: Option<&Path>,
+    exclude_managed_targets: Option<&std::collections::HashSet<String>>,
 ) -> Vec<DetectedSkill> {
-    if exclude_root.is_none() {
+    if exclude_root.is_none() && exclude_managed_targets.is_none() {
         return detected;
     }
-    let exclude_root = exclude_root.unwrap();
     detected
         .into_iter()
         .filter(|skill| {
-            if is_under(&skill.path, exclude_root) {
-                return false;
+            if let Some(exclude_root) = exclude_root {
+                if is_under(&skill.path, exclude_root) {
+                    return false;
+                }
+                if let Some(target) = &skill.link_target {
+                    if is_under(target, exclude_root) {
+                        return false;
+                    }
+                }
             }
-            if let Some(target) = &skill.link_target {
-                if is_under(target, exclude_root) {
+            if let Some(exclude) = exclude_managed_targets {
+                if exclude.contains(&managed_target_key(skill.tool.as_key(), &skill.path)) {
                     return false;
                 }
             }
@@ -127,6 +145,25 @@ fn filter_detected(
 
 fn is_under(path: &Path, base: &Path) -> bool {
     path.starts_with(base)
+}
+
+fn managed_target_key(tool: &str, path: &Path) -> String {
+    let tool = tool.to_ascii_lowercase();
+    let normalized = normalize_path_for_key(path);
+    format!("{tool}\n{normalized}")
+}
+
+fn normalize_path_for_key(path: &Path) -> String {
+    let normalized: PathBuf = path.components().collect();
+    let s = normalized.to_string_lossy().to_string();
+    #[cfg(windows)]
+    {
+        s.to_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        s
+    }
 }
 
 #[cfg(test)]

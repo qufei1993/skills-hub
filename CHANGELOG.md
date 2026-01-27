@@ -4,8 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Added
+## [0.1.1] - 2026-01-26
+
+### Changed
 - GitHub Actions release workflow for macOS packaging and uploading `updater.json` (`.github/workflows/release.yml`).
+- Cursor sync now always uses directory copy due to Cursor not following symlinks when discovering skills: https://forum.cursor.com/t/cursor-doesnt-follow-symlinks-to-discover-skills/149693/4
+- Managed skill update now re-syncs copy-mode targets using copy-only overwrite, and forces Cursor targets to copy to avoid accidental relinking.
 
 ## [0.1.0] - 2026-01-25
 

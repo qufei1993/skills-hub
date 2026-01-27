@@ -17,7 +17,7 @@ use crate::core::installer::{
 use crate::core::onboarding::{build_onboarding_plan, OnboardingPlan};
 use crate::core::skill_store::{SkillStore, SkillTargetRecord};
 use crate::core::sync_engine::{
-    copy_dir_recursive, sync_dir_hybrid, sync_dir_hybrid_with_overwrite, SyncMode,
+    copy_dir_recursive, sync_dir_for_tool_with_overwrite, sync_dir_hybrid, SyncMode,
 };
 use crate::core::tool_adapters::{adapter_by_key, is_tool_installed, resolve_default_path};
 use uuid::Uuid;
@@ -442,7 +442,7 @@ pub async fn sync_skill_to_tool(
         let target = tool_root.join(&name);
         let overwrite = overwrite.unwrap_or(false);
         let result =
-            sync_dir_hybrid_with_overwrite(sourcePath.as_ref(), target.as_path(), overwrite)
+            sync_dir_for_tool_with_overwrite(&tool, sourcePath.as_ref(), &target, overwrite)
                 .map_err(|err| {
                     let msg = err.to_string();
                     if msg.contains("target already exists") {

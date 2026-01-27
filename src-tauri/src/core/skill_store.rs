@@ -323,6 +323,22 @@ impl SkillStore {
         })
     }
 
+    pub fn list_all_skill_target_paths(&self) -> Result<Vec<(String, String)>> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT tool, target_path
+         FROM skill_targets",
+            )?;
+            let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+
+            let mut items = Vec::new();
+            for row in rows {
+                items.push(row?);
+            }
+            Ok(items)
+        })
+    }
+
     pub fn get_skill_target(
         &self,
         skill_id: &str,

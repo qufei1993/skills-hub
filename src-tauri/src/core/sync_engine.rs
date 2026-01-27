@@ -63,7 +63,7 @@ pub fn sync_dir_hybrid_with_overwrite(
     overwrite: bool,
 ) -> Result<SyncOutcome> {
     let mut did_replace = false;
-    if target.exists() {
+    if std::fs::symlink_metadata(target).is_ok() {
         if is_same_link(target, source) {
             return Ok(SyncOutcome {
                 mode_used: SyncMode::Symlink,
@@ -88,10 +88,70 @@ pub fn sync_dir_hybrid_with_overwrite(
     })
 }
 
+pub fn sync_dir_copy_with_overwrite(
+    source: &Path,
+    target: &Path,
+    overwrite: bool,
+) -> Result<SyncOutcome> {
+    let mut did_replace = false;
+    if std::fs::symlink_metadata(target).is_ok() {
+        if overwrite {
+            remove_path_any(target)
+                .with_context(|| format!("remove existing target {:?}", target))?;
+            did_replace = true;
+        } else {
+            anyhow::bail!("target already exists: {:?}", target);
+        }
+    }
+
+    ensure_parent_dir(target)?;
+    copy_dir_recursive(source, target)?;
+
+    Ok(SyncOutcome {
+        mode_used: SyncMode::Copy,
+        target_path: target.to_path_buf(),
+        replaced: did_replace,
+    })
+}
+
+pub fn sync_dir_for_tool_with_overwrite(
+    tool_key: &str,
+    source: &Path,
+    target: &Path,
+    overwrite: bool,
+) -> Result<SyncOutcome> {
+    // Cursor 目前不支持软链/junction：强制使用 copy，避免同步后在 Cursor 内不可用。
+    if tool_key.eq_ignore_ascii_case("cursor") {
+        return sync_dir_copy_with_overwrite(source, target, overwrite);
+    }
+    sync_dir_hybrid_with_overwrite(source, target, overwrite)
+}
+
 fn ensure_parent_dir(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("create dir {:?}", parent))?;
     }
+    Ok(())
+}
+
+fn remove_path_any(path: &Path) -> Result<()> {
+    let meta = match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err).with_context(|| format!("stat {:?}", path)),
+    };
+    let ft = meta.file_type();
+
+    // 软链接（即使指向目录）也应该用 remove_file 删除链接本身
+    if ft.is_symlink() {
+        std::fs::remove_file(path).with_context(|| format!("remove symlink {:?}", path))?;
+        return Ok(());
+    }
+    if ft.is_dir() {
+        std::fs::remove_dir_all(path).with_context(|| format!("remove dir {:?}", path))?;
+        return Ok(());
+    }
+    std::fs::remove_file(path).with_context(|| format!("remove file {:?}", path))?;
     Ok(())
 }
 

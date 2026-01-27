@@ -160,7 +160,11 @@ fn installs_local_skill_and_updates_from_source() {
             .central_path
     )
     .exists());
-    assert!(target.exists(), "目标路径应存在（可能是 symlink 或 copy）");
+    assert!(
+        target.join("a.txt").exists(),
+        "目标路径应存在并包含同步后的文件"
+    );
+    assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"v2");
 
     let err = match super::install_local_skill(
         app.handle(),
