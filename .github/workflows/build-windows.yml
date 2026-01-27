@@ -1,0 +1,40 @@
+# Windows 构建：在 GitHub Actions 中产出 exe/安装包，无需本机安装 Visual Studio
+# 使用方式：把本 workflow 推到任意分支后，在 Actions 里选 "Build Windows" -> "Run workflow"，
+#           在分支下拉框中选择你当前分支（不必是 main），运行完成后在该 run 的 Artifacts 里下载 windows-build
+name: Build Windows
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Setup Rust (MSVC)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Build Tauri (Windows)
+        run: npm run tauri:build -- --bundles nsis
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: src-tauri/target/release/bundle/
