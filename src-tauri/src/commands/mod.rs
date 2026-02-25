@@ -10,6 +10,9 @@ use crate::core::cache_cleanup::{
 };
 use crate::core::central_repo::{ensure_central_repo, resolve_central_repo_path};
 use crate::core::github_search::{search_github_repos, RepoSummary};
+use crate::core::skills_sh_leaderboard::{
+    fetch_leaderboard, LeaderboardEntry, LeaderboardType,
+};
 use crate::core::installer::{
     install_git_skill, install_git_skill_from_selection, install_local_skill,
     install_local_skill_from_selection, list_git_skills, list_local_skills,
@@ -619,6 +622,46 @@ pub async fn search_github(query: String, limit: Option<u32>) -> Result<Vec<Repo
         .await
         .map_err(|err| err.to_string())?
         .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+pub async fn get_skills_leaderboard(
+    leaderboard_type: String,
+) -> Result<Vec<LeaderboardEntry>, String> {
+    let lb_type = match leaderboard_type.as_str() {
+        "trending" => LeaderboardType::Trending,
+        "hot" => LeaderboardType::Hot,
+        _ => LeaderboardType::AllTime,
+    };
+    tauri::async_runtime::spawn_blocking(move || fetch_leaderboard(&lb_type))
+        .await
+        .map_err(|err| err.to_string())?
+        .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+pub async fn search_skills_sh(query: String) -> Result<Vec<LeaderboardEntry>, String> {
+    let query_lower = query.to_lowercase();
+    tauri::async_runtime::spawn_blocking(move || {
+        // Fetch all-time leaderboard and filter by query
+        let entries = fetch_leaderboard(&LeaderboardType::AllTime)?;
+        Ok(entries
+            .into_iter()
+            .filter(|entry| {
+                entry.name.to_lowercase().contains(&query_lower)
+                    || entry.owner.to_lowercase().contains(&query_lower)
+                    || entry.repo.to_lowercase().contains(&query_lower)
+                    || entry
+                        .description
+                        .as_ref()
+                        .map(|d| d.to_lowercase().contains(&query_lower))
+                        .unwrap_or(false)
+            })
+            .collect())
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_anyhow_error)
 }
 
 #[tauri::command]

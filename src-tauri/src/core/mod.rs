@@ -6,6 +6,7 @@ pub mod github_search;
 pub mod installer;
 pub mod onboarding;
 pub mod skill_store;
+pub mod skills_sh_leaderboard;
 pub mod sync_engine;
 pub mod temp_cleanup;
 pub mod tool_adapters;

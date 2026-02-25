@@ -6,6 +6,7 @@ import FilterBar from './components/skills/FilterBar'
 import Header from './components/skills/Header'
 import LoadingOverlay from './components/skills/LoadingOverlay'
 import SkillsList from './components/skills/SkillsList'
+import LeaderboardTab from './components/skills/LeaderboardTab'
 import AddSkillModal from './components/skills/modals/AddSkillModal'
 import DeleteModal from './components/skills/modals/DeleteModal'
 import GitPickModal from './components/skills/modals/GitPickModal'
@@ -78,6 +79,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState<'updated' | 'name'>('updated')
   const [addModalTab, setAddModalTab] = useState<'local' | 'git'>('git')
+  const [activeTab, setActiveTab] = useState<'skills' | 'leaderboard'>('skills')
 
   const isTauri =
     typeof window !== 'undefined' &&
@@ -653,6 +655,82 @@ function App() {
   const handleRefresh = useCallback(() => {
     void loadManagedSkills()
   }, [loadManagedSkills])
+
+  const handleInstallFromLeaderboard = useCallback(
+    async (repoUrl: string, name?: string) => {
+      setLoading(true)
+      setLoadingStartAt(Date.now())
+      setError(null)
+      setActionMessage(t('actions.creatingGitSkill'))
+      try {
+        const created = await invokeTauri<InstallResultDto>('install_git', {
+          repoUrl,
+          name: name || undefined,
+        })
+        {
+          const selectedInstalledIds = tools
+            .filter((tool) => syncTargets[tool.id] && isInstalled(tool.id))
+            .map((t) => t.id)
+          const targets = uniqueToolIdsBySkillsDir(selectedInstalledIds)
+            .map((id) => tools.find((t) => t.id === id))
+            .filter(Boolean) as ToolOption[]
+          if (targets.length === 0) {
+            setError(t('errors.noSyncTargets'))
+          } else {
+            const collectedErrors: { title: string; message: string }[] = []
+            for (let i = 0; i < targets.length; i++) {
+              const tool = targets[i]
+              setActionMessage(
+                t('actions.syncStep', {
+                  index: i + 1,
+                  total: targets.length,
+                  name: created.name,
+                  tool: tool.label,
+                }),
+              )
+              try {
+                await invokeTauri('sync_skill_to_tool', {
+                  sourcePath: created.central_path,
+                  skillId: created.skill_id,
+                  tool: tool.id,
+                  name: created.name,
+                })
+              } catch (err) {
+                const raw = err instanceof Error ? err.message : String(err)
+                collectedErrors.push({
+                  title: t('errors.syncFailedTitle', {
+                    name: created.name,
+                    tool: tool.label,
+                  }),
+                  message: raw,
+                })
+              }
+            }
+            if (collectedErrors.length > 0) showActionErrors(collectedErrors)
+          }
+        }
+        setActionMessage(t('status.gitSkillCreated'))
+        setSuccessToastMessage(t('status.gitSkillCreated'))
+        setActionMessage(null)
+        await loadManagedSkills()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setLoading(false)
+        setLoadingStartAt(null)
+      }
+    },
+    [
+      invokeTauri,
+      isInstalled,
+      loadManagedSkills,
+      showActionErrors,
+      syncTargets,
+      t,
+      tools,
+      uniqueToolIdsBySkillsDir,
+    ],
+  )
 
 
   const handleReviewImport = useCallback(async () => {
@@ -1547,30 +1625,51 @@ function App() {
 
       <main className="skills-main">
         <div className="dashboard-stack">
-          <FilterBar
-            sortBy={sortBy}
-            searchQuery={searchQuery}
-            loading={loading}
-            onSortChange={handleSortChange}
-            onSearchChange={handleSearchChange}
-            onRefresh={handleRefresh}
-            t={t}
-          />
-          <SkillsList
-            plan={plan}
-            visibleSkills={visibleSkills}
-            installedTools={installedTools}
-            loading={loading}
-            getGithubInfo={getGithubInfo}
-            getSkillSourceLabel={getSkillSourceLabel}
-            formatRelative={formatRelative}
-            onReviewImport={handleReviewImport}
-            onUpdateSkill={handleUpdateSkill}
-            onDeleteSkill={handleDeletePrompt}
-            onToggleTool={handleToggleToolForSkill}
-            t={t}
-          />
+          <div className="app-tabs">
+            <button
+              className={`app-tab ${activeTab === 'skills' ? 'active' : ''}`}
+              onClick={() => setActiveTab('skills')}
+            >
+              {t('navSkills')}
+            </button>
+            <button
+              className={`app-tab ${activeTab === 'leaderboard' ? 'active' : ''}`}
+              onClick={() => setActiveTab('leaderboard')}
+            >
+              {t('leaderboard.title')}
+            </button>
           </div>
+
+          {activeTab === 'skills' ? (
+            <>
+              <FilterBar
+                sortBy={sortBy}
+                searchQuery={searchQuery}
+                loading={loading}
+                onSortChange={handleSortChange}
+                onSearchChange={handleSearchChange}
+                onRefresh={handleRefresh}
+                t={t}
+              />
+              <SkillsList
+                plan={plan}
+                visibleSkills={visibleSkills}
+                installedTools={installedTools}
+                loading={loading}
+                getGithubInfo={getGithubInfo}
+                getSkillSourceLabel={getSkillSourceLabel}
+                formatRelative={formatRelative}
+                onReviewImport={handleReviewImport}
+                onUpdateSkill={handleUpdateSkill}
+                onDeleteSkill={handleDeletePrompt}
+                onToggleTool={handleToggleToolForSkill}
+                t={t}
+              />
+            </>
+          ) : (
+            <LeaderboardTab onInstallSkill={handleInstallFromLeaderboard} t={t} />
+          )}
+        </div>
       </main>
 
       <AddSkillModal

@@ -470,6 +470,23 @@ export const resources = {
         pendingUpdates: '待更新',
         allGood: '全部正常',
       },
+      leaderboard: {
+        title: 'Skills 榜单',
+        allTime: '总榜',
+        trending: '趋势',
+        hot: '热门',
+        searchPlaceholder: '搜索 skills.sh 榜单...',
+        rank: '排名',
+        skill: '技能',
+        installs: '安装量',
+        install: '安装',
+        installing: '安装中...',
+        empty: '暂无榜单数据',
+        loadFailed: '加载榜单失败',
+        fromSkillsSh: '来自 skills.sh',
+      },
+      navSkills: '我的 Skills',
+      loading: '加载中...',
       sharedDirConfirm:
         '提示：{{tool}} 与 {{others}} 共用同一个全局 skills 目录，本次修改会同时影响它们。是否继续？',
       tools: {
