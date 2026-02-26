@@ -16,6 +16,7 @@ import ImportModal from './components/skills/modals/ImportModal'
 import NewToolsModal from './components/skills/modals/NewToolsModal'
 import SharedDirModal from './components/skills/modals/SharedDirModal'
 import SettingsModal from './components/skills/modals/SettingsModal'
+import { buildInstalledSkillNameSet } from './components/skills/leaderboardInstalled'
 import type {
   GitSkillCandidate,
   InstallResultDto,
@@ -411,6 +412,10 @@ function App() {
     })
     return sorted
   }, [managedSkills, searchQuery, sortBy])
+  const installedSkillNames = useMemo(
+    () => Array.from(buildInstalledSkillNameSet(managedSkills)),
+    [managedSkills],
+  )
 
   const [storagePath, setStoragePath] = useState<string>(t('notAvailable'))
   const [gitCacheCleanupDays, setGitCacheCleanupDays] = useState<number>(30)
@@ -658,68 +663,50 @@ function App() {
   }, [loadManagedSkills])
 
   const handleInstallFromLeaderboard = useCallback(
-    async (repoUrl: string, name?: string) => {
-      setLoading(true)
-      setLoadingStartAt(Date.now())
+    async (
+      repoUrl: string,
+      name?: string,
+      onProgress?: (phase: 'downloading' | 'syncing') => void,
+    ) => {
       setError(null)
-      setActionMessage(t('actions.creatingGitSkill'))
-      try {
-        const created = await invokeTauri<InstallResultDto>('install_git', {
-          repoUrl,
-          name: name || undefined,
-        })
-        {
-          const selectedInstalledIds = tools
-            .filter((tool) => syncTargets[tool.id] && isInstalled(tool.id))
-            .map((t) => t.id)
-          const targets = uniqueToolIdsBySkillsDir(selectedInstalledIds)
-            .map((id) => tools.find((t) => t.id === id))
-            .filter(Boolean) as ToolOption[]
-          if (targets.length === 0) {
-            setError(t('errors.noSyncTargets'))
-          } else {
-            const collectedErrors: { title: string; message: string }[] = []
-            for (let i = 0; i < targets.length; i++) {
-              const tool = targets[i]
-              setActionMessage(
-                t('actions.syncStep', {
-                  index: i + 1,
-                  total: targets.length,
-                  name: created.name,
-                  tool: tool.label,
-                }),
-              )
-              try {
-                await invokeTauri('sync_skill_to_tool', {
-                  sourcePath: created.central_path,
-                  skillId: created.skill_id,
-                  tool: tool.id,
-                  name: created.name,
-                })
-              } catch (err) {
-                const raw = err instanceof Error ? err.message : String(err)
-                collectedErrors.push({
-                  title: t('errors.syncFailedTitle', {
-                    name: created.name,
-                    tool: tool.label,
-                  }),
-                  message: raw,
-                })
-              }
-            }
-            if (collectedErrors.length > 0) showActionErrors(collectedErrors)
+      onProgress?.('downloading')
+      const created = await invokeTauri<InstallResultDto>('install_git', {
+        repoUrl,
+        name: name || undefined,
+      })
+      const selectedInstalledIds = tools
+        .filter((tool) => syncTargets[tool.id] && isInstalled(tool.id))
+        .map((t) => t.id)
+      const targets = uniqueToolIdsBySkillsDir(selectedInstalledIds)
+        .map((id) => tools.find((t) => t.id === id))
+        .filter(Boolean) as ToolOption[]
+      if (targets.length > 0) {
+        onProgress?.('syncing')
+        const collectedErrors: { title: string; message: string }[] = []
+        for (let i = 0; i < targets.length; i++) {
+          const tool = targets[i]
+          try {
+            await invokeTauri('sync_skill_to_tool', {
+              sourcePath: created.central_path,
+              skillId: created.skill_id,
+              tool: tool.id,
+              name: created.name,
+            })
+          } catch (err) {
+            const raw = err instanceof Error ? err.message : String(err)
+            collectedErrors.push({
+              title: t('errors.syncFailedTitle', {
+                name: created.name,
+                tool: tool.label,
+              }),
+              message: raw,
+            })
           }
         }
-        setActionMessage(t('status.gitSkillCreated'))
-        setSuccessToastMessage(t('status.gitSkillCreated'))
-        setActionMessage(null)
-        await loadManagedSkills()
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-      } finally {
-        setLoading(false)
-        setLoadingStartAt(null)
+        if (collectedErrors.length > 0) showActionErrors(collectedErrors)
       }
+      setSuccessToastMessage(t('status.gitSkillCreated'))
+      await loadManagedSkills()
     },
     [
       invokeTauri,
@@ -1674,7 +1661,11 @@ function App() {
               />
             </>
           ) : activeTab === 'leaderboard' ? (
-            <LeaderboardTab onInstallSkill={handleInstallFromLeaderboard} t={t} />
+            <LeaderboardTab
+              onInstallSkill={handleInstallFromLeaderboard}
+              installedSkillNames={installedSkillNames}
+              t={t}
+            />
           ) : (
             <ToolSkillsTab
               managedSkills={managedSkills}

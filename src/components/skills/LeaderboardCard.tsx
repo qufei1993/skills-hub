@@ -17,7 +17,8 @@ export type LeaderboardEntry = {
 type LeaderboardCardProps = {
   entry: LeaderboardEntry
   onInstall: (entry: LeaderboardEntry) => void
-  installing: boolean
+  installState: 'idle' | 'queued' | 'downloading' | 'syncing' | 'completed'
+  isInstalled: boolean
   t: TFunction
 }
 
@@ -28,11 +29,29 @@ const getRankStyle = (rank: number) => {
   return { class: '', emoji: '', gradient: '' }
 }
 
-const LeaderboardCard = ({ entry, onInstall, installing, t }: LeaderboardCardProps) => {
+const LeaderboardCard = ({
+  entry,
+  onInstall,
+  installState,
+  isInstalled,
+  t,
+}: LeaderboardCardProps) => {
   const skillPath = (entry.skill_slug || entry.name).trim()
   const skillsShUrl = `https://skills.sh/${encodeURIComponent(entry.owner)}/${encodeURIComponent(entry.repo)}/${encodeURIComponent(skillPath)}`
   const rankStyle = getRankStyle(entry.rank)
   const isTopThree = entry.rank <= 3
+
+  const installLabel = isInstalled
+    ? t('leaderboard.installed')
+    : installState === 'queued'
+      ? t('leaderboard.queued')
+      : installState === 'syncing'
+        ? t('leaderboard.syncing')
+        : installState === 'completed'
+          ? t('leaderboard.completed')
+          : installState === 'downloading'
+          ? t('leaderboard.installing')
+          : t('leaderboard.install')
 
   const handleOpenDetails = useCallback(() => {
     void openUrl(skillsShUrl).catch((error) => {
@@ -84,10 +103,10 @@ const LeaderboardCard = ({ entry, onInstall, installing, t }: LeaderboardCardPro
           <button
             className={`lb-btn ${isTopThree ? rankStyle.class : ''}`}
             onClick={() => onInstall(entry)}
-            disabled={installing}
+            disabled={isInstalled || installState !== 'idle'}
           >
             <Download size={14} />
-            <span>{installing ? t('leaderboard.installing') : t('leaderboard.install')}</span>
+            <span>{installLabel}</span>
           </button>
         </div>
       </div>

@@ -1668,6 +1668,87 @@
   gap: 10px;
 }
 
+.leaderboard-queue-panel {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-panel);
+  padding: 12px 14px;
+}
+
+.leaderboard-queue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.leaderboard-queue-head strong {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.leaderboard-queue-empty {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.leaderboard-queue-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.leaderboard-queue-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-app);
+  padding: 7px 9px;
+}
+
+.leaderboard-queue-name {
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboard-queue-stage {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-element);
+  color: var(--text-secondary);
+}
+
+.leaderboard-queue-stage.stage-queued {
+  color: var(--text-secondary);
+}
+
+.leaderboard-queue-stage.stage-downloading,
+.leaderboard-queue-stage.stage-syncing {
+  color: var(--accent-primary);
+}
+
+.leaderboard-queue-stage.stage-completed {
+  color: var(--status-success);
+}
+
+.leaderboard-queue-stage.stage-failed {
+  color: var(--status-error);
+}
+
 /* Tool Skills Tab */
 .tool-skills-tab {
   display: grid;
@@ -1855,6 +1936,20 @@
   .tool-skill-card {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .leaderboard-tab {
+    padding: 0 16px 24px;
+  }
+
+  .leaderboard-header-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .leaderboard-search .search-input {
+    width: 100%;
   }
 }
 
