@@ -14,13 +14,12 @@ Design docs:
 
 ## Key Features
 
-- Unified view: managed skills and per-tool activation status
+- Three core tabs: `By Skills`, `By Tool`, and `Leaderboard`
+- Leaderboard install flow: browse/search skills.sh, then install with download queue + status
 - Onboarding migration: scan existing skills in installed tools, import into the Central Repo, and sync
 - Import sources: local folder / Git URL (including multi-skill repo selection)
-- Update: refresh from source; propagate updates to copy-mode targets
+- Update & sync: refresh from source and propagate updates to copy-mode targets
 - New tool detection: detect newly installed tools and prompt to sync managed skills
-
-![Skills Hub](docs/assets/home-example.png)
 
 ## Screenshots
 
