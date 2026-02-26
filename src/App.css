@@ -1668,6 +1668,196 @@
   gap: 10px;
 }
 
+/* Tool Skills Tab */
+.tool-skills-tab {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 16px;
+  padding: 20px 32px 32px;
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+}
+
+.tool-skills-sidebar {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-app);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tool-skills-sidebar-title {
+  padding: 14px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tool-skills-sidebar-empty {
+  margin: 16px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  background: var(--bg-element);
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+.tool-skills-sidebar-list {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.tool-skills-tool-item {
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-app);
+  text-align: left;
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tool-skills-tool-item:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-panel);
+}
+
+.tool-skills-tool-item.active {
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 7%, var(--bg-app));
+}
+
+.tool-skills-tool-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tool-skills-tool-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.tool-skills-tool-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.tool-skills-tool-status {
+  margin-top: 8px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool-skills-tool-status.installed {
+  color: var(--status-success);
+}
+
+.tool-skills-tool-status.not-installed {
+  color: var(--text-tertiary);
+}
+
+.tool-skills-content {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-app);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tool-skills-content-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tool-skills-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.tool-skills-subtitle {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.tool-skills-empty {
+  margin: 16px 20px;
+  padding: 18px;
+  border-radius: var(--radius-md);
+  color: var(--text-tertiary);
+  border: 1px dashed var(--border-subtle);
+  background: var(--bg-element);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.tool-skills-list {
+  padding: 14px 20px 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.tool-skill-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-app);
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tool-skill-main {
+  min-width: 0;
+}
+
+.tool-skill-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.tool-skill-meta {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+@media (max-width: 980px) {
+  .tool-skills-tab {
+    grid-template-columns: 1fr;
+    padding: 16px 16px 24px;
+  }
+
+  .tool-skill-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 /* New Leaderboard Card Styles */
 .lb-card {
   display: flex;
@@ -2043,4 +2233,3 @@
   background: linear-gradient(135deg, rgba(251, 146, 60, 0.2) 0%, rgba(234, 88, 12, 0.3) 100%);
   color: #fed7aa;
 }
-

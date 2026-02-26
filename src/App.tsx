@@ -7,6 +7,7 @@ import Header from './components/skills/Header'
 import LoadingOverlay from './components/skills/LoadingOverlay'
 import SkillsList from './components/skills/SkillsList'
 import LeaderboardTab from './components/skills/LeaderboardTab'
+import ToolSkillsTab from './components/skills/ToolSkillsTab'
 import AddSkillModal from './components/skills/modals/AddSkillModal'
 import DeleteModal from './components/skills/modals/DeleteModal'
 import GitPickModal from './components/skills/modals/GitPickModal'
@@ -79,7 +80,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState<'updated' | 'name'>('updated')
   const [addModalTab, setAddModalTab] = useState<'local' | 'git'>('git')
-  const [activeTab, setActiveTab] = useState<'skills' | 'leaderboard'>('skills')
+  const [activeTab, setActiveTab] = useState<'skills' | 'leaderboard' | 'tools'>('skills')
 
   const isTauri =
     typeof window !== 'undefined' &&
@@ -1638,6 +1639,12 @@ function App() {
             >
               {t('leaderboard.title')}
             </button>
+            <button
+              className={`app-tab ${activeTab === 'tools' ? 'active' : ''}`}
+              onClick={() => setActiveTab('tools')}
+            >
+              {t('toolSkills.title')}
+            </button>
           </div>
 
           {activeTab === 'skills' ? (
@@ -1666,8 +1673,19 @@ function App() {
                 t={t}
               />
             </>
-          ) : (
+          ) : activeTab === 'leaderboard' ? (
             <LeaderboardTab onInstallSkill={handleInstallFromLeaderboard} t={t} />
+          ) : (
+            <ToolSkillsTab
+              managedSkills={managedSkills}
+              tools={tools}
+              installedToolIds={installedToolIds}
+              loading={loading}
+              formatRelative={formatRelative}
+              getSkillSourceLabel={getSkillSourceLabel}
+              onToggleTool={handleToggleToolForSkill}
+              t={t}
+            />
           )}
         </div>
       </main>
