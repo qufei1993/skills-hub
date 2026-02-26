@@ -28,6 +28,7 @@ type LeaderboardTabProps = {
   onInstallSkill: (
     repoUrl: string,
     name?: string,
+    skillSlug?: string,
     onProgress?: (phase: InstallProgressPhase) => void,
   ) => Promise<void>
   installedSkillNames: string[]
@@ -50,8 +51,11 @@ const LeaderboardTab = ({ onInstallSkill, installedSkillNames, t }: LeaderboardT
   )
 
   useEffect(
-    () => () => {
-      mountedRef.current = false
+    () => {
+      mountedRef.current = true
+      return () => {
+        mountedRef.current = false
+      }
     },
     [],
   )
@@ -106,7 +110,7 @@ const LeaderboardTab = ({ onInstallSkill, installedSkillNames, t }: LeaderboardT
     async (item: QueueItem) => {
       setQueueStage(item.id, 'downloading')
       try {
-        await onInstallSkill(item.repoUrl, item.name, (phase) => {
+        await onInstallSkill(item.repoUrl, item.name, item.skillSlug, (phase) => {
           if (phase === 'syncing') {
             setQueueStage(item.id, 'syncing')
             return

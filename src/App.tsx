@@ -17,6 +17,7 @@ import NewToolsModal from './components/skills/modals/NewToolsModal'
 import SharedDirModal from './components/skills/modals/SharedDirModal'
 import SettingsModal from './components/skills/modals/SettingsModal'
 import { buildInstalledSkillNameSet } from './components/skills/leaderboardInstalled'
+import { pickLeaderboardCandidateSubpath } from './components/skills/leaderboardInstallResolver'
 import type {
   GitSkillCandidate,
   InstallResultDto,
@@ -666,14 +667,41 @@ function App() {
     async (
       repoUrl: string,
       name?: string,
+      skillSlug?: string,
       onProgress?: (phase: 'downloading' | 'syncing') => void,
     ) => {
       setError(null)
       onProgress?.('downloading')
-      const created = await invokeTauri<InstallResultDto>('install_git', {
-        repoUrl,
-        name: name || undefined,
-      })
+      let created: InstallResultDto
+      const normalizedSlug = skillSlug?.trim()
+      if (normalizedSlug) {
+        const candidates = await invokeTauri<GitSkillCandidate[]>(
+          'list_git_skills_cmd',
+          { repoUrl },
+        )
+        const subpath = pickLeaderboardCandidateSubpath(
+          candidates,
+          normalizedSlug,
+          name,
+        )
+        if (subpath) {
+          created = await invokeTauri<InstallResultDto>('install_git_selection', {
+            repoUrl,
+            subpath,
+            name: name || undefined,
+          })
+        } else {
+          created = await invokeTauri<InstallResultDto>('install_git', {
+            repoUrl,
+            name: name || undefined,
+          })
+        }
+      } else {
+        created = await invokeTauri<InstallResultDto>('install_git', {
+          repoUrl,
+          name: name || undefined,
+        })
+      }
       const selectedInstalledIds = tools
         .filter((tool) => syncTargets[tool.id] && isInstalled(tool.id))
         .map((t) => t.id)
@@ -1634,7 +1662,7 @@ function App() {
             </button>
           </div>
 
-          {activeTab === 'skills' ? (
+          <div style={{ display: activeTab === 'skills' ? 'block' : 'none' }}>
             <>
               <FilterBar
                 sortBy={sortBy}
@@ -1660,13 +1688,17 @@ function App() {
                 t={t}
               />
             </>
-          ) : activeTab === 'leaderboard' ? (
+          </div>
+
+          <div style={{ display: activeTab === 'leaderboard' ? 'block' : 'none' }}>
             <LeaderboardTab
               onInstallSkill={handleInstallFromLeaderboard}
               installedSkillNames={installedSkillNames}
               t={t}
             />
-          ) : (
+          </div>
+
+          <div style={{ display: activeTab === 'tools' ? 'block' : 'none' }}>
             <ToolSkillsTab
               managedSkills={managedSkills}
               tools={tools}
@@ -1677,7 +1709,7 @@ function App() {
               onToggleTool={handleToggleToolForSkill}
               t={t}
             />
-          )}
+          </div>
         </div>
       </main>
 

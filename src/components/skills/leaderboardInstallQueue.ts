@@ -17,6 +17,7 @@ export type QueueItem = {
   id: string
   key: string
   name: string
+  skillSlug: string
   repoUrl: string
   stage: QueueStage
   createdAt: number
@@ -49,6 +50,7 @@ export const enqueueLeaderboardInstall = (
     id,
     key,
     name: entry.name,
+    skillSlug: (entry.skill_slug || entry.name).trim(),
     repoUrl: `https://github.com/${entry.owner}/${entry.repo}`,
     stage: 'queued',
     createdAt: now,
