@@ -22,6 +22,12 @@ Design docs:
 
 ![Skills Hub](docs/assets/home-example.png)
 
+## Screenshots
+
+![By Skills](docs/assets/skillshub_by_skills.png)
+![By Tool](docs/assets/skillshub_by_tool.png)
+![Leaderboard](docs/assets/skillshub_leaderboard.png)
+
 ## Supported AI Coding Tools
 
 | tool key | Display name | skills dir (relative to `~`) | detect dir (relative to `~`) |

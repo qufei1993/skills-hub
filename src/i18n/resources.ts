@@ -250,6 +250,7 @@ export const resources = {
         emptyTools: 'No tool data available.',
         emptyForTool: 'No skills synced to {{tool}} yet.',
       },
+      navSkills: 'By Skills',
       sharedDirConfirm:
         'Note: {{tool}} shares the same global skills directory with {{others}}. This change will affect both. Continue?',
       tools: {

@@ -14,6 +14,12 @@
 
 ![Skills Hub](./assets/home-example.png)
 
+## 界面截图
+
+![按 Skills 查看](./assets/skillshub_by_skills.png)
+![按工具查看](./assets/skillshub_by_tool.png)
+![排行榜](./assets/skillshub_leaderboard.png)
+
 ## 支持的 AI 编程工具
 
 | tool key | 工具 | skills 目录（相对 `~`） | detect 目录（相对 `~`） |
