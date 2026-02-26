@@ -8,6 +8,7 @@ export type LeaderboardEntry = {
   name: string
   repo: string
   owner: string
+  skill_slug: string
   description?: string | null
   installs: number
   installs_formatted: string
@@ -28,12 +29,18 @@ const getRankStyle = (rank: number) => {
 }
 
 const LeaderboardCard = ({ entry, onInstall, installing, t }: LeaderboardCardProps) => {
-  const skillsShUrl = `https://skills.sh/${entry.owner}/${entry.repo}/${entry.name}`
+  const skillPath = (entry.skill_slug || entry.name).trim()
+  const skillsShUrl = `https://skills.sh/${encodeURIComponent(entry.owner)}/${encodeURIComponent(entry.repo)}/${encodeURIComponent(skillPath)}`
   const rankStyle = getRankStyle(entry.rank)
   const isTopThree = entry.rank <= 3
 
   const handleOpenDetails = useCallback(() => {
-    void openUrl(skillsShUrl)
+    void openUrl(skillsShUrl).catch((error) => {
+      console.error('failed to open leaderboard skill url via tauri opener', error)
+      if (typeof window !== 'undefined') {
+        window.open(skillsShUrl, '_blank', 'noopener,noreferrer')
+      }
+    })
   }, [skillsShUrl])
 
   return (

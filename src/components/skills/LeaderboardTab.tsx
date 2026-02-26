@@ -19,13 +19,16 @@ const LeaderboardTab = ({ onInstallSkill, t }: LeaderboardTabProps) => {
   const [error, setError] = useState<string | null>(null)
   const [installingRank, setInstallingRank] = useState<number | null>(null)
 
-  const loadLeaderboard = useCallback(async () => {
+  const loadLeaderboard = useCallback(async (rawQuery: string) => {
     setLoading(true)
     setError(null)
     try {
-      const result = await invoke<LeaderboardEntry[]>('get_skills_leaderboard', {
-        leaderboardType: leaderboardType,
-      })
+      const query = rawQuery.trim()
+      const result = query
+        ? await invoke<LeaderboardEntry[]>('search_skills_sh', { query })
+        : await invoke<LeaderboardEntry[]>('get_skills_leaderboard', {
+            leaderboardType: leaderboardType,
+          })
       setEntries(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -35,20 +38,18 @@ const LeaderboardTab = ({ onInstallSkill, t }: LeaderboardTabProps) => {
   }, [leaderboardType])
 
   useEffect(() => {
-    void loadLeaderboard()
-  }, [loadLeaderboard])
+    if (!searchQuery.trim()) {
+      void loadLeaderboard('')
+      return
+    }
 
-  const filteredEntries = useMemo(() => {
-    if (!searchQuery.trim()) return entries
-    const query = searchQuery.trim().toLowerCase()
-    return entries.filter(
-      (entry) =>
-        entry.name.toLowerCase().includes(query) ||
-        entry.owner.toLowerCase().includes(query) ||
-        entry.repo.toLowerCase().includes(query) ||
-        (entry.description && entry.description.toLowerCase().includes(query))
-    )
-  }, [entries, searchQuery])
+    const timer = window.setTimeout(() => {
+      void loadLeaderboard(searchQuery)
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [loadLeaderboard, searchQuery])
+
+  const filteredEntries = useMemo(() => entries, [entries])
 
   const handleInstall = useCallback(
     async (entry: LeaderboardEntry) => {
@@ -56,7 +57,7 @@ const LeaderboardTab = ({ onInstallSkill, t }: LeaderboardTabProps) => {
       setInstallingRank(entry.rank)
       try {
         await onInstallSkill(repoUrl, entry.name)
-      } catch (err) {
+      } catch {
         // Error is handled by parent component
       } finally {
         setInstallingRank(null)

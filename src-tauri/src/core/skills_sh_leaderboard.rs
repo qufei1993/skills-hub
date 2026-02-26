@@ -8,6 +8,7 @@ pub struct LeaderboardEntry {
     pub name: String,
     pub repo: String,
     pub owner: String,
+    pub skill_slug: String,
     pub description: Option<String>,
     pub installs: u64,
     pub installs_formatted: String,
@@ -32,16 +33,13 @@ impl LeaderboardType {
 
 pub fn fetch_leaderboard(
     leaderboard_type: &LeaderboardType,
+    query: Option<&str>,
 ) -> Result<Vec<LeaderboardEntry>> {
     let client = Client::new();
-    let url = match leaderboard_type {
-        LeaderboardType::AllTime => "https://skills.sh/",
-        LeaderboardType::Trending => "https://skills.sh/trending",
-        LeaderboardType::Hot => "https://skills.sh/hot",
-    };
+    let url = leaderboard_url(leaderboard_type, query);
 
     let response = client
-        .get(url)
+        .get(&url)
         .header(
             "User-Agent",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -54,6 +52,18 @@ pub fn fetch_leaderboard(
 
     let html = response.text().context("Failed to read response body")?;
     parse_leaderboard_html(&html)
+}
+
+fn leaderboard_url(leaderboard_type: &LeaderboardType, query: Option<&str>) -> String {
+    if let Some(q) = query.map(str::trim).filter(|q| !q.is_empty()) {
+        return format!("https://skills.sh/?q={}", urlencoding::encode(q));
+    }
+
+    match leaderboard_type {
+        LeaderboardType::AllTime => "https://skills.sh/".to_string(),
+        LeaderboardType::Trending => "https://skills.sh/trending".to_string(),
+        LeaderboardType::Hot => "https://skills.sh/hot".to_string(),
+    }
 }
 
 fn parse_leaderboard_html(html: &str) -> Result<Vec<LeaderboardEntry>> {
@@ -77,16 +87,22 @@ fn parse_leaderboard_html(html: &str) -> Result<Vec<LeaderboardEntry>> {
 
     for link in document.select(&link_selector) {
         let href = link.value().attr("href").unwrap_or("");
-        
+
         // Skip navigation links and other non-skill links
         // Skill links have pattern: /owner/repo/skill-name (at least 3 path segments)
         let parts: Vec<&str> = href.trim_start_matches('/').split('/').collect();
         if parts.len() < 3 {
             continue;
         }
-        
+
         // Skip non-skill pages (like /audits, /docs, etc.)
         if parts[0].starts_with('_') || parts[0] == "audits" || parts[0] == "docs" {
+            continue;
+        }
+        let owner = parts[0].trim().to_string();
+        let repo = parts[1].trim().to_string();
+        let skill_slug = parts[2].trim().to_string();
+        if owner.is_empty() || repo.is_empty() || skill_slug.is_empty() {
             continue;
         }
 
@@ -111,28 +127,7 @@ fn parse_leaderboard_html(html: &str) -> Result<Vec<LeaderboardEntry>> {
             .next()
             .and_then(|elem| elem.text().next())
             .map(|t| t.trim().to_string())
-            .unwrap_or_default();
-
-        // Extract owner/repo from the p tag
-        let repo_selector = Selector::parse("p").unwrap();
-        let owner_repo = link
-            .select(&repo_selector)
-            .next()
-            .and_then(|elem| elem.text().next())
-            .map(|t| t.trim().to_string())
-            .unwrap_or_default();
-
-        // Parse owner and repo from "owner/repo" format
-        let (owner, repo) = if owner_repo.contains('/') {
-            let parts: Vec<&str> = owner_repo.splitn(2, '/').collect();
-            if parts.len() == 2 {
-                (parts[0].to_string(), parts[1].to_string())
-            } else {
-                (owner_repo.clone(), String::new())
-            }
-        } else {
-            (owner_repo.clone(), String::new())
-        };
+            .unwrap_or_else(|| skill_slug.clone());
 
         // Extract installs - look for the last span in the link (the one showing installs)
         let installs_selector = Selector::parse("div:last-child span").unwrap();
@@ -146,12 +141,13 @@ fn parse_leaderboard_html(html: &str) -> Result<Vec<LeaderboardEntry>> {
         let installs = parse_installs_number(&installs_text);
 
         // Only add entry if we have valid data
-        if !name.is_empty() && !owner.is_empty() && rank > 0 {
+        if !name.is_empty() && rank > 0 {
             entries.push(LeaderboardEntry {
                 rank,
                 name,
                 repo,
                 owner,
+                skill_slug,
                 description: None,
                 installs,
                 installs_formatted: installs_text,

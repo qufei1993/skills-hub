@@ -633,7 +633,7 @@ pub async fn get_skills_leaderboard(
         "hot" => LeaderboardType::Hot,
         _ => LeaderboardType::AllTime,
     };
-    tauri::async_runtime::spawn_blocking(move || fetch_leaderboard(&lb_type))
+    tauri::async_runtime::spawn_blocking(move || fetch_leaderboard(&lb_type, None))
         .await
         .map_err(|err| err.to_string())?
         .map_err(format_anyhow_error)
@@ -641,23 +641,12 @@ pub async fn get_skills_leaderboard(
 
 #[tauri::command]
 pub async fn search_skills_sh(query: String) -> Result<Vec<LeaderboardEntry>, String> {
-    let query_lower = query.to_lowercase();
+    let query = query.trim().to_string();
     tauri::async_runtime::spawn_blocking(move || {
-        // Fetch all-time leaderboard and filter by query
-        let entries = fetch_leaderboard(&LeaderboardType::AllTime)?;
-        Ok(entries
-            .into_iter()
-            .filter(|entry| {
-                entry.name.to_lowercase().contains(&query_lower)
-                    || entry.owner.to_lowercase().contains(&query_lower)
-                    || entry.repo.to_lowercase().contains(&query_lower)
-                    || entry
-                        .description
-                        .as_ref()
-                        .map(|d| d.to_lowercase().contains(&query_lower))
-                        .unwrap_or(false)
-            })
-            .collect())
+        if query.is_empty() {
+            return fetch_leaderboard(&LeaderboardType::AllTime, None);
+        }
+        fetch_leaderboard(&LeaderboardType::AllTime, Some(query.as_str()))
     })
     .await
     .map_err(|err| err.to_string())?
