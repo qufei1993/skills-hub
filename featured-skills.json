@@ -1,4 +1,13 @@
 {
   "updated_at": "2026-03-19T01:01:31.505Z",
-  "skills": []
+  "skills": [
+    {
+      "slug": "liepin-jobs",
+      "name": "liepin-jobs",
+      "summary": "Search jobs on Liepin (猎聘), apply to positions, view and edit resumes. Zero-dependency Python CLI wrapping Liepin's official MCP Server.",
+      "downloads": 0,
+      "stars": 0,
+      "source_url": "https://github.com/xllinbupt/MCP2skill/tree/master/liepin-jobs"
+    }
+  ]
 }
