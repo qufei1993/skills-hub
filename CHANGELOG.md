@@ -20,6 +20,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - **Import takeover for identical skills**: Importing an existing skill can now safely take over same-name targets when the content hash matches.
+- **Import modal close behavior**: The local skill import modal now closes correctly after partial import failures, including when some sync targets already exist ([#51](https://github.com/qufei1993/skills-hub/issues/51)).
 - **Unsynced tool re-enable entry**: Tool buttons that were unsynced from a skill remain visible so they can be re-enabled.
 - **SKILL.md metadata parsing**: YAML block scalar descriptions in frontmatter now render correctly in skill cards and detail views.
 
