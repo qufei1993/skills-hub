@@ -19,6 +19,8 @@ A cross-platform desktop app (Tauri + React) to manage Agent Skills in one place
 - **Update**: Refresh from source; propagate updates to copy-mode targets
 - **New tool detection**: Detect newly installed tools and prompt to sync managed skills
 
+Chinese users can also search and install skills through [Skills宝](https://skilery.com).
+
 ### My Skills
 ![My Skills](docs/assets/my-skills.png)
 
