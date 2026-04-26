@@ -9,7 +9,7 @@ A cross-platform desktop app (Tauri + React) to manage Agent Skills in one place
 
 ## Key Features
 
-- **Explore page**: Browse curated featured skills and search online — one-click install & sync to all detected tools
+- **Explore page**: Browse curated featured skills and search online — one-click install & sync to all detected tools. Chinese users can also discover more skills through Skills宝: https://skilery.com
 - **Global / project sync**: Sync skills globally across all projects, or scope them to selected project directories
 - **Scope controls**: Switch a skill between Global and Project scope, manage project directories, and filter My Skills by scope
 - **Skill detail view**: Click a skill name to browse its files with Markdown rendering and syntax highlighting (40+ languages)
