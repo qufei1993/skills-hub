@@ -74,7 +74,7 @@ fn fetch_from_url(url: &str) -> Result<String> {
 
     let body = client
         .get(url)
-        .header("User-Agent", "skills-hub")
+        .header("User-Agent", "SkillSyncer")
         .send()
         .context("fetch featured skills")?
         .error_for_status()

@@ -1,4 +1,4 @@
-# Skills Hub (Tauri Desktop)
+# SkillSyncer (Tauri Desktop)
 
 A cross-platform desktop app (Tauri + React) to manage Agent Skills in one place and sync them to multiple AI coding tools’ global or project-level skills directories (prefer symlink/junction, fallback to copy) — “Install once, sync everywhere”.
 
@@ -134,10 +134,10 @@ cargo test
 - Where are skills stored? The Central Repo defaults to `~/.skillshub` (configurable in Settings).
 - What are tags for? Tags help you find and organize skills. They do not change where a skill is synced or which tools can use it.
 - What is project-level sync? The skill is still stored once in the Central Repo, but its sync target is a selected project directory such as `<project>/.agents/skills`, `<project>/.claude/skills`, or another tool-specific project skills path.
-- Why is Cursor sync always copy? Cursor currently does not support symlink/junction-based skill directories, so Skills Hub forces directory copy when syncing to Cursor.
-- Why does sync sometimes fall back to copy? Skills Hub prefers symlink/junction, but on some systems (especially Windows) symlinks may be restricted; in that case it falls back to directory copy.
+- Why is Cursor sync always copy? Cursor currently does not support symlink/junction-based skill directories, so SkillSyncer forces directory copy when syncing to Cursor.
+- Why does sync sometimes fall back to copy? SkillSyncer prefers symlink/junction, but on some systems (especially Windows) symlinks may be restricted; in that case it falls back to directory copy.
 - What does `TARGET_EXISTS|...` mean? The target folder already exists and the operation did not overwrite it (default is non-destructive). Remove the existing folder or retry with the appropriate overwrite flow.
-- macOS Gatekeeper note (unsigned/notarized builds, may vary by macOS version): if you see “damaged” or “unverified developer”, run `xattr -cr "/Applications/Skills Hub.app"` (https://v2.tauri.app/distribute/#macos).
+- macOS Gatekeeper note (unsigned/notarized builds, may vary by macOS version): if you see “damaged” or “unverified developer”, run `xattr -cr "/Applications/SkillSyncer.app"` (https://v2.tauri.app/distribute/#macos).
 
 ## Supported Platforms
 

@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Skills Hub",
+  "productName": "SkillSyncer",
   "version": "0.6.1",
   "identifier": "com.qufei1993.skillshub",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Skills Hub",
+        "title": "SkillSyncer",
         "width": 960,
         "height": 680,
         "resizable": true,

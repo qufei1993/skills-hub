@@ -282,12 +282,12 @@ jobs:
             exit 1
           fi
 
-          NEW_TAR_GZ="Skills-Hub-${VERSION}-macOS-${ARCH}.tar.gz"
+          NEW_TAR_GZ="SkillSyncer-${VERSION}-macOS-${ARCH}.tar.gz"
           cp "${TAR_GZ}" "release-assets/${NEW_TAR_GZ}"
           cp "${TAR_GZ}.sig" "release-assets/${NEW_TAR_GZ}.sig"
 
           if [ -n "${DMG}" ]; then
-            NEW_DMG="Skills-Hub-${VERSION}-macOS-${ARCH}.dmg"
+            NEW_DMG="SkillSyncer-${VERSION}-macOS-${ARCH}.dmg"
             cp "${DMG}" "release-assets/${NEW_DMG}"
           else
             echo "⚠️ 未找到 macOS .dmg（可选）" >&2
@@ -329,7 +329,7 @@ jobs:
             exit 1
           fi
 
-          NEW_EXE="Skills-Hub-${VERSION}-Windows-${ARCH}.exe"
+          NEW_EXE="SkillSyncer-${VERSION}-Windows-${ARCH}.exe"
           cp "${EXE}" "release-assets/${NEW_EXE}"
 
       - name: List prepared assets
@@ -371,7 +371,7 @@ jobs:
             echo
             echo '**Windows Note:** Windows SmartScreen may show a warning during installation. This is normal for unsigned executables. The application is safe to use.'
             echo
-            echo '**macOS Note:** macOS Gatekeeper workaround (only needed on some macOS versions): `xattr -cr "/Applications/Skills Hub.app"` (https://v2.tauri.app/distribute/#macos).'
+            echo '**macOS Note:** macOS Gatekeeper workaround (only needed on some macOS versions): `xattr -cr "/Applications/SkillSyncer.app"` (https://v2.tauri.app/distribute/#macos).'
           } >> release-notes.md
 
       - name: Generate updater.json
@@ -449,7 +449,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: Skills Hub ${{ github.ref_name }}
+          name: SkillSyncer ${{ github.ref_name }}
           prerelease: ${{ contains(github.ref_name, '-') }}
           body_path: release-notes.md
           files: |

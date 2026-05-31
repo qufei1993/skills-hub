@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for taking the time to contribute to Skills Hub!
+Thanks for taking the time to contribute to SkillSyncer!
 
 ## Development Requirements
 
@@ -43,6 +43,6 @@ cargo test
 Please include the following in your issue report:
 
 - OS version (macOS/Windows/Linux)
-- Skills Hub version
+- SkillSyncer version
 - Steps to reproduce and expected vs. actual behavior
 - Relevant logs (please redact local paths and any sensitive information)

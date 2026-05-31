@@ -6,6 +6,9 @@ import { Toaster, toast } from 'sonner'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import ExplorePage from './components/skills/ExplorePage'
+import MoreSkillsPage from './components/skills/MoreSkillsPage'
+import { EXPLORE_ENABLED } from './features'
+import { openExternalUrl } from './utils/openExternalUrl'
 import FilterBar from './components/skills/FilterBar'
 import SkillDetailView from './components/skills/SkillDetailView'
 import Header from './components/skills/Header'
@@ -103,7 +106,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState<'updated' | 'name'>('updated')
   const [scopeFilter, setScopeFilter] = useState<'all' | 'global' | 'project'>('all')
-  const [activeView, setActiveView] = useState<'myskills' | 'explore' | 'detail' | 'settings' | 'tags'>('myskills')
+  const [activeView, setActiveView] = useState<'myskills' | 'explore' | 'moreskills' | 'detail' | 'settings' | 'tags'>('myskills')
   const [detailSkill, setDetailSkill] = useState<ManagedSkill | null>(null)
   const [tags, setTags] = useState<TagWithCountDto[]>([])
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([])
@@ -764,7 +767,8 @@ function App() {
   }, [featuredSkills.length, invokeTauri])
 
   const handleViewChange = useCallback(
-    (view: 'myskills' | 'explore' | 'tags') => {
+    (view: 'myskills' | 'explore' | 'moreskills' | 'tags') => {
+      if (view === 'explore' && !EXPLORE_ENABLED) return
       setActiveView(view)
       if (view === 'explore') {
         loadFeaturedSkills()
@@ -822,6 +826,17 @@ function App() {
     setShowAddModal(true)
     setAddModalTagIds([])
   }, [])
+
+  const handleOpenSkillSourceSite = useCallback(
+    async (url: string) => {
+      try {
+        await openExternalUrl(url, isTauri)
+      } catch {
+        toast.error(t('moreSkillsOpenError'))
+      }
+    },
+    [isTauri, t],
+  )
 
   const applySelectedAddModalTags = useCallback(
     async (skillId: string, skillName: string) => {
@@ -2514,7 +2529,14 @@ function App() {
             onBack={handleCloseSettings}
             t={t}
           />
-        ) : (
+        ) : activeView === 'moreskills' ? (
+          <MoreSkillsPage
+            loading={loading}
+            onOpenManualAdd={handleOpenAdd}
+            onOpenSite={(url) => void handleOpenSkillSourceSite(url)}
+            t={t}
+          />
+        ) : EXPLORE_ENABLED && activeView === 'explore' ? (
           <ExplorePage
             featuredSkills={featuredSkills}
             featuredLoading={featuredLoading}
@@ -2528,7 +2550,7 @@ function App() {
             onOpenManualAdd={handleOpenAdd}
             t={t}
           />
-        )}
+        ) : null}
       </main>
 
       <AddSkillModal

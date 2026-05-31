@@ -1,8 +1,8 @@
-# Skills Hub - Project Rules
+# SkillSyncer - Project Rules
 
 ## Overview
 
-Skills Hub is a cross-platform desktop app (Tauri 2 + React 19) for managing AI Agent Skills and syncing them to 47+ AI coding tools. Core concept: "Install once, sync everywhere."
+SkillSyncer is a cross-platform desktop app (Tauri 2 + React 19) for managing AI Agent Skills and syncing them to 47+ AI coding tools. Core concept: "Install once, sync everywhere."
 
 ## Tech Stack
 

@@ -1,7 +1,7 @@
 export const resources = {
   en: {
     translation: {
-      appName: 'Skills Hub',
+      appName: 'SkillSyncer',
       unknown: 'unknown',
       languageShort: {
         en: 'EN',
@@ -14,10 +14,23 @@ export const resources = {
       subtitle: 'Manage and sync your skills across tools',
       navMySkills: 'My Skills',
       navExplore: 'Explore',
+      navMoreSkills: 'More Skills',
       navTags: 'Tags',
       newSkill: 'New Skill',
       manualAdd: 'Manual',
       manualAddHint: 'Have a Git URL or local path? Click <b>Manual</b> to add directly',
+      moreSkillsTitle: 'Find Skills Online',
+      moreSkillsIntro:
+        'Browse community sites below to discover skills. Copy a Git repository URL, then use Manual Add to install it in SkillSyncer.',
+      moreSkillsFooter: 'This list is not exhaustive — more community sites may be added over time.',
+      moreSkillsVisit: 'Visit',
+      moreSkillsOpenError: 'Failed to open link in browser.',
+      'moreSkills.sites.skillhub.name': 'SkillHub',
+      'moreSkills.sites.skillhub.desc':
+        'Skills community optimized for Chinese users.',
+      'moreSkills.sites.clawhub.name': 'ClawHub',
+      'moreSkills.sites.clawhub.desc':
+        'Community skill bundles and plugins for OpenClaw and other agents.',
       moreTools: '+{{count}} more',
       installSuccess: '"{{name}}" installed and synced to {{count}} tools',
       settings: 'Settings',
@@ -376,7 +389,7 @@ export const resources = {
   },
   zh: {
     translation: {
-      appName: 'Skills Hub',
+      appName: 'SkillSyncer',
       unknown: '未知',
       languageShort: {
         en: 'EN',
@@ -389,10 +402,21 @@ export const resources = {
       subtitle: '统一管理并同步你的技能到各工具',
       navMySkills: '我的 Skills',
       navExplore: '探索',
+      navMoreSkills: '更多 Skills',
       navTags: '标签',
       newSkill: '新建 Skill',
       manualAdd: '手动添加',
       manualAddHint: '有 Git URL 或本地路径？点击<b>手动添加</b>直接导入',
+      moreSkillsTitle: '在线发现 Skills',
+      moreSkillsIntro:
+        '浏览下方社区网站发现 Skills。复制 Git 仓库地址后，使用「手动添加」导入到 SkillSyncer。',
+      moreSkillsFooter: '以上仅为部分推荐站点，后续可能补充更多社区资源。',
+      moreSkillsVisit: '访问',
+      moreSkillsOpenError: '无法在浏览器中打开链接。',
+      'moreSkills.sites.skillhub.name': 'SkillHub',
+      'moreSkills.sites.skillhub.desc': '专为中国用户优化的 Skills 社区。',
+      'moreSkills.sites.clawhub.name': 'ClawHub',
+      'moreSkills.sites.clawhub.desc': '社区技能包与插件，适用于 OpenClaw 等 Agent。',
       moreTools: '+{{count}} 个',
       installSuccess: '"{{name}}" 已安装并同步到 {{count}} 个工具',
       settings: '设置',

@@ -66,7 +66,7 @@ fn download_dir_recursive(
 
     let mut req = client
         .get(&url)
-        .header("User-Agent", "skills-hub")
+        .header("User-Agent", "SkillSyncer")
         .header("Accept", "application/vnd.github.v3+json");
     if let Some(t) = token {
         req = req.header("Authorization", format!("Bearer {}", t));
@@ -94,7 +94,7 @@ fn download_dir_recursive(
                         std::fs::create_dir_all(parent)
                             .with_context(|| format!("create parent dir {:?}", parent))?;
                     }
-                    let mut file_req = client.get(download_url).header("User-Agent", "skills-hub");
+                    let mut file_req = client.get(download_url).header("User-Agent", "SkillSyncer");
                     if let Some(t) = token {
                         file_req = file_req.header("Authorization", format!("Bearer {}", t));
                     }

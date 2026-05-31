@@ -79,7 +79,7 @@ const GITHUB_TOKEN = process.env.GITHUB_TOKEN || ''
 async function fetchJson(url, retries = 3) {
   const headers = {
     Accept: 'application/vnd.github+json',
-    'User-Agent': 'skills-hub-aggregator',
+    'User-Agent': 'SkillSyncer-aggregator',
   }
   if (GITHUB_TOKEN) {
     headers.Authorization = `Bearer ${GITHUB_TOKEN}`
