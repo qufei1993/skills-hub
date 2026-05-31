@@ -7,6 +7,9 @@ use tauri::Manager;
 use uuid::Uuid;
 
 use super::cache_cleanup::get_git_cache_ttl_secs;
+use super::cache_cleanup::{
+    CACHE_DIR_NAME, CACHE_META_FILE, LEGACY_CACHE_DIR_NAME, LEGACY_CACHE_META_FILE,
+};
 use super::cancel_token::CancelToken;
 use super::central_repo::{ensure_central_repo, resolve_central_repo_path};
 use super::content_hash::hash_dir;
@@ -657,7 +660,7 @@ pub fn update_managed_skill_from_source<R: tauri::Runtime>(
     let now = now_ms();
 
     // Build new content in a sibling temp dir for safe swap.
-    let staging_dir = central_parent.join(format!(".skills-hub-update-{}", Uuid::new_v4()));
+    let staging_dir = central_parent.join(format!(".skills-syncer-update-{}", Uuid::new_v4()));
     if staging_dir.exists() {
         let _ = std::fs::remove_dir_all(&staging_dir);
     }
@@ -1188,6 +1191,39 @@ struct RepoCacheMeta {
 
 static GIT_CACHE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
+fn read_fresh_git_cache(
+    store: &SkillStore,
+    repo_dir: &Path,
+    meta_path: &Path,
+    started: std::time::Instant,
+    clone_url: &str,
+    branch: Option<&str>,
+) -> Result<Option<(PathBuf, String)>> {
+    if !repo_dir.join(".git").exists() {
+        return Ok(None);
+    }
+
+    if let Ok(meta) = std::fs::read_to_string(meta_path) {
+        if let Ok(meta) = serde_json::from_str::<RepoCacheMeta>(&meta) {
+            if let Some(head) = meta.head {
+                let ttl_ms = get_git_cache_ttl_secs(store).saturating_mul(1000);
+                if ttl_ms > 0 && now_ms().saturating_sub(meta.last_fetched_ms) < ttl_ms {
+                    log::info!(
+                        "[installer] git cache hit (fresh) {}s url={} branch={:?} repo_dir={:?}",
+                        started.elapsed().as_secs_f32(),
+                        clone_url,
+                        branch,
+                        repo_dir
+                    );
+                    return Ok(Some((repo_dir.to_path_buf(), head)));
+                }
+            }
+        }
+    }
+
+    Ok(None)
+}
+
 fn clone_to_cache<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     store: &SkillStore,
@@ -1200,33 +1236,35 @@ fn clone_to_cache<R: tauri::Runtime>(
         .path()
         .app_cache_dir()
         .context("failed to resolve app cache dir")?;
-    let cache_root = cache_dir.join("skills-hub-git-cache");
+    let cache_root = cache_dir.join(CACHE_DIR_NAME);
     std::fs::create_dir_all(&cache_root)
         .with_context(|| format!("failed to create cache dir {:?}", cache_root))?;
 
     let repo_dir = cache_root.join(repo_cache_key(clone_url, branch, None));
-    let meta_path = repo_dir.join(".skills-hub-cache.json");
+    let meta_path = repo_dir.join(CACHE_META_FILE);
+    let legacy_cache_root = cache_dir.join(LEGACY_CACHE_DIR_NAME);
+    let legacy_repo_dir = legacy_cache_root.join(repo_cache_key(clone_url, branch, None));
+    let legacy_meta_path = legacy_repo_dir.join(LEGACY_CACHE_META_FILE);
 
     let lock = GIT_CACHE_LOCK.get_or_init(|| Mutex::new(()));
     let _guard = lock.lock().unwrap_or_else(|err| err.into_inner());
 
     if repo_dir.join(".git").exists() {
-        if let Ok(meta) = std::fs::read_to_string(&meta_path) {
-            if let Ok(meta) = serde_json::from_str::<RepoCacheMeta>(&meta) {
-                if let Some(head) = meta.head {
-                    let ttl_ms = get_git_cache_ttl_secs(store).saturating_mul(1000);
-                    if ttl_ms > 0 && now_ms().saturating_sub(meta.last_fetched_ms) < ttl_ms {
-                        log::info!(
-                            "[installer] git cache hit (fresh) {}s url={} branch={:?} repo_dir={:?}",
-                            started.elapsed().as_secs_f32(),
-                            clone_url,
-                            branch,
-                            repo_dir
-                        );
-                        return Ok((repo_dir, head));
-                    }
-                }
-            }
+        if let Some((dir, head)) =
+            read_fresh_git_cache(store, &repo_dir, &meta_path, started, clone_url, branch)?
+        {
+            return Ok((dir, head));
+        }
+    } else if legacy_repo_dir.join(".git").exists() {
+        if let Some((dir, head)) = read_fresh_git_cache(
+            store,
+            &legacy_repo_dir,
+            &legacy_meta_path,
+            started,
+            clone_url,
+            branch,
+        )? {
+            return Ok((dir, head));
         }
     }
 
@@ -1282,35 +1320,33 @@ fn clone_to_cache_subpath<R: tauri::Runtime>(
         .path()
         .app_cache_dir()
         .context("failed to resolve app cache dir")?;
-    let cache_root = cache_dir.join("skills-hub-git-cache");
+    let cache_root = cache_dir.join(CACHE_DIR_NAME);
     std::fs::create_dir_all(&cache_root)
         .with_context(|| format!("failed to create cache dir {:?}", cache_root))?;
 
     let repo_dir = cache_root.join(repo_cache_key(clone_url, branch, Some(subpath)));
-    let meta_path = repo_dir.join(".skills-hub-cache.json");
+    let meta_path = repo_dir.join(CACHE_META_FILE);
+    let legacy_cache_root = cache_dir.join(LEGACY_CACHE_DIR_NAME);
+    let legacy_repo_dir = legacy_cache_root.join(repo_cache_key(clone_url, branch, Some(subpath)));
+    let legacy_meta_path = legacy_repo_dir.join(LEGACY_CACHE_META_FILE);
 
     let lock = GIT_CACHE_LOCK.get_or_init(|| Mutex::new(()));
     let _guard = lock.lock().unwrap_or_else(|err| err.into_inner());
 
-    if repo_dir.join(".git").exists() {
-        if let Ok(meta) = std::fs::read_to_string(&meta_path) {
-            if let Ok(meta) = serde_json::from_str::<RepoCacheMeta>(&meta) {
-                if let Some(head) = meta.head {
-                    let ttl_ms = get_git_cache_ttl_secs(store).saturating_mul(1000);
-                    if ttl_ms > 0 && now_ms().saturating_sub(meta.last_fetched_ms) < ttl_ms {
-                        log::info!(
-                            "[installer] sparse git cache hit (fresh) {}s url={} branch={:?} subpath={} repo_dir={:?}",
-                            started.elapsed().as_secs_f32(),
-                            clone_url,
-                            branch,
-                            subpath,
-                            repo_dir
-                        );
-                        return Ok((repo_dir, head));
-                    }
-                }
-            }
-        }
+    if let Some(hit) =
+        read_fresh_git_cache(store, &repo_dir, &meta_path, started, clone_url, branch)?
+    {
+        return Ok(hit);
+    }
+    if let Some(hit) = read_fresh_git_cache(
+        store,
+        &legacy_repo_dir,
+        &legacy_meta_path,
+        started,
+        clone_url,
+        branch,
+    )? {
+        return Ok(hit);
     }
 
     log::info!(

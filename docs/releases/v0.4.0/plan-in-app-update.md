@@ -2,7 +2,7 @@
 
 ## Context
 
-来源：https://github.com/qufei1993/skills-hub/issues/33
+来源：https://github.com/AlwaysCodeHQ/skills-syncer/issues/33
 
 用户每次跟进版本都需要手动进入 GitHub releases 页面下载，体验不便。需要在软件内支持手动检查更新功能。
 

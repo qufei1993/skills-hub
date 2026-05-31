@@ -1,6 +1,6 @@
-# Skills Hub (Tauri Desktop) — System Design
+# SkillSyncer (Tauri Desktop) — System Design
 
-This document describes the system design of **Skills Hub**, aligned with the current repository implementation.
+This document describes the system design of **SkillSyncer**, aligned with the current repository implementation.
 
 > 中文版：[`docs/system-design.zh.md`](docs/system-design.zh.md)
 
@@ -8,7 +8,7 @@ This document describes the system design of **Skills Hub**, aligned with the cu
 
 AI coding tools (Cursor, Claude Code, Codex, etc.) often support “Skills/Agents/Tools”, but each tool stores global skills in a different location. This causes duplicated installs, drift, and a lack of a unified view.
 
-Skills Hub solves this by storing skill contents in a **Central Repo** and mapping them into each tool via **symlink/junction/copy** — “Install once, sync everywhere”.
+SkillSyncer solves this by storing skill contents in a **Central Repo** and mapping them into each tool via **symlink/junction/copy** — “Install once, sync everywhere”.
 
 ## 2. Goals
 
@@ -17,13 +17,13 @@ Skills Hub solves this by storing skill contents in a **Central Repo** and mappi
 - Import sources: local folder and Git URLs (including multi-skill repo selection)
 - Update: refresh central content from source; propagate updates to copy-mode targets
 - Tool detection: detect newly installed tools and prompt to sync
-- Configurable Central Repo path (default `~/.skillshub`)
+- Configurable Central Repo path (default `~/.skillsyncer`)
 
 ## 3. Glossary
 
 - **Skill**: a directory-based capability package (typically contains `SKILL.md`)
 - **Managed Skill**: a skill stored in the Central Repo and indexed in SQLite
-- **Central Repo**: canonical storage directory, default `~/.skillshub`
+- **Central Repo**: canonical storage directory, default `~/.skillsyncer`
 - **Tool/Agent**: a supported AI coding tool with a global skills directory
 - **Target**: per-tool mapping of a managed skill (symlink/junction/copy), stored in `skill_targets`
 - **Fingerprint / Content Hash**: directory hash used to detect identical vs conflicting variants
@@ -35,12 +35,12 @@ Skills Hub solves this by storing skill contents in a **Central Repo** and mappi
 ```mermaid
 flowchart TB
   user["User"]
-  app["Skills Hub Desktop App\n(Tauri + React)"]
+  app["SkillSyncer Desktop App\n(Tauri + React)"]
 
   fsTools["Tool global skills directories\n~/.cursor/skills, etc."]
-  fsCentral["Central Repo\n~/.skillshub"]
-  db["SQLite\nskills_hub.db"]
-  cache["Cache\nskills-hub-git-*"]
+  fsCentral["Central Repo\n~/.skillsyncer"]
+  db["SQLite\nskills_syncer.db"]
+  cache["Cache\nskills-syncer-git-*"]
   gh["GitHub / Git Remote"]
 
   user -->|manage/import/sync| app
@@ -78,13 +78,13 @@ flowchart LR
 
 ### 5.1 Filesystem
 
-- Central Repo (default): `~/.skillshub`
+- Central Repo (default): `~/.skillsyncer`
 - Git imports: clone into cache temp, then copy into Central Repo (Central Repo does not store `.git`)
 - Tool mapping: write into each tool’s skills directory via symlink/junction/copy
 
 ### 5.2 SQLite
 
-DB path: `app_data_dir()/skills_hub.db`
+DB path: `app_data_dir()/skills_syncer.db`
 
 Main tables:
 

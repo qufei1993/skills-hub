@@ -131,7 +131,7 @@ cargo test
 
 ## FAQ / Notes
 
-- Where are skills stored? The Central Repo defaults to `~/.skillshub` (configurable in Settings).
+- Where are skills stored? The Central Repo defaults to `~/.skillsyncer` (configurable in Settings).
 - What are tags for? Tags help you find and organize skills. They do not change where a skill is synced or which tools can use it.
 - What is project-level sync? The skill is still stored once in the Central Repo, but its sync target is a selected project directory such as `<project>/.agents/skills`, `<project>/.claude/skills`, or another tool-specific project skills path.
 - Why is Cursor sync always copy? Cursor currently does not support symlink/junction-based skill directories, so SkillSyncer forces directory copy when syncing to Cursor.

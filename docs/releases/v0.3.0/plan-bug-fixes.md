@@ -1,12 +1,12 @@
 # Bug 修复计划
 
-来源：https://github.com/qufei1993/skills-hub/issues
+来源：https://github.com/AlwaysCodeHQ/skills-syncer/issues
 
 ---
 
 ## Bug 1：Git 安装时 skill 名称为 "skills" 导致路径重复（#28）
 
-**Issue**: https://github.com/qufei1993/skills-hub/issues/28
+**Issue**: https://github.com/AlwaysCodeHQ/skills-syncer/issues/28
 **严重程度**: P0
 **状态**: ✅ 已修复（commit 69ab806）
 
@@ -28,7 +28,7 @@ let name = name.unwrap_or_else(|| {
 
 ### 复现步骤
 
-1. 在 Skills Hub 中选择「Git 仓库」
+1. 在 SkillSyncer 中选择「Git 仓库」
 2. 输入 `https://github.com/anthropics/skills/tree/main/skills`
 3. 不填显示名称，直接安装
 4. 同步到 Claude Code 后，路径变成 `~/.claude/skills/skills/`
@@ -98,7 +98,7 @@ let name = name.unwrap_or_else(|| {
 
 ## Bug 3：Windows 拒绝访问 OS error 5（#20）
 
-**Issue**: https://github.com/qufei1993/skills-hub/issues/20
+**Issue**: https://github.com/AlwaysCodeHQ/skills-syncer/issues/20
 **严重程度**: P0
 **状态**: ✅ 已修复（commit 93d9aca）
 
@@ -121,7 +121,7 @@ Windows 用户点击 AI-IDE 同步选项时报 OS error 5（权限不足），�
 
 ## Bug 4：Skill 扫描逻辑对部分目录结构失效（#18 + #8）
 
-**Issue**: https://github.com/qufei1993/skills-hub/issues/18 / https://github.com/qufei1993/skills-hub/issues/8
+**Issue**: https://github.com/AlwaysCodeHQ/skills-syncer/issues/18 / https://github.com/AlwaysCodeHQ/skills-syncer/issues/8
 **严重程度**: P1
 **状态**: ✅ 已修复
 
@@ -152,7 +152,7 @@ Windows 用户点击 AI-IDE 同步选项时报 OS error 5（权限不足），�
 
 ## Bug 5：Skill 名称冲突无法安装（#12）
 
-**Issue**: https://github.com/qufei1993/skills-hub/issues/12
+**Issue**: https://github.com/AlwaysCodeHQ/skills-syncer/issues/12
 **严重程度**: P1
 **状态**: ✅ 已关闭（PR #30 合并，UI 已有「显示名称」输入框可手动指定别名，冲突时提示用户重命名）
 
@@ -164,27 +164,27 @@ Windows 用户点击 AI-IDE 同步选项时报 OS error 5（权限不足），�
 
 ## Bug 6：新增 skill 未被自动扫描（#19）
 
-**Issue**: https://github.com/qufei1993/skills-hub/issues/19
+**Issue**: https://github.com/AlwaysCodeHQ/skills-syncer/issues/19
 **严重程度**: P2
 **状态**: ✅ 已关闭（非 bug，预期行为）
 
 ### 调查结论
 
-`~/.skillshub/` 是 Skills Hub 的内部存储，外部工具不应直接写入。实际上 OpenCode 创建的 skill 会落在 `~/.config/opencode/skills/` 下（普通目录），不会进入 `~/.skillshub/`。用户误以为写入了 skillshub 目录。
+`~/.skillsyncer/` 是 SkillSyncer 的内部存储，外部工具不应直接写入。实际上 OpenCode 创建的 skill 会落在 `~/.config/opencode/skills/` 下（普通目录），不会进入 `~/.skillsyncer/`。用户误以为写入了 skillsyncer 目录。
 
-如需将外部工具中新建的 skill 纳入 Skills Hub 管理，可通过"导入已有 Skill"功能手动操作。
+如需将外部工具中新建的 skill 纳入 SkillSyncer 管理，可通过"导入已有 Skill"功能手动操作。
 
 ---
 
 ## Bug 7：不支持 .claude/skills/ 目录格式的仓库（#27）
 
-**Issue**: https://github.com/qufei1993/skills-hub/issues/27
+**Issue**: https://github.com/AlwaysCodeHQ/skills-syncer/issues/27
 **严重程度**: P1
 **状态**: ✅ 已修复（PR #31 合并）
 
 ### 问题描述
 
-使用 `.claude-plugin/plugin.json` + `.claude/skills/` 目录结构的仓库（如 `nextlevelbuilder/ui-ux-pro-max-skill`）无法被 Skills Hub 识别和安装，因为扫描逻辑只查找 `SKILL.md` 文件。
+使用 `.claude-plugin/plugin.json` + `.claude/skills/` 目录结构的仓库（如 `nextlevelbuilder/ui-ux-pro-max-skill`）无法被 SkillSyncer 识别和安装，因为扫描逻辑只查找 `SKILL.md` 文件。
 
 ### 根因
 
@@ -204,7 +204,7 @@ Windows 用户点击 AI-IDE 同步选项时报 OS error 5（权限不足），�
 
 ## Bug 8：界面上没有 OpenClaw 的同步（#29）
 
-**Issue**: https://github.com/qufei1993/skills-hub/issues/29
+**Issue**: https://github.com/AlwaysCodeHQ/skills-syncer/issues/29
 **严重程度**: P2
 **状态**: ✅ 已关闭（PR #26 已修复代码，文档已补充更新）
 

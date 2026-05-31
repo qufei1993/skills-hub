@@ -2,7 +2,7 @@
 
 ## Context
 
-Skills Hub v0.4.x 只有全局同步。Skill 安装到中央仓库 `~/.skillshub/` 后，再同步到各工具的全局 Skills 目录。
+SkillSyncer v0.4.x 只有全局同步。Skill 安装到中央仓库 `~/.skillsyncer/` 后，再同步到各工具的全局 Skills 目录。
 
 v0.5.0 增加项目级同步能力：同一个 Skill 可以选择同步到全局，或同步到一个或多个项目目录下的工具 Skills 目录。
 
@@ -17,7 +17,7 @@ v0.5.0 增加项目级同步能力：同一个 Skill 可以选择同步到全局
 Skill 仍然只安装到中央仓库：
 
 ```text
-~/.skillshub/<skill-name>/
+~/.skillsyncer/<skill-name>/
 ```
 
 全局 / 项目只影响同步目标路径。

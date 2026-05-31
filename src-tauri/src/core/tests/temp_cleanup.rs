@@ -8,8 +8,8 @@ fn cleanup_removes_only_marked_prefixed_dirs() {
     let dir = tempfile::tempdir().unwrap();
     let cache = dir.path();
 
-    let d1 = cache.join("skills-hub-git-1");
-    let d2 = cache.join("skills-hub-git-2");
+    let d1 = cache.join("skills-syncer-git-1");
+    let d2 = cache.join("skills-syncer-git-2");
     let d3 = cache.join("other-3");
 
     fs::create_dir_all(&d1).unwrap();

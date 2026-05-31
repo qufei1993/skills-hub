@@ -56,7 +56,7 @@
 
 ## Bug：导入同名且内容一致的 Skill 时同步冲突
 
-**关联 Issue：** https://github.com/qufei1993/skills-hub/issues/51
+**关联 Issue：** https://github.com/AlwaysCodeHQ/skills-syncer/issues/51
 
 **状态：** 已在本地验证修复，待 v0.5.0 发版后关闭 issue。
 
@@ -81,7 +81,7 @@
 
 ## 新增：Hermes Agent 全局同步支持
 
-**关联 Issue：** https://github.com/qufei1993/skills-hub/issues/54
+**关联 Issue：** https://github.com/AlwaysCodeHQ/skills-syncer/issues/54
 
 **状态：** 已在本地验证，纳入 v0.5.0。
 

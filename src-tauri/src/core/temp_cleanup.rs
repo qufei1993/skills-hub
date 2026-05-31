@@ -4,8 +4,10 @@ use std::time::{Duration, SystemTime};
 use anyhow::{Context, Result};
 use tauri::Manager;
 
-const TEMP_PREFIX: &str = "skills-hub-git-";
-const TEMP_MARKER: &str = ".skills-hub-git-temp";
+const TEMP_PREFIX: &str = "skills-syncer-git-";
+const LEGACY_TEMP_PREFIX: &str = "skills-hub-git-";
+const TEMP_MARKER: &str = ".skills-syncer-git-temp";
+const LEGACY_TEMP_MARKER: &str = ".skills-hub-git-temp";
 
 #[allow(dead_code)]
 pub fn mark_temp_dir(dir: &Path) -> Result<()> {
@@ -13,7 +15,7 @@ pub fn mark_temp_dir(dir: &Path) -> Result<()> {
     if marker.exists() {
         return Ok(());
     }
-    std::fs::write(&marker, b"skills-hub-git-temp-v1\n")
+    std::fs::write(&marker, b"skills-syncer-git-temp-v1\n")
         .with_context(|| format!("failed to write marker {:?}", marker))?;
     Ok(())
 }
@@ -58,12 +60,12 @@ fn cleanup_old_git_temp_dirs_in(cache_dir: &Path, max_age: Duration) -> Result<u
             continue;
         }
         let name = entry.file_name().to_string_lossy().to_string();
-        if !name.starts_with(TEMP_PREFIX) {
+        if !is_managed_temp_dir(&name, &path) {
             continue;
         }
 
         // Safety: only delete directories we have explicitly marked.
-        if !path.join(TEMP_MARKER).exists() {
+        if !path.join(TEMP_MARKER).exists() && !path.join(LEGACY_TEMP_MARKER).exists() {
             continue;
         }
 
@@ -83,6 +85,10 @@ fn cleanup_old_git_temp_dirs_in(cache_dir: &Path, max_age: Duration) -> Result<u
     }
 
     Ok(removed)
+}
+
+fn is_managed_temp_dir(name: &str, path: &Path) -> bool {
+    (name.starts_with(TEMP_PREFIX) || name.starts_with(LEGACY_TEMP_PREFIX)) && path.is_dir()
 }
 
 #[cfg(test)]

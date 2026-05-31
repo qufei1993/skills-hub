@@ -2,7 +2,7 @@
 
 ## 背景
 
-Skills Hub 应用的"探索"功能依赖 `featured-skills.json` 提供精选技能列表。早期方案通过 GitHub Search API 搜索 `claude-code-skill` 等 topic 标签自动发现仓库，但属于盲目搜索，质量不可控，噪音多。
+SkillSyncer 应用的"探索"功能依赖 `featured-skills.json` 提供精选技能列表。早期方案通过 GitHub Search API 搜索 `claude-code-skill` 等 topic 标签自动发现仓库，但属于盲目搜索，质量不可控，噪音多。
 
 **新方案**：维护一份精选仓库列表（Curated Repos），直接从已知的高质量仓库中获取 skills。质量可控、API 调用极少、维护简单。
 
@@ -197,7 +197,7 @@ GitHub API 限额（已认证）：5000 次/小时。即使未认证（60 次/�
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-## Skills Hub 应用端适配
+## SkillSyncer 应用端适配
 
 **后端和前端代码无需任何改动**（向前兼容）：
 

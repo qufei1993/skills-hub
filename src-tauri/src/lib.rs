@@ -4,6 +4,7 @@ mod core;
 use std::sync::Arc;
 
 use core::cancel_token::CancelToken;
+use core::central_repo::migrate_legacy_central_repo_if_needed;
 use core::skill_store::{default_db_path, migrate_legacy_db_if_needed, SkillStore};
 use tauri::Manager;
 use tauri_plugin_log::{Target, TargetKind};
@@ -30,6 +31,7 @@ pub fn run() {
             migrate_legacy_db_if_needed(&db_path).map_err(tauri::Error::from)?;
             let store = SkillStore::new(db_path);
             store.ensure_schema().map_err(tauri::Error::from)?;
+            migrate_legacy_central_repo_if_needed(&store).map_err(tauri::Error::from)?;
             app.manage(store.clone());
             app.manage(Arc::new(CancelToken::new()));
 
@@ -38,8 +40,8 @@ pub fn run() {
 
             // Best-effort cleanup of our own old git temp directories.
             // Safety:
-            // - Only deletes directories that match prefix `skills-hub-git-*`
-            // - And contain our marker file `.skills-hub-git-temp`
+            // - Only deletes directories that match prefix `skills-syncer-git-*` (or legacy `skills-hub-git-*`)
+            // - And contain our marker file `.skills-syncer-git-temp` (or legacy `.skills-hub-git-temp`)
             // - And are older than the max age.
             let handle = app.handle().clone();
             let store_for_cleanup = store.clone();

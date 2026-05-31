@@ -1,12 +1,12 @@
 # 新增：支持 Copaw 工具
 
-> 贡献者：[@LeonDevLifeLog](https://github.com/LeonDevLifeLog)，PR [qufei1993/skills-hub#50](https://github.com/qufei1993/skills-hub/pull/50)
+> 贡献者：[@LeonDevLifeLog](https://github.com/LeonDevLifeLog)，PR [AlwaysCodeHQ/skills-syncer#50](https://github.com/AlwaysCodeHQ/skills-syncer/pull/50)
 
 ## 更新内容
 
 新增对 [CoPaw](https://github.com/agentscope-ai/CoPaw) 的支持。CoPaw 是 AgentScope 出品的 AI 个人助理，支持多端接入（钉钉、飞书、微信、Discord 等）、技能扩展与多智能体协作。
 
-安装 skill 后，Skills Hub 可自动将其同步到 CoPaw 的本地技能池。
+安装 skill 后，SkillSyncer 可自动将其同步到 CoPaw 的本地技能池。
 
 ## 技术细节
 

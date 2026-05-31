@@ -1,4 +1,4 @@
-# Skills Hub（Tauri Desktop）系统设计文档
+# SkillSyncer（Tauri Desktop）系统设计文档
 
 > English version: [`docs/system-design.md`](system-design.md)
 
@@ -10,9 +10,9 @@
 
 - **无法统一查看**：用户很难知道“我有哪些 Skill、在哪些工具生效、版本是否一致”。
 - **重复安装与漂移**：同一个 Skill 被复制到多个工具目录，更新后不一致。
-- **迁移成本高**：安装 Skills Hub 后，用户机器上可能已存在大量 skills，需要安全接管并去重。
+- **迁移成本高**：安装 SkillSyncer 后，用户机器上可能已存在大量 skills，需要安全接管并去重。
 
-Skills Hub 的核心思路是将 Skill 内容集中存放在“中心仓库（Central Repo）”，并把各工具目录中的技能以 **symlink/junction/copy** 的方式映射到中心仓库，实现 “Install once, sync everywhere”。
+SkillSyncer 的核心思路是将 Skill 内容集中存放在“中心仓库（Central Repo）”，并把各工具目录中的技能以 **symlink/junction/copy** 的方式映射到中心仓库，实现 “Install once, sync everywhere”。
 
 ## 2. 目标与非目标
 
@@ -27,7 +27,7 @@ Skills Hub 的核心思路是将 Skill 内容集中存放在“中心仓库（Ce
   - GitHub 搜索（后端已实现，前端入口当前为 disabled）
 - **更新**：按来源（git/local）重建中心目录；对 copy 模式的目标回灌更新。
 - **工具动态检测**：启动时检测“新安装工具”，提示是否一键同步已托管 skills。
-- **可配置中心仓库路径**：默认 `~/.skillshub`。
+- **可配置中心仓库路径**：默认 `~/.skillsyncer`。
 
 ### 2.2 非目标（当前版本不做/不保证）
 
@@ -39,8 +39,8 @@ Skills Hub 的核心思路是将 Skill 内容集中存放在“中心仓库（Ce
 ## 3. 术语与核心概念
 
 - **Skill**：一个以目录为单位的能力包，通常包含 `SKILL.md` 等文件。
-- **Managed Skill**：被 Skills Hub 托管并持久化到 SQLite 的 Skill（中心目录为权威内容）。
-- **Central Repo（中心仓库）**：Hub 存放 skills 内容的中心目录，默认 `~/.skillshub`（可配置）。
+- **Managed Skill**：被 SkillSyncer 托管并持久化到 SQLite 的 Skill（中心目录为权威内容）。
+- **Central Repo（中心仓库）**：Hub 存放 skills 内容的中心目录，默认 `~/.skillsyncer`（可配置）。
 - **Tool/Agent**：一个支持 skills 的 AI 工具（cursor/claude_code/codex/...），每个工具有默认 skills 目录。
 - **Target（同步目标）**：某个 managed skill 在某个工具目录里的映射结果（symlink/junction/copy），对应 DB 表 `skill_targets`。
 - **Onboarding Plan**：首次/手动扫描得到的“候选导入集合”，按 skill name 聚合为 group，并在冲突时提供 variant 选择。
@@ -55,19 +55,19 @@ Skills Hub 的核心思路是将 Skill 内容集中存放在“中心仓库（Ce
 - 用户通过桌面应用管理本机 skills。
 - 应用需要读写：
   - 用户主目录下各工具的默认 skills 目录（以及 detect 目录）
-  - 中心仓库目录（默认 `~/.skillshub`）
-  - 应用数据目录中的 SQLite DB（`skills_hub.db`）
-  - 应用缓存目录中的 git 临时 clone 目录（`skills-hub-git-*`）
+  - 中心仓库目录（默认 `~/.skillsyncer`）
+  - 应用数据目录中的 SQLite DB（`skills_syncer.db`）
+  - 应用缓存目录中的 git 临时 clone 目录（`skills-syncer-git-*`）
 
 ```mermaid
 flowchart TB
   user["用户"]
-  app["Skills Hub 桌面应用\n(Tauri + React)"]
+  app["SkillSyncer 桌面应用\n(Tauri + React)"]
 
   fsTools["各工具全局 Skills 目录\n~/.cursor/skills 等"]
-  fsCentral["中心仓库\n~/.skillshub"]
-  db["SQLite\nskills_hub.db"]
-  cache["Cache\nskills-hub-git-*"]
+  fsCentral["中心仓库\n~/.skillsyncer"]
+  db["SQLite\nskills_syncer.db"]
+  cache["Cache\nskills-syncer-git-*"]
   gh["GitHub / 任意 Git 仓库"]
 
   user -->|管理/导入/同步| app
@@ -130,7 +130,7 @@ flowchart LR
 
 #### 中心仓库
 
-- 默认路径：`~/.skillshub`（`src-tauri/src/core/central_repo.rs`）
+- 默认路径：`~/.skillsyncer`（`src-tauri/src/core/central_repo.rs`）
 - 每个 Skill 使用一个目录：`<central_repo>/<skill_name>/`
 - 特性：
   - **不存完整 git repo**：git 导入使用临时 clone，再把内容复制进中心目录，避免中心目录包含 `.git`。
@@ -139,8 +139,8 @@ flowchart LR
 #### Git 临时目录（缓存）
 
 - 位置：Tauri `app_cache_dir()`（OS 特定）
-- 命名：`skills-hub-git-<uuid>`
-- 安全标记：写入 marker 文件 `.skills-hub-git-temp`
+- 命名：`skills-syncer-git-<uuid>`
+- 安全标记：写入 marker 文件 `.skills-syncer-git-temp`
 - 清理策略：应用启动后台 best-effort 清理超过 24h 的目录（仅匹配 prefix + marker）
 
 #### 工具目录
@@ -206,7 +206,7 @@ flowchart LR
 
 ### 5.2 SQLite 数据模型
 
-DB 文件路径：`app_data_dir()/skills_hub.db`（`src-tauri/src/core/skill_store.rs`）
+DB 文件路径：`app_data_dir()/skills_syncer.db`（`src-tauri/src/core/skill_store.rs`）
 
 ```mermaid
 erDiagram
@@ -358,7 +358,7 @@ key/value 存储：
 #### Git 导入（`install_git_skill`）
 
 - 解析 GitHub URL（支持 repo root、`.git`、`/tree/<branch>/<path>`、`/blob/<branch>/<path>`）。
-- clone 到缓存临时目录（优先系统 `git` CLI，失败回退 libgit2），标记 `.skills-hub-git-temp`。
+- clone 到缓存临时目录（优先系统 `git` CLI，失败回退 libgit2），标记 `.skills-syncer-git-temp`。
 - 复制目标目录到中心仓库：
   - folder URL：复制 subpath
   - repo root URL：若检测到 `skills/` 下存在 >=2 个 `SKILL.md`，抛出 `MULTI_SKILLS|...` 引导用户改用 folder URL 或走候选选择流程
@@ -377,7 +377,7 @@ key/value 存储：
 
 #### 更新（`update_managed_skill_from_source`）
 
-- 根据 `skills.source_type` 重新构建新内容到 sibling staging dir：`.skills-hub-update-<uuid>`
+- 根据 `skills.source_type` 重新构建新内容到 sibling staging dir：`.skills-syncer-update-<uuid>`
 - swap：删除旧中心目录 -> rename staging（跨盘 rename 失败则 copy fallback）
 - 更新 `skills.updated_at/content_hash/source_revision` 等
 - 若 `skill_targets.mode == "copy"`：对这些 target 执行 overwrite 同步，让工具目录内容跟随更新（symlink/junction 自动生效无需处理）
@@ -396,7 +396,7 @@ key/value 存储：
 文件：`src-tauri/src/core/github_search.rs`
 
 - 调用 GitHub Search API：`https://api.github.com/search/repositories`
-- `reqwest::blocking`，设置 `User-Agent: skills-hub`
+- `reqwest::blocking`，设置 `User-Agent: skills-syncer`
 - 返回 `RepoSummary`（full_name/html_url/description/stars/updated_at/clone_url）
 - 备注：当前前端搜索 tab 为 disabled；可作为后续启用点。
 
@@ -406,8 +406,8 @@ key/value 存储：
 
 - 仅清理满足三重条件的目录：
   1) 位于 app_cache_dir
-  2) 名称前缀 `skills-hub-git-`
-  3) 含 marker 文件 `.skills-hub-git-temp`
+  2) 名称前缀 `skills-syncer-git-`
+  3) 含 marker 文件 `.skills-syncer-git-temp`
 - 并要求目录 `modified` 时间超过 max_age（目前 24h）。
 
 ## 7. Commands（前后端接口契约）
@@ -495,7 +495,7 @@ sequenceDiagram
   UI->>CMD: get_central_repo_path()
   CMD->>CORE: resolve + ensure_central_repo
   CORE->>DB: settings.get(central_repo_path)
-  CORE->>FS: create_dir_all(~/.skillshub)
+  CORE->>FS: create_dir_all(~/.skillsyncer)
   CMD-->>UI: path
 
   UI->>CMD: get_tool_status()
@@ -536,7 +536,7 @@ sequenceDiagram
 
   UI->>CMD: import_existing_skill(sourcePath, name)
   CMD->>INST: install_local_skill()
-  INST->>FS: copy sourcePath -> ~/.skillshub/<name>
+  INST->>FS: copy sourcePath -> ~/.skillsyncer/<name>
   INST->>DB: upsert skills row
   CMD-->>UI: {skill_id, central_path, name}
 
@@ -575,9 +575,9 @@ sequenceDiagram
 ```mermaid
 flowchart TB
   A[更新 update_managed_skill] --> B{source_type}
-  B -->|git| C[clone 到 cache temp\nskills-hub-git-*]
+  B -->|git| C[clone 到 cache temp\nskills-syncer-git-*]
   B -->|local| D[读取 source_ref 目录]
-  C --> E[copy 到 staging dir\n.skills-hub-update-*]
+  C --> E[copy 到 staging dir\n.skills-syncer-update-*]
   D --> E
   E --> F[swap: 删除旧 central_dir\nrename/copy 回 central_path]
   F --> G[更新 skills.updated_at/hash/revision]

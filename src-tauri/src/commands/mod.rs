@@ -50,7 +50,7 @@ fn format_anyhow_error(err: anyhow::Error) -> String {
     let mut full = format!("{:#}", err);
 
     // Redact noisy temp paths from clone context (we care about the cause, not the dest).
-    // Example: `clone https://... into "/Users/.../skills-hub-git-<uuid>"`
+    // Example: `clone https://... into "/Users/.../skills-syncer-git-<uuid>"`
     if let Some(head) = full.lines().next() {
         if head.starts_with("clone ") {
             if let Some(pos) = head.find(" into ") {

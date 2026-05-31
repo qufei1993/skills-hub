@@ -7,7 +7,7 @@
 ## [0.6.1] - 2026-05-16
 
 ### 修复
-- **窗口关闭行为**：点击主窗口关闭按钮现在会直接退出应用，不再隐藏到后台，修复应用仍在运行但无法从 Dock 或任务栏重新打开的问题（[PR #68](https://github.com/qufei1993/skills-hub/pull/68)）。
+- **窗口关闭行为**：点击主窗口关闭按钮现在会直接退出应用，不再隐藏到后台，修复应用仍在运行但无法从 Dock 或任务栏重新打开的问题（[PR #68](https://github.com/AlwaysCodeHQ/skills-syncer/pull/68)）。
 
 ## [0.6.0] - 2026-05-05
 
@@ -31,7 +31,7 @@
 - **项目级 Skill 同步**：Skill 现在可以同步到指定项目目录，不再只支持同步到各工具的全局目录。
 - **同步范围控制**：My Skills 卡片新增范围徽标（全局 / 项目数量），并提供范围弹窗用于切换全局同步和项目同步。
 - **范围筛选**：My Skills 支持按全部 / 全局 / 项目范围筛选。
-- **Hermes Agent 工具适配**：新增 Hermes Agent 全局同步支持，目录为 `~/.hermes/skills`（[#54](https://github.com/qufei1993/skills-hub/issues/54)）。
+- **Hermes Agent 工具适配**：新增 Hermes Agent 全局同步支持，目录为 `~/.hermes/skills`（[#54](https://github.com/AlwaysCodeHQ/skills-syncer/issues/54)）。
 
 ### 变更
 - **My Skills 筛选栏**：标题现在显示 Skill 总数，搜索框更紧凑，默认窗口下筛选控件保持单行展示。
@@ -47,7 +47,7 @@
 ## [0.4.3] - 2026-04-11
 
 ### 新增
-- **Copaw 工具适配**：新增 Copaw AI 编程工具支持（感谢 @LeonDevLifeLog [PR#50](https://github.com/qufei1993/skills-hub/pull/50)）。
+- **Copaw 工具适配**：新增 Copaw AI 编程工具支持（感谢 @LeonDevLifeLog [PR#50](https://github.com/AlwaysCodeHQ/skills-syncer/pull/50)）。
 
 ### 修复
 - **Git 技能安装与 frontmatter 渲染**：修复 Git 技能安装及 frontmatter 元数据渲染问题。
@@ -56,7 +56,7 @@
 ## [0.4.2] - 2026-04-06
 
 ### 修复
-- **检测到新工具弹窗样式**：「New tools detected」弹窗改用与其他弹窗一致的 `modal-header` + `modal-footer` 结构，修复标题缺少内边距和分隔线的问题（[#46](https://github.com/qufei1993/skills-hub/issues/46)）。
+- **检测到新工具弹窗样式**：「New tools detected」弹窗改用与其他弹窗一致的 `modal-header` + `modal-footer` 结构，修复标题缺少内边距和分隔线的问题（[#46](https://github.com/AlwaysCodeHQ/skills-syncer/issues/46)）。
 - **Git 技能名称推导**：从仓库根目录（subpath 为 `"."`）安装 Git 技能时，现在正确从仓库 URL 推导名称，不再以 `"."` 作为展示名称。
 
 ## [0.4.1] - 2026-03-21
@@ -67,8 +67,8 @@
 ## [0.4.0] - 2026-03-20
 
 ### 新增
-- **应用内检查更新**：在设置页内直接检查新版本，支持下载安装，无需手动访问 GitHub Releases（[#33](https://github.com/qufei1993/skills-hub/issues/33)）。
-- **QoderWork 工具适配**：新增 QoderWork 桌面 AI 代理支持（`~/.qoderwork/skills/`）（[#34](https://github.com/qufei1993/skills-hub/issues/34)）。
+- **应用内检查更新**：在设置页内直接检查新版本，支持下载安装，无需手动访问 GitHub Releases（[#33](https://github.com/AlwaysCodeHQ/skills-syncer/issues/33)）。
+- **QoderWork 工具适配**：新增 QoderWork 桌面 AI 代理支持（`~/.qoderwork/skills/`）（[#34](https://github.com/AlwaysCodeHQ/skills-syncer/issues/34)）。
 
 ### 变更
 - **设置页面化**：设置从模态弹窗升级为独立页面视图，与 My Skills / Explore 导航风格一致。
@@ -89,12 +89,12 @@
 - **MoltBot 工具适配**：OpenClaw 更名拆分后新增独立的 MoltBot 工具支持。
 
 ### 修复
-- Git 安装时 skill 名称为 "skills" 导致同步路径重复（[#28](https://github.com/qufei1993/skills-hub/issues/28)）。
+- Git 安装时 skill 名称为 "skills" 导致同步路径重复（[#28](https://github.com/AlwaysCodeHQ/skills-syncer/issues/28)）。
 - GitHub API 限流错误未提示重置时间，现在显示具体重置时间。
-- Windows 同步时拒绝访问 OS error 5（[#20](https://github.com/qufei1993/skills-hub/issues/20)）。
-- Git 仓库目录结构无法被正确识别为 skill（[#18](https://github.com/qufei1993/skills-hub/issues/18)、[#8](https://github.com/qufei1993/skills-hub/issues/8)）。
-- 不支持 `.claude/skills/` 目录格式的仓库（[#27](https://github.com/qufei1993/skills-hub/issues/27)）。
-- OpenClaw 路径更新（`.moltbot/skills` → `.openclaw/skills`）（[#29](https://github.com/qufei1993/skills-hub/issues/29)）。
+- Windows 同步时拒绝访问 OS error 5（[#20](https://github.com/AlwaysCodeHQ/skills-syncer/issues/20)）。
+- Git 仓库目录结构无法被正确识别为 skill（[#18](https://github.com/AlwaysCodeHQ/skills-syncer/issues/18)、[#8](https://github.com/AlwaysCodeHQ/skills-syncer/issues/8)）。
+- 不支持 `.claude/skills/` 目录格式的仓库（[#27](https://github.com/AlwaysCodeHQ/skills-syncer/issues/27)）。
+- OpenClaw 路径更新（`.moltbot/skills` → `.openclaw/skills`）（[#29](https://github.com/AlwaysCodeHQ/skills-syncer/issues/29)）。
 
 ### 变更
 - My Skills 列表优化：工具徽章只显示已同步的工具，超过 5 个折叠为 `+N more`。
@@ -103,7 +103,7 @@
 
 ## [0.2.0] - 2026-02-01
 ### 新增
-- **Windows 平台支持**：支持 Windows 构建与发布（感谢 @jrtxio [PR#6](https://github.com/qufei1993/skills-hub/pull/6)）。
+- **Windows 平台支持**：支持 Windows 构建与发布（感谢 @jrtxio [PR#6](https://github.com/AlwaysCodeHQ/skills-syncer/pull/6)）。
 - 新增多款工具适配与显示（如 Kimi Code CLI、Augment、OpenClaw、Cline、CodeBuddy、Command Code、Continue、Crush、Junie、iFlow CLI、Kiro CLI、Kode、MCPJam、Mistral Vibe、Mux、OpenClaude IDE、OpenHands、Pi、Qoder、Qwen Code、Trae/Trae CN、Zencoder、Neovate、Pochi、AdaL 等）。
 - 前端新增共享技能目录提示与联动选择：同一全局 skills 目录的工具勾选/同步/取消同步会一起生效，并弹窗确认。
 - 本地导入对齐 Git 规则的 multi-skill 发现，支持批量选择并展示无效项原因。
@@ -126,7 +126,7 @@
 ## [0.1.0] - 2026-01-24
 
 ### 新增
-- Skills Hub 桌面应用（Tauri + React）初始发布。
+- SkillSyncer 桌面应用（Tauri + React）初始发布。
 - Skills 中心仓库：统一托管并同步到多种 AI 编程工具（优先 symlink/junction，失败回退 copy）。
 - 本地导入：支持从本地文件夹导入 Skill。
 - Git 导入：支持仓库 URL/文件夹 URL（`/tree/<branch>/<path>`），支持多 Skill 候选选择与批量安装。

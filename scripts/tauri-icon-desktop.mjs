@@ -27,7 +27,7 @@ if (!source) {
 
 if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true })
 
-const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skills-hub-tauri-icons-'))
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skills-syncer-tauri-icons-'))
 try {
   const res = spawnSync(
     'npx',

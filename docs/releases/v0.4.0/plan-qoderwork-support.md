@@ -2,7 +2,7 @@
 
 ## Context
 
-来源：https://github.com/qufei1993/skills-hub/issues/34
+来源：https://github.com/AlwaysCodeHQ/skills-syncer/issues/34
 
 QoderWork 是 Qoder 推出的桌面 AI 代理产品，与 Qoder IDE 独立，使用 `~/.qoderwork/skills/` 目录存放技能。当前代码库已支持 Qoder（`.qoder/skills`），但尚未支持 QoderWork。
 

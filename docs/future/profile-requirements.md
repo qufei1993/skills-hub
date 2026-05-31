@@ -94,7 +94,7 @@ Profile 用于用 Skill。
 建议模型：
 
 ```text
-Current Profile: Skills Hub Dev
+Current Profile: SkillSyncer Dev
 ```
 
 切换 Profile 是替换当前同步配置，不是叠加。
@@ -104,7 +104,7 @@ Current Profile: Skills Hub Dev
 一个 Profile 可以包含多个 Skill：
 
 ```text
-Skills Hub Dev
+SkillSyncer Dev
 - react
 - tauri-desktop
 - test-driven-development
@@ -119,7 +119,7 @@ Skill 是可复用资产。
 
 ```text
 frontend-design
-- Skills Hub Dev
+- SkillSyncer Dev
 - Review Flow
 - Docs Writing
 ```
@@ -137,7 +137,7 @@ UNIQUE(profile_id, skill_id)
 Profile 可能需要记录目标工具：
 
 ```text
-Profile: Skills Hub Dev
+Profile: SkillSyncer Dev
 Skills: react, tauri-desktop, test-driven-development
 Tools: Cursor, Codex, Claude Code
 ```
@@ -234,7 +234,7 @@ Issue #23 提到“针对不同项目”。
 仅展示当前配置：
 
 ```text
-Current Profile: Skills Hub Dev ▾
+Current Profile: SkillSyncer Dev ▾
 ```
 
 选择其他 Profile 后弹出变更预览。
@@ -245,12 +245,12 @@ Current Profile: Skills Hub Dev ▾
 Profiles                                      [+ New Profile]
 
 左侧列表：
-- Skills Hub Dev      Active
+- SkillSyncer Dev      Active
 - Docs Writing
 - Review Flow
 
 右侧详情：
-Skills Hub Dev
+SkillSyncer Dev
 React + Tauri + Rust workspace
 
 Tools

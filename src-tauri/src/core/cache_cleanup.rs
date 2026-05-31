@@ -7,8 +7,10 @@ use tauri::Manager;
 
 use super::skill_store::SkillStore;
 
-const CACHE_DIR_NAME: &str = "skills-hub-git-cache";
-const CACHE_META_FILE: &str = ".skills-hub-cache.json";
+pub const CACHE_DIR_NAME: &str = "skills-syncer-git-cache";
+pub const CACHE_META_FILE: &str = ".skills-syncer-cache.json";
+pub const LEGACY_CACHE_DIR_NAME: &str = "skills-hub-git-cache";
+pub const LEGACY_CACHE_META_FILE: &str = ".skills-hub-cache.json";
 pub const GIT_CACHE_CLEANUP_DAYS_KEY: &str = "git_cache_cleanup_days";
 pub const DEFAULT_GIT_CACHE_CLEANUP_DAYS: i64 = 30;
 const MAX_GIT_CACHE_CLEANUP_DAYS: i64 = 3650;
@@ -65,7 +67,14 @@ pub fn cleanup_git_cache_dirs<R: tauri::Runtime>(
 }
 
 fn cleanup_git_cache_dirs_in(cache_dir: &Path, max_age: Duration) -> Result<usize> {
-    let cache_root = cache_dir.join(CACHE_DIR_NAME);
+    let mut removed = 0usize;
+    for cache_name in [CACHE_DIR_NAME, LEGACY_CACHE_DIR_NAME] {
+        removed += cleanup_git_cache_root(&cache_dir.join(cache_name), max_age)?;
+    }
+    Ok(removed)
+}
+
+fn cleanup_git_cache_root(cache_root: &Path, max_age: Duration) -> Result<usize> {
     if !cache_root.exists() {
         return Ok(0);
     }
@@ -76,7 +85,7 @@ fn cleanup_git_cache_dirs_in(cache_dir: &Path, max_age: Duration) -> Result<usiz
         .unwrap_or(SystemTime::UNIX_EPOCH);
 
     let mut removed = 0usize;
-    let rd = match std::fs::read_dir(&cache_root) {
+    let rd = match std::fs::read_dir(cache_root) {
         Ok(v) => v,
         Err(err) => {
             return Err(anyhow::anyhow!(
@@ -98,12 +107,16 @@ fn cleanup_git_cache_dirs_in(cache_dir: &Path, max_age: Duration) -> Result<usiz
         }
 
         let meta_path = path.join(CACHE_META_FILE);
+        let legacy_meta_path = path.join(LEGACY_CACHE_META_FILE);
         let mut should_remove = false;
 
-        if let Ok(raw) = std::fs::read_to_string(&meta_path) {
-            if let Ok(meta) = serde_json::from_str::<RepoCacheMeta>(&raw) {
-                if meta.last_fetched_ms > 0 && meta.last_fetched_ms <= cutoff_ms {
-                    should_remove = true;
+        for candidate in [&meta_path, &legacy_meta_path] {
+            if let Ok(raw) = std::fs::read_to_string(candidate) {
+                if let Ok(meta) = serde_json::from_str::<RepoCacheMeta>(&raw) {
+                    if meta.last_fetched_ms > 0 && meta.last_fetched_ms <= cutoff_ms {
+                        should_remove = true;
+                        break;
+                    }
                 }
             }
         }

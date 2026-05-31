@@ -7,7 +7,7 @@ All notable changes to this project will be documented in this file.
 ## [0.6.1] - 2026-05-16
 
 ### Fixed
-- **Window close behavior**: Closing the main window now exits the app instead of hiding it in the background, fixing cases where the app kept running but could not be reopened from the Dock or taskbar ([PR #68](https://github.com/qufei1993/skills-hub/pull/68)).
+- **Window close behavior**: Closing the main window now exits the app instead of hiding it in the background, fixing cases where the app kept running but could not be reopened from the Dock or taskbar ([PR #68](https://github.com/AlwaysCodeHQ/skills-syncer/pull/68)).
 
 ## [0.6.0] - 2026-05-05
 
@@ -31,7 +31,7 @@ All notable changes to this project will be documented in this file.
 - **Project-level skill sync**: Skills can now be synced to selected project directories instead of only global tool directories.
 - **Skill scope controls**: My Skills cards now show a scope badge (`Global` / project count) and include a scope modal for switching between global and project sync.
 - **Scope filtering**: My Skills can be filtered by All / Global / Project scope.
-- **Hermes Agent adapter**: Added global sync support for Hermes Agent via `~/.hermes/skills` ([#54](https://github.com/qufei1993/skills-hub/issues/54)).
+- **Hermes Agent adapter**: Added global sync support for Hermes Agent via `~/.hermes/skills` ([#54](https://github.com/AlwaysCodeHQ/skills-syncer/issues/54)).
 
 ### Changed
 - **My Skills filter bar**: The section title now displays the total skill count, search is more compact, and filter controls stay on one line in the default window.
@@ -47,7 +47,7 @@ All notable changes to this project will be documented in this file.
 ## [0.4.3] - 2026-04-11
 
 ### Added
-- **Copaw tool adapter**: Support for Copaw AI coding tool (thanks @LeonDevLifeLog [PR#50](https://github.com/qufei1993/skills-hub/pull/50)).
+- **Copaw tool adapter**: Support for Copaw AI coding tool (thanks @LeonDevLifeLog [PR#50](https://github.com/AlwaysCodeHQ/skills-syncer/pull/50)).
 
 ### Fixed
 - **Git skill install & frontmatter rendering**: Fixed issues with Git-based skill installation and frontmatter metadata rendering.
@@ -56,7 +56,7 @@ All notable changes to this project will be documented in this file.
 ## [0.4.2] - 2026-04-06
 
 ### Fixed
-- **New tools modal style**: "New tools detected" dialog now uses consistent header/footer structure (`modal-header` + `modal-footer`) matching all other modals, fixing missing padding and border separators ([#46](https://github.com/qufei1993/skills-hub/issues/46)).
+- **New tools modal style**: "New tools detected" dialog now uses consistent header/footer structure (`modal-header` + `modal-footer`) matching all other modals, fixing missing padding and border separators ([#46](https://github.com/AlwaysCodeHQ/skills-syncer/issues/46)).
 - **Git skill name derivation**: Installing a Git skill from a repo root (subpath `"."`) now correctly derives the name from the repository URL instead of using `"."` as the display name.
 
 ## [0.4.1] - 2026-03-21
@@ -67,8 +67,8 @@ All notable changes to this project will be documented in this file.
 ## [0.4.0] - 2026-03-20
 
 ### Added
-- **In-app update check**: Check for updates directly within Settings, download and install without leaving the app ([#33](https://github.com/qufei1993/skills-hub/issues/33)).
-- **QoderWork tool adapter**: Support for QoderWork desktop AI agent (`~/.qoderwork/skills/`) ([#34](https://github.com/qufei1993/skills-hub/issues/34)).
+- **In-app update check**: Check for updates directly within Settings, download and install without leaving the app ([#33](https://github.com/AlwaysCodeHQ/skills-syncer/issues/33)).
+- **QoderWork tool adapter**: Support for QoderWork desktop AI agent (`~/.qoderwork/skills/`) ([#34](https://github.com/AlwaysCodeHQ/skills-syncer/issues/34)).
 
 ### Changed
 - **Settings promoted to full page**: Settings moved from a modal dialog to a dedicated page view, consistent with My Skills / Explore navigation pattern.
@@ -89,12 +89,12 @@ All notable changes to this project will be documented in this file.
 - **MoltBot tool adapter**: Added standalone MoltBot tool support after OpenClaw rename/split.
 
 ### Fixed
-- Git install deriving skill name as "skills" when URL points to a `skills/` subdirectory, causing duplicated sync paths ([#28](https://github.com/qufei1993/skills-hub/issues/28)).
+- Git install deriving skill name as "skills" when URL points to a `skills/` subdirectory, causing duplicated sync paths ([#28](https://github.com/AlwaysCodeHQ/skills-syncer/issues/28)).
 - GitHub API rate-limit errors now display the exact reset time instead of a generic message.
-- Windows "Access Denied" OS error 5 when syncing to tools ([#20](https://github.com/qufei1993/skills-hub/issues/20)).
-- Git repo directory structures not correctly recognized as skills ([#18](https://github.com/qufei1993/skills-hub/issues/18), [#8](https://github.com/qufei1993/skills-hub/issues/8)).
-- Repos using `.claude/skills/` directory format not detected ([#27](https://github.com/qufei1993/skills-hub/issues/27)).
-- OpenClaw path updated from `.moltbot/skills` to `.openclaw/skills` ([#29](https://github.com/qufei1993/skills-hub/issues/29)).
+- Windows "Access Denied" OS error 5 when syncing to tools ([#20](https://github.com/AlwaysCodeHQ/skills-syncer/issues/20)).
+- Git repo directory structures not correctly recognized as skills ([#18](https://github.com/AlwaysCodeHQ/skills-syncer/issues/18), [#8](https://github.com/AlwaysCodeHQ/skills-syncer/issues/8)).
+- Repos using `.claude/skills/` directory format not detected ([#27](https://github.com/AlwaysCodeHQ/skills-syncer/issues/27)).
+- OpenClaw path updated from `.moltbot/skills` to `.openclaw/skills` ([#29](https://github.com/AlwaysCodeHQ/skills-syncer/issues/29)).
 
 ### Changed
 - My Skills list: tool badges now only show synced tools, collapsing to `+N more` beyond 5.
@@ -104,7 +104,7 @@ All notable changes to this project will be documented in this file.
 ## [0.2.0] - 2026-02-01
 
 ### Added
-- **Windows platform support**: Full support for Windows build and release (thanks @jrtxio [PR#6](https://github.com/qufei1993/skills-hub/pull/6)).
+- **Windows platform support**: Full support for Windows build and release (thanks @jrtxio [PR#6](https://github.com/AlwaysCodeHQ/skills-syncer/pull/6)).
 - Support and display for many new tools (e.g., Kimi Code CLI, Augment, OpenClaw, Cline, CodeBuddy, Command Code, Continue, Crush, Junie, iFlow CLI, Kiro CLI, Kode, MCPJam, Mistral Vibe, Mux, OpenClaude IDE, OpenHands, Pi, Qoder, Qwen Code, Trae/Trae CN, Zencoder, Neovate, Pochi, AdaL).
 - UI confirmation and linked selection for tools that share the same global skills directory.
 - Local import multi-skill discovery aligned with Git rules, with a selection list and invalid-item reasons.
@@ -127,7 +127,7 @@ All notable changes to this project will be documented in this file.
 ## [0.1.0] - 2026-01-25
 
 ### Added
-- Initial release of Skills Hub desktop app (Tauri + React).
+- Initial release of SkillSyncer desktop app (Tauri + React).
 - Central repository for Skills; sync to multiple AI coding tools (symlink/junction preferred, copy fallback).
 - Local import from folders.
 - Git import via repository URL or folder URL (`/tree/<branch>/<path>`), with multi-skill selection and batch install.

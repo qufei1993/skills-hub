@@ -4,8 +4,13 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use tauri::Manager;
 
-const DB_FILE_NAME: &str = "skills_hub.db";
-const LEGACY_APP_IDENTIFIERS: &[&str] = &["com.tauri.dev", "com.tauri.dev.skillshub"];
+const DB_FILE_NAME: &str = "skills_syncer.db";
+const LEGACY_DB_FILE_NAME: &str = "skills_hub.db";
+const LEGACY_APP_IDENTIFIERS: &[&str] = &[
+    "com.tauri.dev",
+    "com.tauri.dev.skillshub",
+    "com.qufei1993.skillshub",
+];
 
 // Schema versioning: bump when making changes and add a migration step.
 const SCHEMA_VERSION: i32 = 5;
@@ -721,7 +726,7 @@ pub fn migrate_legacy_db_if_needed(target_db_path: &Path) -> Result<()> {
 
     let legacy_db_path = LEGACY_APP_IDENTIFIERS
         .iter()
-        .map(|id| data_dir.join(id).join(DB_FILE_NAME))
+        .map(|id| data_dir.join(id).join(LEGACY_DB_FILE_NAME))
         .find(|path| path.exists());
 
     let Some(legacy_db_path) = legacy_db_path else {

@@ -16,10 +16,10 @@ fn format_anyhow_error_passthrough_prefixes() {
 
 #[test]
 fn format_anyhow_error_redacts_clone_temp_path() {
-    let err = anyhow::anyhow!("clone https://example.com/a/b into /tmp/skills-hub-git-123");
+    let err = anyhow::anyhow!("clone https://example.com/a/b into /tmp/skills-syncer-git-123");
     let msg = format_anyhow_error(err);
     assert!(msg.contains("已省略临时目录"));
-    assert!(!msg.contains("/tmp/skills-hub-git-123"));
+    assert!(!msg.contains("/tmp/skills-syncer-git-123"));
 }
 
 #[test]
