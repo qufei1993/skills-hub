@@ -440,7 +440,7 @@ function App() {
           // Fetch full release notes from GitHub API
           try {
             const res = await fetch(
-              `https://api.github.com/repos/AlwaysCodeHQ/skills-syncer/releases/tags/v${update.version}`,
+              `https://api.github.com/repos/AlwaysCodeHQ/SkillSyncer/releases/tags/v${update.version}`,
             )
             if (res.ok) {
               const data = await res.json()

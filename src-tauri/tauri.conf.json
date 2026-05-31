@@ -40,7 +40,7 @@
       "active": true,
       "dialog": false,
       "endpoints": [
-        "https://github.com/AlwaysCodeHQ/skills-syncer/releases/latest/download/updater.json"
+        "https://github.com/AlwaysCodeHQ/SkillSyncer/releases/latest/download/updater.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI1QjEyQ0U0RkM5NjZCMjQKUldRa2E1Yjg1Q3l4dFM0TGl4N3k3KytFalRiajhFZmo4QkE5ek5HVXM1MjRDZWVORWhibnR6Vk8K"
     }

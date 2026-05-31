@@ -5,7 +5,7 @@ use serde::Deserialize;
 use super::skill_store::SkillStore;
 
 const FEATURED_SKILLS_URL: &str =
-    "https://raw.githubusercontent.com/AlwaysCodeHQ/skills-syncer/main/featured-skills.json";
+    "https://raw.githubusercontent.com/AlwaysCodeHQ/SkillSyncer/main/featured-skills.json";
 
 const CACHE_KEY: &str = "featured_skills_cache";
 
