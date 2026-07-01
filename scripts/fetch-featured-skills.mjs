@@ -39,7 +39,13 @@ const CURATED_REPOS = [
   'VoltAgent/awesome-agent-skills',
   'anthropics/knowledge-work-plugins',
   'alirezarezvani/claude-skills',
+  'Xquik-dev/hermes-tweet',
 ]
+
+// Pinned curated repos stay included even if their stars would fall past the cap.
+const PINNED_REPOS = new Set([
+  'Xquik-dev/hermes-tweet',
+])
 
 const MAX_SKILLS = 300
 const CONCURRENCY = 10
@@ -347,7 +353,20 @@ async function main() {
   })
   console.log(`After dedup: ${dedupedEntries.length} unique skills (removed ${skillEntries.length - dedupedEntries.length} duplicates)`)
 
-  const topEntries = dedupedEntries.slice(0, MAX_SKILLS)
+  const pinnedEntries = []
+  const regularEntries = []
+  for (const entry of dedupedEntries) {
+    if (PINNED_REPOS.has(entry.repo.full_name)) {
+      pinnedEntries.push(entry)
+    } else {
+      regularEntries.push(entry)
+    }
+  }
+
+  const topEntries = [
+    ...pinnedEntries,
+    ...regularEntries.slice(0, Math.max(MAX_SKILLS - pinnedEntries.length, 0)),
+  ]
 
   // Step 4: Fetch SKILL.md for top skills to get real names
   console.log(`Fetching SKILL.md for ${topEntries.length} skills...`)
