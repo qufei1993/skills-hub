@@ -48,7 +48,6 @@ pub enum ToolId {
     KiloCode,
     RooCode,
     Goose,
-    GeminiCli,
     GithubCopilot,
     Clawdbot,
     Droid,
@@ -99,7 +98,6 @@ impl ToolId {
             ToolId::KiloCode => "kilo_code",
             ToolId::RooCode => "roo_code",
             ToolId::Goose => "goose",
-            ToolId::GeminiCli => "gemini_cli",
             ToolId::GithubCopilot => "github_copilot",
             ToolId::Clawdbot => "clawdbot",
             ToolId::Droid => "droid",
@@ -524,13 +522,6 @@ pub fn default_tool_adapters() -> Vec<ToolAdapter> {
             relative_detect_dir: ".config/goose",
         },
         ToolAdapter {
-            id: ToolId::GeminiCli,
-            display_name: "Gemini CLI",
-            // add-skill global path: ~/.gemini/skills/
-            relative_skills_dir: ".gemini/skills",
-            relative_detect_dir: ".gemini",
-        },
-        ToolAdapter {
             id: ToolId::GithubCopilot,
             display_name: "GitHub Copilot",
             // add-skill global path: ~/.copilot/skills/
@@ -629,7 +620,6 @@ pub fn project_relative_skills_dir(adapter: &ToolAdapter) -> &'static str {
         ToolId::Crush => ".crush/skills",
         ToolId::Cursor => ".agents/skills",
         ToolId::Droid => ".factory/skills",
-        ToolId::GeminiCli => ".agents/skills",
         ToolId::GithubCopilot => ".agents/skills",
         ToolId::Goose => ".goose/skills",
         ToolId::Junie => ".junie/skills",

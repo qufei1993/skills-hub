@@ -61,7 +61,6 @@ fn project_relative_skills_dir_maps_supported_agents() {
         ("cursor", ".agents/skills"),
         ("codex", ".agents/skills"),
         ("opencode", ".agents/skills"),
-        ("gemini_cli", ".agents/skills"),
         ("github_copilot", ".agents/skills"),
         ("amp", ".agents/skills"),
         ("kimi_cli", ".agents/skills"),
@@ -127,7 +126,6 @@ fn adapters_sharing_project_skills_dir_groups_agents_tools() {
     assert!(keys.contains("cursor"));
     assert!(keys.contains("codex"));
     assert!(keys.contains("opencode"));
-    assert!(keys.contains("gemini_cli"));
     assert!(keys.contains("github_copilot"));
     assert!(keys.contains("amp"));
     assert!(keys.contains("kimi_cli"));

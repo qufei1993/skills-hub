@@ -110,7 +110,6 @@ Skills Hub includes 46 built-in tool adapters and supports custom skills directo
 | `kilo_code` | Kilo Code | `.kilocode/skills` | `.kilocode/skills` | `.kilocode` |
 | `roo_code` | Roo Code | `.roo/skills` | `.roo/skills` | `.roo` |
 | `goose` | Goose | `.config/goose/skills` | `.goose/skills` | `.config/goose` |
-| `gemini_cli` | Gemini CLI | `.gemini/skills` | `.agents/skills` | `.gemini` |
 | `github_copilot` | GitHub Copilot | `.copilot/skills` | `.agents/skills` | `.copilot` |
 | `clawdbot` | Clawdbot | `.clawdbot/skills` | `.clawdbot/skills` | `.clawdbot` |
 | `droid` | Droid | `.factory/skills` | `.factory/skills` | `.factory` |
