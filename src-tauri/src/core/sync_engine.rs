@@ -198,15 +198,17 @@ pub(crate) fn remove_path_any(path: &Path) -> Result<()> {
     };
     let ft = meta.file_type();
 
-    // 软链接（即使指向目录）也应该用 remove_file 删除链接本身
+    // 删除链接本身：symlink 用 remove_file；Windows junction 虽然 is_symlink()==true，
+    // 但底层是目录 reparse point，remove_file 会报 os error 5，必须用 remove_dir
+    // （RemoveDirectoryW 只移除链接本身，不会穿透到目标）
     if ft.is_symlink() {
+        #[cfg(windows)]
+        {
+            if std::fs::remove_dir(path).is_ok() {
+                return Ok(());
+            }
+        }
         std::fs::remove_file(path).with_context(|| format!("remove symlink {:?}", path))?;
-        return Ok(());
-    }
-    // Windows junction：std 不把它归类为 symlink（is_symlink() == false），但 read_link 能解析；
-    // 必须用非递归 remove_dir 只删除链接本身，remove_dir_all 会尝试穿过 reparse point
-    if ft.is_dir() && std::fs::read_link(path).is_ok() {
-        std::fs::remove_dir(path).with_context(|| format!("remove junction {:?}", path))?;
         return Ok(());
     }
     if ft.is_dir() {
