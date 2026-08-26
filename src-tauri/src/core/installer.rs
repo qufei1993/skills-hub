@@ -50,6 +50,23 @@ pub fn install_local_skill<R: tauri::Runtime>(
     let central_path = central_dir.join(&name);
 
     if central_path.exists() {
+        // 中心库已有同名技能且内容一致时，视为"已纳管"：跳过复制，
+        // 返回既有记录让导入/同步流程继续（避免对工具目录里的历史副本重复导入报错）
+        let existing = store.list_skills()?.into_iter().find(|s| s.name == name);
+        let source_hash = hash_dir(source_path).ok();
+        let central_hash = hash_dir(&central_path).ok();
+        if let (Some(record), Some(src_hash), Some(dst_hash)) =
+            (existing, source_hash, central_hash)
+        {
+            if src_hash == dst_hash {
+                return Ok(InstallResult {
+                    skill_id: record.id,
+                    name: record.name,
+                    central_path,
+                    content_hash: record.content_hash,
+                });
+            }
+        }
         anyhow::bail!("skill already exists in central repo: {:?}", central_path);
     }
 

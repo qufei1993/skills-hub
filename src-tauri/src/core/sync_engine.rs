@@ -76,7 +76,7 @@ pub fn sync_dir_hybrid_with_overwrite(
         }
 
         if overwrite {
-            std::fs::remove_dir_all(target)
+            remove_path_any(target)
                 .with_context(|| format!("remove existing target {:?}", target))?;
             did_replace = true;
         } else {
@@ -201,6 +201,12 @@ pub(crate) fn remove_path_any(path: &Path) -> Result<()> {
     // 软链接（即使指向目录）也应该用 remove_file 删除链接本身
     if ft.is_symlink() {
         std::fs::remove_file(path).with_context(|| format!("remove symlink {:?}", path))?;
+        return Ok(());
+    }
+    // Windows junction：std 不把它归类为 symlink（is_symlink() == false），但 read_link 能解析；
+    // 必须用非递归 remove_dir 只删除链接本身，remove_dir_all 会尝试穿过 reparse point
+    if ft.is_dir() && std::fs::read_link(path).is_ok() {
+        std::fs::remove_dir(path).with_context(|| format!("remove junction {:?}", path))?;
         return Ok(());
     }
     if ft.is_dir() {
