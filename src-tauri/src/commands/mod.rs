@@ -1605,25 +1605,34 @@ pub async fn delete_managed_skill(
 
 fn remove_path_any(path: &str) -> Result<(), String> {
     let p = std::path::Path::new(path);
-    if !p.exists() {
-        return Ok(());
-    }
-
-    let meta = std::fs::symlink_metadata(p).map_err(|err| err.to_string())?;
+    // 用 symlink_metadata 而非 exists()：悬空链接（目标已删）也要清理掉
+    let meta = match std::fs::symlink_metadata(p) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(format!("{path}: {err}")),
+    };
     let ft = meta.file_type();
 
-    // 软链接（即使指向目录）也应该用 remove_file 删除链接本身
+    // 删除链接本身：Windows junction 虽然 is_symlink()==true，但它是目录型
+    // reparse point，remove_file（DeleteFileW）会报 os error 5，必须先试
+    // remove_dir（RemoveDirectoryW 只移除链接，不会穿透到目标）
     if ft.is_symlink() {
-        std::fs::remove_file(p).map_err(|err| err.to_string())?;
+        #[cfg(windows)]
+        {
+            if std::fs::remove_dir(p).is_ok() {
+                return Ok(());
+            }
+        }
+        std::fs::remove_file(p).map_err(|err| format!("{path}: {err}"))?;
         return Ok(());
     }
 
     if ft.is_dir() {
-        std::fs::remove_dir_all(p).map_err(|err| err.to_string())?;
+        std::fs::remove_dir_all(p).map_err(|err| format!("{path}: {err}"))?;
         return Ok(());
     }
 
-    std::fs::remove_file(p).map_err(|err| err.to_string())?;
+    std::fs::remove_file(p).map_err(|err| format!("{path}: {err}"))?;
     Ok(())
 }
 
