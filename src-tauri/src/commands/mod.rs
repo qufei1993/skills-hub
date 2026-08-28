@@ -23,8 +23,8 @@ use crate::core::content_hash::hash_dir;
 use crate::core::featured_skills::{fetch_featured_skills, FeaturedSkill};
 use crate::core::github_search::{search_github_repos, RepoSummary};
 use crate::core::installer::{
-    install_git_skill, install_git_skill_from_selection, install_local_skill,
-    install_local_skill_from_selection, list_git_skills, list_local_skills,
+    import_existing_local_skill, install_git_skill, install_git_skill_from_selection,
+    install_local_skill, install_local_skill_from_selection, list_git_skills, list_local_skills,
     update_managed_skill_from_source, GitSkillCandidate, InstallResult, LocalSkillCandidate,
 };
 use crate::core::network_proxy::{
@@ -1416,7 +1416,7 @@ pub async fn import_existing_skill(
         if !source.join("SKILL.md").exists() {
             anyhow::bail!("SKILL_INVALID|missing_skill_md");
         }
-        let result = install_local_skill(&app, &store, source, name)?;
+        let result = import_existing_local_skill(&app, &store, source, name)?;
         Ok::<_, anyhow::Error>(to_install_dto(result))
     })
     .await

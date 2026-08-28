@@ -115,6 +115,25 @@ fn explicit_junction_mode_reports_unsupported_platform() {
     assert!(err.to_string().contains("junction not supported"));
 }
 
+#[cfg(windows)]
+#[test]
+fn overwrite_removes_junction_without_removing_its_target() {
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("source.txt"), b"source").unwrap();
+
+    let target_root = tempfile::tempdir().unwrap();
+    let junction_target = target_root.path().join("junction-target");
+    fs::create_dir_all(&junction_target).unwrap();
+    fs::write(junction_target.join("keep.txt"), b"keep").unwrap();
+
+    let target = target_root.path().join("target");
+    junction::create(&junction_target, &target).unwrap();
+
+    let out = sync_dir_hybrid_with_overwrite(source.path(), &target, true).unwrap();
+    assert!(out.replaced);
+    assert!(junction_target.join("keep.txt").exists());
+}
+
 #[cfg(unix)]
 #[test]
 fn copy_overwrite_replaces_broken_symlink_target() {

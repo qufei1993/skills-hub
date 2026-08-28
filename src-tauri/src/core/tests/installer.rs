@@ -291,6 +291,50 @@ fn installs_local_skill_and_updates_from_source() {
 }
 
 #[test]
+fn imports_identical_existing_local_skill_but_rejects_different_content() {
+    let app = tauri::test::mock_app();
+    let (_dir, store) = make_store();
+    let central_root = tempfile::tempdir().unwrap();
+    set_central_path(&store, central_root.path());
+
+    let original = tempfile::tempdir().unwrap();
+    fs::write(original.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
+    fs::write(original.path().join("a.txt"), b"same").unwrap();
+    let installed = super::install_local_skill(
+        app.handle(),
+        &store,
+        original.path(),
+        Some("local1".to_string()),
+    )
+    .unwrap();
+
+    let discovered = tempfile::tempdir().unwrap();
+    fs::write(discovered.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
+    fs::write(discovered.path().join("a.txt"), b"same").unwrap();
+    let imported = super::import_existing_local_skill(
+        app.handle(),
+        &store,
+        discovered.path(),
+        Some("local1".to_string()),
+    )
+    .unwrap();
+    assert_eq!(imported.skill_id, installed.skill_id);
+    assert_eq!(imported.central_path, installed.central_path);
+
+    fs::write(discovered.path().join("a.txt"), b"different").unwrap();
+    let err = match super::import_existing_local_skill(
+        app.handle(),
+        &store,
+        discovered.path(),
+        Some("local1".to_string()),
+    ) {
+        Ok(_) => panic!("expected error"),
+        Err(err) => err,
+    };
+    assert!(format!("{err:#}").contains("skill already exists"));
+}
+
+#[test]
 fn lists_and_installs_git_skills_without_network() {
     let app = tauri::test::mock_app();
     let (_dir, store) = make_store();

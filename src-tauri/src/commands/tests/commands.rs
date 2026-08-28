@@ -186,6 +186,21 @@ fn remove_path_any_removes_symlink_only() {
 }
 
 #[test]
+#[cfg(windows)]
+fn remove_path_any_removes_junction_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("real");
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("keep.txt"), b"keep").unwrap();
+    let link = dir.path().join("link");
+    junction::create(&target, &link).unwrap();
+
+    remove_path_any(link.to_string_lossy().as_ref()).unwrap();
+    assert!(std::fs::symlink_metadata(&link).is_err());
+    assert!(target.join("keep.txt").exists());
+}
+
+#[test]
 fn get_managed_skills_impl_maps_targets() {
     let (_dir, store) = make_store();
     let skill = SkillRecord {
