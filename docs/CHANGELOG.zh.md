@@ -8,6 +8,7 @@
 
 ### 修复
 - **旧版 macOS 的 Skill 详情兼容性**：修复不支持正则后行断言的 WKWebView 在打开 Skill Markdown 文件时导致应用整页白屏的问题。详情渲染器现在会检测该能力，在不支持时降级为标准 Markdown，并在支持的系统上继续提供完整 GFM 渲染（[#108](https://github.com/qufei1993/skills-hub/issues/108)）。
+- **Tauri WebView 标签重命名弹窗**：标签重命名改用应用内输入弹窗，不再调用 macOS 上无法显示的浏览器 `window.prompt`；剩余的共享目录确认也改用现有应用内弹窗，不再调用 `window.confirm`（[#109](https://github.com/qufei1993/skills-hub/issues/109)）。
 
 ## [0.9.0] - 2026-08-23
 

@@ -213,7 +213,7 @@ export const resources = {
       rename: 'Rename',
       deleteAction: 'Delete',
       tagsEmpty: 'No tags found.',
-      renameTagPrompt: 'Rename tag',
+      renameTagTitle: 'Rename tag',
       deleteTagTitle: 'Delete tag?',
       deleteTagConfirm:
         'Delete "{{name}}" from {{count}} skills?\nThis only removes the tag, not the skills.',
@@ -900,7 +900,7 @@ export const resources = {
       rename: '重命名',
       deleteAction: '删除',
       tagsEmpty: '未找到标签。',
-      renameTagPrompt: '重命名标签',
+      renameTagTitle: '重命名标签',
       deleteTagTitle: '删除标签？',
       deleteTagConfirm: '从 {{count}} 个 Skills 中删除「{{name}}」？\n这只会移除标签，不会删除 Skills。',
       editTagsTitle: '编辑标签：{{name}}',

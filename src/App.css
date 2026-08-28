@@ -1433,6 +1433,19 @@
   justify-content: space-between;
 }
 
+.tag-rename-modal {
+  width: min(420px, 100%);
+}
+
+.tag-rename-body label {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.tag-rename-body .search-input {
+  padding: 0 12px;
+}
+
 .discovery-scan-modal {
   width: min(640px, 100%);
 }

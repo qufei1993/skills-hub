@@ -32,6 +32,7 @@ import GitPickModal from './components/skills/modals/GitPickModal'
 import LocalPickModal from './components/skills/modals/LocalPickModal'
 import ImportModal from './components/skills/modals/ImportModal'
 import NewToolsModal from './components/skills/modals/NewToolsModal'
+import RenameTagModal from './components/skills/modals/RenameTagModal'
 import ScopeSyncModal from './components/skills/modals/ScopeSyncModal'
 import SharedDirModal from './components/skills/modals/SharedDirModal'
 import SettingsPage from './components/skills/SettingsPage'
@@ -180,7 +181,14 @@ function App() {
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([])
   const [includeUntagged, setIncludeUntagged] = useState(false)
   const [tagEditorSkill, setTagEditorSkill] = useState<ManagedSkill | null>(null)
+  const [pendingRenameTag, setPendingRenameTag] = useState<TagWithCountDto | null>(null)
   const [pendingDeleteTag, setPendingDeleteTag] = useState<TagWithCountDto | null>(null)
+  const [pendingSyncTargetChange, setPendingSyncTargetChange] = useState<{
+    toolId: string
+    checked: boolean
+    affected: string[]
+    shared: string[]
+  } | null>(null)
   const [addModalTab, setAddModalTab] = useState<'local' | 'git'>('git')
   const [addModalTagIds, setAddModalTagIds] = useState<number[]>([])
   const [featuredSkills, setFeaturedSkills] = useState<FeaturedSkillDto[]>([])
@@ -2131,6 +2139,7 @@ function App() {
         )
         await loadManagedSkills()
         await loadTags()
+        setPendingRenameTag(null)
         setSuccessToastMessage(t('tagRenamed'))
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
@@ -2138,6 +2147,10 @@ function App() {
     },
     [invokeTauri, loadManagedSkills, loadTags, t],
   )
+
+  const handleCloseRenameTag = useCallback(() => {
+    if (!loading) setPendingRenameTag(null)
+  }, [loading])
 
   const handleDeleteTag = useCallback((tag: TagWithCountDto) => {
     setPendingDeleteTag(tag)
@@ -2198,6 +2211,22 @@ function App() {
     [invokeTauri, loadManagedSkills, loadTags, t],
   )
 
+  const applySyncTargetChange = useCallback(
+    (checked: boolean, affected: string[], shared: string[]) => {
+      setSyncTargets((prev) => {
+        const next = { ...prev }
+        for (const id of affected) next[id] = checked
+        if (installScope === 'project') {
+          for (const id of shared) {
+            if (!toolSupportsProjectScope(id)) next[id] = false
+          }
+        }
+        return next
+      })
+    },
+    [installScope, toolSupportsProjectScope],
+  )
+
   const handleSyncTargetChange = useCallback(
     (toolId: string, checked: boolean) => {
       const sharedByToolId =
@@ -2212,37 +2241,44 @@ function App() {
             )
           : shared
       if (affected.length > 1) {
-        const others = affected.filter((id) => id !== toolId)
-        const otherLabels = others.map((id) => toolLabelById[id] ?? id).join(', ')
-        const ok = window.confirm(
-          t('sharedDirConfirm', {
-            tool: toolLabelById[toolId] ?? toolId,
-            others: otherLabels,
-          }),
-        )
-        if (!ok) return
+        setPendingSyncTargetChange({ toolId, checked, affected, shared })
+        return
       }
-      setSyncTargets((prev) => {
-        const next = { ...prev }
-        for (const id of affected) next[id] = checked
-        if (installScope === 'project') {
-          for (const id of shared) {
-            if (!toolSupportsProjectScope(id)) next[id] = false
-          }
-        }
-        return next
-      })
+      applySyncTargetChange(checked, affected, shared)
     },
     [
+      applySyncTargetChange,
       installScope,
       isInstalled,
       sharedProjectToolIdsByToolId,
       sharedToolIdsByToolId,
-      t,
-      toolLabelById,
       toolSupportsProjectScope,
     ],
   )
+
+  const handleSyncTargetChangeCancel = useCallback(() => {
+    if (!loading) setPendingSyncTargetChange(null)
+  }, [loading])
+
+  const handleSyncTargetChangeConfirm = useCallback(() => {
+    if (!pendingSyncTargetChange) return
+    const { checked, affected, shared } = pendingSyncTargetChange
+    setPendingSyncTargetChange(null)
+    applySyncTargetChange(checked, affected, shared)
+  }, [applySyncTargetChange, pendingSyncTargetChange])
+
+  const pendingSyncTargetLabels = useMemo(() => {
+    if (!pendingSyncTargetChange) return null
+    const others = pendingSyncTargetChange.affected.filter(
+      (id) => id !== pendingSyncTargetChange.toolId,
+    )
+    return {
+      toolLabel:
+        toolLabelById[pendingSyncTargetChange.toolId] ??
+        pendingSyncTargetChange.toolId,
+      otherLabels: others.map((id) => toolLabelById[id] ?? id).join(', '),
+    }
+  }, [pendingSyncTargetChange, toolLabelById])
 
   const handleInstallScopeChange = useCallback(
     (nextScope: InstallScope) => {
@@ -3645,7 +3681,7 @@ function App() {
                   onReviewUntagged={handleReviewUntagged}
                   onViewTag={handleViewTag}
                   onCreateTag={handleCreateTag}
-                  onRenameTag={handleRenameTag}
+                  onRenameTag={setPendingRenameTag}
                   onDeleteTag={handleDeleteTag}
                   t={t}
                 />
@@ -3821,6 +3857,26 @@ function App() {
         otherLabels={pendingSharedLabels?.otherLabels ?? ''}
         onRequestClose={handleSharedCancel}
         onConfirm={handleSharedConfirm}
+        t={t}
+      />
+
+      <SharedDirModal
+        open={Boolean(pendingSyncTargetChange)}
+        loading={loading}
+        toolLabel={pendingSyncTargetLabels?.toolLabel ?? ''}
+        otherLabels={pendingSyncTargetLabels?.otherLabels ?? ''}
+        onRequestClose={handleSyncTargetChangeCancel}
+        onConfirm={handleSyncTargetChangeConfirm}
+        t={t}
+      />
+
+      <RenameTagModal
+        key={pendingRenameTag?.id ?? 'rename-tag-modal'}
+        open={Boolean(pendingRenameTag)}
+        loading={loading}
+        tag={pendingRenameTag}
+        onRequestClose={handleCloseRenameTag}
+        onSave={(tagId, name) => void handleRenameTag(tagId, name)}
         t={t}
       />
 

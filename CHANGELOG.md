@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - **Skill detail compatibility on older macOS versions**: Opening a Skill Markdown file no longer blanks the entire app in WKWebView versions that do not support regular-expression lookbehind. The detail renderer now detects this capability and falls back to standard Markdown while preserving full GFM rendering on supported systems ([#108](https://github.com/qufei1993/skills-hub/issues/108)).
+- **Tag rename dialogs in Tauri WebView**: Tag rename now uses an in-app input dialog instead of the unsupported browser `window.prompt`, restoring tag renaming on macOS. The remaining shared-directory confirmation also uses the existing in-app dialog instead of `window.confirm` ([#109](https://github.com/qufei1993/skills-hub/issues/109)).
 
 ## [0.9.0] - 2026-08-23
 
