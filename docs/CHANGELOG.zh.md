@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-08-28
+
+### 修复
+- **旧版 macOS 的 Skill 详情兼容性**：修复不支持正则后行断言的 WKWebView 在打开 Skill Markdown 文件时导致应用整页白屏的问题。详情渲染器现在会检测该能力，在不支持时降级为标准 Markdown，并在支持的系统上继续提供完整 GFM 渲染（[#108](https://github.com/qufei1993/skills-hub/issues/108)）。
+
 ## [0.9.0] - 2026-08-23
 
 ### 新增
@@ -224,7 +229,9 @@
 ### 性能
 - Git 导入/批量安装优化：缓存 clone 减少重复拉取；增加超时与无交互提示提升稳定性。
 
-[Unreleased]: https://github.com/qufei1993/skills-hub/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/qufei1993/skills-hub/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/qufei1993/skills-hub/compare/v0.9.0...v0.9.1
+[0.9.0]: https://github.com/qufei1993/skills-hub/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/qufei1993/skills-hub/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/qufei1993/skills-hub/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/qufei1993/skills-hub/compare/v0.7.0...v0.7.1
