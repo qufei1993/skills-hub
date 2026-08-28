@@ -19,6 +19,7 @@ import remarkFrontmatter from 'remark-frontmatter'
 import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
 import type { TFunction } from 'i18next'
+import { supportsRegExpLookbehind } from './markdownCompatibility'
 import type { ManagedSkill, SkillFileEntry } from './types'
 
 // ─── Types ───────────────────────────────────────────
@@ -37,6 +38,10 @@ type TreeNode = {
   size: number
   children: TreeNode[]
 }
+
+const MARKDOWN_REMARK_PLUGINS = supportsRegExpLookbehind()
+  ? [remarkFrontmatter, remarkGfm]
+  : [remarkFrontmatter]
 
 // ─── Helpers ─────────────────────────────────────────
 function formatSize(bytes: number): string {
@@ -305,7 +310,7 @@ const FileContentRenderer = memo(
             </dl>
           )}
           <Markdown
-            remarkPlugins={[remarkFrontmatter, remarkGfm]}
+            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
             components={{
               code: ({ className, children, ...rest }) => {
                 const match = /language-(\w+)/.exec(className ?? '')
