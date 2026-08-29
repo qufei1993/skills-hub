@@ -14,6 +14,7 @@
 - **Tauri WebView 标签重命名弹窗**：标签重命名改用应用内输入弹窗，不再调用 macOS 上无法显示的浏览器 `window.prompt`；剩余的共享目录确认也改用现有应用内弹窗，不再调用 `window.confirm`（[#109](https://github.com/qufei1993/skills-hub/issues/109)）。
 - **响应式 Skill 详情工作区**：将固定宽度的详情抽屉改为随主窗口伸缩的完整工作区，保证文件树与 Markdown 内容拥有可读空间，并在紧凑的响应式头部展示范围、已同步工具、标签、来源、更新时间和文件数。来源路径支持直接复制，Markdown 元数据表不再重复展示 `name` 和 `description` 字段（[#111](https://github.com/qufei1993/skills-hub/issues/111)）。
 - **Windows 目录联接清理与已有 Skill 导入**：停用、取消同步或删除 Skill 时，现在可以正确移除 Windows 目录联接且不会影响其目标目录。发现流程也可以复用中央存储中内容完全相同的托管记录，同时继续拒绝普通本地重复安装和内容冲突（[#110](https://github.com/qufei1993/skills-hub/pull/110)）。
+- **Windows 自动更新计划**：默认 24 小时间隔及其他整天间隔现在会通过 `schtasks` 注册为按天执行，不再生成超过 Windows 上限的小时修饰值。受支持的分钟和小时间隔继续使用原有计划类型，无法精确表达的非整天长间隔会在创建任务前返回明确错误（[#102](https://github.com/qufei1993/skills-hub/issues/102)）。
 
 ## [0.9.0] - 2026-08-23
 
