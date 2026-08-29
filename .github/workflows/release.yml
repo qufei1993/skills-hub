@@ -372,13 +372,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/extract-changelog.mjs "$TAG" CHANGELOG.md > release-notes.md
           {
+            echo '## 中文'
+            echo
+            node scripts/extract-changelog.mjs "$TAG" docs/CHANGELOG.zh.md
+            echo
+            echo '**Windows 提示：** Windows SmartScreen 可能会在安装时显示警告。这是未签名可执行文件的正常提示，应用可以安全使用。'
+            echo
+            echo '**macOS 提示：** 部分 macOS 版本可能需要执行 Gatekeeper 解除限制命令：`xattr -cr "/Applications/Skills Hub.app"`（https://v2.tauri.app/distribute/#macos）。'
+            echo
+            echo '## English'
+            echo
+            node scripts/extract-changelog.mjs "$TAG" CHANGELOG.md
             echo
             echo '**Windows Note:** Windows SmartScreen may show a warning during installation. This is normal for unsigned executables. The application is safe to use.'
             echo
             echo '**macOS Note:** macOS Gatekeeper workaround (only needed on some macOS versions): `xattr -cr "/Applications/Skills Hub.app"` (https://v2.tauri.app/distribute/#macos).'
-          } >> release-notes.md
+          } > release-notes.md
 
       - name: Generate updater.json
         env:
