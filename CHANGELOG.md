@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - **Bilingual GitHub release notes**: The release workflow now extracts both Chinese and English changelog entries, including localized platform installation notes in GitHub Releases and app updater metadata.
+- **App update completion flow**: Available updates now use a prominent title-bar action that expands from an icon to a localized label on hover or keyboard focus. After installation, users can restart immediately from the completion dialog or close it and restart later from the persistent title-bar action.
 
 ### Fixed
 - **Skill detail compatibility on older macOS versions**: Opening a Skill Markdown file no longer blanks the entire app in WKWebView versions that do not support regular-expression lookbehind. The detail renderer now detects this capability and falls back to standard Markdown while preserving full GFM rendering on supported systems ([#108](https://github.com/qufei1993/skills-hub/issues/108)).

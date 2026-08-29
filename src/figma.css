@@ -75,38 +75,96 @@
 }
 
 .titlebar-update-action {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 21px;
-  height: 21px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
   appearance: none;
   border: 0;
-  border-radius: 5px;
-  background: var(--accent-soft-bg);
-  color: var(--accent-primary);
+  border-radius: 999px;
+  background: var(--accent-primary);
+  color: var(--accent-primary-fg);
   padding: 0;
+  overflow: hidden;
   cursor: pointer;
-  transition: color 160ms ease, background-color 160ms ease;
+  box-shadow: 0 1px 2px rgb(0 0 0 / .12);
+  transition:
+    width 180ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 120ms ease;
+}
+
+.titlebar-update-action:hover:not(:disabled),
+.titlebar-update-action:focus-visible,
+.titlebar-update-action.installing,
+.titlebar-update-action.done {
+  width: 72px;
 }
 
 .titlebar-update-action:hover:not(:disabled) {
-  color: var(--accent-primary-hover);
-  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  background: var(--accent-primary-hover);
+  box-shadow: 0 2px 6px rgb(47 111 237 / .28);
+}
+
+.titlebar-update-action:active:not(:disabled) {
+  transform: scale(.97);
 }
 
 .titlebar-update-action:focus-visible {
   outline: 2px solid var(--accent-primary);
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
 
 .titlebar-update-action:disabled { cursor: wait; }
-.titlebar-update-action.done { color: var(--success); background: var(--success-soft-bg); }
+.titlebar-update-action.done {
+  color: var(--status-success);
+  background: var(--success-soft-bg);
+  box-shadow: inset 0 0 0 1px var(--success-soft-border);
+}
+.titlebar-update-icon,
+.titlebar-update-label {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 120ms ease, transform 180ms ease;
+}
+.titlebar-update-icon { opacity: 1; transform: translateX(0); }
+.titlebar-update-label {
+  opacity: 0;
+  transform: translateX(6px);
+  white-space: nowrap;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+.titlebar-update-action:hover:not(:disabled) .titlebar-update-icon,
+.titlebar-update-action:focus-visible .titlebar-update-icon,
+.titlebar-update-action.installing .titlebar-update-icon,
+.titlebar-update-action.done .titlebar-update-icon {
+  opacity: 0;
+  transform: translateX(-6px);
+}
+.titlebar-update-action:hover:not(:disabled) .titlebar-update-label,
+.titlebar-update-action:focus-visible .titlebar-update-label,
+.titlebar-update-action.installing .titlebar-update-label,
+.titlebar-update-action.done .titlebar-update-label {
+  opacity: 1;
+  transform: translateX(0);
+}
 .titlebar-update-spinner { animation: titlebar-update-spin 900ms linear infinite; }
 
 @keyframes titlebar-update-spin { to { transform: rotate(360deg); } }
 
 @media (prefers-reduced-motion: reduce) {
+  .titlebar-update-action,
+  .titlebar-update-icon,
+  .titlebar-update-label { transition: none; }
   .titlebar-update-spinner { animation: none; }
 }
 

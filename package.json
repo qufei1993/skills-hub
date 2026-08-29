@@ -36,6 +36,7 @@
     "@tauri-apps/api": "^2.9.1",
     "@tauri-apps/plugin-dialog": "^2.5.3",
     "@tauri-apps/plugin-opener": "^2.5.3",
+    "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.5.3",
     "clsx": "^2.1.1",
     "i18next": "^25.7.4",

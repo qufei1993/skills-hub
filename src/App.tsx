@@ -607,6 +607,15 @@ function App() {
     if (updateAvailableVersion) setShowAppUpdateModal(true)
   }, [updateAvailableVersion])
 
+  const handleRestartApp = useCallback(async () => {
+    try {
+      const { relaunch } = await import('@tauri-apps/plugin-process')
+      await relaunch()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err), { duration: 3200 })
+    }
+  }, [])
+
   const handleDismissUpdateForever = useCallback(() => {
     if (updateAvailableVersion) {
       localStorage.setItem('skills-ignored-update-version', updateAvailableVersion)
@@ -3514,6 +3523,7 @@ function App() {
         onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)}
         onOpenSettings={handleOpenSettings}
         onOpenUpdate={handleOpenUpdate}
+        onRestart={handleRestartApp}
         onViewChange={handleViewChange}
         onManagementTabChange={handleManagementTabChange}
         t={t}
@@ -4047,7 +4057,7 @@ function App() {
             aria-modal="true"
             onClick={(e) => e.stopPropagation()}
           >
-            {!updateInstalling && !updateDone && (
+            {!updateInstalling && (
               <button
                 className="modal-close update-modal-close"
                 type="button"
@@ -4077,9 +4087,9 @@ function App() {
                 <button
                   className="btn btn-primary"
                   type="button"
-                  onClick={handleDismissUpdate}
+                  onClick={handleRestartApp}
                 >
-                  {t('done')}
+                  {t('restartNow')}
                 </button>
               ) : (
                 <>

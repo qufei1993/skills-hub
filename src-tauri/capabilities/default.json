@@ -10,6 +10,7 @@
     "core:window:allow-start-dragging",
     "core:window:allow-start-resize-dragging",
     "dialog:default",
+    "process:allow-restart",
     "dialog:allow-open",
     {
       "identifier": "opener:allow-open-url",
