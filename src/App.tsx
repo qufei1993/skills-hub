@@ -3547,11 +3547,29 @@ function App() {
                 <span>{t('stats.project')}</span>
                 <strong>{projectSkillCount}</strong>
               </article>
-              <article>
-                <span>{t('stats.syncStatus')}</span>
-                <strong className={`status-summary ${dashboardSyncStatus.className}`}>
-                  <i />{dashboardSyncStatus.label}
-                </strong>
+              <article className={`dashboard-status-card${syncIssueCount > 0 ? ' actionable' : ''}`}>
+                <button
+                  className="dashboard-status-button"
+                  type="button"
+                  disabled={syncIssueCount === 0}
+                  onClick={() => handleManagementTabChange('updates')}
+                  aria-label={
+                    syncIssueCount > 0
+                      ? `${dashboardSyncStatus.label}，${t('stats.viewIssues')}`
+                      : dashboardSyncStatus.label
+                  }
+                  title={syncIssueCount > 0 ? t('stats.viewIssues') : undefined}
+                >
+                  <span>{t('stats.syncStatus')}</span>
+                  <strong className={`status-summary ${dashboardSyncStatus.className}`}>
+                    <i />{dashboardSyncStatus.label}
+                  </strong>
+                  {syncIssueCount > 0 ? (
+                    <span className="dashboard-status-action">
+                      {t('stats.viewIssues')} <span aria-hidden="true">→</span>
+                    </span>
+                  ) : null}
+                </button>
               </article>
             </section>
             <FilterBar
