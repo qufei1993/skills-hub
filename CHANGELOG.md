@@ -7,7 +7,7 @@ All notable changes to this project will be documented in this file.
 ## [0.9.1] - 2026-08-28
 
 ### Changed
-- **Bilingual GitHub release notes**: The release workflow now extracts both Chinese and English changelog entries, including localized platform installation notes in GitHub Releases and app updater metadata.
+- **Bilingual GitHub release notes**: The release workflow now extracts both Chinese and English changelog entries, including localized platform installation notes in GitHub Releases and app updater metadata. In-app update dialogs display only the section matching the current interface language, while legacy and incomplete release-note formats continue to display in full.
 - **App update completion flow**: Available updates now use a prominent title-bar action that expands from an icon to a localized label on hover or keyboard focus. After installation, users can restart immediately from the completion dialog or close it and restart later from the persistent title-bar action.
 
 ### Fixed

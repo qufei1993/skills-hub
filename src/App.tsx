@@ -43,6 +43,7 @@ import {
   getAutoUpdateToastKey,
   shouldKeepWaitingForTriggeredAutoUpdate,
 } from './components/skills/autoUpdateSettings'
+import { selectLocalizedReleaseNotes } from './components/skills/releaseNotes'
 import {
   getSkillSyncState,
   getToolSyncState,
@@ -168,6 +169,10 @@ function App() {
   const [updateDone, setUpdateDone] = useState(false)
   const [showAppUpdateModal, setShowAppUpdateModal] = useState(false)
   const updateObjRef = useRef<Update | null>(null) as MutableRefObject<Update | null>
+  const localizedUpdateBody = useMemo(
+    () => selectLocalizedReleaseNotes(updateBody, language),
+    [language, updateBody],
+  )
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState<'updated' | 'name'>('updated')
   const [scopeFilter, setScopeFilter] = useState<'all' | 'global' | 'project'>('all')
@@ -4076,9 +4081,9 @@ function App() {
                   {t('updateBannerText', { version: updateAvailableVersion })}
                 </div>
               )}
-              {!updateDone && updateBody && (
+              {!updateDone && localizedUpdateBody && (
                 <div className="update-modal-notes">
-                  <Markdown remarkPlugins={[remarkGfm]}>{updateBody}</Markdown>
+                  <Markdown remarkPlugins={[remarkGfm]}>{localizedUpdateBody}</Markdown>
                 </div>
               )}
             </div>
