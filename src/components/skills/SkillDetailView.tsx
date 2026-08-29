@@ -23,6 +23,10 @@ import { toast } from 'sonner'
 import type { TFunction } from 'i18next'
 import { supportsRegExpLookbehind } from './markdownCompatibility'
 import { getVisibleFrontmatterEntries } from './skillDetailMetadata'
+import {
+  getSkillSyncState,
+  isSuccessfulSkillTarget,
+} from './skillSyncStatus'
 import ToolIcon from './ToolIcon'
 import type { ManagedSkill, SkillFileEntry, ToolOption } from './types'
 
@@ -531,7 +535,7 @@ const SkillDetailView = ({
     const toolIds = Array.from(
       new Set(
         skill.targets
-          .filter((target) => target.status !== 'disabled')
+          .filter(isSuccessfulSkillTarget)
           .map((target) => target.tool),
       ),
     )
@@ -558,11 +562,14 @@ const SkillDetailView = ({
       : projectNames.length === 1
         ? projectNames[0]
         : t('scope.projectCount', { count: projectNames.length })
-  const syncStatus = !skill.enabled
-    ? { className: 'disabled', label: t('detail.syncDisabled') }
-    : syncedTools.length > 0
-      ? { className: 'healthy', label: t('detail.syncHealthy') }
-      : { className: 'idle', label: t('detail.notSynced') }
+  const syncState = getSkillSyncState(skill)
+  const syncStatus = {
+    disabled: t('detail.syncDisabled'),
+    healthy: t('detail.syncHealthy'),
+    partial: t('detail.syncPartialFailed'),
+    failed: t('detail.syncFailed'),
+    idle: t('detail.notSynced'),
+  }[syncState]
 
   return (
     <div className="detail-view">
@@ -574,9 +581,9 @@ const SkillDetailView = ({
         <div className="detail-summary">
           <div className="detail-title-row">
             <div className="detail-skill-name">{skill.name}</div>
-            <span className={`detail-sync-status ${syncStatus.className}`}>
+            <span className={`detail-sync-status ${syncState}`}>
               <i aria-hidden="true" />
-              {syncStatus.label}
+              {syncStatus}
             </span>
           </div>
           {skill.description ? (

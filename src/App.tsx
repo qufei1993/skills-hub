@@ -44,6 +44,11 @@ import {
   shouldKeepWaitingForTriggeredAutoUpdate,
 } from './components/skills/autoUpdateSettings'
 import {
+  getSkillSyncState,
+  getToolSyncState,
+  isActiveSkillTarget,
+} from './components/skills/skillSyncStatus'
+import {
   buildInstallSyncJobs,
   filterTargetsForScope,
   getAddedProjectPaths,
@@ -3035,24 +3040,30 @@ function App() {
               }
             } catch (err) {
               const raw = err instanceof Error ? err.message : String(err)
-              if (raw.startsWith('TOOL_NOT_INSTALLED|') || raw.startsWith('TOOL_NOT_WRITABLE|')) {
-                continue
-              }
               collectedErrors.push({
                 title: t('errors.syncFailedTitle', {
                   name: skill.name,
                   tool: toolLabel,
                 }),
-                message: raw,
+                message: raw.startsWith('TOOL_NOT_INSTALLED|')
+                  ? t('errors.toolNotInstalled')
+                  : raw.startsWith('TOOL_NOT_WRITABLE|')
+                    ? t('errors.toolNotWritable', {
+                        tool: raw.split('|')[1] ?? toolLabel,
+                        path: raw.split('|')[2] ?? '',
+                      })
+                    : raw,
               })
             }
           }
         }
-        setActionMessage(t('status.syncCompleted'))
-        setSuccessToastMessage(t('status.syncCompleted'))
-        setActionMessage(null)
         await loadManagedSkills()
-        if (collectedErrors.length > 0) showActionErrors(collectedErrors)
+        if (collectedErrors.length > 0) {
+          showActionErrors(collectedErrors)
+        } else {
+          setSuccessToastMessage(t('status.syncCompleted'))
+        }
+        setActionMessage(null)
       } finally {
         setLoading(false)
         setLoadingStartAt(null)
@@ -3169,20 +3180,14 @@ function App() {
           }
         } else if (nextScope === 'global') {
           for (const toolId of installedToolIds) {
-            try {
-                await invokeTauri('sync_skill_to_tool', {
-                  sourcePath: skill.central_path,
-                  skillId: skill.id,
-                  tool: toolId,
-                  name: skill.name,
-                  overwriteIfSameContent: true,
-                  scope: 'global',
-                })
-            } catch (err) {
-              const raw = err instanceof Error ? err.message : String(err)
-              if (raw.startsWith('TOOL_NOT_INSTALLED|')) continue
-              throw err
-            }
+            await invokeTauri('sync_skill_to_tool', {
+              sourcePath: skill.central_path,
+              skillId: skill.id,
+              tool: toolId,
+              name: skill.name,
+              overwriteIfSameContent: true,
+              scope: 'global',
+            })
           }
         }
         await loadManagedSkills()
@@ -3196,6 +3201,7 @@ function App() {
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
+        await loadManagedSkills()
         return
       } finally {
         setLoading(false)
@@ -3264,9 +3270,9 @@ function App() {
         (target) =>
           target.tool === toolId &&
           (target.scope ?? 'global') === skillScope &&
-          target.status !== 'disabled',
+          isActiveSkillTarget(target),
       )
-      const synced = matchingTargets.length > 0
+      const synced = getToolSyncState(skill, toolId, skillScope) === 'synced'
 
       setLoading(true)
       setLoadingStartAt(Date.now())
@@ -3346,6 +3352,7 @@ function App() {
         } else {
           setError(raw)
         }
+        await loadManagedSkills()
       } finally {
         setLoading(false)
         setLoadingStartAt(null)
@@ -3404,6 +3411,7 @@ function App() {
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err)
       setError(raw)
+      await loadManagedSkills()
     } finally {
       setLoading(false)
       setLoadingStartAt(null)
@@ -3452,6 +3460,21 @@ function App() {
   ).length
   const projectSkillCount = managedSkills.length - globalSkillCount
   const enabledSkillCount = managedSkills.filter((skill) => skill.enabled !== false).length
+  const syncIssueCount = managedSkills.filter((skill) => {
+    const state = getSkillSyncState(skill)
+    return state === 'partial' || state === 'failed'
+  }).length
+  const unsyncedSkillCount = managedSkills.filter(
+    (skill) => getSkillSyncState(skill) === 'idle',
+  ).length
+  const dashboardSyncStatus =
+    syncIssueCount > 0
+      ? { className: 'error', label: t('stats.needsAttention', { count: syncIssueCount }) }
+      : unsyncedSkillCount > 0
+        ? { className: 'idle', label: t('stats.notSyncedCount', { count: unsyncedSkillCount }) }
+        : enabledSkillCount === managedSkills.length
+          ? { className: 'healthy', label: t('stats.allNormal') }
+          : { className: 'idle', label: t('stats.enabledCount', { count: enabledSkillCount }) }
   const pendingUpdateCount = autoUpdateConfig?.last_failed ?? 0
 
   const handleManagementTabChange = (tab: ManagementTab) => {
@@ -3526,8 +3549,8 @@ function App() {
               </article>
               <article>
                 <span>{t('stats.syncStatus')}</span>
-                <strong className="status-summary">
-                  <i />{enabledSkillCount === managedSkills.length ? t('stats.allNormal') : t('stats.enabledCount', { count: enabledSkillCount })}
+                <strong className={`status-summary ${dashboardSyncStatus.className}`}>
+                  <i />{dashboardSyncStatus.label}
                 </strong>
               </article>
             </section>

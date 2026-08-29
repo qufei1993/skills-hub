@@ -15,7 +15,7 @@ use super::github_download::{
     download_github_directory, parse_github_api_params, GithubDownloadOptions,
 };
 use super::network_proxy::get_github_proxy_url;
-use super::skill_store::{SkillRecord, SkillStore};
+use super::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
 use super::sync_engine::copy_dir_recursive;
 use super::sync_engine::sync_dir_copy_with_overwrite;
 use super::tool_adapters::adapter_by_key;
@@ -26,6 +26,17 @@ pub struct InstallResult {
     pub name: String,
     pub central_path: PathBuf,
     pub content_hash: Option<String>,
+}
+
+fn record_target_sync_failure(
+    store: &SkillStore,
+    target: &SkillTargetRecord,
+    error: &str,
+) -> Result<()> {
+    let mut failed_target = target.clone();
+    failed_target.status = "error".to_string();
+    failed_target.last_error = Some(error.to_string());
+    store.upsert_skill_target(&failed_target)
 }
 
 pub fn install_local_skill<R: tauri::Runtime>(
@@ -855,7 +866,13 @@ pub fn update_managed_skill_from_source<R: tauri::Runtime>(
         let force_copy = t.mode == "copy" || t.tool == "cursor";
         if force_copy {
             let target_path = PathBuf::from(&t.target_path);
-            let sync_res = sync_dir_copy_with_overwrite(&central_path, &target_path, true)?;
+            let sync_res = match sync_dir_copy_with_overwrite(&central_path, &target_path, true) {
+                Ok(result) => result,
+                Err(err) => {
+                    record_target_sync_failure(store, &t, &format!("{err:#}"))?;
+                    return Err(err);
+                }
+            };
             let record = super::skill_store::SkillTargetRecord {
                 id: t.id.clone(),
                 skill_id: t.skill_id.clone(),

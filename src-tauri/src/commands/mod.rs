@@ -64,6 +64,7 @@ fn format_anyhow_error(err: anyhow::Error) -> String {
     if first.starts_with("MULTI_SKILLS|")
         || first.starts_with("TARGET_EXISTS|")
         || first.starts_with("TOOL_NOT_INSTALLED|")
+        || first.starts_with("TOOL_NOT_WRITABLE|")
     {
         return first;
     }
@@ -935,6 +936,48 @@ pub struct SyncResultDto {
     pub target_path: String,
 }
 
+fn sync_mode_name(mode: SyncMode) -> &'static str {
+    match mode {
+        SyncMode::Auto => "auto",
+        SyncMode::Symlink => "symlink",
+        SyncMode::Junction => "junction",
+        SyncMode::Copy => "copy",
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_skill_target_failure(
+    store: &SkillStore,
+    skill_id: &str,
+    tool: &str,
+    scope: &str,
+    project_path: Option<&str>,
+    target_path: &std::path::Path,
+    requested_mode: SyncMode,
+    error: &str,
+) -> anyhow::Result<()> {
+    let existing = store.get_skill_target(skill_id, tool, scope, project_path)?;
+    let record = SkillTargetRecord {
+        id: existing
+            .as_ref()
+            .map(|target| target.id.clone())
+            .unwrap_or_else(|| Uuid::new_v4().to_string()),
+        skill_id: skill_id.to_string(),
+        tool: tool.to_string(),
+        scope: scope.to_string(),
+        project_path: project_path.map(str::to_string),
+        target_path: target_path.to_string_lossy().to_string(),
+        mode: existing
+            .as_ref()
+            .map(|target| target.mode.clone())
+            .unwrap_or_else(|| sync_mode_name(requested_mode).to_string()),
+        status: "error".to_string(),
+        last_error: Some(error.to_string()),
+        synced_at: existing.and_then(|target| target.synced_at),
+    };
+    store.upsert_skill_target(&record)
+}
+
 #[tauri::command]
 pub async fn sync_skill_dir(
     source_path: String,
@@ -992,29 +1035,52 @@ pub async fn sync_skill_to_tool(
             None
         };
 
-        if scope == "global" && !runtime_tool.installed {
-            anyhow::bail!("TOOL_NOT_INSTALLED|{}", runtime_tool.key);
-        }
         let tool_root = resolve_runtime_tool_root(&runtime_tool, project_root.as_deref())?;
-        // Pre-check: ensure the skills directory is writable (fixes #20 — Windows OS error 5).
-        if let Err(err) = std::fs::create_dir_all(&tool_root) {
-            if err.kind() == std::io::ErrorKind::PermissionDenied {
-                anyhow::bail!(
-                    "TOOL_NOT_WRITABLE|{}|{}",
-                    runtime_tool.label,
-                    tool_root.to_string_lossy()
-                );
-            }
-            anyhow::bail!("failed to create skills dir {:?}: {}", tool_root, err);
-        }
         let target = tool_root.join(&name);
         let project_path_for_record = project_root
             .as_ref()
             .map(|path| path.to_string_lossy().to_string());
+        if scope == "global" && !runtime_tool.installed {
+            let error = format!("TOOL_NOT_INSTALLED|{}", runtime_tool.key);
+            record_skill_target_failure(
+                &store,
+                &skillId,
+                &tool,
+                scope,
+                project_path_for_record.as_deref(),
+                &target,
+                runtime_tool.sync_mode,
+                &error,
+            )?;
+            anyhow::bail!(error);
+        }
+        // Pre-check: ensure the skills directory is writable (fixes #20 — Windows OS error 5).
+        if let Err(err) = std::fs::create_dir_all(&tool_root) {
+            let error = if err.kind() == std::io::ErrorKind::PermissionDenied {
+                format!(
+                    "TOOL_NOT_WRITABLE|{}|{}",
+                    runtime_tool.label,
+                    tool_root.to_string_lossy()
+                )
+            } else {
+                format!("failed to create skills dir {:?}: {}", tool_root, err)
+            };
+            record_skill_target_failure(
+                &store,
+                &skillId,
+                &tool,
+                scope,
+                project_path_for_record.as_deref(),
+                &target,
+                runtime_tool.sync_mode,
+                &error,
+            )?;
+            anyhow::bail!(error);
+        }
         if let Some(existing) =
             store.get_skill_target(&skillId, &tool, scope, project_path_for_record.as_deref())?
         {
-            if existing.status != "disabled"
+            if existing.status == "ok"
                 && existing.target_path == target.to_string_lossy()
                 && target.exists()
             {
@@ -1027,7 +1093,7 @@ pub async fn sync_skill_to_tool(
         let overwrite = overwrite.unwrap_or(false)
             || (overwriteIfSameContent.unwrap_or(false)
                 && target_has_same_content(sourcePath.as_ref(), &target));
-        let result = (if runtime_tool.is_custom {
+        let result = if runtime_tool.is_custom {
             sync_dir_with_mode_with_overwrite(
                 runtime_tool.sync_mode,
                 sourcePath.as_ref(),
@@ -1036,24 +1102,38 @@ pub async fn sync_skill_to_tool(
             )
         } else {
             sync_dir_for_tool_with_overwrite(&tool, sourcePath.as_ref(), &target, overwrite)
-        })
-        .map_err(|err| {
-            let msg = err.to_string();
-            if msg.contains("target already exists") {
-                anyhow::anyhow!("TARGET_EXISTS|{}", target.to_string_lossy())
-            } else if msg.contains("os error 5")
-                || msg.contains("Access is denied")
-                || msg.contains("Permission denied")
-            {
-                anyhow::anyhow!(
-                    "TOOL_NOT_WRITABLE|{}|{}",
-                    runtime_tool.label,
-                    tool_root.to_string_lossy()
-                )
-            } else {
-                anyhow::anyhow!(msg)
+        };
+        let result = match result {
+            Ok(result) => result,
+            Err(err) => {
+                let msg = err.to_string();
+                let error = if msg.contains("target already exists") {
+                    format!("TARGET_EXISTS|{}", target.to_string_lossy())
+                } else if msg.contains("os error 5")
+                    || msg.contains("Access is denied")
+                    || msg.contains("Permission denied")
+                {
+                    format!(
+                        "TOOL_NOT_WRITABLE|{}|{}",
+                        runtime_tool.label,
+                        tool_root.to_string_lossy()
+                    )
+                } else {
+                    msg
+                };
+                record_skill_target_failure(
+                    &store,
+                    &skillId,
+                    &tool,
+                    scope,
+                    project_path_for_record.as_deref(),
+                    &target,
+                    runtime_tool.sync_mode,
+                    &error,
+                )?;
+                anyhow::bail!(error);
             }
-        })?;
+        };
 
         // Some tools share the same skills directory; keep DB records consistent across them.
         let group = runtime_tools_sharing_dir(&store, &runtime_tool, scope)?;
@@ -1462,6 +1542,7 @@ pub struct SkillTargetDto {
     pub project_path: Option<String>,
     pub mode: String,
     pub status: String,
+    pub last_error: Option<String>,
     pub target_path: String,
     pub synced_at: Option<i64>,
 }
@@ -1722,6 +1803,7 @@ fn get_managed_skills_impl(store: &SkillStore) -> Result<Vec<ManagedSkillDto>, S
                     project_path: target.project_path,
                     mode: target.mode,
                     status: target.status,
+                    last_error: target.last_error,
                     target_path: target.target_path,
                     synced_at: target.synced_at,
                 })

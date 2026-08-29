@@ -4513,6 +4513,14 @@
   color: var(--status-success);
 }
 
+.detail-sync-status.partial {
+  color: var(--status-warning);
+}
+
+.detail-sync-status.failed {
+  color: var(--status-error);
+}
+
 .detail-sync-status.disabled,
 .detail-sync-status.idle {
   color: var(--text-secondary);

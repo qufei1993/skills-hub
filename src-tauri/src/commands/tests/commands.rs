@@ -10,8 +10,14 @@ fn make_store() -> (tempfile::TempDir, SkillStore) {
 
 #[test]
 fn format_anyhow_error_passthrough_prefixes() {
-    let err = anyhow::anyhow!("MULTI_SKILLS|abc");
-    assert_eq!(format_anyhow_error(err), "MULTI_SKILLS|abc");
+    for message in [
+        "MULTI_SKILLS|abc",
+        "TARGET_EXISTS|/tmp/skill",
+        "TOOL_NOT_INSTALLED|cursor",
+        "TOOL_NOT_WRITABLE|Cursor|/tmp/skills",
+    ] {
+        assert_eq!(format_anyhow_error(anyhow::anyhow!(message)), message);
+    }
 }
 
 #[test]
@@ -230,8 +236,8 @@ fn get_managed_skills_impl_maps_targets() {
         project_path: None,
         target_path: "/tmp/target".to_string(),
         mode: "copy".to_string(),
-        status: "ok".to_string(),
-        last_error: None,
+        status: "error".to_string(),
+        last_error: Some("permission denied".to_string()),
         synced_at: None,
     };
     store.upsert_skill_target(&target).unwrap();
@@ -246,5 +252,54 @@ fn get_managed_skills_impl_maps_targets() {
     assert_eq!(out[0].targets.len(), 1);
     assert_eq!(out[0].targets[0].tool, "cursor");
     assert_eq!(out[0].targets[0].scope, "global");
+    assert_eq!(out[0].targets[0].status, "error");
+    assert_eq!(
+        out[0].targets[0].last_error.as_deref(),
+        Some("permission denied")
+    );
     assert!(out[0].targets[0].project_path.is_none());
+}
+
+#[test]
+fn record_skill_target_failure_persists_error_status() {
+    let (_dir, store) = make_store();
+    let skill = SkillRecord {
+        id: "s1".to_string(),
+        name: "S1".to_string(),
+        description: None,
+        source_type: "local".to_string(),
+        source_ref: Some("/tmp/src".to_string()),
+        source_subpath: None,
+        source_revision: None,
+        central_path: "/tmp/central".to_string(),
+        content_hash: None,
+        created_at: 1,
+        updated_at: 2,
+        last_sync_at: None,
+        last_seen_at: 1,
+        enabled: true,
+        status: "ok".to_string(),
+    };
+    store.upsert_skill(&skill).unwrap();
+
+    record_skill_target_failure(
+        &store,
+        "s1",
+        "cursor",
+        "global",
+        None,
+        std::path::Path::new("/tmp/target"),
+        SyncMode::Copy,
+        "permission denied",
+    )
+    .unwrap();
+
+    let target = store
+        .get_skill_target("s1", "cursor", "global", None)
+        .unwrap()
+        .unwrap();
+    assert_eq!(target.status, "error");
+    assert_eq!(target.last_error.as_deref(), Some("permission denied"));
+    assert_eq!(target.mode, "copy");
+    assert!(target.synced_at.is_none());
 }

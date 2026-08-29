@@ -60,6 +60,7 @@ export type ManagedSkill = {
     project_path?: string | null
     mode: string
     status: string
+    last_error?: string | null
     target_path: string
     synced_at?: number | null
   }[]

@@ -2,6 +2,7 @@ import { memo } from 'react'
 import { Copy, Folder, Github, RefreshCw, Tag, Trash2 } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { toast } from 'sonner'
+import { getToolSyncState } from './skillSyncStatus'
 import type { ManagedSkill, ToolOption } from './types'
 import ToolIcon from './ToolIcon'
 
@@ -58,13 +59,6 @@ const SkillCard = ({
   const scope = getSkillScope(skill)
   const projectCount = getSkillProjects(skill).length
   const enabled = skill.enabled !== false
-  const isToolSynced = (toolId: string) =>
-    skill.targets.some(
-      (target) =>
-        target.tool === toolId &&
-        (target.scope ?? 'global') === scope &&
-        target.status !== 'disabled',
-    )
   const handleCopySource = async () => {
     if (!copyValue) return
     try {
@@ -146,12 +140,20 @@ const SkillCard = ({
           <span>{t('syncTargets')}</span>
           <div className="skill-tool-avatars">
             {installedTools.map((tool) => {
-              const synced = isToolSynced(tool.id)
-              const stateLabel = synced ? t('toolManagement.synced') : t('toolManagement.notSynced')
+              const syncState = getToolSyncState(skill, tool.id, scope)
+              const synced = syncState === 'synced'
+              const stateLabel =
+                syncState === 'failed'
+                  ? t('toolManagement.syncFailed')
+                  : syncState === 'partial'
+                    ? t('toolManagement.syncPartialFailed')
+                    : synced
+                      ? t('toolManagement.synced')
+                      : t('toolManagement.notSynced')
               return (
                 <button
                   key={tool.id}
-                  className={synced ? 'synced' : 'not-synced'}
+                  className={syncState}
                   type="button"
                   title={`${tool.label} · ${stateLabel}`}
                   aria-label={`${tool.label} · ${stateLabel}`}

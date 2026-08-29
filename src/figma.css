@@ -331,7 +331,10 @@
 .dashboard-stats article > span { color: var(--text-secondary); font-size: 13px; }
 .dashboard-stats article > strong { font-size: 26px; line-height: 30px; }
 .dashboard-stats .status-summary { font-size: 14px; display: flex; align-items: center; gap: 8px; }
-.status-summary i { width: 7px; height: 7px; border-radius: 50%; background: #16a34a; }
+.status-summary i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.status-summary.healthy { color: var(--status-success); }
+.status-summary.error { color: var(--status-error); }
+.status-summary.idle { color: var(--text-secondary); }
 
 .filter-bar {
   padding: 0;
@@ -495,6 +498,14 @@
 .skill-tool-avatars button.not-synced:hover:not(:disabled) {
   opacity: .85;
   filter: grayscale(.35);
+}
+.skill-tool-avatars button.partial {
+  border-color: color-mix(in srgb, var(--status-warning) 28%, var(--bg-panel));
+  background: color-mix(in srgb, var(--status-warning) 14%, var(--bg-panel));
+}
+.skill-tool-avatars button.failed {
+  border-color: color-mix(in srgb, var(--status-error) 28%, var(--bg-panel));
+  background: color-mix(in srgb, var(--status-error) 12%, var(--bg-panel));
 }
 .skill-tool-avatars button:focus-visible {
   z-index: 2;
