@@ -2,7 +2,7 @@ import { memo } from 'react'
 import { Copy, Folder, Github, RefreshCw, Tag, Trash2 } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { toast } from 'sonner'
-import { getToolSyncState } from './skillSyncStatus'
+import { getFullySyncedTools, getToolSyncState } from './skillSyncStatus'
 import type { ManagedSkill, ToolOption } from './types'
 import ToolIcon from './ToolIcon'
 
@@ -59,6 +59,7 @@ const SkillCard = ({
   const scope = getSkillScope(skill)
   const projectCount = getSkillProjects(skill).length
   const enabled = skill.enabled !== false
+  const syncedToolCount = getFullySyncedTools(skill, installedTools, scope).length
   const handleCopySource = async () => {
     if (!copyValue) return
     try {
@@ -137,7 +138,12 @@ const SkillCard = ({
 
       <div className="skill-card-footer">
         <div className="skill-tools-block">
-          <span>{t('syncTargets')}</span>
+          <span>
+            {t('syncTargetsCount', {
+              synced: syncedToolCount,
+              total: installedTools.length,
+            })}
+          </span>
           <div className="skill-tool-avatars">
             {installedTools.map((tool) => {
               const syncState = getToolSyncState(skill, tool.id, scope)

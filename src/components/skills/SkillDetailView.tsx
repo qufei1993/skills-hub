@@ -24,8 +24,8 @@ import type { TFunction } from 'i18next'
 import { supportsRegExpLookbehind } from './markdownCompatibility'
 import { getVisibleFrontmatterEntries } from './skillDetailMetadata'
 import {
+  getFullySyncedTools,
   getSkillSyncState,
-  isSuccessfulSkillTarget,
 } from './skillSyncStatus'
 import ToolIcon from './ToolIcon'
 import type { ManagedSkill, SkillFileEntry, ToolOption } from './types'
@@ -531,22 +531,8 @@ const SkillDetailView = ({
   }, [isGitSource, sourceValue, t])
 
   const syncedTools = useMemo(() => {
-    const toolById = new Map(tools.map((tool) => [tool.id, tool]))
-    const toolIds = Array.from(
-      new Set(
-        skill.targets
-          .filter(isSuccessfulSkillTarget)
-          .map((target) => target.tool),
-      ),
-    )
-    return toolIds.map(
-      (toolId): ToolOption =>
-        toolById.get(toolId) ?? {
-          id: toolId,
-          label: t(`tools.${toolId}`, { defaultValue: toolId }),
-        },
-    )
-  }, [skill.targets, t, tools])
+    return getFullySyncedTools(skill, tools, scope)
+  }, [scope, skill, tools])
 
   const visibleTools = syncedTools.slice(0, 3)
   const hiddenToolCount = syncedTools.length - visibleTools.length

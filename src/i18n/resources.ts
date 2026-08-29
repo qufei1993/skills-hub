@@ -27,6 +27,7 @@ export const resources = {
         viewIssues: 'View issues',
       },
       syncTargets: 'Sync tools',
+      syncTargetsCount: 'Sync tools {{synced}}/{{total}}',
       skillDescriptionEmpty: 'No description',
       viewMode: {
         label: 'Skill layout',
@@ -732,6 +733,7 @@ export const resources = {
         viewIssues: '查看异常',
       },
       syncTargets: '同步工具',
+      syncTargetsCount: '同步工具 {{synced}}/{{total}}',
       skillDescriptionEmpty: '暂无描述',
       viewMode: {
         label: 'Skill 布局',

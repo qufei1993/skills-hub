@@ -3527,7 +3527,7 @@ function App() {
             onBack={handleBackToList}
             invokeTauri={invokeTauri}
             formatRelative={formatRelative}
-            tools={tools}
+            tools={installedTools}
             scope={getSkillScope(detailSkill)}
             projects={getSkillProjects(detailSkill)}
             t={t}

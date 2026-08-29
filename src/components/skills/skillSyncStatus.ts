@@ -48,3 +48,13 @@ export function getToolSyncState(
   if (successfulCount === 0) return 'failed'
   return 'partial'
 }
+
+export function getFullySyncedTools<T extends { id: string }>(
+  skill: Pick<ManagedSkill, 'targets'>,
+  tools: T[],
+  scope: 'global' | 'project',
+): T[] {
+  return tools.filter(
+    (tool) => getToolSyncState(skill, tool.id, scope) === 'synced',
+  )
+}

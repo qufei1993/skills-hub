@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { getSkillSyncState, getToolSyncState } from './skillSyncStatus'
+import {
+  getFullySyncedTools,
+  getSkillSyncState,
+  getToolSyncState,
+} from './skillSyncStatus'
 import type { ManagedSkill } from './types'
 
 type Target = ManagedSkill['targets'][number]
@@ -59,5 +63,23 @@ describe('getToolSyncState', () => {
       targets: [target('ok', 'codex', 'project'), target('error', 'codex', 'project')],
     }
     expect(getToolSyncState(skill, 'codex', 'project')).toBe('partial')
+  })
+
+  it('returns only fully synced tools from the current tool list', () => {
+    const skill = {
+      targets: [
+        target('ok', 'codex'),
+        target('error', 'cursor'),
+        target('ok', 'legacy-tool'),
+      ],
+    }
+    const tools = [
+      { id: 'codex', label: 'Codex' },
+      { id: 'cursor', label: 'Cursor' },
+    ]
+
+    expect(getFullySyncedTools(skill, tools, 'global')).toEqual([
+      { id: 'codex', label: 'Codex' },
+    ])
   })
 })
