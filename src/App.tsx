@@ -3504,6 +3504,9 @@ function App() {
             onBack={handleBackToList}
             invokeTauri={invokeTauri}
             formatRelative={formatRelative}
+            tools={tools}
+            scope={getSkillScope(detailSkill)}
+            projects={getSkillProjects(detailSkill)}
             t={t}
           />
         ) : activeView === 'myskills' ? (

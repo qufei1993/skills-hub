@@ -4,10 +4,12 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Copy,
   File,
   Folder,
   FolderOpen,
   GitBranch,
+  Globe2,
 } from 'lucide-react'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import {
@@ -20,7 +22,9 @@ import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
 import type { TFunction } from 'i18next'
 import { supportsRegExpLookbehind } from './markdownCompatibility'
-import type { ManagedSkill, SkillFileEntry } from './types'
+import { getVisibleFrontmatterEntries } from './skillDetailMetadata'
+import ToolIcon from './ToolIcon'
+import type { ManagedSkill, SkillFileEntry, ToolOption } from './types'
 
 // ─── Types ───────────────────────────────────────────
 type SkillDetailViewProps = {
@@ -28,6 +32,9 @@ type SkillDetailViewProps = {
   onBack: () => void
   invokeTauri: <T>(command: string, args?: Record<string, unknown>) => Promise<T>
   formatRelative: (ms: number | null | undefined) => string
+  tools: ToolOption[]
+  scope: 'global' | 'project'
+  projects: string[]
   t: TFunction
 }
 
@@ -48,6 +55,15 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function compactSourcePath(path: string): string {
+  if (path.length <= 64) return path
+  const separator = path.includes('\\') ? '\\' : '/'
+  const prefix = path.startsWith(separator) ? separator : ''
+  const parts = path.split(/[\\/]/).filter(Boolean)
+  if (parts.length <= 5) return path
+  return `${prefix}${parts.slice(0, 3).join(separator)}${separator}…${separator}${parts.slice(-2).join(separator)}`
 }
 
 const EXT_LANG: Record<string, string> = {
@@ -293,11 +309,12 @@ const FileContentRenderer = memo(
   ({ filename, content, isDark }: FileContentRendererProps) => {
     if (isMarkdown(filename)) {
       const { meta, body } = parseFrontmatter(content)
+      const visibleMetaEntries = getVisibleFrontmatterEntries(meta)
       return (
         <div className="markdown-body">
-          {meta && (
+          {visibleMetaEntries.length > 0 ? (
             <dl className="frontmatter-meta">
-              {Object.entries(meta).map(([key, value]) => (
+              {visibleMetaEntries.map(([key, value]) => (
                 <div
                   className="frontmatter-meta-item"
                   data-key={key}
@@ -308,7 +325,7 @@ const FileContentRenderer = memo(
                 </div>
               ))}
             </dl>
-          )}
+          ) : null}
           <Markdown
             remarkPlugins={MARKDOWN_REMARK_PLUGINS}
             components={{
@@ -404,6 +421,9 @@ const SkillDetailView = ({
   onBack,
   invokeTauri,
   formatRelative,
+  tools,
+  scope,
+  projects,
   t,
 }: SkillDetailViewProps) => {
   const [files, setFiles] = useState<SkillFileEntry[]>([])
@@ -489,14 +509,60 @@ const SkillDetailView = ({
     })
   }, [])
 
-  const sourceLabel =
-    skill.source_type.toLowerCase().includes('git')
-      ? skill.source_ref?.replace(/^https?:\/\/(www\.)?github\.com\//, '') ?? ''
-      : skill.source_ref ?? ''
+  const isGitSource = skill.source_type.toLowerCase().includes('git')
+  const sourceValue = skill.source_ref?.trim() || skill.central_path
+  const sourceLabel = isGitSource
+    ? sourceValue.replace(/^https?:\/\/(www\.)?github\.com\//, '')
+    : compactSourcePath(sourceValue)
 
-  const SourceIcon = skill.source_type.toLowerCase().includes('git')
-    ? GitBranch
-    : Folder
+  const SourceIcon = isGitSource ? GitBranch : Folder
+
+  const handleCopySource = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(sourceValue)
+      toast.success(t(isGitSource ? 'detail.sourceCopied' : 'detail.pathCopied'))
+    } catch {
+      toast.error(t('copyFailed'))
+    }
+  }, [isGitSource, sourceValue, t])
+
+  const syncedTools = useMemo(() => {
+    const toolById = new Map(tools.map((tool) => [tool.id, tool]))
+    const toolIds = Array.from(
+      new Set(
+        skill.targets
+          .filter((target) => target.status !== 'disabled')
+          .map((target) => target.tool),
+      ),
+    )
+    return toolIds.map(
+      (toolId): ToolOption =>
+        toolById.get(toolId) ?? {
+          id: toolId,
+          label: t(`tools.${toolId}`, { defaultValue: toolId }),
+        },
+    )
+  }, [skill.targets, t, tools])
+
+  const visibleTools = syncedTools.slice(0, 3)
+  const hiddenToolCount = syncedTools.length - visibleTools.length
+  const visibleTags = skill.tags.slice(0, 3)
+  const hiddenTagCount = skill.tags.length - visibleTags.length
+  const projectNames = projects.map((projectPath) => {
+    const parts = projectPath.split(/[\\/]/).filter(Boolean)
+    return parts.at(-1) ?? projectPath
+  })
+  const scopeLabel =
+    scope === 'global'
+      ? t('scope.globalBadge')
+      : projectNames.length === 1
+        ? projectNames[0]
+        : t('scope.projectCount', { count: projectNames.length })
+  const syncStatus = !skill.enabled
+    ? { className: 'disabled', label: t('detail.syncDisabled') }
+    : syncedTools.length > 0
+      ? { className: 'healthy', label: t('detail.syncHealthy') }
+      : { className: 'idle', label: t('detail.notSynced') }
 
   return (
     <div className="detail-view">
@@ -505,29 +571,95 @@ const SkillDetailView = ({
           <ArrowLeft size={16} />
           {t('detail.back')}
         </button>
-        <div className="detail-skill-name">{skill.name}</div>
-        {skill.description ? (
-          <div className="detail-desc">{skill.description}</div>
-        ) : null}
-        <div className="detail-meta">
-          {sourceLabel ? (
-            <span className="detail-meta-item">
-              <SourceIcon size={13} />
-              {sourceLabel}
+        <div className="detail-summary">
+          <div className="detail-title-row">
+            <div className="detail-skill-name">{skill.name}</div>
+            <span className={`detail-sync-status ${syncStatus.className}`}>
+              <i aria-hidden="true" />
+              {syncStatus.label}
             </span>
+          </div>
+          {skill.description ? (
+            <p className="detail-desc">{skill.description}</p>
           ) : null}
-          {sourceLabel ? (
-            <span className="detail-meta-dot">&middot;</span>
-          ) : null}
-          <span className="detail-meta-item">
-            <Clock size={13} />
-            {formatRelative(skill.updated_at)}
-          </span>
-          <span className="detail-meta-dot">&middot;</span>
-          <span className="detail-meta-item">
-            <File size={13} />
-            {t('detail.fileCount', { count: files.length })}
-          </span>
+        </div>
+        <div className="detail-metadata-rail">
+          <div className="detail-context-row">
+            <span
+              className={`detail-scope ${scope}`}
+              title={scope === 'project' ? projects.join('\n') : undefined}
+            >
+              {scope === 'global' ? <Globe2 size={13} /> : <Folder size={13} />}
+              {scopeLabel}
+            </span>
+
+            {visibleTools.length > 0 ? (
+              <div className="detail-context-group">
+                <span className="detail-context-label">{t('detail.syncedTo')}</span>
+                <div className="detail-tool-list" title={syncedTools.map((tool) => tool.label).join(', ')}>
+                  {visibleTools.map((tool) => (
+                    <span className="detail-tool-item" key={tool.id}>
+                      <ToolIcon
+                        toolKey={tool.id}
+                        label={tool.label}
+                        avatar={tool.avatar}
+                      />
+                      <span>{tool.label}</span>
+                    </span>
+                  ))}
+                  {hiddenToolCount > 0 ? (
+                    <span
+                      className="detail-overflow-text"
+                      title={t('detail.moreTools', { count: hiddenToolCount })}
+                    >
+                      +{hiddenToolCount}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            {visibleTags.length > 0 ? (
+              <div className="detail-tag-list">
+                {visibleTags.map((tag) => (
+                  <span className="detail-tag" key={tag.id}>
+                    # {tag.name}
+                  </span>
+                ))}
+                {hiddenTagCount > 0 ? (
+                  <span
+                    className="detail-tag"
+                    title={t('detail.moreTags', { count: hiddenTagCount })}
+                  >
+                    +{hiddenTagCount}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          <div className="detail-provenance-row">
+            <button
+              className="detail-source-copy"
+              type="button"
+              title={sourceValue}
+              aria-label={`${isGitSource ? t('detail.copySource') : t('detail.copyPath')}：${sourceValue}`}
+              onClick={() => void handleCopySource()}
+            >
+              <SourceIcon size={13} />
+              <span className="detail-source-text">{sourceLabel}</span>
+              <span className="detail-copy-action" aria-hidden="true">
+                <Copy size={13} />
+              </span>
+            </button>
+            <span className="detail-meta-item">
+              <Clock size={13} />
+              {formatRelative(skill.updated_at)}
+            </span>
+            <span className="detail-meta-item">
+              <File size={13} />
+              {t('detail.fileCount', { count: files.length })}
+            </span>
+          </div>
         </div>
       </div>
 
