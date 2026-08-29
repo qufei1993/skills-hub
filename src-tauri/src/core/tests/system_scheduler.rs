@@ -114,7 +114,8 @@ fn windows_task_uses_hourly_schedule_without_elevated_flag() {
         executable: Path::new("C:\\Users\\may\\AppData\\Local\\SkillsHub\\SkillsHub.exe")
             .to_path_buf(),
         schedule: hourly_schedule(12),
-    });
+    })
+    .unwrap();
 
     assert!(args.iter().any(|v| v == "/SC"));
     assert!(args.iter().any(|v| v == "HOURLY"));
@@ -131,17 +132,58 @@ fn windows_task_supports_minutes_and_daily_time() {
     let minute_args = windows_schtasks_args(&SchedulerConfig {
         executable: Path::new("C:\\SkillsHub\\SkillsHub.exe").to_path_buf(),
         schedule: minute_schedule(30),
-    });
+    })
+    .unwrap();
     assert!(minute_args.iter().any(|v| v == "MINUTE"));
     assert!(minute_args.iter().any(|v| v == "30"));
 
     let daily_args = windows_schtasks_args(&SchedulerConfig {
         executable: Path::new("C:\\SkillsHub\\SkillsHub.exe").to_path_buf(),
         schedule: daily_schedule("23:45"),
-    });
+    })
+    .unwrap();
     assert!(daily_args.iter().any(|v| v == "DAILY"));
     assert!(daily_args.iter().any(|v| v == "/ST"));
     assert!(daily_args.iter().any(|v| v == "23:45"));
+}
+
+#[test]
+fn windows_task_maps_whole_day_intervals_to_daily_schedule() {
+    for (hours, days) in [(24, "1"), (48, "2"), (720, "30")] {
+        let args = windows_schtasks_args(&SchedulerConfig {
+            executable: Path::new("C:\\SkillsHub\\SkillsHub.exe").to_path_buf(),
+            schedule: hourly_schedule(hours),
+        })
+        .unwrap();
+
+        assert!(args.iter().any(|value| value == "DAILY"));
+        assert!(args.iter().any(|value| value == "/MO"));
+        assert!(args.iter().any(|value| value == days));
+        assert!(!args.iter().any(|value| value == "HOURLY"));
+    }
+}
+
+#[test]
+fn windows_task_keeps_23_hours_as_hourly_schedule() {
+    let args = windows_schtasks_args(&SchedulerConfig {
+        executable: Path::new("C:\\SkillsHub\\SkillsHub.exe").to_path_buf(),
+        schedule: hourly_schedule(23),
+    })
+    .unwrap();
+
+    assert!(args.iter().any(|value| value == "HOURLY"));
+    assert!(args.iter().any(|value| value == "23"));
+}
+
+#[test]
+fn windows_task_rejects_long_non_whole_day_intervals() {
+    let error = windows_schtasks_args(&SchedulerConfig {
+        executable: Path::new("C:\\SkillsHub\\SkillsHub.exe").to_path_buf(),
+        schedule: hourly_schedule(25),
+    })
+    .unwrap_err();
+
+    assert!(error.to_string().contains("whole days"));
 }
 
 #[test]
