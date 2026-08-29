@@ -565,6 +565,7 @@ const SkillDetailView = ({
   const syncState = getSkillSyncState(skill)
   const syncStatus = {
     disabled: t('detail.syncDisabled'),
+    'source-error': t('detail.sourceError'),
     healthy: t('detail.syncHealthy'),
     partial: t('detail.syncPartialFailed'),
     failed: t('detail.syncFailed'),

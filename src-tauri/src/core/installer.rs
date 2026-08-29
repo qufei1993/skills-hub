@@ -700,6 +700,25 @@ pub fn update_managed_skill_from_source<R: tauri::Runtime>(
     store: &SkillStore,
     skill_id: &str,
 ) -> Result<UpdateResult> {
+    let mut source_updated = false;
+    let result = update_managed_skill_from_source_inner(app, store, skill_id, &mut source_updated);
+    if result.is_err() && !source_updated {
+        if let Ok(Some(mut skill)) = store.get_skill_by_id(skill_id) {
+            skill.status = "error".to_string();
+            if let Err(err) = store.upsert_skill(&skill) {
+                eprintln!("[update] failed to persist Skill error status: {err:#}");
+            }
+        }
+    }
+    result
+}
+
+fn update_managed_skill_from_source_inner<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    store: &SkillStore,
+    skill_id: &str,
+    source_updated: &mut bool,
+) -> Result<UpdateResult> {
     let record = store
         .get_skill_by_id(skill_id)?
         .ok_or_else(|| anyhow::anyhow!("skill not found"))?;
@@ -846,6 +865,7 @@ pub fn update_managed_skill_from_source<R: tauri::Runtime>(
         status: "ok".to_string(),
     };
     store.upsert_skill(&updated)?;
+    *source_updated = true;
 
     // If any targets are "copy", re-sync them so changes propagate. Symlinks update automatically.
     // Cursor 目前不支持软链/junction，因此无论历史 mode 如何，都需要强制 copy 回灌。

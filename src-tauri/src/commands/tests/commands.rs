@@ -208,13 +208,18 @@ fn remove_path_any_removes_junction_only() {
 
 #[test]
 fn get_managed_skills_impl_maps_targets() {
-    let (_dir, store) = make_store();
+    let (dir, store) = make_store();
     let skill = SkillRecord {
         id: "s1".to_string(),
         name: "S1".to_string(),
         description: None,
         source_type: "local".to_string(),
-        source_ref: Some("/tmp/src".to_string()),
+        source_ref: Some(
+            dir.path()
+                .join("missing-source")
+                .to_string_lossy()
+                .to_string(),
+        ),
         source_subpath: None,
         source_revision: None,
         central_path: "/tmp/central".to_string(),
@@ -258,6 +263,31 @@ fn get_managed_skills_impl_maps_targets() {
         Some("permission denied")
     );
     assert!(out[0].targets[0].project_path.is_none());
+    assert_eq!(out[0].status, "error");
+}
+
+#[test]
+fn managed_skill_status_keeps_existing_local_sources_healthy() {
+    let source = tempfile::tempdir().unwrap();
+    let skill = SkillRecord {
+        id: "s1".to_string(),
+        name: "S1".to_string(),
+        description: None,
+        source_type: "local".to_string(),
+        source_ref: Some(source.path().to_string_lossy().to_string()),
+        source_subpath: None,
+        source_revision: None,
+        central_path: "/tmp/central".to_string(),
+        content_hash: None,
+        created_at: 1,
+        updated_at: 1,
+        last_sync_at: None,
+        last_seen_at: 1,
+        enabled: true,
+        status: "ok".to_string(),
+    };
+
+    assert_eq!(managed_skill_status(&skill), "ok");
 }
 
 #[test]

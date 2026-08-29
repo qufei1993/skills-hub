@@ -37,7 +37,7 @@ use crate::core::onboarding::{
     build_onboarding_plan, get_discovery_scan_settings as get_discovery_scan_settings_core,
     save_discovery_scan_config, DiscoveryScanConfig, DiscoveryScanSettings, OnboardingPlan,
 };
-use crate::core::skill_store::{SkillStore, SkillTargetRecord};
+use crate::core::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
 use crate::core::skills_search::{
     search_skills_online as search_skills_online_core, OnlineSkillResult,
 };
@@ -1788,11 +1788,32 @@ fn now_ms() -> i64 {
     now.as_millis() as i64
 }
 
+fn managed_skill_status(skill: &SkillRecord) -> String {
+    if skill.status != "ok" {
+        return skill.status.clone();
+    }
+    if skill.source_type != "local" {
+        return skill.status.clone();
+    }
+    let source_exists = skill
+        .source_ref
+        .as_deref()
+        .and_then(|source| expand_home_path(source).ok())
+        .map(|source| source.exists())
+        .unwrap_or(false);
+    if source_exists {
+        skill.status.clone()
+    } else {
+        "error".to_string()
+    }
+}
+
 fn get_managed_skills_impl(store: &SkillStore) -> Result<Vec<ManagedSkillDto>, String> {
     let skills = store.list_skills().map_err(|err| err.to_string())?;
     Ok(skills
         .into_iter()
         .map(|skill| {
+            let status = managed_skill_status(&skill);
             let targets = store
                 .list_skill_targets(&skill.id)
                 .unwrap_or_default()
@@ -1829,7 +1850,7 @@ fn get_managed_skills_impl(store: &SkillStore) -> Result<Vec<ManagedSkillDto>, S
                 updated_at: skill.updated_at,
                 last_sync_at: skill.last_sync_at,
                 enabled: skill.enabled,
-                status: skill.status,
+                status,
                 tags,
                 targets,
             }

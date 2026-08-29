@@ -4521,6 +4521,10 @@
   color: var(--status-error);
 }
 
+.detail-sync-status.source-error {
+  color: var(--status-error);
+}
+
 .detail-sync-status.disabled,
 .detail-sync-status.idle {
   color: var(--text-secondary);

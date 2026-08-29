@@ -2,6 +2,7 @@ import type { ManagedSkill } from './types'
 
 export type SkillSyncState =
   | 'disabled'
+  | 'source-error'
   | 'healthy'
   | 'partial'
   | 'failed'
@@ -18,9 +19,10 @@ export const isSuccessfulSkillTarget = (target: SkillTarget) =>
   target.status === 'ok'
 
 export function getSkillSyncState(
-  skill: Pick<ManagedSkill, 'enabled' | 'targets'>,
+  skill: Pick<ManagedSkill, 'enabled' | 'status' | 'targets'>,
 ): SkillSyncState {
   if (!skill.enabled) return 'disabled'
+  if (skill.status !== 'ok') return 'source-error'
   const activeTargets = skill.targets.filter(isActiveSkillTarget)
   if (activeTargets.length === 0) return 'idle'
   const successfulCount = activeTargets.filter(isSuccessfulSkillTarget).length

@@ -632,6 +632,7 @@ export const resources = {
       detail: {
         back: 'Back',
         syncHealthy: 'Sync healthy',
+        sourceError: 'Source unavailable',
         syncPartialFailed: 'Partially synced',
         syncFailed: 'Sync failed',
         syncDisabled: 'Sync disabled',
@@ -1313,6 +1314,7 @@ export const resources = {
       detail: {
         back: '返回',
         syncHealthy: '同步正常',
+        sourceError: '来源异常',
         syncPartialFailed: '部分同步失败',
         syncFailed: '同步失败',
         syncDisabled: '同步已停用',

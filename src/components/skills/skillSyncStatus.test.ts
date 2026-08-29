@@ -18,18 +18,24 @@ const target = (
 
 describe('getSkillSyncState', () => {
   it('distinguishes disabled, idle, healthy, partial, and failed skills', () => {
-    expect(getSkillSyncState({ enabled: false, targets: [target('ok')] })).toBe('disabled')
-    expect(getSkillSyncState({ enabled: true, targets: [] })).toBe('idle')
-    expect(getSkillSyncState({ enabled: true, targets: [target('ok')] })).toBe('healthy')
+    expect(getSkillSyncState({ enabled: false, status: 'ok', targets: [target('ok')] })).toBe('disabled')
+    expect(getSkillSyncState({ enabled: true, status: 'ok', targets: [] })).toBe('idle')
+    expect(getSkillSyncState({ enabled: true, status: 'ok', targets: [target('ok')] })).toBe('healthy')
     expect(
-      getSkillSyncState({ enabled: true, targets: [target('ok'), target('error', 'cursor')] }),
+      getSkillSyncState({ enabled: true, status: 'ok', targets: [target('ok'), target('error', 'cursor')] }),
     ).toBe('partial')
-    expect(getSkillSyncState({ enabled: true, targets: [target('error')] })).toBe('failed')
+    expect(getSkillSyncState({ enabled: true, status: 'ok', targets: [target('error')] })).toBe('failed')
+  })
+
+  it('prioritizes a source update error over healthy sync targets', () => {
+    expect(
+      getSkillSyncState({ enabled: true, status: 'error', targets: [target('ok')] }),
+    ).toBe('source-error')
   })
 
   it('ignores disabled targets when calculating health', () => {
     expect(
-      getSkillSyncState({ enabled: true, targets: [target('ok'), target('disabled', 'cursor')] }),
+      getSkillSyncState({ enabled: true, status: 'ok', targets: [target('ok'), target('disabled', 'cursor')] }),
     ).toBe('healthy')
   })
 })

@@ -3462,7 +3462,7 @@ function App() {
   const enabledSkillCount = managedSkills.filter((skill) => skill.enabled !== false).length
   const syncIssueCount = managedSkills.filter((skill) => {
     const state = getSkillSyncState(skill)
-    return state === 'partial' || state === 'failed'
+    return state === 'source-error' || state === 'partial' || state === 'failed'
   }).length
   const unsyncedSkillCount = managedSkills.filter(
     (skill) => getSkillSyncState(skill) === 'idle',
