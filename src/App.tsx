@@ -275,13 +275,28 @@ function App() {
         return '' // Silently ignore cancelled operations
       }
       if (raw.includes('skill already exists in central repo')) {
-        // Extract skill name from path like: skill already exists in central repo: "/path/to/react-best-practices"
+        // New (v0.9.x+): error string is prefixed with MANAGED| or ORPHAN| so
+        // the UI can react differently when the central folder is already
+        // owned by a skill record vs. a folder the user placed there by hand.
+        // Fall back to the original generic message for older builds.
+        const managed = raw.includes('MANAGED|skill already exists in central repo')
+        const orphan = raw.includes('ORPHAN|skill already exists in central repo')
         const pathMatch = raw.match(/central repo:\s*"?([^"]+)"?/)
-        if (pathMatch) {
-          const skillName = pathMatch[1].split('/').pop() ?? ''
-          if (skillName) {
-            return t('errors.skillExistsInHubNamed', { name: skillName })
-          }
+        const skillName = pathMatch ? (pathMatch[1].split('/').pop() ?? '') : ''
+        if (managed) {
+          return skillName
+            ? t('errors.skillAlreadyManagedNamed', { name: skillName })
+            : t('errors.skillAlreadyManaged')
+        }
+        if (orphan) {
+          return skillName
+            ? t('errors.skillExistsInHubNamed', { name: skillName })
+            : t('errors.skillExistsInHub')
+        }
+        // Legacy / unknown discriminator: keep the existing message so older
+        // binaries stay compatible.
+        if (skillName) {
+          return t('errors.skillExistsInHubNamed', { name: skillName })
         }
         return t('errors.skillExistsInHub')
       }

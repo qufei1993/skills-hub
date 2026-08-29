@@ -337,6 +337,105 @@ fn installs_local_skill_and_updates_from_source() {
     assert!(format!("{:#}", err).contains("skill already exists"));
 }
 
+/// When the central folder is owned by a managed skill record, the error
+/// string must be prefixed with `MANAGED|` so the UI can react differently
+/// from a user-placed orphan. Covers the case where content_hash also differs
+/// (the user re-imports a tweaked copy from a tool directory).
+#[test]
+fn install_local_skill_marks_existing_central_as_managed_when_record_present() {
+    let app = tauri::test::mock_app();
+    let (_dir, store) = make_store();
+    let central_root = tempfile::tempdir().unwrap();
+    set_central_path(&store, central_root.path());
+
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("SKILL.md"), b"---\nname: m\n---\n").unwrap();
+    fs::write(source.path().join("a.txt"), b"v1").unwrap();
+    let installed = super::install_local_skill(
+        app.handle(),
+        &store,
+        source.path(),
+        Some("managed1".to_string()),
+    )
+    .unwrap();
+
+    // Mutate the source so the hash differs from the central copy.
+    fs::write(source.path().join("a.txt"), b"v2").unwrap();
+
+    let err = match super::install_local_skill(
+        app.handle(),
+        &store,
+        source.path(),
+        Some("managed1".to_string()),
+    ) {
+        Ok(_) => panic!("expected error"),
+        Err(e) => e,
+    };
+    let msg = format!("{:#}", err);
+    assert!(
+        msg.starts_with("MANAGED|skill already exists in central repo:"),
+        "expected MANAGED| prefix, got: {msg}"
+    );
+
+    // And the import flow (which goes through the same code path) should
+    // also surface the MANAGED discriminator instead of bailing as orphan.
+    let err2 = match super::import_existing_local_skill(
+        app.handle(),
+        &store,
+        source.path(),
+        Some("managed1".to_string()),
+    ) {
+        Ok(_) => panic!("expected error"),
+        Err(e) => e,
+    };
+    let msg2 = format!("{:#}", err2);
+    assert!(
+        msg2.starts_with("MANAGED|skill already exists in central repo:"),
+        "expected MANAGED| prefix on import, got: {msg2}"
+    );
+
+    // Sanity: the original record is still there and intact.
+    let skill = store.get_skill_by_id(&installed.skill_id).unwrap().unwrap();
+    assert_eq!(skill.name, "managed1");
+}
+
+/// When the central folder exists on disk but no skill record references it
+/// (the user dropped a folder into ~/.skillshub by hand), the error string
+/// must be prefixed with `ORPHAN|` so the UI can offer the existing
+/// "move it elsewhere, then import" guidance.
+#[test]
+fn install_local_skill_marks_unmanaged_central_as_orphan() {
+    let app = tauri::test::mock_app();
+    let (_dir, store) = make_store();
+    let central_root = tempfile::tempdir().unwrap();
+    set_central_path(&store, central_root.path());
+
+    // Pre-create the central folder without ever calling install_local_skill
+    // (simulates the user dropping it there by hand).
+    let orphan_dir = central_root.path().join("dropped-by-user");
+    fs::create_dir_all(&orphan_dir).unwrap();
+    fs::write(orphan_dir.join("SKILL.md"), b"---\nname: m\n---\n").unwrap();
+
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("SKILL.md"), b"---\nname: m\n---\n").unwrap();
+    fs::write(source.path().join("a.txt"), b"payload").unwrap();
+
+    let err = match super::install_local_skill(
+        app.handle(),
+        &store,
+        source.path(),
+        Some("dropped-by-user".to_string()),
+    ) {
+        Ok(_) => panic!("expected error"),
+        Err(e) => e,
+    };
+    let msg = format!("{:#}", err);
+    assert!(
+        msg.starts_with("ORPHAN|skill already exists in central repo:"),
+        "expected ORPHAN| prefix, got: {msg}"
+    );
+}
+
 #[test]
 fn failed_update_marks_skill_error_and_success_clears_it() {
     let app = tauri::test::mock_app();

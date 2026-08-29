@@ -100,7 +100,25 @@ fn install_local_skill_with_existing_policy<R: tauri::Runtime>(
                 }
             }
         }
-        anyhow::bail!("skill already exists in central repo: {:?}", central_path);
+        // Distinguish two cases the frontend needs to react to differently:
+        //   * MANAGED  -- a skill record already owns this central path; the user
+        //                can be told "already in your library, just refresh sync"
+        //   * ORPHAN   -- the folder is on disk but no record references it
+        //                (the user placed it there by hand); the previous
+        //                generic message was the only hint to relocate it.
+        // The error string is the same shape as before so the existing
+        // `formatErrorMessage` path match keeps working; we just prefix the
+        // discriminator so the UI can branch.
+        let is_managed = store
+            .list_skills()?
+            .iter()
+            .any(|skill| Path::new(&skill.central_path) == central_path);
+        let discriminator = if is_managed { "MANAGED" } else { "ORPHAN" };
+        anyhow::bail!(
+            "{}|skill already exists in central repo: {:?}",
+            discriminator,
+            central_path
+        );
     }
 
     copy_dir_recursive(source_path, &central_path)
