@@ -554,6 +554,10 @@ export const resources = {
           'The central storage folder is managed by Skills Hub and cannot be used for manual placement. Move this Skill elsewhere, then add it again from Local Directory.',
         skillExistsInHubNamed:
           'The central storage folder is managed by Skills Hub and cannot be used for manual placement. Move "{{name}}" elsewhere, then add it again from Local Directory.',
+        skillAlreadyManaged:
+          'A Skill with this name is already managed by Skills Hub. The central copy on disk differs from the version you tried to import. Open My Skills to compare, or run "Sync now" to push the central version to your tools.',
+        skillAlreadyManagedNamed:
+          '"{{name}}" is already managed by Skills Hub. The central copy on disk differs from the version you tried to import. Open My Skills to compare, or run "Sync now" to push the central version to your tools.',
         targetExists: 'Target folder already exists. Please remove it and try again.',
         targetExistsDetail:
           'Target folder already exists: {{path}}. For safety it was not overwritten.',
@@ -1246,6 +1250,10 @@ export const resources = {
           '中心存储目录由 Skills Hub 自动管理，不能直接放入新的 Skill；请先将该 Skill 移到其他目录，再通过“本地目录”重新添加。',
         skillExistsInHubNamed:
           '中心存储目录由 Skills Hub 自动管理，不能直接放入新的 Skill；请先将「{{name}}」移到其他目录，再通过“本地目录”重新添加。',
+        skillAlreadyManaged:
+          '同名 Skill 已被 Skills Hub 管理；中心仓里的版本与本次导入的不一致。打开“我的 Skills”对比，或点击“立即同步”把中心仓版本推送到各工具。',
+        skillAlreadyManagedNamed:
+          '「{{name}}」已被 Skills Hub 管理；中心仓里的版本与本次导入的不一致。打开“我的 Skills”对比，或点击“立即同步”把中心仓版本推送到各工具。',
         targetExists: '目标目录已存在，请先清理后重试。',
         targetExistsDetail:
           '目标目录已存在同名 Skill：{{path}}。为安全起见未覆盖。\n你可以：先手动清理该目录后重试。',
