@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [0.9.1] - 2026-08-28
+## [0.9.1] - 2026-08-29
 
 ### Changed
 - **Bilingual GitHub release notes**: The release workflow now extracts both Chinese and English changelog entries, including localized platform installation notes in GitHub Releases and app updater metadata. In-app update dialogs display only the section matching the current interface language, while legacy and incomplete release-note formats continue to display in full.
