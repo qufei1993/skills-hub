@@ -73,6 +73,8 @@ const AddSkillModal = ({
   const projectRequired =
     installScope === 'project' &&
     normalizeProjectPaths(installProjects).length === 0
+  const sourceRequired =
+    (addModalTab === 'local' ? localPath : gitUrl).trim().length === 0
   const unsupportedTools = getUnsupportedToolsForScope(
     installedTools,
     installScope,
@@ -326,7 +328,7 @@ const AddSkillModal = ({
                 <button
                   className="btn btn-primary"
                   onClick={onSubmit}
-                  disabled={loading || projectRequired}
+                  disabled={loading || projectRequired || sourceRequired}
                 >
                   {addModalTab === 'local' ? t('create') : t('install')}
                 </button>
