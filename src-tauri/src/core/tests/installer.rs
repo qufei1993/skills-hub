@@ -457,6 +457,137 @@ fn imports_identical_existing_local_skill_but_rejects_different_content() {
 }
 
 #[test]
+fn auto_update_migrates_legacy_kimi_target_without_removing_old_path() {
+    let app = tauri::test::mock_app();
+    let (_dir, store) = make_store();
+    let central_root = tempfile::tempdir().unwrap();
+    set_central_path(&store, central_root.path());
+
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
+    fs::write(source.path().join("content.txt"), b"v1").unwrap();
+    let installed = super::install_local_skill(
+        app.handle(),
+        &store,
+        source.path(),
+        Some("local1".to_string()),
+    )
+    .unwrap();
+
+    let project = tempfile::tempdir().unwrap();
+    let legacy_target = project.path().join(".agents/skills/local1");
+    fs::create_dir_all(&legacy_target).unwrap();
+    fs::write(legacy_target.join("content.txt"), b"v1").unwrap();
+    store
+        .upsert_skill_target(&SkillTargetRecord {
+            id: "legacy-kimi-target".to_string(),
+            skill_id: installed.skill_id.clone(),
+            tool: "kimi_cli".to_string(),
+            scope: "project".to_string(),
+            project_path: Some(project.path().to_string_lossy().to_string()),
+            target_path: legacy_target.to_string_lossy().to_string(),
+            mode: "copy".to_string(),
+            status: "ok".to_string(),
+            last_error: None,
+            synced_at: Some(1),
+        })
+        .unwrap();
+
+    fs::write(source.path().join("content.txt"), b"v2").unwrap();
+    let update =
+        super::update_managed_skill_from_source(app.handle(), &store, &installed.skill_id).unwrap();
+
+    let expected_target = project.path().join(".kimi-code/skills/local1");
+    assert_eq!(fs::read(legacy_target.join("content.txt")).unwrap(), b"v1");
+    assert_eq!(
+        fs::read(expected_target.join("content.txt")).unwrap(),
+        b"v2"
+    );
+    assert!(update.updated_targets.contains(&"kimi_cli".to_string()));
+    let target = store
+        .get_skill_target(
+            &installed.skill_id,
+            "kimi_cli",
+            "project",
+            Some(project.path().to_string_lossy().as_ref()),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(target.target_path, expected_target.to_string_lossy());
+    assert_eq!(target.status, "ok");
+    assert!(target.last_error.is_none());
+}
+
+#[test]
+fn auto_update_preserves_conflicting_new_kimi_target_and_marks_legacy_record_failed() {
+    let app = tauri::test::mock_app();
+    let (_dir, store) = make_store();
+    let central_root = tempfile::tempdir().unwrap();
+    set_central_path(&store, central_root.path());
+
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
+    fs::write(source.path().join("content.txt"), b"v1").unwrap();
+    let installed = super::install_local_skill(
+        app.handle(),
+        &store,
+        source.path(),
+        Some("local1".to_string()),
+    )
+    .unwrap();
+
+    let project = tempfile::tempdir().unwrap();
+    let legacy_target = project.path().join(".agents/skills/local1");
+    let expected_target = project.path().join(".kimi-code/skills/local1");
+    fs::create_dir_all(&legacy_target).unwrap();
+    fs::write(legacy_target.join("content.txt"), b"legacy").unwrap();
+    fs::create_dir_all(&expected_target).unwrap();
+    fs::write(expected_target.join("content.txt"), b"user-content").unwrap();
+    store
+        .upsert_skill_target(&SkillTargetRecord {
+            id: "legacy-kimi-conflict".to_string(),
+            skill_id: installed.skill_id.clone(),
+            tool: "kimi_cli".to_string(),
+            scope: "project".to_string(),
+            project_path: Some(project.path().to_string_lossy().to_string()),
+            target_path: legacy_target.to_string_lossy().to_string(),
+            mode: "copy".to_string(),
+            status: "ok".to_string(),
+            last_error: None,
+            synced_at: Some(1),
+        })
+        .unwrap();
+
+    fs::write(source.path().join("content.txt"), b"v2").unwrap();
+    let error =
+        match super::update_managed_skill_from_source(app.handle(), &store, &installed.skill_id) {
+            Ok(_) => panic!("expected conflicting Kimi target to fail"),
+            Err(error) => error,
+        };
+
+    assert_eq!(
+        fs::read(legacy_target.join("content.txt")).unwrap(),
+        b"legacy"
+    );
+    assert_eq!(
+        fs::read(expected_target.join("content.txt")).unwrap(),
+        b"user-content"
+    );
+    assert!(format!("{error:#}").contains("TOOL_SYNC_TARGET_CONFLICT|Kimi Code CLI|"));
+    let target = store
+        .get_skill_target(
+            &installed.skill_id,
+            "kimi_cli",
+            "project",
+            Some(project.path().to_string_lossy().as_ref()),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(target.target_path, legacy_target.to_string_lossy());
+    assert_eq!(target.status, "error");
+}
+
+#[test]
 fn lists_and_installs_git_skills_without_network() {
     let app = tauri::test::mock_app();
     let (_dir, store) = make_store();

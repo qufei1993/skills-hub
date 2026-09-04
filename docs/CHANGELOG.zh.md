@@ -4,8 +4,11 @@
 
 ## [Unreleased]
 
+## [0.10.0]
+
 ### 修复
 - **安全迁移与移除 Skills**：修改 Skills 中心存储位置时，会拒绝与工具同步目录、本地原始源目录或当前存储目录树重叠的路径；已有 Skills 需要明确确认后才会迁移，底层同步也会独立拦截源目录与目标目录重叠。修改自定义工具目录时，也会阻止同步目标与本地原始 Skill 重叠，保持原配置和文件不变，并显示可操作的本地化提示。应用清理的真实文件和目录会进入系统回收站，本地原始源目录始终保留（[#123](https://github.com/qufei1993/skills-hub/issues/123)、[PR #125](https://github.com/qufei1993/skills-hub/pull/125)）。
+- **Kimi Code CLI 同步路径与图标**：将全局、项目和检测目录修正为 Kimi Code 的 `.kimi-code` 目录规则（包括 `KIMI_CODE_HOME`），并将通用 Kimi 标识替换为官方 Kimi Code 产品图标。自动更新会在当前 Kimi 目录安全创建目标并更新旧同步记录，旧路径下的任何内容都不会被删除或移动；如果新路径已有不同内容，则保留现场并提示用户处理冲突（[#122](https://github.com/qufei1993/skills-hub/issues/122)）。
 
 ## [0.9.1] - 2026-08-29
 

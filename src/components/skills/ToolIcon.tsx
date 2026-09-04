@@ -13,7 +13,6 @@ import gooseLogo from '@lobehub/icons-static-svg/icons/goose.svg'
 import hermesAgentLogo from '@lobehub/icons-static-svg/icons/hermesagent.svg'
 import junieLogo from '@lobehub/icons-static-svg/icons/junie-color.svg'
 import kiloCodeLogo from '@lobehub/icons-static-svg/icons/kilocode.svg'
-import kimiLogo from '@lobehub/icons-static-svg/icons/kimi-color.svg'
 import kiroLogo from '@lobehub/icons-static-svg/icons/kiro-color.svg'
 import mcpLogo from '@lobehub/icons-static-svg/icons/mcp.svg'
 import mistralLogo from '@lobehub/icons-static-svg/icons/mistral-color.svg'
@@ -26,6 +25,7 @@ import rooCodeLogo from '@lobehub/icons-static-svg/icons/roocode.svg'
 import traeLogo from '@lobehub/icons-static-svg/icons/trae-color.svg'
 import windsurfLogo from '@lobehub/icons-static-svg/icons/windsurf.svg'
 import zencoderLogo from '@lobehub/icons-static-svg/icons/zencoder-color.svg'
+import kimiCodeLogo from '../../assets/kimi-code-icon.png'
 
 type ToolIconProps = {
   toolKey: string
@@ -50,7 +50,7 @@ const logoByToolKey: Record<string, string> = {
   hermes_agent: hermesAgentLogo,
   junie: junieLogo,
   kilo_code: kiloCodeLogo,
-  kimi_cli: kimiLogo,
+  kimi_cli: kimiCodeLogo,
   kiro_cli: kiroLogo,
   mcpjam: mcpLogo,
   mistral_vibe: mistralLogo,
@@ -104,7 +104,7 @@ const ToolIcon = ({ toolKey, label, avatar, className = '' }: ToolIconProps) => 
 
   return (
     <span
-      className={`tool-brand-icon${logo ? ' has-logo' : ' fallback'}${avatar ? ' custom-avatar' : ''}${className ? ` ${className}` : ''}`}
+      className={`tool-brand-icon${logo ? ' has-logo' : ' fallback'}${toolKey === 'kimi_cli' && !avatar ? ' kimi-code-icon' : ''}${avatar ? ' custom-avatar' : ''}${className ? ` ${className}` : ''}`}
       style={style}
       aria-hidden="true"
     >
