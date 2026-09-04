@@ -248,8 +248,8 @@ fn migrate_custom_tool_target(
     if let Some(local_source) = local_source.as_ref() {
         if paths_overlap(&next_target, local_source)? {
             anyhow::bail!(
-                "custom tool target overlaps original local source: {:?}",
-                local_source
+                "SKILL_TARGET_OVERLAPS_SOURCE|{}|custom tool target overlaps original local source",
+                local_source.to_string_lossy()
             );
         }
     }

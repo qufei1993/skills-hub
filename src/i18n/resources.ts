@@ -578,7 +578,7 @@ export const resources = {
         toolNotWritable:
           'Cannot sync to {{tool}}: permission denied on {{path}}. Please check directory permissions or run as administrator.',
         targetOverlapsSource:
-          'This sync target overlaps the original local source: {{path}}. Choose a different tool directory to keep the source safe.',
+          'Could not save: this tool directory would overlap an original local Skill. Choose a separate tool directory. The original files were not changed.',
         noSkillsFoundInRepo: 'No skills found in this repository.',
         requireLocalPath: 'Please enter a local path.',
         requireGitUrl: 'Please enter a Git repository URL.',
@@ -1291,7 +1291,7 @@ export const resources = {
         toolNotWritable:
           '无法同步到 {{tool}}：目录 {{path}} 权限不足。请检查目录权限或以管理员身份运行。',
         targetOverlapsSource:
-          '同步目标与本地原始源目录重叠：{{path}}。为保护源文件，请为该工具选择其他目录。',
+          '无法保存：所选工具目录会与本地原始 Skill 目录重叠。为避免覆盖或移除源文件，请选择一个独立目录。原始文件未被修改。',
         noSkillsFoundInRepo: '该仓库未发现可导入的 Skills。',
         requireLocalPath: '请输入本地路径',
         requireGitUrl: '请输入 Git 仓库地址',

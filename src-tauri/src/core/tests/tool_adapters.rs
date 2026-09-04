@@ -142,6 +142,96 @@ fn saving_changed_custom_tool_migrates_existing_targets_and_preserves_key() {
 }
 
 #[test]
+fn changing_custom_tool_directory_to_local_source_returns_safe_error_and_preserves_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = SkillStore::new(dir.path().join("test.db"));
+    store.ensure_schema().unwrap();
+
+    let original = dir.path().join("source/skill-a");
+    fs::create_dir_all(&original).unwrap();
+    fs::write(original.join("source-marker.txt"), "original").unwrap();
+    let central = dir.path().join("central/skill-a");
+    fs::create_dir_all(&central).unwrap();
+    fs::write(central.join("SKILL.md"), "# Skill A").unwrap();
+    let old_root = dir.path().join("old-tools");
+
+    save_tool_config(
+        &store,
+        ToolConfig {
+            disabled_builtin_tools: Vec::new(),
+            custom_tools: vec![make_custom_tool(
+                "custom_casey",
+                "Casey",
+                old_root.to_string_lossy().as_ref(),
+            )],
+        },
+    )
+    .unwrap();
+
+    store
+        .upsert_skill(&SkillRecord {
+            id: "skill-a".to_string(),
+            name: "skill-a".to_string(),
+            description: None,
+            source_type: "local".to_string(),
+            source_ref: Some(original.to_string_lossy().to_string()),
+            source_subpath: None,
+            source_revision: None,
+            central_path: central.to_string_lossy().to_string(),
+            content_hash: None,
+            created_at: 1,
+            updated_at: 1,
+            last_sync_at: None,
+            last_seen_at: 1,
+            enabled: true,
+            status: "ok".to_string(),
+        })
+        .unwrap();
+    let old_target = old_root.join("skill-a");
+    fs::create_dir_all(&old_target).unwrap();
+    fs::write(old_target.join("SKILL.md"), "# Skill A").unwrap();
+    store
+        .upsert_skill_target(&SkillTargetRecord {
+            id: "target-a".to_string(),
+            skill_id: "skill-a".to_string(),
+            tool: "custom_casey".to_string(),
+            scope: "global".to_string(),
+            project_path: None,
+            target_path: old_target.to_string_lossy().to_string(),
+            mode: "copy".to_string(),
+            status: "ok".to_string(),
+            last_error: None,
+            synced_at: Some(1),
+        })
+        .unwrap();
+
+    let err = save_tool_config(
+        &store,
+        ToolConfig {
+            disabled_builtin_tools: Vec::new(),
+            custom_tools: vec![make_custom_tool(
+                "custom_casey",
+                "Casey",
+                original.parent().unwrap().to_string_lossy().as_ref(),
+            )],
+        },
+    )
+    .unwrap_err();
+
+    assert!(err.to_string().starts_with("SKILL_TARGET_OVERLAPS_SOURCE|"));
+    assert_eq!(
+        fs::read_to_string(original.join("source-marker.txt")).unwrap(),
+        "original"
+    );
+    assert!(old_target.join("SKILL.md").is_file());
+    let config = load_tool_config(&store).unwrap();
+    assert_eq!(
+        config.custom_tools[0].skills_dir,
+        old_root.to_string_lossy()
+    );
+}
+
+#[test]
 fn legacy_custom_tool_config_defaults_avatar_and_sync_mode() {
     let config: ToolConfig = serde_json::from_str(
         r#"{
