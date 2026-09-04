@@ -22,14 +22,15 @@ pub struct SyncOutcome {
 }
 
 pub fn sync_dir_hybrid(source: &Path, target: &Path) -> Result<SyncOutcome> {
+    if is_same_link(target, source) {
+        return Ok(SyncOutcome {
+            mode_used: SyncMode::Symlink,
+            target_path: target.to_path_buf(),
+            replaced: false,
+        });
+    }
+    ensure_paths_do_not_overlap(source, target)?;
     if target.exists() {
-        if is_same_link(target, source) {
-            return Ok(SyncOutcome {
-                mode_used: SyncMode::Symlink,
-                target_path: target.to_path_buf(),
-                replaced: false,
-            });
-        }
         anyhow::bail!("target already exists: {:?}", target);
     }
 
@@ -65,16 +66,16 @@ pub fn sync_dir_hybrid_with_overwrite(
     target: &Path,
     overwrite: bool,
 ) -> Result<SyncOutcome> {
+    if is_same_link(target, source) {
+        return Ok(SyncOutcome {
+            mode_used: SyncMode::Symlink,
+            target_path: target.to_path_buf(),
+            replaced: false,
+        });
+    }
+    ensure_paths_do_not_overlap(source, target)?;
     let mut did_replace = false;
     if std::fs::symlink_metadata(target).is_ok() {
-        if is_same_link(target, source) {
-            return Ok(SyncOutcome {
-                mode_used: SyncMode::Symlink,
-                target_path: target.to_path_buf(),
-                replaced: false,
-            });
-        }
-
         if overwrite {
             remove_path_any(target)
                 .with_context(|| format!("remove existing target {:?}", target))?;
@@ -96,6 +97,7 @@ pub fn sync_dir_copy_with_overwrite(
     target: &Path,
     overwrite: bool,
 ) -> Result<SyncOutcome> {
+    ensure_paths_do_not_overlap(source, target)?;
     let mut did_replace = false;
     if std::fs::symlink_metadata(target).is_ok() {
         if overwrite {
@@ -138,15 +140,16 @@ fn sync_dir_link_with_overwrite(
     target: &Path,
     overwrite: bool,
 ) -> Result<SyncOutcome> {
+    if is_same_link(target, source) {
+        return Ok(SyncOutcome {
+            mode_used: mode,
+            target_path: target.to_path_buf(),
+            replaced: false,
+        });
+    }
+    ensure_paths_do_not_overlap(source, target)?;
     let mut did_replace = false;
     if std::fs::symlink_metadata(target).is_ok() {
-        if is_same_link(target, source) {
-            return Ok(SyncOutcome {
-                mode_used: mode,
-                target_path: target.to_path_buf(),
-                replaced: false,
-            });
-        }
         if overwrite {
             remove_path_any(target)
                 .with_context(|| format!("remove existing target {:?}", target))?;
@@ -190,7 +193,79 @@ fn ensure_parent_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn ensure_paths_do_not_overlap(source: &Path, target: &Path) -> Result<()> {
+    if paths_overlap(source, target)? {
+        anyhow::bail!(
+            "source and target paths overlap: {:?} and {:?}",
+            source,
+            target
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn paths_overlap(first: &Path, second: &Path) -> Result<bool> {
+    let first = path_for_comparison(first)?;
+    let second = path_for_comparison(second)?;
+    Ok(first == second || first.starts_with(&second) || second.starts_with(&first))
+}
+
+pub(crate) fn path_is_protected_real_content(
+    path: &Path,
+    protected_paths: &[PathBuf],
+) -> Result<bool> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(err).with_context(|| format!("stat {:?}", path)),
+    };
+    if metadata.file_type().is_symlink() {
+        return Ok(false);
+    }
+    for protected in protected_paths {
+        if paths_overlap(path, protected)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn path_for_comparison(path: &Path) -> Result<PathBuf> {
+    if let Ok(canonical) = std::fs::canonicalize(path) {
+        return Ok(canonical);
+    }
+
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let mut missing = Vec::new();
+    let mut existing = absolute.as_path();
+    while !existing.exists() {
+        let name = existing
+            .file_name()
+            .context("path has no existing ancestor")?;
+        missing.push(name.to_os_string());
+        existing = existing.parent().context("path has no existing ancestor")?;
+    }
+    let mut normalized = std::fs::canonicalize(existing)?;
+    for component in missing.iter().rev() {
+        normalized.push(component);
+    }
+    Ok(normalized)
+}
+
 pub(crate) fn remove_path_any(path: &Path) -> Result<()> {
+    remove_path_safely_with(path, |path| {
+        trash::delete(path).map_err(anyhow::Error::from)
+    })
+}
+
+pub(crate) fn remove_path_safely_with<F>(path: &Path, recycle: F) -> Result<()>
+where
+    F: FnOnce(&Path) -> Result<()>,
+{
     let meta = match std::fs::symlink_metadata(path) {
         Ok(meta) => meta,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -211,12 +286,7 @@ pub(crate) fn remove_path_any(path: &Path) -> Result<()> {
         std::fs::remove_file(path).with_context(|| format!("remove symlink {:?}", path))?;
         return Ok(());
     }
-    if ft.is_dir() {
-        std::fs::remove_dir_all(path).with_context(|| format!("remove dir {:?}", path))?;
-        return Ok(());
-    }
-    std::fs::remove_file(path).with_context(|| format!("remove file {:?}", path))?;
-    Ok(())
+    recycle(path).with_context(|| format!("move path to system recycle bin {:?}", path))
 }
 
 fn is_same_link(link_path: &Path, target: &Path) -> bool {
@@ -262,6 +332,7 @@ fn should_skip_copy(entry: &walkdir::DirEntry) -> bool {
 }
 
 pub fn copy_dir_recursive(source: &Path, target: &Path) -> Result<()> {
+    ensure_paths_do_not_overlap(source, target)?;
     let profile = std::env::var("SKILLS_HUB_PROFILE_IO")
         .ok()
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))

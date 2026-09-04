@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **Safe Skills storage migration and removal**: Changing the central Skills storage now rejects paths that overlap tool sync directories, original local sources, or the current storage tree; existing Skills require an explicit migration confirmation, and sync operations independently reject overlapping source and target paths. User-facing removal sends real files and directories to the system recycle bin while preserving original local sources ([#123](https://github.com/qufei1993/skills-hub/issues/123)).
+
 ## [0.9.1] - 2026-08-29
 
 ### Changed

@@ -49,6 +49,8 @@ const DeleteModal = ({
             <ul>
               <li>{t('delete.warningRemoveFromTools')}</li>
               <li>{t('delete.warningDeleteFromHub')}</li>
+              <li>{t('delete.warningRecycle')}</li>
+              <li>{t('delete.warningKeepSource')}</li>
             </ul>
           </div>
         </div>

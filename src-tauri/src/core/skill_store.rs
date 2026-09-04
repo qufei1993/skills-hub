@@ -208,6 +208,43 @@ impl SkillStore {
         })
     }
 
+    pub fn commit_central_repo_migration(
+        &self,
+        updates: &[(String, String, i64)],
+        new_base: &str,
+    ) -> Result<()> {
+        self.with_conn(|conn| {
+            conn.execute_batch("BEGIN IMMEDIATE;")?;
+            let result = (|| -> Result<()> {
+                for (skill_id, central_path, updated_at) in updates {
+                    let changed = conn.execute(
+                        "UPDATE skills SET central_path = ?1, updated_at = ?2 WHERE id = ?3",
+                        params![central_path, updated_at, skill_id],
+                    )?;
+                    if changed != 1 {
+                        anyhow::bail!("skill not found during storage migration: {skill_id}");
+                    }
+                }
+                conn.execute(
+                    "INSERT INTO settings (key, value) VALUES ('central_repo_path', ?1)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![new_base],
+                )?;
+                Ok(())
+            })();
+            match result {
+                Ok(()) => {
+                    conn.execute_batch("COMMIT;")?;
+                    Ok(())
+                }
+                Err(err) => {
+                    let _ = conn.execute_batch("ROLLBACK;");
+                    Err(err)
+                }
+            }
+        })
+    }
+
     #[allow(dead_code)]
     pub fn set_onboarding_completed(&self, completed: bool) -> Result<()> {
         self.set_setting(

@@ -1538,6 +1538,78 @@
   gap: 12px;
 }
 
+.storage-migration-modal {
+  width: min(560px, 100%);
+}
+
+.storage-migration-modal .modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.storage-migration-body {
+  gap: 16px;
+}
+
+.storage-migration-body > p,
+.storage-migration-notice p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.storage-migration-paths {
+  display: grid;
+  gap: 10px;
+}
+
+.storage-migration-paths > div {
+  display: grid;
+  gap: 5px;
+}
+
+.storage-migration-paths span {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.storage-migration-paths code {
+  overflow-wrap: anywhere;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-element);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.storage-migration-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--warning-soft-border);
+  border-radius: var(--radius-md);
+  background: var(--warning-soft-bg);
+}
+
+.storage-migration-notice > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--status-warning);
+}
+
+.storage-migration-notice strong {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
 .tag-delete-modal {
   width: min(440px, 100%);
 }

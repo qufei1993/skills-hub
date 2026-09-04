@@ -1,8 +1,9 @@
 use std::fs;
 
 use crate::core::sync_engine::{
-    copy_dir_recursive, sync_dir_for_tool_with_overwrite, sync_dir_hybrid,
-    sync_dir_hybrid_with_overwrite, sync_dir_with_mode_with_overwrite, SyncMode,
+    copy_dir_recursive, path_is_protected_real_content, remove_path_safely_with,
+    sync_dir_for_tool_with_overwrite, sync_dir_hybrid, sync_dir_hybrid_with_overwrite,
+    sync_dir_with_mode_with_overwrite, SyncMode,
 };
 
 #[test]
@@ -57,6 +58,102 @@ fn hybrid_sync_with_overwrite_replaces_existing() {
 
     let out = sync_dir_hybrid_with_overwrite(src_dir.path(), &target, true).unwrap();
     assert!(out.replaced);
+}
+
+#[test]
+fn overwrite_rejects_same_source_and_target_without_deleting_source() {
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("keep.txt"), b"keep").unwrap();
+
+    let err = sync_dir_hybrid_with_overwrite(source.path(), source.path(), true).unwrap_err();
+
+    assert!(err.to_string().contains("overlap"));
+    assert_eq!(fs::read(source.path().join("keep.txt")).unwrap(), b"keep");
+}
+
+#[test]
+fn copy_sync_rejects_target_inside_source_without_creating_it() {
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("keep.txt"), b"keep").unwrap();
+    let target = source.path().join("nested/skill");
+
+    let err = crate::core::sync_engine::sync_dir_copy_with_overwrite(source.path(), &target, false)
+        .unwrap_err();
+
+    assert!(err.to_string().contains("overlap"));
+    assert!(!target.exists());
+    assert_eq!(fs::read(source.path().join("keep.txt")).unwrap(), b"keep");
+}
+
+#[test]
+fn overwrite_rejects_target_that_contains_source_without_deleting_either() {
+    let target = tempfile::tempdir().unwrap();
+    let source = target.path().join("source");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("keep.txt"), b"keep").unwrap();
+
+    let err = sync_dir_hybrid_with_overwrite(&source, target.path(), true).unwrap_err();
+
+    assert!(err.to_string().contains("overlap"));
+    assert_eq!(fs::read(source.join("keep.txt")).unwrap(), b"keep");
+    assert!(target.path().exists());
+}
+
+#[test]
+fn safe_remove_sends_real_directory_to_recycler() {
+    let root = tempfile::tempdir().unwrap();
+    let target = root.path().join("target");
+    let recycled = root.path().join("recycled");
+    fs::create_dir_all(&target).unwrap();
+    fs::write(target.join("keep.txt"), b"keep").unwrap();
+
+    remove_path_safely_with(&target, |path| {
+        fs::rename(path, &recycled).map_err(anyhow::Error::from)
+    })
+    .unwrap();
+
+    assert!(!target.exists());
+    assert_eq!(fs::read(recycled.join("keep.txt")).unwrap(), b"keep");
+}
+
+#[cfg(unix)]
+#[test]
+fn safe_remove_unlinks_symlink_without_recycling_target() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    let link = root.path().join("link");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("keep.txt"), b"keep").unwrap();
+    std::os::unix::fs::symlink(&source, &link).unwrap();
+
+    remove_path_safely_with(&link, |_| {
+        anyhow::bail!("symlink must not be sent to recycle bin")
+    })
+    .unwrap();
+
+    assert!(fs::symlink_metadata(&link).is_err());
+    assert_eq!(fs::read(source.join("keep.txt")).unwrap(), b"keep");
+}
+
+#[test]
+fn real_target_overlapping_protected_source_is_preserved() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    fs::create_dir_all(&source).unwrap();
+
+    assert!(path_is_protected_real_content(&source, std::slice::from_ref(&source)).unwrap());
+}
+
+#[cfg(unix)]
+#[test]
+fn symlink_to_protected_source_can_be_unlinked_safely() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    let link = root.path().join("link");
+    fs::create_dir_all(&source).unwrap();
+    std::os::unix::fs::symlink(&source, &link).unwrap();
+
+    assert!(!path_is_protected_real_content(&link, &[source]).unwrap());
 }
 
 #[test]

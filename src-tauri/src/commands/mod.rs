@@ -18,7 +18,10 @@ use crate::core::cache_cleanup::{
     set_git_cache_ttl_secs as set_git_cache_ttl_secs_core,
 };
 use crate::core::cancel_token::CancelToken;
-use crate::core::central_repo::{ensure_central_repo, resolve_central_repo_path};
+use crate::core::central_repo::{
+    ensure_central_repo, plan_central_repo_migration, resolve_central_repo_path,
+    validate_central_repo_path_change, CentralRepoMigrationItem,
+};
 use crate::core::content_hash::hash_dir;
 use crate::core::featured_skills::{fetch_featured_skills, FeaturedSkill};
 use crate::core::github_search::{search_github_repos, RepoSummary};
@@ -42,7 +45,8 @@ use crate::core::skills_search::{
     search_skills_online as search_skills_online_core, OnlineSkillResult,
 };
 use crate::core::sync_engine::{
-    copy_dir_recursive, sync_dir_for_tool_with_overwrite, sync_dir_hybrid,
+    copy_dir_recursive, path_is_protected_real_content, paths_overlap,
+    remove_path_any as remove_path_any_core, sync_dir_for_tool_with_overwrite, sync_dir_hybrid,
     sync_dir_with_mode_with_overwrite, SyncMode,
 };
 use crate::core::system_scheduler::{
@@ -65,6 +69,9 @@ fn format_anyhow_error(err: anyhow::Error) -> String {
         || first.starts_with("TARGET_EXISTS|")
         || first.starts_with("TOOL_NOT_INSTALLED|")
         || first.starts_with("TOOL_NOT_WRITABLE|")
+        || first.starts_with("UNSAFE_STORAGE_PATH|")
+        || first.starts_with("STORAGE_MIGRATION_CONFIRMATION_REQUIRED|")
+        || first.starts_with("SKILL_TARGET_OVERLAPS_SOURCE|")
     {
         return first;
     }
@@ -766,11 +773,115 @@ pub async fn get_central_repo_path(
     .map_err(format_anyhow_error)
 }
 
+#[derive(Debug, Serialize)]
+pub struct StoragePathChangePreviewDto {
+    pub current_path: String,
+    pub new_path: String,
+    pub skill_count: usize,
+}
+
+#[derive(Clone, Debug)]
+struct StorageLinkMigration {
+    mode: SyncMode,
+    old_source: std::path::PathBuf,
+    new_source: std::path::PathBuf,
+    target: std::path::PathBuf,
+}
+
+fn recycle_new_storage_copies(plan: &[CentralRepoMigrationItem]) {
+    for item in plan {
+        if std::fs::symlink_metadata(&item.new_path).is_ok() {
+            if let Err(err) = remove_path_any_core(&item.new_path) {
+                eprintln!(
+                    "failed to recycle incomplete storage copy {:?}: {err:#}",
+                    item.new_path
+                );
+            }
+        }
+    }
+}
+
+fn rollback_central_repo_migration(
+    plan: &[CentralRepoMigrationItem],
+    links: &[StorageLinkMigration],
+    attempted_link_count: usize,
+) {
+    let mut links_restored = true;
+    for link in links[..attempted_link_count].iter().rev() {
+        if let Err(err) =
+            sync_dir_with_mode_with_overwrite(link.mode, &link.old_source, &link.target, true)
+        {
+            links_restored = false;
+            eprintln!("failed to restore Skill link {:?}: {err:#}", link.target);
+        }
+    }
+    if links_restored {
+        recycle_new_storage_copies(plan);
+    } else {
+        eprintln!("keeping new storage copies because one or more links could not be restored");
+    }
+}
+
+fn storage_path_change_plan(
+    store: &SkillStore,
+    current_base: &std::path::Path,
+    new_base: &std::path::Path,
+) -> anyhow::Result<Vec<CentralRepoMigrationItem>> {
+    let skills = store.list_skills()?;
+    let mut tool_roots = runtime_tools(store, true)?
+        .into_iter()
+        .map(|tool| tool.skills_dir)
+        .collect::<Vec<_>>();
+    for (_, target_path) in store.list_all_skill_target_paths()? {
+        if let Some(parent) = std::path::Path::new(&target_path).parent() {
+            tool_roots.push(parent.to_path_buf());
+        }
+    }
+    let local_sources = skills
+        .iter()
+        .filter(|skill| skill.source_type == "local")
+        .filter_map(|skill| skill.source_ref.as_deref())
+        .map(std::path::PathBuf::from)
+        .collect::<Vec<_>>();
+    validate_central_repo_path_change(current_base, new_base, &tool_roots, &local_sources)?;
+    plan_central_repo_migration(&skills, new_base)
+}
+
+#[tauri::command]
+pub async fn preview_central_repo_path_change(
+    app: tauri::AppHandle,
+    store: State<'_, SkillStore>,
+    path: String,
+) -> Result<StoragePathChangePreviewDto, String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let new_base = expand_home_path(&path)?;
+        if !new_base.is_absolute() {
+            anyhow::bail!("storage path must be absolute");
+        }
+        let current_base = resolve_central_repo_path(&app, &store)?;
+        let skill_count = if current_base == new_base {
+            0
+        } else {
+            storage_path_change_plan(&store, &current_base, &new_base)?.len()
+        };
+        Ok::<_, anyhow::Error>(StoragePathChangePreviewDto {
+            current_path: current_base.to_string_lossy().to_string(),
+            new_path: new_base.to_string_lossy().to_string(),
+            skill_count,
+        })
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_anyhow_error)
+}
+
 #[tauri::command]
 pub async fn set_central_repo_path(
     app: tauri::AppHandle,
     store: State<'_, SkillStore>,
     path: String,
+    confirmed: Option<bool>,
 ) -> Result<String, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -778,46 +889,103 @@ pub async fn set_central_repo_path(
         if !new_base.is_absolute() {
             anyhow::bail!("storage path must be absolute");
         }
-        ensure_central_repo(&new_base)?;
-
         let current_base = resolve_central_repo_path(&app, &store)?;
-        let skills = store.list_skills()?;
         if current_base == new_base {
             store.set_setting("central_repo_path", new_base.to_string_lossy().as_ref())?;
             return Ok::<_, anyhow::Error>(new_base.to_string_lossy().to_string());
         }
 
-        if !skills.is_empty() {
-            for skill in skills {
-                let old_path = std::path::PathBuf::from(&skill.central_path);
-                if !old_path.exists() {
-                    anyhow::bail!("central path not found: {:?}", old_path);
-                }
-                let file_name = old_path
-                    .file_name()
-                    .ok_or_else(|| anyhow::anyhow!("invalid central path: {:?}", old_path))?;
-                let new_path = new_base.join(file_name);
-                if new_path.exists() {
-                    anyhow::bail!("target path already exists: {:?}", new_path);
-                }
+        let plan = storage_path_change_plan(&store, &current_base, &new_base)?;
+        if !plan.is_empty() && confirmed != Some(true) {
+            anyhow::bail!("STORAGE_MIGRATION_CONFIRMATION_REQUIRED|{}", plan.len());
+        }
+        ensure_central_repo(&new_base)?;
 
-                if let Err(err) = std::fs::rename(&old_path, &new_path) {
-                    copy_dir_recursive(&old_path, &new_path)
-                        .with_context(|| format!("copy {:?} -> {:?}", old_path, new_path))?;
-                    std::fs::remove_dir_all(&old_path)
-                        .with_context(|| format!("cleanup {:?}", old_path))?;
-                    // Surface rename error in logs for troubleshooting.
-                    eprintln!("rename failed, fallback used: {}", err);
+        let mut links = Vec::new();
+        for item in &plan {
+            let protected_paths = skill_protected_paths(&store, &item.skill.id)?;
+            for target in store.list_skill_targets(&item.skill.id)? {
+                if target.status == "disabled" {
+                    continue;
                 }
-
-                let mut updated = skill.clone();
-                updated.central_path = new_path.to_string_lossy().to_string();
-                updated.updated_at = now_ms();
-                store.upsert_skill(&updated)?;
+                let mode = match target.mode.as_str() {
+                    "symlink" => Some(SyncMode::Symlink),
+                    "junction" => Some(SyncMode::Junction),
+                    _ => None,
+                };
+                if let Some(mode) = mode {
+                    let target_path = std::path::PathBuf::from(&target.target_path);
+                    ensure_target_does_not_overlap_local_source(
+                        &store,
+                        &item.skill.id,
+                        &target_path,
+                    )?;
+                    if path_is_protected_real_content(&target_path, &protected_paths)? {
+                        anyhow::bail!(
+                            "refusing to replace protected Skill path during storage migration: {:?}",
+                            target_path
+                        );
+                    }
+                    links.push(StorageLinkMigration {
+                        mode,
+                        old_source: item.old_path.clone(),
+                        new_source: item.new_path.clone(),
+                        target: target_path,
+                    });
+                }
             }
         }
 
-        store.set_setting("central_repo_path", new_base.to_string_lossy().as_ref())?;
+        for item in &plan {
+            if let Err(err) = copy_dir_recursive(&item.old_path, &item.new_path)
+                .with_context(|| format!("copy {:?} -> {:?}", item.old_path, item.new_path))
+            {
+                recycle_new_storage_copies(&plan);
+                return Err(err);
+            }
+        }
+
+        for (index, link) in links.iter().enumerate() {
+            if let Err(err) = sync_dir_with_mode_with_overwrite(
+                link.mode,
+                &link.new_source,
+                &link.target,
+                true,
+            )
+            .with_context(|| format!("refresh moved Skill target {:?}", link.target))
+            {
+                rollback_central_repo_migration(&plan, &links, index + 1);
+                return Err(err);
+            }
+        }
+
+        let updated_at = now_ms();
+        let updates = plan
+            .iter()
+            .map(|item| {
+                (
+                    item.skill.id.clone(),
+                    item.new_path.to_string_lossy().to_string(),
+                    updated_at,
+                )
+            })
+            .collect::<Vec<_>>();
+        if let Err(err) = store.commit_central_repo_migration(
+            &updates,
+            new_base.to_string_lossy().as_ref(),
+        ) {
+            rollback_central_repo_migration(&plan, &links, links.len());
+            return Err(err);
+        }
+
+        for item in &plan {
+            if let Err(err) = remove_path_any_core(&item.old_path) {
+                eprintln!(
+                    "storage migration succeeded but old path could not be recycled {:?}: {err:#}",
+                    item.old_path
+                );
+            }
+        }
         Ok::<_, anyhow::Error>(new_base.to_string_lossy().to_string())
     })
     .await
@@ -1037,6 +1205,7 @@ pub async fn sync_skill_to_tool(
 
         let tool_root = resolve_runtime_tool_root(&runtime_tool, project_root.as_deref())?;
         let target = tool_root.join(&name);
+        ensure_target_does_not_overlap_local_source(&store, &skillId, &target)?;
         let project_path_for_record = project_root
             .as_ref()
             .map(|path| path.to_string_lossy().to_string());
@@ -1185,6 +1354,58 @@ fn target_has_same_content(source: &std::path::Path, target: &std::path::Path) -
     }
 }
 
+fn skill_protected_paths(
+    store: &SkillStore,
+    skill_id: &str,
+) -> anyhow::Result<Vec<std::path::PathBuf>> {
+    let Some(skill) = store.get_skill_by_id(skill_id)? else {
+        return Ok(Vec::new());
+    };
+    let mut paths = vec![std::path::PathBuf::from(skill.central_path)];
+    if skill.source_type == "local" {
+        if let Some(source) = skill.source_ref.filter(|source| !source.trim().is_empty()) {
+            paths.push(std::path::PathBuf::from(source));
+        }
+    }
+    Ok(paths)
+}
+
+fn ensure_target_does_not_overlap_local_source(
+    store: &SkillStore,
+    skill_id: &str,
+    target: &std::path::Path,
+) -> anyhow::Result<()> {
+    let Some(skill) = store.get_skill_by_id(skill_id)? else {
+        return Ok(());
+    };
+    if skill.source_type != "local" {
+        return Ok(());
+    }
+    if let Some(source) = skill.source_ref.filter(|source| !source.trim().is_empty()) {
+        let source = std::path::PathBuf::from(source);
+        if paths_overlap(target, &source)? {
+            anyhow::bail!(
+                "SKILL_TARGET_OVERLAPS_SOURCE|{}|sync target overlaps original local source",
+                source.to_string_lossy()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn remove_skill_target_safely(
+    store: &SkillStore,
+    skill_id: &str,
+    target: &str,
+) -> anyhow::Result<()> {
+    let path = std::path::Path::new(target);
+    let protected_paths = skill_protected_paths(store, skill_id)?;
+    if path_is_protected_real_content(path, &protected_paths)? {
+        return Ok(());
+    }
+    remove_path_any_core(path)
+}
+
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn unsync_skill_from_tool(
@@ -1247,7 +1468,7 @@ pub async fn unsync_skill_from_tool(
                 store.get_skill_target(&skillId, k, scope, project_path.as_deref())?
             {
                 if !removed {
-                    remove_path_any(&target.target_path).map_err(anyhow::Error::msg)?;
+                    remove_skill_target_safely(&store, &skillId, &target.target_path)?;
                     removed = true;
                 }
                 store.delete_skill_target(&skillId, k, scope, project_path.as_deref())?;
@@ -1275,7 +1496,9 @@ pub async fn set_skill_enabled(
             let mut remove_failures: Vec<String> = Vec::new();
             for target in targets {
                 if target.status != "disabled" {
-                    if let Err(err) = remove_path_any(&target.target_path) {
+                    if let Err(err) =
+                        remove_skill_target_safely(&store, &skillId, &target.target_path)
+                    {
                         remove_failures.push(format!("{}: {}", target.target_path, err));
                     }
                 }
@@ -1656,7 +1879,7 @@ pub async fn delete_managed_skill(
 
         let mut remove_failures: Vec<String> = Vec::new();
         for target in targets {
-            if let Err(err) = remove_path_any(&target.target_path) {
+            if let Err(err) = remove_skill_target_safely(&store, &skillId, &target.target_path) {
                 remove_failures.push(format!("{}: {}", target.target_path, err));
             }
         }
@@ -1664,8 +1887,20 @@ pub async fn delete_managed_skill(
         let record = store.get_skill_by_id(&skillId)?;
         if let Some(skill) = record {
             let path = std::path::PathBuf::from(skill.central_path);
-            if path.exists() {
-                std::fs::remove_dir_all(&path)?;
+            let overlaps_local_source = if skill.source_type == "local" {
+                match skill
+                    .source_ref
+                    .as_deref()
+                    .filter(|source| !source.trim().is_empty())
+                {
+                    Some(source) => paths_overlap(&path, std::path::Path::new(source))?,
+                    None => false,
+                }
+            } else {
+                false
+            };
+            if path.exists() && !overlaps_local_source {
+                remove_path_any_core(&path)?;
             }
             store.delete_skill(&skillId)?;
         }
@@ -1684,37 +1919,9 @@ pub async fn delete_managed_skill(
     .map_err(format_anyhow_error)
 }
 
+#[cfg(test)]
 fn remove_path_any(path: &str) -> Result<(), String> {
-    let p = std::path::Path::new(path);
-    // 用 symlink_metadata 而非 exists()：悬空链接（目标已删）也要清理掉
-    let meta = match std::fs::symlink_metadata(p) {
-        Ok(meta) => meta,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(err) => return Err(format!("{path}: {err}")),
-    };
-    let ft = meta.file_type();
-
-    // 删除链接本身：Windows junction 虽然 is_symlink()==true，但它是目录型
-    // reparse point，remove_file（DeleteFileW）会报 os error 5，必须先试
-    // remove_dir（RemoveDirectoryW 只移除链接，不会穿透到目标）
-    if ft.is_symlink() {
-        #[cfg(windows)]
-        {
-            if std::fs::remove_dir(p).is_ok() {
-                return Ok(());
-            }
-        }
-        std::fs::remove_file(p).map_err(|err| format!("{path}: {err}"))?;
-        return Ok(());
-    }
-
-    if ft.is_dir() {
-        std::fs::remove_dir_all(p).map_err(|err| format!("{path}: {err}"))?;
-        return Ok(());
-    }
-
-    std::fs::remove_file(p).map_err(|err| format!("{path}: {err}"))?;
-    Ok(())
+    remove_path_any_core(std::path::Path::new(path)).map_err(|err| format!("{path}: {err:#}"))
 }
 
 fn to_install_dto(result: InstallResult) -> InstallResultDto {
