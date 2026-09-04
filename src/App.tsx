@@ -35,6 +35,7 @@ import NewToolsModal from './components/skills/modals/NewToolsModal'
 import RenameTagModal from './components/skills/modals/RenameTagModal'
 import ScopeSyncModal from './components/skills/modals/ScopeSyncModal'
 import SharedDirModal from './components/skills/modals/SharedDirModal'
+import StoragePathMigrationModal from './components/skills/modals/StoragePathMigrationModal'
 import SettingsPage from './components/skills/SettingsPage'
 import ToolsPage from './components/skills/ToolsPage'
 import UpdatesPage from './components/skills/UpdatesPage'
@@ -44,6 +45,7 @@ import {
   shouldKeepWaitingForTriggeredAutoUpdate,
 } from './components/skills/autoUpdateSettings'
 import { selectLocalizedReleaseNotes } from './components/skills/releaseNotes'
+import { requiresStorageMigrationConfirmation } from './components/skills/storagePathChange'
 import {
   getSkillSyncState,
   getToolSyncState,
@@ -71,6 +73,7 @@ import type {
   ManagedSkill,
   OnboardingPlan,
   OnlineSkillDto,
+  StoragePathChangePreview,
   TagWithCountDto,
   ToolConfigDto,
   ToolOption,
@@ -294,6 +297,10 @@ function App() {
       if (raw.startsWith('TOOL_NOT_WRITABLE|')) {
         const parts = raw.split('|')
         return t('errors.toolNotWritable', { tool: parts[1] ?? '', path: parts[2] ?? '' })
+      }
+      if (raw.startsWith('SKILL_TARGET_OVERLAPS_SOURCE|')) {
+        const path = raw.split('|')[1] ?? ''
+        return t('errors.targetOverlapsSource', { path })
       }
       if (raw.startsWith('PROJECT_SCOPE_UNSUPPORTED|')) {
         const tool = raw.split('|')[1] ?? ''
@@ -943,6 +950,9 @@ function App() {
   }, [managedSkills])
 
   const [storagePath, setStoragePath] = useState<string>(t('notAvailable'))
+  const [pendingStoragePathChange, setPendingStoragePathChange] =
+    useState<StoragePathChangePreview | null>(null)
+  const [storagePathChanging, setStoragePathChanging] = useState(false)
   const [gitCacheCleanupDays, setGitCacheCleanupDays] = useState<number>(30)
   const [gitCacheTtlSecs, setGitCacheTtlSecs] = useState<number>(60)
   const [githubToken, setGithubToken] = useState<string>('')
@@ -1068,15 +1078,58 @@ function App() {
         title: t('selectStoragePath'),
       })
       if (!selected || Array.isArray(selected)) return
+      const preview = await invokeTauri<StoragePathChangePreview>(
+        'preview_central_repo_path_change',
+        { path: selected },
+      )
+      if (requiresStorageMigrationConfirmation(preview)) {
+        setPendingStoragePathChange(preview)
+        return
+      }
       const newPath = await invokeTauri<string>('set_central_repo_path', {
         path: selected,
+        confirmed: true,
       })
       setStoragePath(newPath)
       await loadManagedSkills()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      const raw = err instanceof Error ? err.message : String(err)
+      const parts = raw.split('|')
+      setError(
+        raw.startsWith('UNSAFE_STORAGE_PATH|')
+          ? t(`storageMigration.errors.${parts[1] ?? 'unknown'}`, {
+              path: parts[2] ?? '',
+            })
+          : raw,
+      )
     }
   }, [invokeTauri, isTauri, loadManagedSkills, t])
+
+  const handleConfirmStoragePathChange = useCallback(async () => {
+    if (!pendingStoragePathChange || storagePathChanging) return
+    setStoragePathChanging(true)
+    setError(null)
+    try {
+      const newPath = await invokeTauri<string>('set_central_repo_path', {
+        path: pendingStoragePathChange.new_path,
+        confirmed: true,
+      })
+      setStoragePath(newPath)
+      setPendingStoragePathChange(null)
+      await loadManagedSkills()
+      setSuccessToastMessage(t('storageMigration.success'))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setStoragePathChanging(false)
+    }
+  }, [
+    invokeTauri,
+    loadManagedSkills,
+    pendingStoragePathChange,
+    storagePathChanging,
+    t,
+  ])
   const handleGitCacheCleanupDaysChange = useCallback(
     async (nextDays: number) => {
       const normalized = Math.max(0, Math.min(nextDays, 3650))
@@ -3978,6 +4031,14 @@ function App() {
         onConfirm={() => {
           if (pendingDeleteSkill) void handleDeleteManaged(pendingDeleteSkill)
         }}
+        t={t}
+      />
+
+      <StoragePathMigrationModal
+        preview={pendingStoragePathChange}
+        loading={storagePathChanging}
+        onRequestClose={() => setPendingStoragePathChange(null)}
+        onConfirm={() => void handleConfirmStoragePathChange()}
         t={t}
       />
 

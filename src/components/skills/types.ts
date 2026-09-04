@@ -106,6 +106,12 @@ export type ToolStatusDto = {
   newly_installed: string[]
 }
 
+export type StoragePathChangePreview = {
+  current_path: string
+  new_path: string
+  skill_count: number
+}
+
 export type CustomToolConfigDto = {
   key: string
   label: string

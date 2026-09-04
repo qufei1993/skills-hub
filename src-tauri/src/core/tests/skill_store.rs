@@ -140,6 +140,30 @@ fn settings_roundtrip_and_update() {
 }
 
 #[test]
+fn central_repo_migration_metadata_is_atomic() {
+    let (_dir, store) = make_store();
+    let original = make_skill("one", "One", "/old/one", 1);
+    store.upsert_skill(&original).unwrap();
+
+    let err = store
+        .commit_central_repo_migration(
+            &[
+                ("one".to_string(), "/new/one".to_string(), 2),
+                ("missing".to_string(), "/new/missing".to_string(), 2),
+            ],
+            "/new",
+        )
+        .unwrap_err();
+
+    assert!(err.to_string().contains("skill not found"));
+    assert_eq!(
+        store.get_skill_by_id("one").unwrap().unwrap().central_path,
+        "/old/one"
+    );
+    assert_eq!(store.get_setting("central_repo_path").unwrap(), None);
+}
+
+#[test]
 fn skills_upsert_list_get_delete() {
     let (_dir, store) = make_store();
 

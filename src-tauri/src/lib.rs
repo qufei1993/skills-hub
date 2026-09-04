@@ -114,6 +114,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_central_repo_path,
+            commands::preview_central_repo_path_change,
             commands::set_central_repo_path,
             commands::get_recent_projects,
             commands::save_recent_project,

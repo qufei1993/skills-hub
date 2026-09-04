@@ -4,7 +4,10 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use super::skill_store::{SkillStore, SkillTargetRecord};
-use super::sync_engine::{remove_path_any, sync_dir_with_mode_with_overwrite, SyncMode};
+use super::sync_engine::{
+    path_is_protected_real_content, paths_overlap, remove_path_any,
+    sync_dir_with_mode_with_overwrite, SyncMode,
+};
 
 pub const TOOL_CONFIG_SETTING: &str = "tool_config_v1";
 
@@ -237,6 +240,24 @@ fn migrate_custom_tool_target(
     };
     let next_target = root.join(target_name);
     let previous_target = PathBuf::from(&target.target_path);
+    let local_source = (skill.source_type == "local")
+        .then_some(skill.source_ref.as_deref())
+        .flatten()
+        .filter(|path| !path.trim().is_empty())
+        .map(PathBuf::from);
+    if let Some(local_source) = local_source.as_ref() {
+        if paths_overlap(&next_target, local_source)? {
+            anyhow::bail!(
+                "SKILL_TARGET_OVERLAPS_SOURCE|{}|custom tool target overlaps original local source",
+                local_source.to_string_lossy()
+            );
+        }
+    }
+    let mut protected_paths = vec![source.clone()];
+    if let Some(local_source) = local_source {
+        protected_paths.push(local_source);
+    }
+    let previous_is_protected = path_is_protected_real_content(&previous_target, &protected_paths)?;
     let same_path = next_target == previous_target;
     let shared_target =
         store.is_skill_target_path_used_by_another_record(&target.target_path, &target.id)?;
@@ -255,6 +276,12 @@ fn migrate_custom_tool_target(
     let force_mode_recreate =
         same_path && tool.sync_mode != SyncMode::Auto && target.mode != requested_mode;
     if force_mode_recreate {
+        if previous_is_protected {
+            anyhow::bail!(
+                "refusing to replace protected Skill source: {:?}",
+                previous_target
+            );
+        }
         remove_path_any(&previous_target)
             .with_context(|| format!("remove old target {:?}", previous_target))?;
     }
@@ -287,7 +314,7 @@ fn migrate_custom_tool_target(
         }
     };
 
-    if !same_path && !shared_target {
+    if !same_path && !shared_target && !previous_is_protected {
         if let Err(err) = remove_path_any(&previous_target) {
             let _ = remove_path_any(&next_target);
             return Err(err).with_context(|| format!("remove old target {:?}", previous_target));
