@@ -2926,9 +2926,10 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exploreInstallTrigger])
 
-  const handleInstallSelectedLocalCandidates = async () => {
+  const handleInstallSelectedLocalCandidates = async (subpaths: string[]) => {
+    const requestedSubpaths = new Set(subpaths)
     const selected = localCandidates.filter(
-      (c) => c.valid && localCandidateSelected[c.subpath],
+      (c) => c.valid && localCandidateSelected[c.subpath] && requestedSubpaths.has(c.subpath),
     )
     if (selected.length === 0) {
       setError(t('errors.selectAtLeastOneSkill'))
@@ -3019,8 +3020,11 @@ function App() {
     }
   }
 
-  const handleInstallSelectedCandidates = async () => {
-    const selected = gitCandidates.filter((c) => gitCandidateSelected[c.subpath])
+  const handleInstallSelectedCandidates = async (subpaths: string[]) => {
+    const requestedSubpaths = new Set(subpaths)
+    const selected = gitCandidates.filter(
+      (c) => gitCandidateSelected[c.subpath] && requestedSubpaths.has(c.subpath),
+    )
     if (selected.length === 0) {
       setError(t('errors.selectAtLeastOneSkill'))
       return
