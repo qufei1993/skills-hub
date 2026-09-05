@@ -1,14 +1,12 @@
 use super::fetch_featured_skills_inner;
 use crate::core::skill_store::SkillStore;
 
-fn temp_store() -> SkillStore {
+fn temp_store() -> (tempfile::TempDir, SkillStore) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
     let store = SkillStore::new(db_path);
     store.ensure_schema().unwrap();
-    // Leak the tempdir so it stays alive for the duration of the test.
-    std::mem::forget(dir);
-    store
+    (dir, store)
 }
 
 fn json_payload() -> String {
@@ -37,6 +35,18 @@ fn json_payload() -> String {
 }
 
 #[test]
+fn temp_store_removes_its_directory_when_guard_drops() {
+    let temp_path;
+    {
+        let (temp_dir, _store) = temp_store();
+        temp_path = temp_dir.path().to_path_buf();
+        assert!(temp_path.exists());
+    }
+
+    assert!(!temp_path.exists());
+}
+
+#[test]
 fn parses_and_filters_empty_source_url() {
     let mut server = mockito::Server::new();
     let _m = server
@@ -46,7 +56,7 @@ fn parses_and_filters_empty_source_url() {
         .with_body(json_payload())
         .create();
 
-    let store = temp_store();
+    let (_dir, store) = temp_store();
     let url = format!("{}/featured.json", server.url());
     let skills = fetch_featured_skills_inner(&url, &store).unwrap();
 
@@ -57,7 +67,7 @@ fn parses_and_filters_empty_source_url() {
 
 #[test]
 fn falls_back_to_cache_on_http_failure() {
-    let store = temp_store();
+    let (_dir, store) = temp_store();
 
     // Pre-populate cache
     store
@@ -79,7 +89,7 @@ fn falls_back_to_cache_on_http_failure() {
 
 #[test]
 fn falls_back_to_bundled_on_total_failure() {
-    let store = temp_store();
+    let (_dir, store) = temp_store();
 
     let mut server = mockito::Server::new();
     let _m = server
@@ -97,7 +107,7 @@ fn falls_back_to_bundled_on_total_failure() {
 
 #[test]
 fn falls_back_to_bundled_on_malformed_json() {
-    let store = temp_store();
+    let (_dir, store) = temp_store();
 
     let mut server = mockito::Server::new();
     let _m = server

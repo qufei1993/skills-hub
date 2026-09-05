@@ -1,5 +1,7 @@
 # Skills Hub - Project Rules
 
+Reply in Chinese; write PR titles and descriptions in English.
+
 ## Overview
 
 Skills Hub is a cross-platform desktop app (Tauri 2 + React 19) for managing AI Agent Skills and syncing them to 47+ AI coding tools. Core concept: "Install once, sync everywhere."
@@ -21,15 +23,14 @@ Skills Hub is a cross-platform desktop app (Tauri 2 + React 19) for managing AI 
 npm run dev              # Vite dev server (port 5173)
 npm run tauri:dev        # Tauri dev window (frontend + backend)
 npm run build            # tsc + vite build
-npm run check            # Full check: lint + build + rust:fmt:check + rust:clippy + rust:test
+npm run check            # Full check: lint + test + build + rust:fmt:check + rust:clippy + rust:test
+npm test                 # Frontend regression tests
 npm run lint             # ESLint (flat config v9)
 npm run rust:test        # cargo test
 npm run rust:clippy      # Rust lint
 npm run rust:fmt         # Rust format
 npm run rust:fmt:check   # Rust format check
 ```
-
-Always run `npm run check` before committing to ensure all checks pass.
 
 ## Directory Structure
 
@@ -129,10 +130,14 @@ src-tauri/src/                # Rust backend
 
 ## Development Workflow
 
-1. **Before implementing**: Briefly describe the approach and list the files to be modified. Wait for confirmation before writing code.
-2. **Implement completely**: For features involving both frontend and backend, modify both sides in one pass — including Tauri command registration, DTO types, i18n translations (both EN and ZH), and UI.
-3. **Verify after changes**: Always run `npm run check` after implementation to ensure lint, build, and all Rust checks pass. Fix any errors before presenting the result.
+1. **Branch baseline**: Unless specified otherwise, fetch `origin/main` and create a `codex/` branch from it, preserving existing work. Verify the base commit; after changing the baseline, sync dependencies with the lockfile.
+2. **Before implementing**: Briefly describe the approach and list the files to be modified. Wait for confirmation before writing code.
+3. **Implement completely**: For features involving both frontend and backend, modify both sides in one pass — including Tauri command registration, DTO types, i18n translations (both EN and ZH), and UI.
 4. **Keep changes minimal**: Only modify what is necessary for the requirement. Do not refactor, add comments, or "improve" unrelated code.
+5. **Verify**: Bug fixes must include regression tests that fail before the fix and pass afterward. Run `npm run check` on the final changes before committing; resolve all failures.
+6. **Manual review**: After user-facing bug fixes, run `npm run tauri:dev` from the working branch and confirm startup, unless requested otherwise. Reuse or restart only this checkout's development processes.
+7. **Release records**: Record user-visible fixes under the current project version in `CHANGELOG.md`, `docs/CHANGELOG.zh.md`, and `docs/releases/v<version>/`; do not bump the version unless requested.
+8. **Pull requests**: When requested, submit code, tests, and release records against `main`, updating an existing branch PR when available. Describe the problem, fix, and validation; verify the PR and return its link. Do not merge without authorization.
 
 ## Security Red Lines
 

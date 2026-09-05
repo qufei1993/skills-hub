@@ -11,7 +11,7 @@ type LocalPickModalProps = {
   onRequestClose: () => void
   onCancel: () => void
   onToggleCandidate: (subpath: string, checked: boolean) => void
-  onInstall: () => void
+  onInstall: (subpaths: string[]) => void
   t: TFunction
 }
 
@@ -37,9 +37,10 @@ const LocalPickModal = ({
     )
   }, [localCandidates, normalizedQuery])
   const selectableCandidates = filteredCandidates.filter((c) => c.valid)
-  const selectedCount = selectableCandidates.filter(
+  const selectedCandidates = selectableCandidates.filter(
     (c) => localCandidateSelected[c.subpath],
-  ).length
+  )
+  const selectedCount = selectedCandidates.length
   const selectableCount = selectableCandidates.length
   const allVisibleSelected =
     selectableCount > 0 &&
@@ -139,7 +140,11 @@ const LocalPickModal = ({
           <button className="btn btn-secondary" onClick={onCancel} disabled={loading}>
             {t('cancel')}
           </button>
-          <button className="btn btn-primary" onClick={onInstall} disabled={loading}>
+          <button
+            className="btn btn-primary"
+            onClick={() => onInstall(selectedCandidates.map((c) => c.subpath))}
+            disabled={loading || selectedCount === 0}
+          >
             {t('installSelected')}
           </button>
         </div>
