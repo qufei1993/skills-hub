@@ -512,9 +512,17 @@ fn path_for_comparison(path: &Path) -> Result<PathBuf> {
 }
 
 pub(crate) fn remove_path_any(path: &Path) -> Result<()> {
-    remove_path_safely_with(path, |path| {
-        trash::delete(path).map_err(anyhow::Error::from)
-    })
+    remove_path_safely_with(path, recycle_path)
+}
+
+#[cfg(not(test))]
+fn recycle_path(path: &Path) -> Result<()> {
+    trash::delete(path).map_err(anyhow::Error::from)
+}
+
+#[cfg(test)]
+fn recycle_path(path: &Path) -> Result<()> {
+    remove_path_permanently(path)
 }
 
 fn remove_path_permanently(path: &Path) -> Result<()> {
