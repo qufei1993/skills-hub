@@ -418,7 +418,7 @@ fn changed_skill_does_not_overwrite_a_copy_target_with_unexpected_content() {
         .upsert_skill_target(&SkillTargetRecord {
             id: "modified-target".to_string(),
             skill_id: installed.skill_id.clone(),
-            tool: "cursor".to_string(),
+            tool: "test-copy-tool".to_string(),
             scope: "global".to_string(),
             project_path: None,
             target_path: target.to_string_lossy().to_string(),
@@ -443,7 +443,7 @@ fn changed_skill_does_not_overwrite_a_copy_target_with_unexpected_content() {
         .file_type()
         .is_symlink());
     let saved_target = store
-        .get_skill_target(&installed.skill_id, "cursor", "global", None)
+        .get_skill_target(&installed.skill_id, "test-copy-tool", "global", None)
         .unwrap()
         .unwrap();
     assert_eq!(saved_target.status, "error");
