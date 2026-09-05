@@ -14,6 +14,15 @@ export type AutoUpdateTaskStatusKey =
   | 'autoUpdateTaskReady'
   | 'autoUpdateTaskNeedsAttention'
 
+export function getAutoUpdateRunningReset() {
+  return {
+    last_checked: 0,
+    last_unchanged: 0,
+    last_updated: 0,
+    last_failed: 0,
+  }
+}
+
 export function getAutoUpdateToastKey(
   previousEnabled: boolean | null | undefined,
   nextEnabled: boolean,
@@ -128,17 +137,18 @@ export function shouldKeepWaitingForTriggeredAutoUpdate(
 }
 
 export function isAutoUpdatePossiblyStalled(
-  config: Pick<
+  config: (Pick<
     AutoUpdateConfigDto,
     'last_run_at' | 'last_status' | 'last_updated' | 'last_failed' | 'progress'
-  > | null | undefined,
+  > & { last_unchanged?: number }) | null | undefined,
   nowMs: number,
   staleAfterMs = 10 * 60 * 1000,
 ) {
   if (!config?.last_run_at || config.last_status !== 'running') {
     return false
   }
-  const completed = config.last_updated + config.last_failed
+  const completed =
+    (config.last_unchanged ?? 0) + config.last_updated + config.last_failed
   return (
     nowMs - config.last_run_at > staleAfterMs &&
     completed === 0 &&

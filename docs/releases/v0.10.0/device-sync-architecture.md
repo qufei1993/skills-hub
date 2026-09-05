@@ -241,17 +241,25 @@ pub trait GitProvider {
 
 所有平台都必须支持授权登录、选择已有仓库与创建私有仓库。未配置 OAuth 客户端时，UI 明确回退到 Token/SSH，而不是把客户端密钥打包进桌面应用。
 
-发布构建通过 `SKILLS_HUB_GITHUB_CLIENT_ID`、`SKILLS_HUB_GITLAB_CLIENT_ID` 和 `SKILLS_HUB_GITEE_AUTH_RELAY_URL` 注入公开配置。GitHub/GitLab 的 client ID 可公开，但绝不向桌面包注入 client secret。
+发布构建通过 `SKILLS_HUB_GITHUB_CLIENT_ID`、`SKILLS_HUB_GITLAB_CLIENT_ID` 和 `SKILLS_HUB_GITEE_AUTH_RELAY_URL` 注入公开配置。GitHub/GitLab 的 client ID 是公开标识，不是凭据；仓库仍不写死实际部署值，也绝不向桌面包注入 client secret。
+
+### 13.1 发布配置边界
+
+- debug 构建可以从进程环境或本地 `.env` 读取以上三个公开配置。非空运行时值优先，未提供时可以使用编译时值，便于本地开发。
+- release 构建不加载 `.env`，也不读取这三个运行时环境变量。它只使用 `option_env!` 在编译期写入的值，因此启动环境不能替换 OAuth client ID 或 Gitee 中转地址。
+- 发布工作流继续通过构建任务的环境变量注入部署值。Client ID 虽然可公开，仍作为部署配置管理，避免将具体应用注册信息写死在仓库。
+- Gitee 中转地址遵守相同边界。缺少对应编译时值时，该 Provider 的 OAuth 被标记为未配置，界面回退到 Token/SSH；应用不会采用运行时地址绕过发布配置。
 
 Gitee 中转只承担 OAuth 协议适配，不保存 Skill 或仓库数据：
 
 - `POST /v1/oauth/gitee/device/start` 创建短时授权会话，返回授权地址、用户码、有效期和轮询间隔。
-- `POST /v1/oauth/gitee/device/poll` 查询会话；完成后返回 access token、可选 refresh token、有效期和可选 `refresh_url`。
+- `POST /v1/oauth/gitee/device/poll` 查询会话；完成后只消费 access token、可选 refresh token 和有效期。响应中的 `refresh_url` 等端点字段一律忽略，刷新地址只能来自本地可信构建配置。
 - 会话一次性使用且短时过期；日志禁止记录 code、token 和平台账号隐私字段。
 
 ## 14. 凭据与安全边界
 
 - OAuth Token 和手动 HTTPS Token 都使用系统安全凭据存储，SQLite 只保存 credential key。
+- 系统凭据存储中的值使用带版本前缀的凭据封装。封装记录凭据类型、Provider、允许的 origin、Token 数据和受信刷新配置；旧格式或版本不匹配时要求重新授权。
 - OAuth 待授权会话只存在进程内存；页面只接收一次性用户码和 credential key，不接收 access token。
 - macOS 对应 Keychain，Windows 对应 Credential Manager，Linux 对应 Secret Service。
 - SSH remote 不读取、不复制私钥，只调用系统 SSH Agent/系统 Git。
@@ -262,11 +270,23 @@ Gitee 中转只承担 OAuth 协议适配，不保存 Skill 或仓库数据：
 ### 14.1 可信主机与凭据绑定
 
 - OAuth 凭据必须绑定 Provider 和官方 Git 主机：GitHub 对应 `github.com`，GitLab 对应 `gitlab.com`，Gitee 对应 `gitee.com`。
-- Git credential callback 必须校验 libgit2 实际请求 URL 的主机。主机与凭据绑定不一致时拒绝提供 Token。
+- Git credential callback 必须校验 libgit2 实际请求 URL 的精确 origin。origin 由小写主机和有效端口组成；只接受 HTTPS，并拒绝 userinfo、查询参数和 fragment。Provider 或 origin 不一致时拒绝提供 Token。
 - 更换 Provider 或主机后不自动复用原 OAuth/Token 凭据。自建 Git 服务仅通过用户明确配置的 Token 或 SSH 连接。
 - 所有仓库 URL 必须规范化后再比较主机，拒绝 userinfo、查询参数、fragment 和主机混淆形式。
 
-### 14.2 远端清单与文件边界
+### 14.2 OAuth 刷新端点
+
+- Token 响应不能指定或覆盖刷新目的地。GitHub 和 GitLab 只使用代码定义的官方 Token URL；Gitee 只使用当前受控配置派生出的 `/v1/oauth/gitee/device/poll`。
+- 保存带 refresh token 的凭据前校验端点。每次刷新前再次校验 Provider、端点格式，并要求已保存端点与当前可信端点完全一致。
+- 刷新请求禁止 HTTP 重定向。端点失配、配置变化或刷新失败时停止发送凭据并要求用户重新授权。
+
+### 14.3 旧 GitHub PAT 迁移
+
+- 首次读取旧版 SQLite `github_token` 时，应用把 PAT 写入独立的系统凭据存储，并封装为绑定 `github.com:443` 的个人访问令牌。
+- 只有系统凭据写入成功后才删除 SQLite 明文。迁移失败时保留旧值，以便重试；已有有效系统凭据时保留该凭据并清理旧值。
+- 迁移、保存和删除操作串行执行，避免并发操作让 SQLite 与系统凭据存储产生竞态。前端只读取“是否已配置”，不再回传 Token 明文。
+
+### 14.4 远端清单与文件边界
 
 - Git 仓库始终视为不可信输入，即使它是当前用户的私有仓库。
 - 读取 Manifest 后必须在任何写入、删除或合并前完成整体验证：格式版本受支持、Map key 等于 Skill ID、ID 是安全单路径段、名称不含路径分隔符、文件路径是规范相对路径。

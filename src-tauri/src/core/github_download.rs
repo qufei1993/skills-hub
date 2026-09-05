@@ -8,14 +8,15 @@ use reqwest::blocking::Client;
 use serde::Deserialize;
 
 use super::cancel_token::CancelToken;
-use super::network_proxy::github_http_client;
+use super::network_proxy::github_http_client_no_redirects;
+
+const GITHUB_API_ORIGIN: &str = "https://api.github.com";
 
 #[derive(Debug, Deserialize)]
 struct GithubContent {
     name: String,
     #[serde(rename = "type")]
     content_type: String,
-    download_url: Option<String>,
     path: String,
 }
 
@@ -39,12 +40,37 @@ pub fn download_github_directory(
     dest: &Path,
     options: GithubDownloadOptions<'_>,
 ) -> Result<()> {
-    let client = github_http_client(options.proxy_url, Some(30))?;
+    download_github_directory_from_api(
+        GITHUB_API_ORIGIN,
+        false,
+        owner,
+        repo,
+        branch,
+        path,
+        dest,
+        options,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn download_github_directory_from_api(
+    api_origin: &str,
+    allow_http: bool,
+    owner: &str,
+    repo: &str,
+    branch: &str,
+    path: &str,
+    dest: &Path,
+    options: GithubDownloadOptions<'_>,
+) -> Result<()> {
+    let api_origin = validate_api_origin(api_origin, allow_http)?;
+    let client = github_http_client_no_redirects(options.proxy_url, Some(30))?;
 
     std::fs::create_dir_all(dest).with_context(|| format!("create directory {:?}", dest))?;
 
     download_dir_recursive(
         &client,
+        &api_origin,
         owner,
         repo,
         branch,
@@ -58,6 +84,7 @@ pub fn download_github_directory(
 #[allow(clippy::too_many_arguments)]
 fn download_dir_recursive(
     client: &Client,
+    api_origin: &reqwest::Url,
     owner: &str,
     repo: &str,
     branch: &str,
@@ -70,13 +97,10 @@ fn download_dir_recursive(
         anyhow::bail!("CANCELLED|操作已被用户取消。");
     }
 
-    let url = format!(
-        "https://api.github.com/repos/{}/{}/contents/{}?ref={}",
-        owner, repo, path, branch
-    );
+    let url = github_contents_url(api_origin, owner, repo, path, branch)?;
 
     let mut req = client
-        .get(&url)
+        .get(url.clone())
         .header("User-Agent", "skills-hub")
         .header("Accept", "application/vnd.github.v3+json");
     if let Some(t) = token {
@@ -85,7 +109,7 @@ fn download_dir_recursive(
     let resp = req
         .send()
         .with_context(|| format!("request GitHub contents: {}", url))?;
-    let resp = check_github_response(resp, &url)?;
+    let resp = check_github_response(resp, url.as_str())?;
 
     let items: Vec<GithubContent> = resp
         .json()
@@ -100,30 +124,33 @@ fn download_dir_recursive(
 
         match item.content_type.as_str() {
             "file" => {
-                if let Some(download_url) = &item.download_url {
-                    if let Some(parent) = local_path.parent() {
-                        std::fs::create_dir_all(parent)
-                            .with_context(|| format!("create parent dir {:?}", parent))?;
-                    }
-                    let mut file_req = client.get(download_url).header("User-Agent", "skills-hub");
-                    if let Some(t) = token {
-                        file_req = file_req.header("Authorization", format!("Bearer {}", t));
-                    }
-                    let file_resp = file_req
-                        .send()
-                        .with_context(|| format!("download file: {}", item.path))?;
-                    let file_resp = check_github_response(file_resp, &item.path)?;
-                    let bytes = file_resp
-                        .bytes()
-                        .with_context(|| format!("read file bytes: {}", item.path))?;
-
-                    std::fs::write(&local_path, &bytes)
-                        .with_context(|| format!("write file {:?}", local_path))?;
+                if let Some(parent) = local_path.parent() {
+                    std::fs::create_dir_all(parent)
+                        .with_context(|| format!("create parent dir {:?}", parent))?;
                 }
+                let file_url = github_contents_url(api_origin, owner, repo, &item.path, branch)?;
+                let mut file_req = client
+                    .get(file_url)
+                    .header("User-Agent", "skills-hub")
+                    .header("Accept", "application/vnd.github.raw+json");
+                if let Some(t) = token {
+                    file_req = file_req.header("Authorization", format!("Bearer {}", t));
+                }
+                let file_resp = file_req
+                    .send()
+                    .with_context(|| format!("download file: {}", item.path))?;
+                let file_resp = check_github_response(file_resp, &item.path)?;
+                let bytes = file_resp
+                    .bytes()
+                    .with_context(|| format!("read file bytes: {}", item.path))?;
+
+                std::fs::write(&local_path, &bytes)
+                    .with_context(|| format!("write file {:?}", local_path))?;
             }
             "dir" => {
                 download_dir_recursive(
                     client,
+                    api_origin,
                     owner,
                     repo,
                     branch,
@@ -140,6 +167,40 @@ fn download_dir_recursive(
     }
 
     Ok(())
+}
+
+fn validate_api_origin(value: &str, allow_http: bool) -> Result<reqwest::Url> {
+    let url = reqwest::Url::parse(value).context("parse GitHub API origin")?;
+    if (url.scheme() != "https" && !(allow_http && url.scheme() == "http"))
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !matches!(url.path(), "" | "/")
+    {
+        anyhow::bail!("GitHub API endpoint must be a trusted origin");
+    }
+    Ok(url)
+}
+
+fn github_contents_url(
+    api_origin: &reqwest::Url,
+    owner: &str,
+    repo: &str,
+    path: &str,
+    branch: &str,
+) -> Result<reqwest::Url> {
+    let mut url = api_origin.clone();
+    {
+        let mut segments = url
+            .path_segments_mut()
+            .map_err(|_| anyhow::anyhow!("GitHub API origin cannot be a base URL"))?;
+        segments.clear().extend(["repos", owner, repo, "contents"]);
+        segments.extend(path.split('/').filter(|segment| !segment.is_empty()));
+    }
+    url.query_pairs_mut().append_pair("ref", branch);
+    Ok(url)
 }
 
 /// Check a GitHub API response for rate-limit errors and surface a helpful message.
@@ -256,6 +317,110 @@ mod tests {
             Some("path"),
         );
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn authenticated_file_download_ignores_response_download_url_and_uses_api_endpoint() {
+        let mut api_server = mockito::Server::new();
+        let mut attacker_server = mockito::Server::new();
+        let attacker_request = attacker_server.mock("GET", "/stolen").expect(0).create();
+        let list_request = api_server
+            .mock("GET", "/repos/acme/private/contents/skills/example")
+            .match_query(mockito::Matcher::UrlEncoded("ref".into(), "main".into()))
+            .match_header("authorization", "Bearer private-pat")
+            .match_header("accept", "application/vnd.github.v3+json")
+            .with_status(200)
+            .with_body(format!(
+                r#"[{{"name":"SKILL.md","type":"file","download_url":"{}/stolen","path":"skills/example/SKILL.md"}}]"#,
+                attacker_server.url()
+            ))
+            .create();
+        let raw_request = api_server
+            .mock(
+                "GET",
+                "/repos/acme/private/contents/skills/example/SKILL.md",
+            )
+            .match_query(mockito::Matcher::UrlEncoded("ref".into(), "main".into()))
+            .match_header("authorization", "Bearer private-pat")
+            .match_header("accept", "application/vnd.github.raw+json")
+            .with_status(200)
+            .with_body("private skill contents")
+            .create();
+        let destination = tempfile::tempdir().unwrap();
+
+        download_github_directory_from_api(
+            &api_server.url(),
+            true,
+            "acme",
+            "private",
+            "main",
+            "skills/example",
+            destination.path(),
+            GithubDownloadOptions {
+                cancel: None,
+                token: Some("private-pat"),
+                proxy_url: "",
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(destination.path().join("SKILL.md")).unwrap(),
+            "private skill contents"
+        );
+        list_request.assert();
+        raw_request.assert();
+        attacker_request.assert();
+    }
+
+    #[test]
+    fn authenticated_file_download_does_not_follow_api_redirects() {
+        for status in [307, 308] {
+            let mut api_server = mockito::Server::new();
+            let mut attacker_server = mockito::Server::new();
+            let list_request = api_server
+                .mock("GET", "/repos/acme/private/contents/skills/example")
+                .match_query(mockito::Matcher::UrlEncoded("ref".into(), "main".into()))
+                .match_header("authorization", "Bearer private-pat")
+                .with_status(200)
+                .with_body(
+                    r#"[{"name":"SKILL.md","type":"file","path":"skills/example/SKILL.md"}]"#,
+                )
+                .create();
+            let redirect_target = format!("{}/stolen", attacker_server.url());
+            let raw_request = api_server
+                .mock(
+                    "GET",
+                    "/repos/acme/private/contents/skills/example/SKILL.md",
+                )
+                .match_query(mockito::Matcher::UrlEncoded("ref".into(), "main".into()))
+                .match_header("authorization", "Bearer private-pat")
+                .with_status(status)
+                .with_header("location", &redirect_target)
+                .create();
+            let attacker_request = attacker_server.mock("GET", "/stolen").expect(0).create();
+            let destination = tempfile::tempdir().unwrap();
+
+            let result = download_github_directory_from_api(
+                &api_server.url(),
+                true,
+                "acme",
+                "private",
+                "main",
+                "skills/example",
+                destination.path(),
+                GithubDownloadOptions {
+                    cancel: None,
+                    token: Some("private-pat"),
+                    proxy_url: "",
+                },
+            );
+
+            assert!(result.is_err(), "accepted HTTP {status} redirect");
+            list_request.assert();
+            raw_request.assert();
+            attacker_request.assert();
+        }
     }
 
     #[test]

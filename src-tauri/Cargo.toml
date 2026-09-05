@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.9.1"
+version = "0.10.0"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -35,9 +35,21 @@ sha2 = "0.10"
 hex = "0.4"
 git2 = { version = "0.19", features = ["vendored-openssl"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "socks"] }
+dotenvy = "0.15"
 junction = "1.1"
 uuid = { version = "1", features = ["v4"] }
 urlencoding = "2.1"
+trash = "=3.3.1"
+fs2 = "0.4"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -17,6 +17,14 @@ fn set_central_path(store: &SkillStore, central: &Path) {
 }
 
 #[test]
+fn update_lock_rejects_a_second_updater_for_the_same_repository() {
+    let dir = tempfile::tempdir().unwrap();
+    let _first = super::UpdateFileLock::acquire(dir.path()).unwrap();
+    let error = super::UpdateFileLock::acquire(dir.path()).unwrap_err();
+    assert!(format!("{error:#}").contains("UPDATE_IN_PROGRESS"));
+}
+
+#[test]
 fn record_target_sync_failure_preserves_target_and_sets_error() {
     let (_dir, store) = make_store();
     let skill = SkillRecord {
@@ -338,9 +346,333 @@ fn installs_local_skill_and_updates_from_source() {
 }
 
 #[test]
+fn unchanged_local_skill_skips_central_and_copy_target_replacement() {
+    let app = tauri::test::mock_app();
+    let (_dir, store) = make_store();
+    let central_root = tempfile::tempdir().unwrap();
+    set_central_path(&store, central_root.path());
+
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
+    fs::write(source.path().join("a.txt"), b"same").unwrap();
+    let installed = super::install_local_skill(
+        app.handle(),
+        &store,
+        source.path(),
+        Some("unchanged".to_string()),
+    )
+    .unwrap();
+
+    let target_root = tempfile::tempdir().unwrap();
+    let target = target_root.path().join("target");
+    store
+        .upsert_skill_target(&SkillTargetRecord {
+            id: "unchanged-target".to_string(),
+            skill_id: installed.skill_id.clone(),
+            tool: "cursor".to_string(),
+            scope: "global".to_string(),
+            project_path: None,
+            target_path: target.to_string_lossy().to_string(),
+            mode: "copy".to_string(),
+            status: "ok".to_string(),
+            last_error: None,
+            synced_at: None,
+        })
+        .unwrap();
+
+    let result =
+        super::update_managed_skill_from_source(app.handle(), &store, &installed.skill_id).unwrap();
+
+    assert!(result.updated_targets.is_empty());
+    assert!(!target.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn changed_skill_does_not_overwrite_a_copy_target_with_unexpected_content() {
+    use std::os::unix::fs::symlink;
+
+    let app = tauri::test::mock_app();
+    let (_dir, store) = make_store();
+    let central_root = tempfile::tempdir().unwrap();
+    set_central_path(&store, central_root.path());
+
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
+    fs::write(source.path().join("a.txt"), b"v1").unwrap();
+    let installed = super::install_local_skill(
+        app.handle(),
+        &store,
+        source.path(),
+        Some("modified-target".to_string()),
+    )
+    .unwrap();
+
+    let target_root = tempfile::tempdir().unwrap();
+    let manual_content = target_root.path().join("manual-content");
+    fs::create_dir_all(&manual_content).unwrap();
+    fs::write(manual_content.join("a.txt"), b"manual").unwrap();
+    let target = target_root.path().join("target");
+    symlink(&manual_content, &target).unwrap();
+    store
+        .upsert_skill_target(&SkillTargetRecord {
+            id: "modified-target".to_string(),
+            skill_id: installed.skill_id.clone(),
+            tool: "cursor".to_string(),
+            scope: "global".to_string(),
+            project_path: None,
+            target_path: target.to_string_lossy().to_string(),
+            mode: "copy".to_string(),
+            status: "ok".to_string(),
+            last_error: None,
+            synced_at: None,
+        })
+        .unwrap();
+    fs::write(source.path().join("a.txt"), b"v2").unwrap();
+
+    let error =
+        match super::update_managed_skill_from_source(app.handle(), &store, &installed.skill_id) {
+            Ok(_) => panic!("expected modified copy target to block automatic replacement"),
+            Err(error) => error,
+        };
+
+    assert!(format!("{error:#}").contains("TARGET_MODIFIED"));
+    assert_eq!(fs::read(manual_content.join("a.txt")).unwrap(), b"manual");
+    assert!(fs::symlink_metadata(&target)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    let saved_target = store
+        .get_skill_target(&installed.skill_id, "cursor", "global", None)
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved_target.status, "error");
+}
+
+#[test]
+fn changed_skill_rolls_back_central_and_earlier_targets_when_a_later_target_is_modified() {
+    let app = tauri::test::mock_app();
+    let (_dir, store) = make_store();
+    let central_root = tempfile::tempdir().unwrap();
+    set_central_path(&store, central_root.path());
+
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
+    fs::write(source.path().join("a.txt"), b"v1").unwrap();
+    let installed = super::install_local_skill(
+        app.handle(),
+        &store,
+        source.path(),
+        Some("transactional-update".to_string()),
+    )
+    .unwrap();
+    let saved_before = store.get_skill_by_id(&installed.skill_id).unwrap().unwrap();
+    let central_path = PathBuf::from(&saved_before.central_path);
+
+    let targets_root = tempfile::tempdir().unwrap();
+    let first_target = targets_root.path().join("first");
+    let second_target = targets_root.path().join("second");
+    for (id, tool, target) in [
+        ("first-target", "aaa", &first_target),
+        ("second-target", "zzz", &second_target),
+    ] {
+        fs::create_dir_all(target).unwrap();
+        fs::write(target.join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
+        fs::write(target.join("a.txt"), b"v1").unwrap();
+        store
+            .upsert_skill_target(&SkillTargetRecord {
+                id: id.to_string(),
+                skill_id: installed.skill_id.clone(),
+                tool: tool.to_string(),
+                scope: "global".to_string(),
+                project_path: None,
+                target_path: target.to_string_lossy().to_string(),
+                mode: "copy".to_string(),
+                status: "ok".to_string(),
+                last_error: None,
+                synced_at: Some(1),
+            })
+            .unwrap();
+    }
+    fs::write(second_target.join("a.txt"), b"manual").unwrap();
+    fs::write(source.path().join("a.txt"), b"v2").unwrap();
+
+    let error =
+        match super::update_managed_skill_from_source(app.handle(), &store, &installed.skill_id) {
+            Ok(_) => panic!("expected modified later target to roll back the update"),
+            Err(error) => error,
+        };
+
+    assert!(format!("{error:#}").contains("TARGET_MODIFIED"));
+    assert_eq!(fs::read(central_path.join("a.txt")).unwrap(), b"v1");
+    assert_eq!(fs::read(first_target.join("a.txt")).unwrap(), b"v1");
+    assert_eq!(fs::read(second_target.join("a.txt")).unwrap(), b"manual");
+    let saved_after = store.get_skill_by_id(&installed.skill_id).unwrap().unwrap();
+    assert_eq!(saved_after.content_hash, saved_before.content_hash);
+    assert_eq!(saved_after.updated_at, saved_before.updated_at);
+    assert!(fs::read_dir(central_root.path()).unwrap().all(|entry| {
+        let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+        name == ".skills-hub-update.lock" || !name.starts_with(".skills-hub-")
+    }));
+    assert!(fs::read_dir(targets_root.path())
+        .unwrap()
+        .all(|entry| !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".skills-hub-")));
+}
+
+#[cfg(unix)]
+#[test]
+fn rollback_conflict_preserves_concurrent_write_and_marks_all_related_targets() {
+    use std::os::unix::fs::symlink;
+
+    let app = tauri::test::mock_app();
+    let (_dir, store) = make_store();
+    let central_root = tempfile::tempdir().unwrap();
+    set_central_path(&store, central_root.path());
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
+    fs::write(source.path().join("a.txt"), b"v1").unwrap();
+    let installed = super::install_local_skill(
+        app.handle(),
+        &store,
+        source.path(),
+        Some("rollback-conflict".to_string()),
+    )
+    .unwrap();
+    let target_root = tempfile::tempdir().unwrap();
+    let first = target_root.path().join("first");
+    fs::create_dir_all(&first).unwrap();
+    fs::write(first.join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
+    fs::write(first.join("a.txt"), b"v1").unwrap();
+    let manual = target_root.path().join("manual");
+    fs::create_dir_all(&manual).unwrap();
+    fs::write(manual.join("a.txt"), b"manual").unwrap();
+    let second = target_root.path().join("second");
+    symlink(&manual, &second).unwrap();
+    for (id, tool, target) in [
+        ("rollback-first", "aaa", &first),
+        ("rollback-second", "zzz", &second),
+    ] {
+        store
+            .upsert_skill_target(&SkillTargetRecord {
+                id: id.to_string(),
+                skill_id: installed.skill_id.clone(),
+                tool: tool.to_string(),
+                scope: "global".to_string(),
+                project_path: None,
+                target_path: target.to_string_lossy().to_string(),
+                mode: "copy".to_string(),
+                status: "ok".to_string(),
+                last_error: None,
+                synced_at: None,
+            })
+            .unwrap();
+    }
+    fs::write(source.path().join("a.txt"), b"v2").unwrap();
+    let hook =
+        super::TEST_UPDATE_WRITE_AFTER_ACTIVATION.get_or_init(|| std::sync::Mutex::new(None));
+    *hook.lock().unwrap() = Some(super::TestUpdateWrite {
+        skill_id: installed.skill_id.clone(),
+        target_index: 0,
+        relative_path: PathBuf::from("written-during-update.txt"),
+        content: b"keep me".to_vec(),
+    });
+
+    let error =
+        match super::update_managed_skill_from_source(app.handle(), &store, &installed.skill_id) {
+            Ok(_) => panic!("expected rollback conflict"),
+            Err(error) => error,
+        };
+
+    assert!(error.to_string().starts_with("ROLLBACK_CONFLICT|"));
+    assert_eq!(fs::read(first.join("a.txt")).unwrap(), b"v1");
+    let recovery = fs::read_dir(target_root.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(".skills-hub-recovery-")
+        })
+        .unwrap();
+    assert_eq!(
+        fs::read(recovery.join("written-during-update.txt")).unwrap(),
+        b"keep me"
+    );
+    for tool in ["aaa", "zzz"] {
+        let target = store
+            .get_skill_target(&installed.skill_id, tool, "global", None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(target.status, "error");
+        assert!(target.last_error.is_some());
+    }
+}
+
+#[test]
+fn changed_skill_updates_a_shared_copy_directory_only_once() {
+    let app = tauri::test::mock_app();
+    let (_dir, store) = make_store();
+    let central_root = tempfile::tempdir().unwrap();
+    set_central_path(&store, central_root.path());
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
+    fs::write(source.path().join("a.txt"), b"v1").unwrap();
+    let installed = super::install_local_skill(
+        app.handle(),
+        &store,
+        source.path(),
+        Some("shared-copy".to_string()),
+    )
+    .unwrap();
+    let target_root = tempfile::tempdir().unwrap();
+    let target = target_root.path().join("shared");
+    fs::create_dir_all(&target).unwrap();
+    fs::write(target.join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
+    fs::write(target.join("a.txt"), b"v1").unwrap();
+    for (id, tool) in [("shared-a", "aaa"), ("shared-b", "bbb")] {
+        store
+            .upsert_skill_target(&SkillTargetRecord {
+                id: id.to_string(),
+                skill_id: installed.skill_id.clone(),
+                tool: tool.to_string(),
+                scope: "global".to_string(),
+                project_path: None,
+                target_path: target.to_string_lossy().to_string(),
+                mode: "copy".to_string(),
+                status: "ok".to_string(),
+                last_error: None,
+                synced_at: None,
+            })
+            .unwrap();
+    }
+    fs::write(source.path().join("a.txt"), b"v2").unwrap();
+
+    let result =
+        super::update_managed_skill_from_source(app.handle(), &store, &installed.skill_id).unwrap();
+
+    assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"v2");
+    assert_eq!(result.updated_targets, vec!["aaa", "bbb"]);
+    for tool in ["aaa", "bbb"] {
+        let saved = store
+            .get_skill_target(&installed.skill_id, tool, "global", None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.status, "ok");
+        assert!(saved.synced_at.is_some());
+    }
+}
+
+#[test]
 fn failed_update_marks_skill_error_and_success_clears_it() {
     let app = tauri::test::mock_app();
     let (dir, store) = make_store();
+    set_central_path(&store, dir.path());
     let central = dir.path().join("central");
     fs::create_dir_all(&central).unwrap();
     fs::write(central.join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
@@ -368,7 +700,7 @@ fn failed_update_marks_skill_error_and_success_clears_it() {
         Ok(_) => panic!("expected source update failure"),
         Err(err) => err.to_string(),
     };
-    assert!(error.contains("source path not found"));
+    assert!(error.contains("source path not found"), "{error}");
     assert_eq!(
         store.get_skill_by_id(&skill.id).unwrap().unwrap().status,
         "error"
@@ -397,6 +729,7 @@ fn failed_update_marks_skill_error_and_success_clears_it() {
         synced_at: None,
     };
     store.upsert_skill_target(&target).unwrap();
+    fs::write(source.join("a.txt"), b"changed").unwrap();
     assert!(super::update_managed_skill_from_source(app.handle(), &store, &skill.id).is_err());
     assert_eq!(
         store.get_skill_by_id(&skill.id).unwrap().unwrap().status,

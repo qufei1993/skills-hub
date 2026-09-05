@@ -1,13 +1,13 @@
 {
   "name": "skills-hub",
   "private": true,
-  "version": "0.9.1",
+  "version": "0.10.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port 5173 --strictPort",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "test": "vitest run",
+    "test": "vitest run --exclude '**/.worktrees/**'",
     "rust:fmt": "cd src-tauri && cargo fmt --all",
     "rust:fmt:check": "cd src-tauri && cargo fmt --all -- --check",
     "rust:clippy": "cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings",

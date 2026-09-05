@@ -58,6 +58,42 @@
 | `package.json` | 将架构检查接入 `npm run check` |
 | `AGENTS.md` | 固化所有新增联网功能必须通过统一模块的规则 |
 
+### Task 0: 恢复 v0.9.1 数据库兼容性（已完成前置修复）
+
+**Files:**
+- Modify: `src-tauri/src/core/skill_store.rs`
+- Test: `src-tauri/src/core/tests/skill_store.rs`
+- Modify: `AGENTS.md`
+
+**Interfaces:**
+- Preserves: 共享主数据库 `PRAGMA user_version = 6`。
+- Produces: `settings.schema.device_sync = 1` 作为设备同步独立 schema 标记。
+- Repairs: v0.10.0 开发版产生的主数据库 schema 7，保留设备同步数据后恢复为 6。
+
+- [x] **Step 1: 添加 v0.10 数据库可被 v0.9.1 接受的失败测试**
+
+Run: `cd src-tauri && cargo test core::skill_store::tests::device_sync_schema_keeps_v091_database_compatibility -- --nocapture`
+
+Observed before fix: FAIL，实际主版本为 7，v0.9.1 只接受到 6。
+
+- [x] **Step 2: 添加开发版 schema 7 的无损恢复测试**
+
+测试先保存设备同步配置、模拟 `PRAGMA user_version = 7`、再次初始化，再断言主版本为 6 且配置内容不变。
+
+- [x] **Step 3: 将设备同步 schema 与共享版本解耦**
+
+`SCHEMA_VERSION` 恢复为 6；设备同步表每次通过 `CREATE TABLE IF NOT EXISTS` 幂等确保，并将自身版本写入 `settings.schema.device_sync`。只把已知的开发版版本 7 恢复为 6，未知的更高版本仍拒绝打开。
+
+- [x] **Step 4: 运行数据库定向测试**
+
+Run: `cd src-tauri && cargo test core::skill_store::tests:: -- --nocapture`
+
+Observed after fix: 19 项数据库测试全部 PASS。
+
+- [ ] **Step 5: 在最终发布检查中验证真实升级/降级路径**
+
+用数据库副本执行 v0.9.1 → v0.10.0 → v0.9.1 往返启动验证，断言 Skill、目标、标签和设置数量保持一致；不得直接修改用户真实数据库作为测试手段。
+
 ### Task 1: NetworkPolicy 与旧代理配置迁移
 
 **Files:**

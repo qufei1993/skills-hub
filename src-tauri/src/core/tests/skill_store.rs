@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
 use crate::core::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
+use crate::core::{
+    device_sync::credentials::MemoryCredentialStore, github_token::resolve_github_token,
+};
 use rusqlite::Connection;
 
 fn make_store() -> (tempfile::TempDir, SkillStore) {
@@ -9,6 +12,23 @@ fn make_store() -> (tempfile::TempDir, SkillStore) {
     let store = SkillStore::new(db);
     store.ensure_schema().expect("ensure_schema");
     (dir, store)
+}
+
+fn sqlite_sidecar_path(db_path: &std::path::Path, suffix: &str) -> PathBuf {
+    let mut path = db_path.as_os_str().to_os_string();
+    path.push(suffix);
+    PathBuf::from(path)
+}
+
+fn sqlite_visible_files_contain(db_path: &std::path::Path, needle: &[u8]) -> bool {
+    [
+        db_path.to_path_buf(),
+        sqlite_sidecar_path(db_path, "-wal"),
+        sqlite_sidecar_path(db_path, "-shm"),
+    ]
+    .into_iter()
+    .filter_map(|path| std::fs::read(path).ok())
+    .any(|bytes| bytes.windows(needle.len()).any(|window| window == needle))
 }
 
 fn make_skill(id: &str, name: &str, central_path: &str, updated_at: i64) -> SkillRecord {
@@ -35,6 +55,195 @@ fn make_skill(id: &str, name: &str, central_path: &str, updated_at: i64) -> Skil
 fn schema_is_idempotent() {
     let (_dir, store) = make_store();
     store.ensure_schema().expect("ensure_schema again");
+}
+
+#[test]
+fn commit_skill_update_rolls_back_skill_metadata_when_a_target_write_fails() {
+    let (_dir, store) = make_store();
+    let original = make_skill("atomic", "Original", "/tmp/atomic", 1);
+    store.upsert_skill(&original).unwrap();
+    let mut changed = original.clone();
+    changed.name = "Changed".to_string();
+    changed.updated_at = 2;
+    let invalid_target = SkillTargetRecord {
+        id: "invalid-target".to_string(),
+        skill_id: "missing-skill".to_string(),
+        tool: "cursor".to_string(),
+        scope: "global".to_string(),
+        project_path: None,
+        target_path: "/tmp/invalid-target".to_string(),
+        mode: "copy".to_string(),
+        status: "ok".to_string(),
+        last_error: None,
+        synced_at: Some(2),
+    };
+
+    assert!(store
+        .commit_skill_update(&changed, &[invalid_target])
+        .is_err());
+
+    let saved = store.get_skill_by_id("atomic").unwrap().unwrap();
+    assert_eq!(saved.name, "Original");
+    assert_eq!(saved.updated_at, 1);
+}
+
+#[test]
+fn device_sync_schema_keeps_v091_database_compatibility() {
+    let (_dir, store) = make_store();
+    let config = crate::core::device_sync::types::DeviceSyncConfig {
+        remote_url: "https://example/sync.git".to_string(),
+        credential_key: Some("system-vault-key".to_string()),
+        ..Default::default()
+    };
+    store.save_device_sync_config(&config).unwrap();
+    let loaded = store.get_device_sync_config().unwrap().unwrap();
+    assert_eq!(loaded.remote_url, config.remote_url);
+    assert_eq!(loaded.credential_key.as_deref(), Some("system-vault-key"));
+    let conn = Connection::open(store.db_path()).unwrap();
+    let raw: String = conn
+        .query_row("SELECT config_json FROM device_sync_config", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert!(!raw.contains("secret-token"));
+    assert_eq!(
+        conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i32>(0))
+            .unwrap(),
+        6,
+        "v0.9.1 rejects any main database schema newer than version 6"
+    );
+    assert_eq!(
+        store.get_setting("schema.device_sync").unwrap().as_deref(),
+        Some("1")
+    );
+}
+
+#[test]
+fn prerelease_schema_v7_is_repaired_without_losing_device_sync_data() {
+    let (_dir, store) = make_store();
+    let config = crate::core::device_sync::types::DeviceSyncConfig {
+        remote_url: "https://example/repaired-sync.git".to_string(),
+        credential_key: Some("system-vault-key".to_string()),
+        ..Default::default()
+    };
+    store.save_device_sync_config(&config).unwrap();
+    let conn = Connection::open(store.db_path()).unwrap();
+    conn.pragma_update(None, "user_version", 7).unwrap();
+    drop(conn);
+
+    store.ensure_schema().unwrap();
+
+    let conn = Connection::open(store.db_path()).unwrap();
+    assert_eq!(
+        conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i32>(0))
+            .unwrap(),
+        6
+    );
+    assert_eq!(
+        store.get_device_sync_config().unwrap().unwrap().remote_url,
+        config.remote_url
+    );
+}
+
+#[test]
+fn newer_device_sync_schema_marker_is_not_downgraded() {
+    let (_dir, store) = make_store();
+    store
+        .set_setting("schema.device_sync", "2")
+        .expect("set future device sync schema marker");
+
+    store.ensure_schema().expect("ensure_schema");
+
+    assert_eq!(
+        store.get_setting("schema.device_sync").unwrap().as_deref(),
+        Some("2")
+    );
+}
+
+#[test]
+fn device_sync_devices_are_upserted_and_sorted_by_recent_activity() {
+    let (_dir, store) = make_store();
+    store
+        .upsert_device_sync_device(&crate::core::device_sync::types::DeviceSyncDevice {
+            id: "older".to_string(),
+            name: "Home Windows".to_string(),
+            alias: None,
+            last_commit: Some("abc".to_string()),
+            last_seen_at: 100,
+            is_current: false,
+        })
+        .unwrap();
+    store
+        .upsert_device_sync_device(&crate::core::device_sync::types::DeviceSyncDevice {
+            id: "current".to_string(),
+            name: "Office Mac".to_string(),
+            alias: None,
+            last_commit: Some("def".to_string()),
+            last_seen_at: 200,
+            is_current: true,
+        })
+        .unwrap();
+
+    let devices = store.list_device_sync_devices("current").unwrap();
+
+    assert_eq!(devices.len(), 2);
+    assert_eq!(devices[0].id, "current");
+    assert!(devices[0].is_current);
+    assert_eq!(devices[1].name, "Home Windows");
+    assert!(!devices[1].is_current);
+}
+
+#[test]
+fn device_alias_is_local_and_preserves_the_discovered_name() {
+    let (_dir, store) = make_store();
+    store
+        .upsert_device_sync_device(&crate::core::device_sync::types::DeviceSyncDevice {
+            id: "home-mac".to_string(),
+            name: "MacBook-Pro.local".to_string(),
+            alias: None,
+            last_commit: Some("abc".to_string()),
+            last_seen_at: 100,
+            is_current: false,
+        })
+        .unwrap();
+
+    store
+        .set_device_sync_device_alias("home-mac", Some("家里电脑"))
+        .unwrap();
+
+    let devices = store.list_device_sync_devices("office-mac").unwrap();
+    assert_eq!(devices[0].name, "MacBook-Pro.local");
+    assert_eq!(devices[0].alias.as_deref(), Some("家里电脑"));
+
+    store
+        .set_device_sync_device_alias("home-mac", None)
+        .unwrap();
+    assert_eq!(
+        store.list_device_sync_devices("office-mac").unwrap()[0].alias,
+        None
+    );
+}
+
+#[test]
+fn changing_sync_repository_clears_repository_scoped_state() {
+    let (_dir, store) = make_store();
+    store
+        .upsert_device_sync_device(&crate::core::device_sync::types::DeviceSyncDevice {
+            id: "old-device".to_string(),
+            name: "Old device".to_string(),
+            alias: None,
+            last_commit: None,
+            last_seen_at: 100,
+            is_current: false,
+        })
+        .unwrap();
+
+    store.clear_device_sync_repository_state().unwrap();
+
+    assert!(store
+        .list_device_sync_devices("current")
+        .unwrap()
+        .is_empty());
 }
 
 #[test]
@@ -120,6 +329,8 @@ fn settings_roundtrip_and_update() {
     assert_eq!(store.get_setting("k").unwrap().as_deref(), Some("v1"));
     store.set_setting("k", "v2").unwrap();
     assert_eq!(store.get_setting("k").unwrap().as_deref(), Some("v2"));
+    store.delete_setting("k").unwrap();
+    assert_eq!(store.get_setting("k").unwrap(), None);
 
     store.set_onboarding_completed(true).unwrap();
     assert_eq!(
@@ -137,6 +348,30 @@ fn settings_roundtrip_and_update() {
             .as_deref(),
         Some("false")
     );
+}
+
+#[test]
+fn central_repo_migration_metadata_is_atomic() {
+    let (_dir, store) = make_store();
+    let original = make_skill("one", "One", "/old/one", 1);
+    store.upsert_skill(&original).unwrap();
+
+    let err = store
+        .commit_central_repo_migration(
+            &[
+                ("one".to_string(), "/new/one".to_string(), 2),
+                ("missing".to_string(), "/new/missing".to_string(), 2),
+            ],
+            "/new",
+        )
+        .unwrap_err();
+
+    assert!(err.to_string().contains("skill not found"));
+    assert_eq!(
+        store.get_skill_by_id("one").unwrap().unwrap().central_path,
+        "/old/one"
+    );
+    assert_eq!(store.get_setting("central_repo_path").unwrap(), None);
 }
 
 #[test]
@@ -165,6 +400,43 @@ fn skills_upsert_list_get_delete() {
 
     store.delete_skill("a").unwrap();
     assert!(store.get_skill_by_id("a").unwrap().is_none());
+}
+
+#[test]
+fn adopting_remote_identity_preserves_targets_and_tags() {
+    let (_dir, store) = make_store();
+    store
+        .upsert_skill(&make_skill("local", "One", "/central/one", 1))
+        .unwrap();
+    let tag = store.create_tag("shared").unwrap();
+    store.set_skill_tags("local", &[tag.id]).unwrap();
+    store
+        .upsert_skill_target(&SkillTargetRecord {
+            id: "target".to_string(),
+            skill_id: "local".to_string(),
+            tool: "cursor".to_string(),
+            scope: "project".to_string(),
+            project_path: Some("/local/project".to_string()),
+            target_path: "/local/project/.cursor/skills/one".to_string(),
+            mode: "copy".to_string(),
+            status: "ok".to_string(),
+            last_error: None,
+            synced_at: None,
+        })
+        .unwrap();
+    store.adopt_skill_id("local", "remote").unwrap();
+    assert!(store.get_skill_by_id("local").unwrap().is_none());
+    assert_eq!(
+        store.get_skill_by_id("remote").unwrap().unwrap().name,
+        "One"
+    );
+    assert_eq!(store.get_skill_tags("remote").unwrap()[0].name, "shared");
+    assert_eq!(
+        store.list_skill_targets("remote").unwrap()[0]
+            .project_path
+            .as_deref(),
+        Some("/local/project")
+    );
 }
 
 #[test]
@@ -487,4 +759,61 @@ fn error_context_includes_db_path() {
     let err = store.ensure_schema().unwrap_err();
     let msg = format!("{:#}", err);
     assert!(msg.contains("failed to open db at"), "{msg}");
+}
+
+#[test]
+fn legacy_database_migration_scrubs_app_managed_source_and_backup_files() {
+    const SOURCE_SECRET: &str = "github_pat_UNIQUE_LEGACY_SOURCE_36e8c20a";
+    const BACKUP_SECRET: &str = "github_pat_UNIQUE_APP_BACKUP_52c7fd19";
+    let dir = tempfile::tempdir().unwrap();
+    let data_dir = dir.path().join("data");
+    let target = data_dir.join("com.skills-hub").join("skills_hub.db");
+    let legacy = data_dir.join("com.tauri.dev").join("skills_hub.db");
+    let backup = target.with_extension("bak-existing");
+    std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+
+    let legacy_store = SkillStore::new(legacy.clone());
+    legacy_store.ensure_schema().unwrap();
+    legacy_store
+        .set_setting("github_token", SOURCE_SECRET)
+        .unwrap();
+    let backup_store = SkillStore::new(backup.clone());
+    backup_store.ensure_schema().unwrap();
+    backup_store
+        .set_setting("github_token", BACKUP_SECRET)
+        .unwrap();
+    assert!(sqlite_visible_files_contain(
+        &legacy,
+        SOURCE_SECRET.as_bytes()
+    ));
+    assert!(sqlite_visible_files_contain(
+        &backup,
+        BACKUP_SECRET.as_bytes()
+    ));
+
+    super::migrate_legacy_db_if_needed_in_data_dir(&target, &data_dir).unwrap();
+
+    assert_eq!(legacy_store.get_setting("github_token").unwrap(), None);
+    assert_eq!(backup_store.get_setting("github_token").unwrap(), None);
+    let target_store = SkillStore::new(target.clone());
+    target_store.ensure_schema().unwrap();
+    let credentials = MemoryCredentialStore::default();
+    assert_eq!(
+        resolve_github_token(&target_store, &credentials)
+            .unwrap()
+            .as_deref(),
+        Some(SOURCE_SECRET)
+    );
+
+    for db_path in [&target, &legacy, &backup] {
+        assert!(
+            !sqlite_visible_files_contain(db_path, SOURCE_SECRET.as_bytes()),
+            "source secret remained in {db_path:?} or its SQLite sidecars"
+        );
+        assert!(
+            !sqlite_visible_files_contain(db_path, BACKUP_SECRET.as_bytes()),
+            "backup secret remained in {db_path:?} or its SQLite sidecars"
+        );
+    }
 }

@@ -17,6 +17,15 @@
       "allow": [
         {
           "url": "https://github.com/qufei1993/skills-hub"
+        },
+        {
+          "url": "https://github.com/login/device*"
+        },
+        {
+          "url": "https://gitlab.com/oauth/*"
+        },
+        {
+          "url": "https://gitee.com/oauth/*"
         }
       ]
     },

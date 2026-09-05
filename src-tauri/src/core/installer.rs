@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Context, Result};
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 use uuid::Uuid;
@@ -9,17 +11,16 @@ use uuid::Uuid;
 use super::cache_cleanup::get_git_cache_ttl_secs;
 use super::cancel_token::CancelToken;
 use super::central_repo::{ensure_central_repo, resolve_central_repo_path};
-use super::content_hash::hash_dir;
+use super::content_hash::{hash_dir, hash_dir_strict};
 use super::git_fetcher::{clone_or_pull, clone_or_pull_sparse};
 use super::github_download::{
     download_github_directory, parse_github_api_params, GithubDownloadOptions,
 };
+use super::github_token::{resolve_github_token, SystemGithubTokenStore};
 use super::network_proxy::get_github_proxy_url;
 use super::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
 use super::sync_engine::copy_dir_recursive;
-use super::sync_engine::sync_dir_copy_with_overwrite;
-use super::tool_adapters::adapter_by_key;
-use super::tool_adapters::is_tool_installed;
+use super::sync_engine::PreparedDirReplacement;
 
 pub struct InstallResult {
     pub skill_id: String,
@@ -174,12 +175,6 @@ pub fn install_git_skill<R: tauri::Runtime>(
     // Fast path: for subpath installs, prefer sparse git checkout.
     // The old GitHub Contents API path is much slower on large repos because it performs
     // one directory/file request at a time and can time out before we even attempt git.
-    let github_token = store.get_setting("github_token")?.unwrap_or_default();
-    let github_token_opt = if github_token.is_empty() {
-        None
-    } else {
-        Some(github_token.as_str())
-    };
     let github_proxy_url = get_github_proxy_url(store)?;
     let revision;
     if let Some((owner, repo, branch, subpath)) = parse_github_api_params(
@@ -222,6 +217,7 @@ pub fn install_git_skill<R: tauri::Runtime>(
                     "[installer] sparse git checkout failed, falling back to GitHub API download: {:#}",
                     err
                 );
+                let github_token = resolve_github_token(store, &SystemGithubTokenStore)?;
                 match download_github_directory(
                     &owner,
                     &repo,
@@ -230,7 +226,7 @@ pub fn install_git_skill<R: tauri::Runtime>(
                     &central_path,
                     GithubDownloadOptions {
                         cancel,
-                        token: github_token_opt,
+                        token: github_token.as_deref(),
                         proxy_url: &github_proxy_url,
                     },
                 ) {
@@ -693,6 +689,169 @@ pub struct UpdateResult {
     pub content_hash: Option<String>,
     pub source_revision: Option<String>,
     pub updated_targets: Vec<String>,
+    pub changed: bool,
+}
+
+#[derive(Debug)]
+pub(crate) struct UpdateFileLock(std::fs::File);
+
+impl UpdateFileLock {
+    fn acquire(central_parent: &Path) -> Result<Self> {
+        let lock_path = central_parent.join(".skills-hub-update.lock");
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .with_context(|| format!("open update lock {:?}", lock_path))?;
+        match file.try_lock_exclusive() {
+            Ok(()) => Ok(Self(file)),
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                anyhow::bail!("UPDATE_IN_PROGRESS|{}", central_parent.to_string_lossy())
+            }
+            Err(err) => Err(err).with_context(|| format!("lock update repository {:?}", lock_path)),
+        }
+    }
+}
+
+pub(crate) fn acquire_skill_update_lock<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    store: &SkillStore,
+) -> Result<UpdateFileLock> {
+    let central_root = resolve_central_repo_path(app, store)?;
+    UpdateFileLock::acquire(&central_root)
+}
+
+impl Drop for UpdateFileLock {
+    fn drop(&mut self) {
+        if let Err(err) = FileExt::unlock(&self.0) {
+            eprintln!("[update] failed to unlock update repository: {err}");
+        }
+    }
+}
+
+struct PreparedTargetUpdate {
+    originals: Vec<SkillTargetRecord>,
+    updated: Vec<SkillTargetRecord>,
+    replacement: PreparedDirReplacement,
+}
+
+#[cfg(test)]
+struct TestUpdateWrite {
+    skill_id: String,
+    target_index: usize,
+    relative_path: PathBuf,
+    content: Vec<u8>,
+}
+
+#[cfg(test)]
+static TEST_UPDATE_WRITE_AFTER_ACTIVATION: OnceLock<Mutex<Option<TestUpdateWrite>>> =
+    OnceLock::new();
+
+#[cfg(test)]
+fn inject_test_write_after_activation(skill_id: &str, index: usize, target: &Path) {
+    let hook = TEST_UPDATE_WRITE_AFTER_ACTIVATION.get_or_init(|| Mutex::new(None));
+    let mut hook = hook.lock().unwrap_or_else(|err| err.into_inner());
+    let should_run = hook
+        .as_ref()
+        .is_some_and(|write| write.skill_id == skill_id && write.target_index == index);
+    if should_run {
+        let write = hook.take().expect("test update write");
+        std::fs::write(target.join(write.relative_path), write.content).unwrap();
+    }
+}
+
+#[cfg(not(test))]
+fn inject_test_write_after_activation(_skill_id: &str, _index: usize, _target: &Path) {}
+
+fn physical_target_key(path: &Path) -> PathBuf {
+    let normalized = if std::fs::symlink_metadata(path)
+        .map(|metadata| !metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        if let Ok(canonical) = std::fs::canonicalize(path) {
+            canonical
+        } else {
+            path.to_path_buf()
+        }
+    } else if let Some(file_name) = path.file_name() {
+        path.parent()
+            .and_then(|parent| std::fs::canonicalize(parent).ok())
+            .map(|parent| parent.join(file_name))
+            .unwrap_or_else(|| path.to_path_buf())
+    } else {
+        path.to_path_buf()
+    };
+    #[cfg(windows)]
+    {
+        PathBuf::from(normalized.to_string_lossy().to_lowercase())
+    }
+    #[cfg(not(windows))]
+    {
+        normalized
+    }
+}
+
+struct RollbackFailure {
+    detail: String,
+    user_message: Option<String>,
+}
+
+fn rollback_prepared_update(
+    central: &mut PreparedDirReplacement,
+    targets: &mut [PreparedTargetUpdate],
+) -> Option<RollbackFailure> {
+    let mut errors = Vec::new();
+    let mut user_message = None;
+    for target in targets.iter_mut().rev() {
+        if let Err(err) = target.replacement.rollback() {
+            let raw = format!("{err:#}");
+            if raw.starts_with("ROLLBACK_CONFLICT|") && user_message.is_none() {
+                user_message = Some(raw.clone());
+            }
+            errors.push(format!(
+                "rollback {:?}: {raw}",
+                target
+                    .updated
+                    .first()
+                    .map(|record| record.target_path.as_str())
+                    .unwrap_or("unknown target")
+            ));
+        }
+    }
+    if let Err(err) = central.rollback() {
+        let raw = format!("{err:#}");
+        if raw.starts_with("ROLLBACK_CONFLICT|") && user_message.is_none() {
+            user_message = Some(raw.clone());
+        }
+        errors.push(format!("rollback central Skill: {raw}"));
+    }
+    if errors.is_empty() {
+        None
+    } else {
+        Some(RollbackFailure {
+            detail: errors.join("; "),
+            user_message,
+        })
+    }
+}
+
+fn record_rollback_failure_for_targets(
+    store: &SkillStore,
+    targets: &[PreparedTargetUpdate],
+    failure: &str,
+) {
+    for target in targets {
+        for original in &target.originals {
+            if let Err(err) = record_target_sync_failure(store, original, failure) {
+                eprintln!(
+                    "[update] failed to persist rollback conflict for {:?}: {err:#}",
+                    original.target_path
+                );
+            }
+        }
+    }
 }
 
 pub fn update_managed_skill_from_source<R: tauri::Runtime>(
@@ -700,9 +859,22 @@ pub fn update_managed_skill_from_source<R: tauri::Runtime>(
     store: &SkillStore,
     skill_id: &str,
 ) -> Result<UpdateResult> {
+    let _update_lock = acquire_skill_update_lock(app, store)?;
+    update_managed_skill_from_source_with_lock_held(app, store, skill_id)
+}
+
+pub(crate) fn update_managed_skill_from_source_with_lock_held<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    store: &SkillStore,
+    skill_id: &str,
+) -> Result<UpdateResult> {
     let mut source_updated = false;
     let result = update_managed_skill_from_source_inner(app, store, skill_id, &mut source_updated);
-    if result.is_err() && !source_updated {
+    let update_in_progress = result
+        .as_ref()
+        .err()
+        .is_some_and(|err| err.to_string().starts_with("UPDATE_IN_PROGRESS|"));
+    if result.is_err() && !source_updated && !update_in_progress {
         if let Ok(Some(mut skill)) = store.get_skill_by_id(skill_id) {
             skill.status = "error".to_string();
             if let Err(err) = store.upsert_skill(&skill) {
@@ -731,6 +903,10 @@ fn update_managed_skill_from_source_inner<R: tauri::Runtime>(
         .parent()
         .ok_or_else(|| anyhow::anyhow!("invalid central path"))?
         .to_path_buf();
+    let previous_content_hash = hash_dir(&central_path)
+        .with_context(|| format!("hash current central Skill {:?}", central_path))?;
+    let previous_strict_hash = hash_dir_strict(&central_path)
+        .with_context(|| format!("strictly hash current central Skill {:?}", central_path))?;
 
     let now = now_ms();
 
@@ -741,6 +917,7 @@ fn update_managed_skill_from_source_inner<R: tauri::Runtime>(
     }
 
     let mut new_revision: Option<String> = None;
+    let mut resolved_source_subpath = record.source_subpath.clone();
 
     if record.source_type == "git" {
         let repo_url = record
@@ -797,12 +974,9 @@ fn update_managed_skill_from_source_inner<R: tauri::Runtime>(
                 }
             }) {
                 resolved_subpath = Some(matched.1.clone());
-                // Backfill source_subpath for future updates
-                let mut patched = record.clone();
-                patched.source_subpath = Some(matched.1.clone());
-                let _ = store.upsert_skill(&patched);
             }
         }
+        resolved_source_subpath = resolved_subpath.clone();
         let copy_src = if let Some(subpath) = &resolved_subpath {
             repo_dir.join(subpath)
         } else {
@@ -812,8 +986,12 @@ fn update_managed_skill_from_source_inner<R: tauri::Runtime>(
             anyhow::bail!("path not found in repo: {:?}", copy_src);
         }
 
-        copy_dir_recursive(&copy_src, &staging_dir)
-            .with_context(|| format!("copy {:?} -> {:?}", copy_src, staging_dir))?;
+        if let Err(err) = copy_dir_recursive(&copy_src, &staging_dir)
+            .with_context(|| format!("copy {:?} -> {:?}", copy_src, staging_dir))
+        {
+            let _ = std::fs::remove_dir_all(&staging_dir);
+            return Err(err);
+        }
     } else if record.source_type == "local" {
         let source = record
             .source_ref
@@ -823,37 +1001,39 @@ fn update_managed_skill_from_source_inner<R: tauri::Runtime>(
         if !source_path.exists() {
             anyhow::bail!("source path not found: {:?}", source_path);
         }
-        copy_dir_recursive(&source_path, &staging_dir)
-            .with_context(|| format!("copy {:?} -> {:?}", source_path, staging_dir))?;
+        if let Err(err) = copy_dir_recursive(&source_path, &staging_dir)
+            .with_context(|| format!("copy {:?} -> {:?}", source_path, staging_dir))
+        {
+            let _ = std::fs::remove_dir_all(&staging_dir);
+            return Err(err);
+        }
     } else {
         anyhow::bail!("unsupported source_type for update: {}", record.source_type);
     }
 
-    // Swap: remove old dir and rename staging into place (best effort).
-    std::fs::remove_dir_all(&central_path)
-        .with_context(|| format!("failed to remove old central dir {:?}", central_path))?;
-    if let Err(err) = std::fs::rename(&staging_dir, &central_path) {
-        // Fallback for cross-device rename: copy then delete staging.
-        copy_dir_recursive(&staging_dir, &central_path)
-            .with_context(|| format!("fallback copy {:?} -> {:?}", staging_dir, central_path))?;
-        let _ = std::fs::remove_dir_all(&staging_dir);
-        // Still surface original rename error in logs for troubleshooting.
-        eprintln!("[update] rename warning: {}", err);
-    }
-
-    let content_hash = compute_content_hash(&central_path);
-    let description = parse_skill_md(&central_path.join("SKILL.md"))
+    let next_content_hash = match hash_dir(&staging_dir)
+        .with_context(|| format!("hash staged central Skill {:?}", staging_dir))
+    {
+        Ok(hash) => hash,
+        Err(err) => {
+            let _ = std::fs::remove_dir_all(&staging_dir);
+            return Err(err);
+        }
+    };
+    let changed = previous_content_hash != next_content_hash;
+    let description = parse_skill_md(&staging_dir.join("SKILL.md"))
         .and_then(|(_, desc)| desc)
         .or(record.description.clone());
 
-    // Update DB skill row.
+    let content_hash = Some(next_content_hash);
+
     let updated = SkillRecord {
         id: record.id.clone(),
         name: record.name.clone(),
         description,
         source_type: record.source_type.clone(),
         source_ref: record.source_ref.clone(),
-        source_subpath: record.source_subpath.clone(),
+        source_subpath: resolved_source_subpath,
         source_revision: new_revision.clone().or(record.source_revision.clone()),
         central_path: record.central_path.clone(),
         content_hash: content_hash.clone(),
@@ -864,50 +1044,177 @@ fn update_managed_skill_from_source_inner<R: tauri::Runtime>(
         enabled: record.enabled,
         status: "ok".to_string(),
     };
-    store.upsert_skill(&updated)?;
+
+    if !changed {
+        std::fs::remove_dir_all(&staging_dir)
+            .with_context(|| format!("remove unchanged staged Skill {:?}", staging_dir))?;
+        store.upsert_skill(&updated)?;
+        *source_updated = true;
+        return Ok(UpdateResult {
+            skill_id: record.id,
+            name: record.name,
+            central_path,
+            content_hash,
+            source_revision: new_revision,
+            updated_targets: Vec::new(),
+            changed: false,
+        });
+    }
+
     *source_updated = true;
 
-    // If any targets are "copy", re-sync them so changes propagate. Symlinks update automatically.
-    // Cursor 目前不支持软链/junction，因此无论历史 mode 如何，都需要强制 copy 回灌。
+    // Prepare every copied target before changing the central Skill. This makes the update
+    // transactional across the central repository and all managed copies.
+    let mut central_replacement = PreparedDirReplacement::from_staging(
+        staging_dir.clone(),
+        central_path.clone(),
+        Some(previous_strict_hash.clone()),
+        false,
+    )?;
     let targets = store.list_skill_targets(skill_id)?;
     let mut updated_targets: Vec<String> = Vec::new();
+    let mut prepared_targets: Vec<PreparedTargetUpdate> = Vec::new();
+    let mut grouped_targets: BTreeMap<PathBuf, Vec<SkillTargetRecord>> = BTreeMap::new();
     for t in targets {
         if t.status == "disabled" {
             continue;
         }
-        // Project scoped targets live under a project root and do not require global tool install detection.
-        if t.scope == "global" {
-            if let Some(adapter) = adapter_by_key(&t.tool) {
-                if !is_tool_installed(&adapter).unwrap_or(false) {
-                    continue;
-                }
-            }
-        }
         let force_copy = t.mode == "copy" || t.tool == "cursor";
         if force_copy {
-            let target_path = PathBuf::from(&t.target_path);
-            let sync_res = match sync_dir_copy_with_overwrite(&central_path, &target_path, true) {
-                Ok(result) => result,
-                Err(err) => {
-                    record_target_sync_failure(store, &t, &format!("{err:#}"))?;
-                    return Err(err);
+            let key = physical_target_key(Path::new(&t.target_path));
+            grouped_targets.entry(key).or_default().push(t);
+        }
+    }
+    for originals in grouped_targets.into_values() {
+        let target_path = PathBuf::from(&originals[0].target_path);
+        let replacement = match PreparedDirReplacement::prepare_copy(
+            &staging_dir,
+            &target_path,
+            Some(previous_strict_hash.clone()),
+            true,
+        ) {
+            Ok(result) => result,
+            Err(err) => {
+                let failure = format!("{err:#}");
+                for target in &originals {
+                    record_target_sync_failure(store, target, &failure)?;
                 }
-            };
-            let record = super::skill_store::SkillTargetRecord {
-                id: t.id.clone(),
-                skill_id: t.skill_id.clone(),
-                tool: t.tool.clone(),
-                scope: t.scope.clone(),
-                project_path: t.project_path.clone(),
-                target_path: sync_res.target_path.to_string_lossy().to_string(),
+                return Err(err);
+            }
+        };
+        let updated = originals
+            .iter()
+            .map(|target| SkillTargetRecord {
+                id: target.id.clone(),
+                skill_id: target.skill_id.clone(),
+                tool: target.tool.clone(),
+                scope: target.scope.clone(),
+                project_path: target.project_path.clone(),
+                target_path: target.target_path.clone(),
                 mode: "copy".to_string(),
                 status: "ok".to_string(),
                 last_error: None,
                 synced_at: Some(now),
-            };
-            store.upsert_skill_target(&record)?;
-            updated_targets.push(t.tool.clone());
+            })
+            .collect();
+        updated_targets.extend(originals.iter().map(|target| target.tool.clone()));
+        prepared_targets.push(PreparedTargetUpdate {
+            originals,
+            updated,
+            replacement,
+        });
+    }
+
+    if let Err(err) = central_replacement.activate() {
+        if err.to_string().starts_with("TARGET_MODIFIED|") {
+            anyhow::bail!("CENTRAL_MODIFIED|{}", central_path.to_string_lossy());
         }
+        return Err(err);
+    }
+
+    for index in 0..prepared_targets.len() {
+        if let Err(err) = prepared_targets[index].replacement.activate() {
+            let failure = format!("{err:#}");
+            let failed_targets = prepared_targets[index].originals.clone();
+            if let Some(rollback_failure) =
+                rollback_prepared_update(&mut central_replacement, &mut prepared_targets)
+            {
+                let user_error = rollback_failure.user_message.unwrap_or_else(|| {
+                    format!("{failure}; rollback failed: {}", rollback_failure.detail)
+                });
+                record_rollback_failure_for_targets(store, &prepared_targets, &user_error);
+                for target in &failed_targets {
+                    let _ = record_target_sync_failure(store, target, &failure);
+                }
+                anyhow::bail!(user_error);
+            }
+            for target in &failed_targets {
+                record_target_sync_failure(store, target, &failure)?;
+            }
+            return Err(err);
+        }
+        if let Some(target) = prepared_targets[index].updated.first() {
+            inject_test_write_after_activation(skill_id, index, Path::new(&target.target_path));
+        }
+    }
+
+    let verification = central_replacement.verify_backup_unchanged().and_then(|_| {
+        for target in &prepared_targets {
+            target.replacement.verify_backup_unchanged()?;
+        }
+        Ok(())
+    });
+    if let Err(err) = verification {
+        let failure = format!("{err:#}");
+        let failed_targets = prepared_targets
+            .iter()
+            .find(|target| {
+                target
+                    .updated
+                    .iter()
+                    .any(|record| failure.contains(&record.target_path))
+            })
+            .map(|target| target.originals.clone())
+            .unwrap_or_default();
+        if let Some(rollback_failure) =
+            rollback_prepared_update(&mut central_replacement, &mut prepared_targets)
+        {
+            let user_error = rollback_failure.user_message.unwrap_or_else(|| {
+                format!("{failure}; rollback failed: {}", rollback_failure.detail)
+            });
+            record_rollback_failure_for_targets(store, &prepared_targets, &user_error);
+            for target in &failed_targets {
+                let _ = record_target_sync_failure(store, target, &failure);
+            }
+            anyhow::bail!(user_error);
+        }
+        for target in &failed_targets {
+            record_target_sync_failure(store, target, &failure)?;
+        }
+        return Err(err);
+    }
+
+    let target_records: Vec<_> = prepared_targets
+        .iter()
+        .flat_map(|target| target.updated.iter().cloned())
+        .collect();
+    if let Err(err) = store.commit_skill_update(&updated, &target_records) {
+        let failure = format!("commit update metadata: {err:#}");
+        if let Some(rollback_failure) =
+            rollback_prepared_update(&mut central_replacement, &mut prepared_targets)
+        {
+            let user_error = rollback_failure.user_message.unwrap_or_else(|| {
+                format!("{failure}; rollback failed: {}", rollback_failure.detail)
+            });
+            record_rollback_failure_for_targets(store, &prepared_targets, &user_error);
+            anyhow::bail!(user_error);
+        }
+        return Err(err).context("commit update metadata");
+    }
+
+    central_replacement.commit();
+    for target in &mut prepared_targets {
+        target.replacement.commit();
     }
 
     Ok(UpdateResult {
@@ -917,6 +1224,7 @@ fn update_managed_skill_from_source_inner<R: tauri::Runtime>(
         content_hash,
         source_revision: new_revision,
         updated_targets,
+        changed: true,
     })
 }
 

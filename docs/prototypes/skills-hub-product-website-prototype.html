@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Skills Hub 产品官网交互原型" />
+  <title>Skills Hub — Install once. Sync everywhere.</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;family=Noto+Sans+SC:wght@400;500;600;700&amp;display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --fog: #f6f7f9;
+      --paper: #ffffff;
+      --paper-soft: #f0f2f5;
+      --ink: #15171a;
+      --ink-2: #626872;
+      --ink-3: #949aa4;
+      --line: #dde1e7;
+      --line-2: #c9cfd8;
+      --blue: #2f6fed;
+      --blue-deep: #245bc8;
+      --blue-soft: #edf4ff;
+      --green: #07845f;
+      --green-soft: #e9f8f2;
+      --amber: #b86508;
+      --amber-soft: #fff4e5;
+      --display: "Bricolage Grotesque", "Noto Sans SC", sans-serif;
+      --sans: "Noto Sans SC", system-ui, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+      --content: 1180px;
+      --shadow: 0 24px 80px rgba(27, 37, 58, .12);
+      --shadow-soft: 0 12px 38px rgba(27, 37, 58, .08);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; min-width: 320px; color: var(--ink); background: var(--fog); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    a { color: inherit; text-decoration: none; }
+    img { display: block; max-width: 100%; }
+    [hidden] { display: none !important; }
+    :focus-visible { outline: 3px solid rgba(47,111,237,.3); outline-offset: 2px; }
+
+    .site { min-height: 100vh; display: flex; flex-direction: column; }
+    .content { width: min(var(--content), calc(100% - 40px)); margin: 0 auto; }
+    .mono { font-family: var(--mono); }
+    .eyebrow { color: var(--blue); font: 600 11px/1 var(--mono); letter-spacing: .11em; text-transform: uppercase; }
+
+    .site-header { position: sticky; top: 0; z-index: 40; height: 68px; border-bottom: 1px solid rgba(221,225,231,.9); background: rgba(246,247,249,.88); backdrop-filter: blur(18px); }
+    .header-inner { height: 100%; display: flex; align-items: center; gap: 28px; }
+    .brand { display: inline-flex; align-items: center; gap: 10px; padding: 0; border: 0; background: transparent; }
+    .brand img { width: 32px; height: 32px; border-radius: 8px; }
+    .brand strong { font-family: var(--display); font-size: 18px; letter-spacing: -.025em; }
+    .brand span { padding: 4px 6px; border: 1px solid #cadbfd; border-radius: 999px; background: var(--blue-soft); color: var(--blue); font: 600 9px/1 var(--mono); letter-spacing: .08em; }
+    .nav { margin-left: auto; display: flex; align-items: center; gap: 3px; }
+    .nav button { min-height: 38px; padding: 0 13px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font-size: 13px; font-weight: 500; }
+    .nav button:hover { color: var(--ink); background: var(--paper-soft); }
+    .nav button.active { color: var(--blue); background: var(--blue-soft); }
+    .header-actions { display: flex; gap: 8px; }
+
+    .btn { min-height: 40px; padding: 0 16px; border: 1px solid var(--line-2); border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: var(--paper); color: var(--ink); font-size: 13px; font-weight: 600; transition: 150ms ease; }
+    .btn:hover { transform: translateY(-1px); border-color: #aab2be; }
+    .btn-primary { color: white; background: var(--blue); border-color: var(--blue); }
+    .btn-primary:hover { background: var(--blue-deep); border-color: var(--blue-deep); }
+    .btn-dark { color: white; background: var(--ink); border-color: var(--ink); }
+    .btn-quiet { color: var(--ink-2); border-color: transparent; background: transparent; }
+    .btn-large { min-height: 50px; padding: 0 21px; border-radius: 10px; font-size: 14px; }
+    .btn-small { min-height: 33px; padding: 0 11px; font-size: 11px; }
+    .btn-full { width: 100%; }
+    .os-icon { width: 18px; height: 18px; display: grid; place-items: center; font: 600 11px var(--mono); }
+
+    .page { display: none; min-height: calc(100vh - 68px); }
+    .page.active { display: block; animation: page-in 240ms ease both; }
+    @keyframes page-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+
+    /* Home */
+    .hero { position: relative; overflow: hidden; padding: 82px 0 60px; }
+    .hero::before { content: ""; position: absolute; left: 50%; top: -520px; width: 920px; height: 920px; border: 1px solid #dce6f8; border-radius: 50%; transform: translateX(-50%); pointer-events: none; }
+    .hero-copy { position: relative; z-index: 1; max-width: 790px; margin: 0 auto; text-align: center; }
+    .hero h1 { margin: 17px 0 19px; font-family: var(--display); font-size: clamp(49px, 7.1vw, 82px); line-height: .98; letter-spacing: -.055em; }
+    .hero h1 span { color: var(--blue); }
+    .hero-copy > p { max-width: 670px; margin: 0 auto; color: var(--ink-2); font-size: 18px; line-height: 1.75; }
+    .hero-actions { display: flex; justify-content: center; gap: 10px; margin-top: 28px; }
+    .hero-note { margin-top: 13px; color: var(--ink-3); font-size: 11px; }
+
+    .product-stage { position: relative; margin-top: 63px; min-height: 620px; }
+    .sync-rail { position: absolute; inset: 48px 0 auto; height: 310px; pointer-events: none; }
+    .rail-line { position: absolute; top: 134px; left: 3%; right: 3%; height: 1px; background: var(--line-2); }
+    .rail-pulse { position: absolute; top: 133px; left: 3%; width: 77%; height: 3px; background: var(--blue); transform-origin: left; animation: sync-pass 3.6s ease-in-out infinite; }
+    @keyframes sync-pass { 0%,12% { transform: scaleX(.05); opacity: .2; } 65%,100% { transform: scaleX(1); opacity: 1; } }
+    .tool-node { position: absolute; top: 105px; width: 58px; text-align: center; }
+    .tool-node.source-node { left: 1%; }
+    .tool-node.claude-node { right: 14%; }
+    .tool-node.cursor-node { right: 1%; }
+    .tool-badge { width: 58px; height: 58px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); box-shadow: var(--shadow-soft); font: 700 13px var(--display); }
+    .tool-node span { display: block; margin-top: 8px; color: var(--ink-2); font: 500 10px var(--mono); }
+
+    .app-window { position: relative; z-index: 3; width: min(920px, calc(100% - 150px)); margin: 0 auto; overflow: hidden; border: 1px solid var(--line-2); border-radius: 17px; background: var(--paper); box-shadow: var(--shadow); }
+    .window-bar { height: 48px; padding: 0 15px; display: flex; align-items: center; border-bottom: 1px solid var(--line); background: #fafbfc; }
+    .traffic { display: flex; gap: 6px; }
+    .traffic i { width: 9px; height: 9px; border-radius: 50%; background: #d6dae0; }
+    .window-title { margin: 0 auto; transform: translateX(-26px); color: var(--ink-2); font: 500 11px var(--mono); }
+    .app-body { display: grid; grid-template-columns: 195px 1fr; min-height: 485px; }
+    .app-sidebar { padding: 17px 11px; border-right: 1px solid var(--line); background: #fafbfc; }
+    .app-brand { padding: 5px 9px 18px; display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 13px; }
+    .app-brand img { width: 24px; height: 24px; border-radius: 6px; }
+    .side-section { margin: 11px 9px 7px; color: var(--ink-3); font: 600 8px var(--mono); letter-spacing: .09em; }
+    .side-link { padding: 9px 10px; border-radius: 7px; display: flex; justify-content: space-between; color: var(--ink-2); font-size: 11px; }
+    .side-link.active { color: var(--blue); background: var(--blue-soft); font-weight: 600; }
+    .side-link em { font-style: normal; color: var(--ink-3); }
+    .app-main { padding: 24px 27px; min-width: 0; }
+    .app-head { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 18px; }
+    .app-head h2 { margin: 0; font-size: 17px; }
+    .app-head span { color: var(--ink-2); font-size: 10px; }
+    .skill-table { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+    .skill-item { display: grid; grid-template-columns: minmax(170px, 1fr) 110px 175px; align-items: center; min-height: 62px; padding: 0 15px; border-bottom: 1px solid var(--line); transition: 150ms ease; }
+    .skill-item:last-child { border-bottom: 0; }
+    .skill-item.active { background: var(--blue-soft); }
+    .skill-name { display: flex; gap: 10px; align-items: center; min-width: 0; }
+    .skill-glyph { flex: 0 0 auto; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; background: var(--paper-soft); color: var(--ink-2); font: 600 10px var(--mono); }
+    .active .skill-glyph { background: var(--blue); color: white; }
+    .skill-name strong { display: block; font: 600 11px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .skill-name span { display: block; margin-top: 3px; color: var(--ink-3); font-size: 9px; }
+    .source { color: var(--ink-2); font-size: 10px; }
+    .targets { display: flex; justify-content: flex-end; gap: 5px; }
+    .target { min-width: 45px; padding: 5px 6px; border-radius: 5px; background: var(--paper-soft); color: var(--ink-2); text-align: center; font: 500 8px var(--mono); }
+    .target.on { background: var(--green-soft); color: var(--green); }
+    .sync-result { display: flex; justify-content: space-between; gap: 20px; align-items: center; margin-top: 15px; padding: 13px 15px; border: 1px solid #c8e9dd; border-radius: 9px; background: var(--green-soft); color: #326f5d; font-size: 11px; }
+    .sync-result b { color: var(--green); }
+
+    .trust-bar { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--paper); }
+    .trust-inner { min-height: 76px; display: grid; grid-template-columns: 1.3fr repeat(4,1fr); align-items: center; }
+    .trust-inner > div { height: 100%; padding: 0 22px; border-right: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--ink-2); font-size: 12px; text-align: center; }
+    .trust-inner > div:first-child { justify-content: flex-start; color: var(--ink); font-weight: 600; }
+    .trust-inner > div:last-child { border-right: 0; }
+
+    .section { padding: 90px 0; }
+    .section-head { display: flex; align-items: end; justify-content: space-between; gap: 35px; margin-bottom: 34px; }
+    .section-title { margin: 10px 0 0; font-family: var(--display); font-size: 38px; line-height: 1.08; letter-spacing: -.04em; }
+    .section-lead { max-width: 520px; margin: 0; color: var(--ink-2); line-height: 1.7; font-size: 14px; }
+    .feature-grid { display: grid; grid-template-columns: repeat(3,1fr); border: 1px solid var(--line); border-radius: 15px; overflow: hidden; background: var(--line); gap: 1px; }
+    .feature { min-height: 270px; padding: 28px; background: var(--paper); }
+    .feature-mark { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 10px; color: var(--blue); font: 600 12px var(--mono); }
+    .feature h3 { margin: 52px 0 10px; font-size: 18px; }
+    .feature p { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.7; }
+
+    .steps { display: grid; grid-template-columns: repeat(3,1fr); position: relative; }
+    .steps::before { content: ""; position: absolute; left: 9%; right: 9%; top: 27px; height: 1px; background: var(--line-2); }
+    .step { position: relative; padding: 0 38px; text-align: center; }
+    .step-num { position: relative; z-index: 1; width: 55px; height: 55px; margin: 0 auto 21px; display: grid; place-items: center; border: 1px solid var(--line-2); border-radius: 50%; background: var(--fog); color: var(--blue); font: 600 11px var(--mono); }
+    .step h3 { margin: 0 0 8px; font-size: 17px; }
+    .step p { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.65; }
+
+    .collection-preview { padding: 90px 0; background: var(--ink); color: white; }
+    .collection-preview .eyebrow { color: #8eb3ff; }
+    .collection-preview .section-lead { color: #aeb5c0; }
+    .collection-grid { display: grid; grid-template-columns: 1.2fr .8fr .8fr; gap: 14px; }
+    .collection-card { min-height: 320px; padding: 24px; border: 1px solid #343841; border-radius: 14px; display: flex; flex-direction: column; background: #1b1e23; color: white; text-align: left; transition: 160ms ease; }
+    .collection-card:hover { transform: translateY(-3px); border-color: #4e5664; }
+    .collection-card.featured { background: var(--blue); border-color: var(--blue); }
+    .card-meta { display: flex; gap: 7px; }
+    .card-tag { padding: 5px 7px; border-radius: 5px; background: rgba(255,255,255,.09); color: #c2c8d3; font: 600 9px var(--mono); }
+    .featured .card-tag { color: white; background: rgba(255,255,255,.14); }
+    .collection-card h3 { margin: 27px 0 10px; font-family: var(--display); font-size: 24px; line-height: 1.15; letter-spacing: -.025em; }
+    .collection-card p { margin: 0; color: #aeb5c0; font-size: 13px; line-height: 1.65; }
+    .featured p { color: #dbe7ff; }
+    .card-bottom { margin-top: auto; display: flex; justify-content: space-between; align-items: center; padding-top: 25px; color: #aeb5c0; font-size: 11px; }
+    .featured .card-bottom { color: white; }
+    .creator { display: flex; align-items: center; gap: 7px; }
+    .creator i { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 50%; background: white; color: var(--blue); font: 700 9px var(--mono); font-style: normal; }
+
+    .bottom-cta { padding: 104px 0; text-align: center; }
+    .bottom-cta h2 { max-width: 750px; margin: 0 auto 17px; font-family: var(--display); font-size: 52px; line-height: 1.03; letter-spacing: -.05em; }
+    .bottom-cta p { max-width: 580px; margin: 0 auto 25px; color: var(--ink-2); line-height: 1.7; }
+
+    /* Collections */
+    .catalog-hero { padding: 70px 0 42px; border-bottom: 1px solid var(--line); }
+    .catalog-hero h1, .download-hero h1 { margin: 15px 0 14px; font-family: var(--display); font-size: 58px; letter-spacing: -.05em; }
+    .catalog-hero p, .download-hero p { max-width: 630px; margin: 0; color: var(--ink-2); line-height: 1.75; }
+    .catalog-tools { padding: 24px 0; display: flex; gap: 12px; align-items: center; border-bottom: 1px solid var(--line); }
+    .search { flex: 1; min-height: 42px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); }
+    .search:focus { border-color: var(--blue); outline: 3px solid rgba(47,111,237,.12); }
+    .filter { min-height: 42px; padding: 0 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink-2); }
+    .catalog-grid { padding: 34px 0 90px; display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; }
+    .catalog-card { min-height: 295px; padding: 22px; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 13px; background: var(--paper); text-align: left; transition: 160ms ease; }
+    .catalog-card:hover { transform: translateY(-2px); border-color: #b8c2d1; box-shadow: var(--shadow-soft); }
+    .catalog-cover { height: 92px; padding: 15px; border-radius: 9px; background: var(--ink); color: white; display: flex; justify-content: space-between; align-items: end; overflow: hidden; }
+    .catalog-cover code { color: #acb4c0; font: 500 9px var(--mono); }
+    .catalog-cover strong { font: 700 23px var(--display); }
+    .cover-blue { background: var(--blue); }
+    .cover-white { color: var(--ink); border: 1px solid var(--line); background: #f9fafb; }
+    .cover-white code { color: var(--ink-3); }
+    .catalog-card h3 { margin: 20px 0 8px; font-size: 18px; }
+    .catalog-card > p { margin: 0; color: var(--ink-2); font-size: 12px; line-height: 1.65; }
+    .catalog-bottom { margin-top: auto; padding-top: 20px; display: flex; justify-content: space-between; color: var(--ink-3); font-size: 10px; }
+    .empty { grid-column: 1 / -1; padding: 70px 20px; text-align: center; color: var(--ink-2); }
+
+    /* Collection detail */
+    .detail { padding: 42px 0 90px; }
+    .back { padding: 8px 0; border: 0; background: transparent; color: var(--ink-2); font-size: 12px; }
+    .detail-grid { margin-top: 24px; display: grid; grid-template-columns: minmax(0,1fr) 342px; gap: 62px; align-items: start; }
+    .detail-main h1 { margin: 17px 0 14px; font-family: var(--display); font-size: 57px; line-height: 1.03; letter-spacing: -.05em; }
+    .detail-lead { margin: 0; color: var(--ink-2); font-size: 17px; line-height: 1.75; }
+    .proofs { display: flex; flex-wrap: wrap; gap: 8px; margin: 26px 0 40px; }
+    .proofs span { padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink-2); font-size: 11px; }
+    .detail-block { padding: 29px 0; border-top: 1px solid var(--line); }
+    .detail-block h2 { margin: 0 0 16px; font-size: 22px; }
+    .detail-block > p { margin: 0; color: var(--ink-2); line-height: 1.75; }
+    .skill-list { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+    .detail-skill { padding: 14px 15px; display: grid; grid-template-columns: 185px 1fr auto; gap: 15px; align-items: center; border-bottom: 1px solid var(--line); background: var(--paper); }
+    .detail-skill:last-child { border-bottom: 0; }
+    .detail-skill code { font: 600 11px var(--mono); }
+    .detail-skill span { color: var(--ink-2); font-size: 11px; }
+    .detail-skill em { color: var(--green); font-size: 10px; font-style: normal; }
+    .install-card { position: sticky; top: 94px; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); }
+    .install-cover { min-height: 165px; padding: 22px; background: var(--blue); color: white; display: flex; flex-direction: column; justify-content: space-between; }
+    .install-cover span { font: 500 9px var(--mono); opacity: .8; }
+    .install-cover strong { max-width: 240px; font: 700 25px/1.1 var(--display); }
+    .install-body { padding: 20px; }
+    .install-body p { margin: 0 0 16px; color: var(--ink-2); font-size: 12px; line-height: 1.6; }
+    .install-facts { display: grid; grid-template-columns: repeat(3,1fr); margin-top: 17px; border-top: 1px solid var(--line); }
+    .install-facts div { padding-top: 14px; text-align: center; }
+    .install-facts strong { display: block; font-size: 15px; }
+    .install-facts span { color: var(--ink-3); font: 500 8px var(--mono); }
+
+    /* Download */
+    .download-hero { padding: 74px 0 38px; text-align: center; }
+    .download-hero p { margin: 0 auto; }
+    .download-grid { padding: 30px 0 90px; display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; }
+    .download-card { min-height: 310px; padding: 25px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); display: flex; flex-direction: column; }
+    .download-card.recommended { border-color: #b9d0fb; box-shadow: 0 0 0 3px rgba(47,111,237,.06); }
+    .platform-head { display: flex; justify-content: space-between; align-items: start; }
+    .platform-icon { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 11px; background: var(--paper-soft); font: 700 15px var(--mono); }
+    .recommended-label { padding: 5px 7px; border-radius: 5px; color: var(--blue); background: var(--blue-soft); font: 600 9px var(--mono); }
+    .download-card h2 { margin: 24px 0 7px; font-size: 21px; }
+    .download-card > p { margin: 0; color: var(--ink-2); font-size: 12px; line-height: 1.6; }
+    .version { margin: auto 0 13px; padding-top: 25px; color: var(--ink-3); font: 500 9px var(--mono); }
+    .release-info { margin-bottom: 90px; padding: 25px; display: grid; grid-template-columns: 1fr auto; gap: 30px; align-items: center; border: 1px solid var(--line); border-radius: 13px; background: var(--paper); }
+    .release-info h3 { margin: 0 0 6px; font-size: 16px; }
+    .release-info p { margin: 0; color: var(--ink-2); font-size: 12px; }
+
+    /* Modal */
+    .overlay { position: fixed; inset: 0; z-index: 90; padding: 20px; display: grid; place-items: center; background: rgba(18,21,27,.58); backdrop-filter: blur(5px); }
+    .modal { width: min(610px,100%); max-height: calc(100vh - 40px); overflow: auto; border-radius: 16px; background: var(--paper); box-shadow: var(--shadow); }
+    .modal-head { padding: 22px 23px 18px; display: flex; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); }
+    .modal-head h2 { margin: 0; font-size: 20px; }
+    .modal-head p { margin: 6px 0 0; color: var(--ink-2); font-size: 12px; }
+    .close { flex: 0 0 auto; width: 32px; height: 32px; border: 0; border-radius: 7px; background: var(--paper-soft); color: var(--ink-2); }
+    .modal-body { padding: 23px; }
+    .handoff { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 9px; align-items: center; text-align: center; }
+    .handoff-item { min-height: 100px; padding: 13px 8px; border: 1px solid var(--line); border-radius: 9px; background: #fafbfc; display: grid; place-items: center; align-content: center; gap: 7px; }
+    .handoff-item img { width: 31px; height: 31px; border-radius: 7px; }
+    .handoff-item strong { font-size: 11px; }
+    .handoff-item span { color: var(--ink-3); font: 500 8px var(--mono); }
+    .handoff-arrow { color: var(--ink-3); }
+    .notice { margin: 18px 0; padding: 13px; border-radius: 8px; background: var(--blue-soft); color: #456494; font-size: 11px; line-height: 1.6; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    .installing { padding: 46px 25px; text-align: center; }
+    .installing-mark { width: 58px; height: 58px; margin: 0 auto 17px; display: grid; place-items: center; border-radius: 50%; background: var(--green-soft); color: var(--green); font-size: 24px; }
+    .installing h2 { margin: 0 0 9px; }
+    .installing p { max-width: 450px; margin: 0 auto 20px; color: var(--ink-2); line-height: 1.65; font-size: 13px; }
+    .toast { position: fixed; right: 22px; bottom: 22px; z-index: 120; max-width: 340px; padding: 13px 15px; border: 1px solid #c8e9dd; border-radius: 9px; background: var(--paper); box-shadow: var(--shadow-soft); color: #2d6f5b; font-size: 12px; animation: toast-in 200ms ease both; }
+    @keyframes toast-in { from { opacity: 0; transform: translateY(7px); } }
+
+    footer { margin-top: auto; padding: 43px 0 30px; border-top: 1px solid var(--line); background: var(--paper); }
+    .footer-grid { display: grid; grid-template-columns: 1.5fr repeat(3,1fr); gap: 35px; }
+    .footer-brand { display: flex; gap: 9px; align-items: center; font-family: var(--display); font-weight: 700; }
+    .footer-brand img { width: 28px; height: 28px; border-radius: 7px; }
+    .footer-note { max-width: 290px; margin-top: 12px; color: var(--ink-3); font-size: 11px; line-height: 1.65; }
+    .footer-col strong { display: block; margin-bottom: 12px; font-size: 11px; }
+    .footer-col button, .footer-col a { display: block; margin: 8px 0; padding: 0; border: 0; background: transparent; color: var(--ink-2); font-size: 11px; text-align: left; }
+    .copyright { margin-top: 34px; padding-top: 19px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; color: var(--ink-3); font-size: 10px; }
+
+    @media (max-width: 930px) {
+      .nav { display: none; }
+      .header-actions { margin-left: auto; }
+      .app-window { width: calc(100% - 60px); }
+      .tool-node.claude-node, .tool-node.cursor-node { display: none; }
+      .feature-grid, .catalog-grid, .download-grid { grid-template-columns: repeat(2,1fr); }
+      .feature:last-child { grid-column: 1 / -1; }
+      .collection-grid { grid-template-columns: 1fr 1fr; }
+      .collection-card.featured { grid-column: 1 / -1; }
+      .detail-grid { grid-template-columns: 1fr; }
+      .install-card { position: static; }
+    }
+
+    @media (max-width: 680px) {
+      .content { width: min(var(--content), calc(100% - 28px)); }
+      .site-header { height: 62px; }
+      .brand span, .header-actions .btn-quiet { display: none; }
+      .hero { padding: 56px 0 38px; }
+      .hero h1 { font-size: 49px; }
+      .hero-copy > p { font-size: 15px; }
+      .hero-actions { flex-direction: column; }
+      .hero-actions .btn { width: 100%; }
+      .product-stage { min-height: 575px; margin-top: 43px; }
+      .sync-rail { display: none; }
+      .app-window { width: 100%; border-radius: 12px; }
+      .app-body { grid-template-columns: 1fr; min-height: 450px; }
+      .app-sidebar { display: none; }
+      .app-main { padding: 18px 14px; }
+      .skill-item { grid-template-columns: 1fr; min-height: 72px; padding: 11px; }
+      .source { display: none; }
+      .targets { margin: 7px 0 0 40px; justify-content: flex-start; }
+      .target { min-width: 42px; }
+      .sync-result { display: block; line-height: 1.6; }
+      .trust-inner { grid-template-columns: 1fr 1fr; }
+      .trust-inner > div { min-height: 63px; padding: 0 10px; border-bottom: 1px solid var(--line); }
+      .trust-inner > div:first-child { grid-column: 1 / -1; justify-content: center; }
+      .section { padding: 65px 0; }
+      .section-head { display: block; }
+      .section-title { font-size: 33px; }
+      .section-lead { margin-top: 14px; }
+      .feature-grid, .catalog-grid, .download-grid, .collection-grid { grid-template-columns: 1fr; }
+      .feature:last-child, .collection-card.featured { grid-column: auto; }
+      .steps { grid-template-columns: 1fr; gap: 30px; }
+      .steps::before { left: 27px; right: auto; top: 27px; bottom: 27px; width: 1px; height: auto; }
+      .step { padding: 0 0 0 82px; text-align: left; min-height: 65px; }
+      .step-num { position: absolute; left: 0; top: 0; }
+      .bottom-cta h2 { font-size: 40px; }
+      .catalog-hero h1, .download-hero h1 { font-size: 44px; }
+      .catalog-tools { flex-wrap: wrap; }
+      .search { flex-basis: 100%; }
+      .catalog-card { min-height: 275px; }
+      .detail-main h1 { font-size: 43px; }
+      .detail-skill { grid-template-columns: 1fr auto; }
+      .detail-skill span { grid-column: 1 / -1; }
+      .release-info { grid-template-columns: 1fr; }
+      .handoff { grid-template-columns: 1fr; }
+      .handoff-arrow { transform: rotate(90deg); }
+      .footer-grid { grid-template-columns: 1fr 1fr; }
+      .footer-grid > div:first-child { grid-column: 1 / -1; }
+      .copyright { display: block; line-height: 1.8; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="site">
+    <header class="site-header">
+      <div class="content header-inner">
+        <button class="brand" data-page="home" aria-label="返回首页"><img src="../../public/logo.png" alt="Skills Hub" /><strong>Skills Hub</strong><span>DESKTOP</span></button>
+        <nav class="nav" aria-label="主导航">
+          <button class="active" data-page="home">产品</button>
+          <button data-page="collections">官方合集</button>
+          <button data-page="download">下载</button>
+          <button data-docs>文档</button>
+        </nav>
+        <div class="header-actions"><button class="btn btn-quiet" data-github>GitHub ↗</button><button class="btn btn-primary" data-page="download">免费下载</button></div>
+      </div>
+    </header>
+
+    <main>
+      <section class="page active" id="page-home">
+        <div class="hero">
+          <div class="content">
+            <div class="hero-copy">
+              <div class="eyebrow">Install once · Sync everywhere</div>
+              <h1>一处管理，<span>处处可用。</span></h1>
+              <p>Skills Hub 把散落在不同目录里的 Agent Skills 集中管理，并同步到 Codex、Claude Code、Cursor 等 47+ AI 编程工具。</p>
+              <div class="hero-actions"><button class="btn btn-primary btn-large" data-smart-download><span class="os-icon">⌘</span><span data-smart-label>下载 macOS 版</span></button><button class="btn btn-large" data-page="collections">浏览官方合集</button></div>
+              <div class="hero-note">免费使用 · 本地优先 · macOS / Windows / Linux</div>
+            </div>
+
+            <div class="product-stage" aria-label="Skills Hub 桌面应用同步演示">
+              <div class="sync-rail"><div class="rail-line"></div><div class="rail-pulse"></div><div class="tool-node source-node"><div class="tool-badge">SKILL</div><span>LOCAL</span></div><div class="tool-node claude-node"><div class="tool-badge">CC</div><span>CLAUDE</span></div><div class="tool-node cursor-node"><div class="tool-badge">CR</div><span>CURSOR</span></div></div>
+              <div class="app-window">
+                <div class="window-bar"><div class="traffic"><i></i><i></i><i></i></div><div class="window-title">Skills Hub — My Skills</div></div>
+                <div class="app-body">
+                  <aside class="app-sidebar">
+                    <div class="app-brand"><img src="../../public/logo.png" alt="" /> Skills Hub</div>
+                    <div class="side-section">WORKSPACE</div><div class="side-link active">我的 Skills <em>24</em></div><div class="side-link">官方合集 <em>6</em></div><div class="side-link">发现 Skills</div>
+                    <div class="side-section">SYNC</div><div class="side-link">全局工具 <em>5</em></div><div class="side-link">项目配置</div><div class="side-link">同步记录</div>
+                  </aside>
+                  <div class="app-main">
+                    <div class="app-head"><div><h2>我的 Skills</h2><span>统一来源，按需同步</span></div><button class="btn btn-primary btn-small" id="demo-sync">同步所选</button></div>
+                    <div class="skill-table">
+                      <div class="skill-item active"><div class="skill-name"><div class="skill-glyph">FD</div><div><strong>frontend-design</strong><span>UI 设计与前端实现</span></div></div><div class="source">本地 · personal</div><div class="targets"><span class="target on">Codex</span><span class="target on">Claude</span><span class="target on">Cursor</span></div></div>
+                      <div class="skill-item"><div class="skill-name"><div class="skill-glyph">BR</div><div><strong>brainstorming</strong><span>实现前澄清需求</span></div></div><div class="source">GitHub · official</div><div class="targets"><span class="target on">Codex</span><span class="target">Claude</span><span class="target on">Cursor</span></div></div>
+                      <div class="skill-item"><div class="skill-name"><div class="skill-glyph">BC</div><div><strong>browser-control</strong><span>真实浏览器验收</span></div></div><div class="source">GitHub · plugin</div><div class="targets"><span class="target on">Codex</span><span class="target on">Claude</span><span class="target">Cursor</span></div></div>
+                      <div class="skill-item"><div class="skill-name"><div class="skill-glyph">HW</div><div><strong>human-writing</strong><span>清理 AI 写作痕迹</span></div></div><div class="source">本地 · personal</div><div class="targets"><span class="target on">Codex</span><span class="target">Claude</span><span class="target">Cursor</span></div></div>
+                    </div>
+                    <div class="sync-result"><span><b>✓ 所有目标保持同步</b> · 最近同步于刚刚</span><span class="mono">4 skills → 3 tools</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="trust-bar"><div class="content trust-inner"><div>支持你正在使用的 AI 工具</div><div>Codex</div><div>Claude Code</div><div>Cursor</div><div>OpenCode + 43</div></div></div>
+
+        <section class="section"><div class="content">
+          <div class="section-head"><div><div class="eyebrow">One source of truth</div><h2 class="section-title">Skills 不该散落在<br />十几个隐藏目录里。</h2></div><p class="section-lead">Skills Hub 在本地建立唯一可信来源。安装、更新和删除只做一次，再由你决定同步到哪些工具和项目。</p></div>
+          <div class="feature-grid">
+            <article class="feature"><div class="feature-mark">01</div><h3>统一安装与管理</h3><p>从本地文件夹或 GitHub 仓库安装。多 Skill 仓库会先列出内容，由你选择需要的部分。</p></article>
+            <article class="feature"><div class="feature-mark">47+</div><h3>连接所有 Agent</h3><p>自动识别已安装工具，并使用链接或复制策略同步。每个项目也可以拥有独立配置。</p></article>
+            <article class="feature"><div class="feature-mark">↻</div><h3>持续更新，不丢修改</h3><p>检查上游变化、预览更新状态，并保留明确的来源和同步记录。</p></article>
+          </div>
+        </div></section>
+
+        <section class="section"><div class="content">
+          <div class="section-head"><div><div class="eyebrow">How it works</div><h2 class="section-title">三步建立自己的<br />Skills 工作台。</h2></div><p class="section-lead">不需要改变现有工作习惯。Skills Hub 负责整理文件和同步关系，Agent 继续从原来的目录读取。</p></div>
+          <div class="steps"><article class="step"><div class="step-num">01</div><h3>安装 Skills</h3><p>添加本地目录、GitHub 仓库，或者选择一套官方合集。</p></article><article class="step"><div class="step-num">02</div><h3>选择目标</h3><p>勾选 Codex、Claude Code、Cursor 和需要同步的项目。</p></article><article class="step"><div class="step-num">03</div><h3>保持同步</h3><p>更新中央来源后，所有已连接工具获得同一版本。</p></article></div>
+        </div></section>
+
+        <section class="collection-preview"><div class="content">
+          <div class="section-head"><div><div class="eyebrow">Official collections</div><h2 class="section-title">不用从几十条 Skills<br />里自己拼工作流。</h2></div><p class="section-lead">我们从公开项目中筛选真正好用的 Skills，解释选择理由，并整理成可以直接安装的官方合集。</p></div>
+          <div class="collection-grid">
+            <button class="collection-card featured" data-detail="product"><div class="card-meta"><span class="card-tag">官方首发</span><span class="card-tag">8 SKILLS</span></div><h3>独立开发者产品交付工作流</h3><p>从需求澄清、界面设计到实现、浏览器验收与发布检查。</p><div class="card-bottom"><span class="creator"><i>QF</i> Skills Hub</span><span>查看合集 →</span></div></button>
+            <button class="collection-card" data-detail="research"><div class="card-meta"><span class="card-tag">RESEARCH</span><span class="card-tag">6 SKILLS</span></div><h3>带证据链的深度调研</h3><p>从问题拆解、来源搜索到事实核验和可追溯报告。</p><div class="card-bottom"><span class="creator"><i>QF</i> Skills Hub</span><span>查看</span></div></button>
+            <button class="collection-card" data-detail="frontend"><div class="card-meta"><span class="card-tag">FRONTEND</span><span class="card-tag">5 SKILLS</span></div><h3>AI 前端设计与验收</h3><p>减少模板感，并在真实浏览器中完成响应式验收。</p><div class="card-bottom"><span class="creator"><i>QF</i> Skills Hub</span><span>查看</span></div></button>
+          </div>
+          <div style="margin-top:22px;text-align:center"><button class="btn" data-page="collections">浏览全部官方合集 →</button></div>
+        </div></section>
+
+        <section class="bottom-cta"><div class="content"><h2>让每个 Agent，都使用同一套 Skills。</h2><p>免费下载 Skills Hub。你的 Skill 文件和工作流始终保存在自己的电脑上。</p><button class="btn btn-primary btn-large" data-smart-download><span class="os-icon">⌘</span><span data-smart-label>下载 macOS 版</span></button></div></section>
+      </section>
+
+      <section class="page" id="page-collections">
+        <div class="catalog-hero"><div class="content"><div class="eyebrow">Curated by Skills Hub</div><h1>官方 Skills 合集</h1><p>不是按 Star 排列的仓库目录，而是围绕真实任务整理、解释并验证过的 Agent 工作流。安装前可以查看每一条 Skill 的来源。</p></div></div>
+        <div class="content catalog-tools"><input class="search" id="collection-search" type="search" placeholder="搜索合集、任务或 Skill" aria-label="搜索官方合集" /><select class="filter" id="category-filter" aria-label="合集分类"><option value="all">全部分类</option><option value="development">工程开发</option><option value="research">研究写作</option><option value="design">设计</option><option value="product">产品</option></select></div>
+        <div class="content catalog-grid" id="catalog-grid"></div>
+      </section>
+
+      <section class="page" id="page-detail">
+        <div class="content detail">
+          <button class="back" data-page="collections">← 返回官方合集</button>
+          <div class="detail-grid">
+            <article class="detail-main">
+              <div class="eyebrow" id="detail-eyebrow">Official / Product / v1.2</div><h1 id="detail-title">独立开发者<br />产品交付工作流</h1><p class="detail-lead" id="detail-lead">适合正在把一个产品想法变成可发布版本的个人开发者。它让 Agent 在关键阶段停下来确认，而不是从一句模糊需求直接冲向代码。</p>
+              <div class="proofs"><span>✓ 来源已检查</span><span>✓ 作者真实项目验证</span><span>✓ 最近更新于 12 天前</span><span>✓ 支持 4 个工具</span></div>
+              <section class="detail-block"><h2>这套合集解决什么</h2><p id="detail-purpose">从模糊需求开始，依次完成产品澄清、视觉方向、前端实现、浏览器验收和发布前检查。每个阶段都有明确的停顿点和交付物。</p></section>
+              <section class="detail-block"><h2>包含的 Skills</h2><div class="skill-list" id="detail-skills"></div></section>
+              <section class="detail-block"><h2>安装后这样开始</h2><p class="mono" style="padding:15px;border:1px solid var(--line);border-radius:9px;background:var(--paper);font-size:11px">使用 brainstorming 帮我梳理这个产品想法。先确认用户、问题、范围和验收条件，不要开始写代码。</p></section>
+            </article>
+            <aside class="install-card"><div class="install-cover"><span>SKILLS HUB / OFFICIAL</span><strong id="install-title">从想法到可发布版本</strong></div><div class="install-body"><p>Skills Hub 会先检查本机状态，再由你确认新增、已有和可能冲突的 Skills。</p><button class="btn btn-primary btn-large btn-full" id="install-collection">安装到 Skills Hub</button><div class="install-facts"><div><strong id="detail-count">8</strong><span>SKILLS</span></div><div><strong>4</strong><span>TOOLS</span></div><div><strong>v1.2</strong><span>VERSION</span></div></div></div></aside>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" id="page-download">
+        <div class="download-hero"><div class="content"><div class="eyebrow">Free desktop app</div><h1>下载 Skills Hub</h1><p>安装一次，在一台电脑上集中管理并同步所有 Agent Skills。无需账户即可使用本地管理功能。</p></div></div>
+        <div class="content download-grid">
+          <article class="download-card" data-platform-card="mac"><div class="platform-head"><div class="platform-icon">⌘</div><span class="recommended-label" hidden>当前设备</span></div><h2>macOS</h2><p>支持 Apple Silicon 和 Intel 芯片。需要 macOS 12 或更高版本。</p><div class="version">VERSION 0.9.1 · UNIVERSAL</div><button class="btn btn-dark btn-full" data-download="mac">下载 .dmg</button></article>
+          <article class="download-card" data-platform-card="windows"><div class="platform-head"><div class="platform-icon">⊞</div><span class="recommended-label" hidden>当前设备</span></div><h2>Windows</h2><p>支持 Windows 10 和 Windows 11，提供 x64 安装程序。</p><div class="version">VERSION 0.9.1 · X64</div><button class="btn btn-dark btn-full" data-download="windows">下载 .exe</button></article>
+          <article class="download-card" data-platform-card="linux"><div class="platform-head"><div class="platform-icon">$</div><span class="recommended-label" hidden>当前设备</span></div><h2>Linux</h2><p>提供 AppImage 和 Debian 安装包，支持主流 x64 发行版。</p><div class="version">VERSION 0.9.1 · X64</div><button class="btn btn-dark btn-full" data-download="linux">选择安装包</button></article>
+        </div>
+        <div class="content release-info"><div><h3>Skills Hub v0.9.1</h3><p>查看更新内容、文件校验值和所有历史版本。</p></div><button class="btn" data-github>前往 GitHub Releases ↗</button></div>
+      </section>
+    </main>
+
+    <footer><div class="content"><div class="footer-grid"><div><div class="footer-brand"><img src="../../public/logo.png" alt="" /> Skills Hub</div><p class="footer-note">Install once. Sync everywhere.<br />跨平台 Agent Skills 管理与同步工具。</p></div><div class="footer-col"><strong>产品</strong><button data-page="home">功能</button><button data-page="download">下载</button><a href="#">更新日志</a></div><div class="footer-col"><strong>资源</strong><button data-page="collections">官方合集</button><button data-docs>文档</button><button data-github>GitHub</button></div><div class="footer-col"><strong>更多</strong><a href="#">问题反馈</a><a href="#">隐私</a><a href="#">关于</a></div></div><div class="copyright"><span>© 2026 Skills Hub. Open source software.</span><span>English · 简体中文</span></div></div></footer>
+  </div>
+
+  <div class="overlay" id="install-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div id="modal-flow"><div class="modal-head"><div><h2 id="modal-title">安装到 Skills Hub</h2><p>打开桌面端并继续安装当前官方合集。</p></div><button class="close" data-close aria-label="关闭">×</button></div><div class="modal-body"><div class="handoff"><div class="handoff-item"><strong>官方合集</strong><span id="handoff-name">PRODUCT-SHIPPING</span></div><div class="handoff-arrow">→</div><div class="handoff-item"><img src="../../public/logo.png" alt="Skills Hub" /><strong>桌面端预览</strong></div><div class="handoff-arrow">→</div><div class="handoff-item"><strong>选择目标</strong><span>CODEX / CURSOR / …</span></div></div><div class="notice">如果已经安装 Skills Hub，将直接打开合集预览；否则先进入下载页，安装完成后会自动恢复当前合集。</div><div class="modal-actions"><button class="btn" data-close>取消</button><button class="btn btn-primary" id="open-app">打开 Skills Hub →</button></div></div></div>
+      <div class="installing" id="modal-success" hidden><div class="installing-mark">✓</div><h2>已发送到 Skills Hub</h2><p>桌面端将显示这套合集的来源、已有 Skills、需要安装的内容以及可用同步目标。</p><button class="btn" data-close>留在网页</button> <button class="btn btn-primary" id="view-download">没有打开？下载桌面端</button></div>
+    </div>
+  </div>
+  <div class="toast" id="toast" hidden></div>
+
+  <script>
+    const collections = [
+      { id:'product', category:'product', tag:'PRODUCT', count:8, title:'独立开发者产品交付工作流', short:'从需求澄清、界面设计到实现、浏览器验收与发布检查。', lead:'适合正在把一个产品想法变成可发布版本的个人开发者。它让 Agent 在关键阶段停下来确认，而不是从一句模糊需求直接冲向代码。', purpose:'从模糊需求开始，依次完成产品澄清、视觉方向、前端实现、浏览器验收和发布前检查。每个阶段都有明确的停顿点和交付物。', install:'从想法到可发布版本', cover:'cover-blue', skills:[['brainstorming','实现前澄清用户、问题和范围','需求'],['frontend-design','建立具体视觉方向并完成界面','设计'],['executing-plans','按确认计划实施并保留检查点','实现'],['browser-control','在真实浏览器验证交互和响应式','验收'],['finishing-branch','完成测试、整理和交付','发布']] },
+      { id:'research', category:'research', tag:'RESEARCH', count:6, title:'带证据链的深度调研', short:'从问题拆解、来源搜索到事实核验和可追溯报告。', lead:'适合需要形成可靠判断、而不只是汇总搜索结果的研究任务。', purpose:'先拆解研究问题和证据标准，再搜索一手来源、核对事实冲突，最终形成每个结论都可以回溯的报告。', install:'从问题到可信结论', cover:'', skills:[['build-evidence-map','定义结论需要哪些证据','规划'],['browser-control','访问与提取具体来源','检索'],['doublecheck','交叉核验关键事实','核验'],['human-writing','把证据组织成可读报告','成稿']] },
+      { id:'frontend', category:'design', tag:'FRONTEND', count:5, title:'AI 前端设计与验收', short:'减少模板感，并在真实浏览器中完成响应式验收。', lead:'适合使用 Agent 开发产品界面，但不愿接受千篇一律模板结果的开发者。', purpose:'先建立符合产品语境的视觉方向，再执行界面实现，最后在桌面和移动视口中检查布局、交互、控制台和无障碍状态。', install:'从设计方向到真实验收', cover:'cover-white', skills:[['frontend-design','确定视觉系统和独特记忆点','设计'],['anti-ui-slop','识别通用模板化表现','审查'],['browser-control','真实浏览器交互验收','验收'],['eyeball','检查最终视觉质量','复核']] },
+      { id:'writing', category:'research', tag:'WRITING', count:4, title:'自然、有判断的中文写作', short:'清理 AI 痕迹，保留具体经验、立场和自然节奏。', lead:'适合需要用 AI 辅助写作，但希望结果仍像一个具体的人写出来。', purpose:'先确定作者位置和真实判断，再删除空泛结构、套路句式和多余强调，最后只保留真正有用的表达。', install:'让文字保留人的手迹', cover:'cover-white', skills:[['human-writing','保留真实判断和写作手迹','主写'],['em-dash','检查标点和句式习惯','清理'],['doublecheck','复核事实和引用','核验']] },
+      { id:'tauri', category:'development', tag:'TAURI', count:7, title:'跨平台桌面应用工程', short:'面向 React、Tauri 和 Rust 桌面产品的开发与交付。', lead:'适合正在构建跨平台桌面应用，并需要同时处理前端、Rust 和系统差异的开发者。', purpose:'覆盖桌面端需求设计、React 实现、Rust 命令层、跨平台路径处理、测试和发布检查。', install:'把 Web 能力装进桌面产品', cover:'', skills:[['brainstorming','明确桌面场景和系统边界','需求'],['frontend-design','构建桌面管理界面','界面'],['executing-plans','实施前后端完整变更','开发'],['finishing-branch','执行测试和发布检查','交付']] },
+      { id:'security', category:'development', tag:'SECURITY', count:5, title:'Agent 项目安全检查', short:'在发布前检查依赖、提示注入、权限和供应链风险。', lead:'适合准备公开发布 Agent 工具、插件或 Skills 的开发者。', purpose:'从依赖与来源开始，检查 Agent 权限边界、提示注入风险、敏感数据路径和交付完整性。', install:'发布前完成安全复核', cover:'cover-white', skills:[['agent-owasp-compliance','检查 Agent 常见安全风险','OWASP'],['agent-supply-chain','核验依赖与内容来源','供应链'],['audit-integrity','检查审计证据完整性','审计']] }
+    ];
+    const pages=[...document.querySelectorAll('.page')], modal=document.getElementById('install-modal'), toast=document.getElementById('toast');
+    let selectedCollection=collections[0], toastTimer;
+
+    function showPage(name){ pages.forEach(p=>p.classList.toggle('active',p.id===`page-${name}`)); document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===name)); window.scrollTo({top:0,behavior:'smooth'}); }
+    function showToast(message){ toast.textContent=message; toast.hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(()=>toast.hidden=true,2600); }
+    function renderCatalog(){ const q=document.getElementById('collection-search').value.toLowerCase(), cat=document.getElementById('category-filter').value, visible=collections.filter(c=>(cat==='all'||c.category===cat)&&`${c.title} ${c.short} ${c.tag}`.toLowerCase().includes(q)); document.getElementById('catalog-grid').innerHTML=visible.length?visible.map(c=>`<button class="catalog-card" data-detail="${c.id}"><div class="catalog-cover ${c.cover}"><code>${c.tag} / ${c.count} SKILLS</code><strong>${c.tag.slice(0,2)}</strong></div><h3>${c.title}</h3><p>${c.short}</p><div class="catalog-bottom"><span>Skills Hub 官方</span><span>查看合集 →</span></div></button>`).join(''):'<div class="empty">没有找到对应合集。可以尝试其他关键词或分类。</div>'; bindDetailButtons(); }
+    function openDetail(id){ selectedCollection=collections.find(c=>c.id===id)||collections[0]; document.getElementById('detail-eyebrow').textContent=`Official / ${selectedCollection.tag} / v1.2`; document.getElementById('detail-title').innerHTML=selectedCollection.title.replace('产品交付','<br>产品交付'); document.getElementById('detail-lead').textContent=selectedCollection.lead; document.getElementById('detail-purpose').textContent=selectedCollection.purpose; document.getElementById('install-title').textContent=selectedCollection.install; document.getElementById('detail-count').textContent=selectedCollection.count; document.getElementById('detail-skills').innerHTML=selectedCollection.skills.map(s=>`<div class="detail-skill"><code>${s[0]}</code><span>${s[1]}</span><em>${s[2]}</em></div>`).join(''); showPage('detail'); }
+    function bindDetailButtons(){ document.querySelectorAll('[data-detail]').forEach(b=>b.onclick=()=>openDetail(b.dataset.detail)); }
+    function detectPlatform(){ const value=(navigator.userAgentData?.platform||navigator.platform||'').toLowerCase(); return value.includes('win')?'windows':value.includes('linux')?'linux':'mac'; }
+    function setPlatform(){ const platform=detectPlatform(), names={mac:'macOS',windows:'Windows',linux:'Linux'}; document.querySelectorAll('[data-smart-label]').forEach(el=>el.textContent=`下载 ${names[platform]} 版`); document.querySelectorAll('[data-platform-card]').forEach(card=>{ const active=card.dataset.platformCard===platform; card.classList.toggle('recommended',active); card.querySelector('.recommended-label').hidden=!active; }); }
+
+    document.querySelectorAll('[data-page]').forEach(b=>b.addEventListener('click',()=>showPage(b.dataset.page)));
+    document.querySelectorAll('[data-smart-download]').forEach(b=>b.addEventListener('click',()=>showPage('download')));
+    document.querySelectorAll('[data-download]').forEach(b=>b.addEventListener('click',()=>showToast(`${b.dataset.download==='mac'?'macOS':b.dataset.download==='windows'?'Windows':'Linux'} 安装包下载将在正式官网接入`)));
+    document.querySelectorAll('[data-github]').forEach(b=>b.addEventListener('click',()=>showToast('正式官网将跳转到 Skills Hub GitHub 仓库')));
+    document.querySelectorAll('[data-docs]').forEach(b=>b.addEventListener('click',()=>showToast('产品文档将在正式官网单独建设')));
+    document.getElementById('collection-search').addEventListener('input',renderCatalog); document.getElementById('category-filter').addEventListener('change',renderCatalog);
+    document.getElementById('demo-sync').addEventListener('click',e=>{ e.currentTarget.textContent='同步中…'; setTimeout(()=>{e.currentTarget.textContent='同步所选';showToast('4 条 Skills 已同步到 3 个工具');},700); });
+    document.getElementById('install-collection').addEventListener('click',()=>{ document.getElementById('handoff-name').textContent=selectedCollection.tag; document.getElementById('modal-flow').hidden=false; document.getElementById('modal-success').hidden=true; modal.hidden=false; });
+    document.getElementById('open-app').addEventListener('click',()=>{ document.getElementById('modal-flow').hidden=true; document.getElementById('modal-success').hidden=false; });
+    document.getElementById('view-download').addEventListener('click',()=>{ modal.hidden=true; showPage('download'); });
+    document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click',()=>modal.hidden=true)); modal.addEventListener('click',e=>{if(e.target===modal)modal.hidden=true;}); document.addEventListener('keydown',e=>{if(e.key==='Escape')modal.hidden=true;});
+    renderCatalog(); bindDetailButtons(); setPlatform();
+  </script>
+</body>
+</html>

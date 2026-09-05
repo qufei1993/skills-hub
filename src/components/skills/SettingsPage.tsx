@@ -27,7 +27,8 @@ type SettingsPageProps = {
   gitCacheCleanupDays: number
   gitCacheTtlSecs: number
   themePreference: 'system' | 'light' | 'dark'
-  githubToken: string
+  githubTokenDraft: string
+  githubTokenConfigured: boolean
   githubProxyConfig: GithubProxyConfigDto
   discoveryScanEnabledCount: number
   discoveryScanSourceCount: number
@@ -37,7 +38,9 @@ type SettingsPageProps = {
   onGitCacheCleanupDaysChange: (nextDays: number) => void
   onGitCacheTtlSecsChange: (nextSecs: number) => void
   onClearGitCacheNow: () => void
-  onGithubTokenChange: (token: string) => void
+  onGithubTokenDraftChange: (token: string) => void
+  onGithubTokenSave: () => void
+  onGithubTokenRemove: () => void
   onGithubProxyConfigChange: (enabled: boolean, port: number) => void
   onOpenDiscoveryScanSettings: () => void
   onBack: () => void
@@ -57,8 +60,11 @@ const SettingsPage = ({
   onGitCacheCleanupDaysChange,
   onGitCacheTtlSecsChange,
   onClearGitCacheNow,
-  githubToken,
-  onGithubTokenChange,
+  githubTokenDraft,
+  githubTokenConfigured,
+  onGithubTokenDraftChange,
+  onGithubTokenSave,
+  onGithubTokenRemove,
   githubProxyConfig,
   onGithubProxyConfigChange,
   discoveryScanEnabledCount,
@@ -67,10 +73,6 @@ const SettingsPage = ({
   onBack,
   t,
 }: SettingsPageProps) => {
-  const [localToken, setLocalToken] = useState(githubToken)
-  useEffect(() => {
-    setLocalToken(githubToken)
-  }, [githubToken])
   const [localGithubProxyPort, setLocalGithubProxyPort] = useState(
     String(githubProxyConfig.port),
   )
@@ -437,15 +439,40 @@ const SettingsPage = ({
                     id="settings-github-token"
                     className="settings-input mono"
                     type="password"
-                    placeholder={t('githubTokenPlaceholder')}
-                    value={localToken}
-                    onChange={(e) => setLocalToken(e.target.value)}
-                    onBlur={() => {
-                      if (localToken !== githubToken) {
-                        onGithubTokenChange(localToken)
-                      }
-                    }}
+                    placeholder={
+                      githubTokenConfigured
+                        ? t('githubTokenReplacementPlaceholder')
+                        : t('githubTokenPlaceholder')
+                    }
+                    value={githubTokenDraft}
+                    onChange={(e) => onGithubTokenDraftChange(e.target.value)}
                   />
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    type="button"
+                    disabled={!githubTokenDraft.trim()}
+                    onClick={onGithubTokenSave}
+                  >
+                    {t('githubTokenSave')}
+                  </button>
+                  {githubTokenConfigured ? (
+                    <button
+                      className="btn btn-danger btn-sm"
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm(t('githubTokenRemoveConfirm'))) {
+                          onGithubTokenRemove()
+                        }
+                      }}
+                    >
+                      {t('githubTokenRemove')}
+                    </button>
+                  ) : null}
+                </div>
+                <div className="settings-helper" role="status">
+                  {githubTokenConfigured
+                    ? t('githubTokenConfigured')
+                    : t('githubTokenNotConfigured')}
                 </div>
                 <div className="settings-helper">{t('githubTokenHint')}</div>
               </div>

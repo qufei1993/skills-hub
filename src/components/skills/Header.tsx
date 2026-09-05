@@ -2,6 +2,7 @@ import { memo, type PointerEvent } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import {
   ChevronLeft,
+  Cloud,
   Compass,
   Download,
   Layers3,
@@ -16,12 +17,13 @@ import type { TFunction } from 'i18next'
 type ManagementTab = 'tags' | 'tools' | 'updates'
 
 type HeaderProps = {
-  activeView: 'myskills' | 'explore' | 'detail' | 'settings' | 'manage'
+  activeView: 'myskills' | 'explore' | 'detail' | 'settings' | 'manage' | 'device-sync'
   managementTab: ManagementTab
   skillCount: number
   tagCount: number
   toolCount: number
   updateCount: number
+  syncConflictCount: number
   appVersion: string
   updateAvailableVersion: string | null
   updateChecking: boolean
@@ -32,7 +34,7 @@ type HeaderProps = {
   onOpenSettings: () => void
   onOpenUpdate: () => void
   onRestart: () => void
-  onViewChange: (view: 'myskills' | 'explore' | 'manage') => void
+  onViewChange: (view: 'myskills' | 'explore' | 'manage' | 'device-sync') => void
   onManagementTabChange: (tab: ManagementTab) => void
   t: TFunction
 }
@@ -52,6 +54,7 @@ const Header = ({
   tagCount,
   toolCount,
   updateCount,
+  syncConflictCount,
   appVersion,
   updateAvailableVersion,
   updateChecking,
@@ -169,6 +172,16 @@ const Header = ({
         >
           <Compass size={18} />
           <span>{t('addSkills')}</span>
+        </button>
+        <button
+          className={activeView === 'device-sync' ? 'active' : ''}
+          type="button"
+          onClick={() => onViewChange('device-sync')}
+          title={collapsed ? t('deviceSync.nav') : undefined}
+        >
+          <Cloud size={18} />
+          <span>{t('deviceSync.nav')}</span>
+          {syncConflictCount > 0 ? <em>{syncConflictCount}</em> : null}
         </button>
       </nav>
 

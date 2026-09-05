@@ -33,6 +33,37 @@ type UpdatesPageProps = {
   t: TFunction
 }
 
+function formatUpdateFailure(reason: string, t: TFunction): string {
+  if (reason.startsWith('TARGET_MODIFIED|')) {
+    return t('errors.targetModified', {
+      path: reason.slice('TARGET_MODIFIED|'.length),
+    })
+  }
+  if (reason.startsWith('UPDATE_IN_PROGRESS|')) {
+    return t('errors.updateInProgress')
+  }
+  if (reason.startsWith('CENTRAL_MODIFIED|')) {
+    return t('errors.centralModified', {
+      path: reason.slice('CENTRAL_MODIFIED|'.length),
+    })
+  }
+  if (reason.startsWith('ROLLBACK_CONFLICT|')) {
+    try {
+      const detail = JSON.parse(reason.slice('ROLLBACK_CONFLICT|'.length)) as {
+        target?: string
+        recovery?: string
+      }
+      return t('errors.rollbackConflict', {
+        target: detail.target ?? '',
+        recovery: detail.recovery ?? '',
+      })
+    } catch {
+      return t('errors.rollbackConflictUnknown')
+    }
+  }
+  return reason
+}
+
 const UpdatesPage = ({
   autoUpdateConfig,
   onAutoUpdateConfigChange,
@@ -309,14 +340,22 @@ const UpdatesPage = ({
             <div>
               <span>{t('autoUpdateCheckedShort')}</span>
               <strong>{autoUpdateConfig?.last_checked ?? 0}</strong>
+              <small>{t('autoUpdateCheckedDescription')}</small>
+            </div>
+            <div>
+              <span>{t('autoUpdateUnchangedShort')}</span>
+              <strong>{autoUpdateConfig?.last_unchanged ?? 0}</strong>
+              <small>{t('autoUpdateUnchangedDescription')}</small>
             </div>
             <div>
               <span>{t('autoUpdateUpdatedShort')}</span>
               <strong>{autoUpdateConfig?.last_updated ?? 0}</strong>
+              <small>{t('autoUpdateUpdatedDescription')}</small>
             </div>
             <div className={(autoUpdateConfig?.last_failed ?? 0) > 0 ? 'danger' : ''}>
               <span>{t('autoUpdateFailedShort')}</span>
               <strong>{autoUpdateConfig?.last_failed ?? 0}</strong>
+              <small>{t('autoUpdateFailedDescription')}</small>
             </div>
           </div>
           {autoUpdateHasRuntime ? (
@@ -364,7 +403,11 @@ const UpdatesPage = ({
               {autoUpdateProgressForDisplay.failed.map((item) => (
                 <div className="updates-issue-item" key={item.skill_id}>
                   <strong>{item.name || item.skill_id}</strong>
-                  {item.reason ? <code>{item.reason}</code> : null}
+                  {item.reason ? (
+                    <code>
+                      {formatUpdateFailure(item.reason, t)}
+                    </code>
+                  ) : null}
                 </div>
               ))}
             </div>
