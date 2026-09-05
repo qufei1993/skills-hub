@@ -553,11 +553,21 @@ export const resources = {
           'Update its identity, directories, or sync mode. Existing synced Skills move with directory changes.',
         saveCustom: 'Save changes',
         removeCustom: 'Remove custom tool',
+        removeCustomTitle: 'Remove custom tool?',
+        removeCustomBody:
+          'This removes the tool configuration for "{{name}}" from Skills Hub. Skill files in {{path}} are not deleted. Add the tool again to resume management and sync.',
+        removeCustomConfirm: 'Remove tool',
         saved: 'Tool settings saved.',
       },
       gitCacheCleanupDays: 'Cache retention (days)',
       gitCacheCleanupHint:
         'Remove Git cache entries that have not been used for this many days. Set to 0 to keep them.',
+      gitCacheConfirm: {
+        title: 'Clear Git cache?',
+        body:
+          'This removes downloaded Git cache from this computer. Installed Skills and local source folders are not affected. Repositories will be downloaded again when needed.',
+        confirm: 'Clear cache',
+      },
       gitCacheTtlSecs: 'Repeat fetch interval (seconds)',
       gitCacheTtlHint:
         'Use local cache for repeated access to the same repository within this window. Set to 0 to fetch every time.',
@@ -1482,10 +1492,19 @@ export const resources = {
         editCustomHint: '修改工具信息、目录或同步模式；目录变化时会迁移已同步的 Skills。',
         saveCustom: '保存修改',
         removeCustom: '移除自定义工具',
+        removeCustomTitle: '移除自定义工具？',
+        removeCustomBody:
+          '将从 Skills Hub 移除“{{name}}”的工具配置。不会删除 {{path}} 中的 Skill 文件；以后若要继续管理和同步，需要重新添加该工具。',
+        removeCustomConfirm: '移除工具',
         saved: '工具设置已保存。',
       },
       gitCacheCleanupDays: '缓存保留时间（天）',
       gitCacheCleanupHint: '超过这个天数未使用的 Git 缓存会被清理，用于释放磁盘空间。设为 0 表示一直保留。',
+      gitCacheConfirm: {
+        title: '清理 Git 缓存？',
+        body: '将删除本机 Git 下载缓存，不影响已安装的 Skills 或本地源文件；后续使用相关仓库时需要重新下载。',
+        confirm: '清理缓存',
+      },
       gitCacheTtlSecs: '重复拉取间隔（秒）',
       gitCacheTtlHint:
         '在这个时间内重复访问同一仓库，会直接使用本地缓存，避免频繁请求。设为 0 表示每次都拉取。',

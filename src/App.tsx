@@ -1437,16 +1437,18 @@ function App() {
       setAutoUpdateTriggering(false)
     }
   }, [autoUpdateTriggering, invokeTauri, isTauri, loadManagedSkills, t])
-  const handleClearGitCacheNow = useCallback(async () => {
+  const handleClearGitCacheNow = useCallback(async (): Promise<boolean> => {
     if (!isTauri) {
       setError(t('errors.notTauri'))
-      return
+      return false
     }
     try {
       const removed = await invokeTauri<number>('clear_git_cache_now')
       setSuccessToastMessage(t('status.gitCacheCleared', { count: removed }))
+      return true
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+      return false
     }
   }, [invokeTauri, isTauri, t])
   const handlePickLocalPath = useCallback(async () => {

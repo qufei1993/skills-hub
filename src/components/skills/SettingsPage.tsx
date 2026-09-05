@@ -5,6 +5,7 @@ import type { TFunction } from 'i18next'
 import type { DownloadOptions, Update } from '@tauri-apps/plugin-updater'
 import { toast } from 'sonner'
 import type { GithubProxyConfigDto } from './types'
+import ConfirmActionModal from './modals/ConfirmActionModal'
 
 const PROJECT_REPOSITORY_URL = 'https://github.com/qufei1993/skills-hub'
 
@@ -37,7 +38,7 @@ type SettingsPageProps = {
   onThemeChange: (nextTheme: 'system' | 'light' | 'dark') => void
   onGitCacheCleanupDaysChange: (nextDays: number) => void
   onGitCacheTtlSecsChange: (nextSecs: number) => void
-  onClearGitCacheNow: () => void
+  onClearGitCacheNow: () => Promise<boolean>
   onGithubTokenDraftChange: (token: string) => void
   onGithubTokenSave: () => void
   onGithubTokenRemove: () => void
@@ -73,6 +74,8 @@ const SettingsPage = ({
   onBack,
   t,
 }: SettingsPageProps) => {
+  const [confirmingClearGitCache, setConfirmingClearGitCache] = useState(false)
+  const [clearingGitCache, setClearingGitCache] = useState(false)
   const [localGithubProxyPort, setLocalGithubProxyPort] = useState(
     String(githubProxyConfig.port),
   )
@@ -88,6 +91,17 @@ const SettingsPage = ({
     () => buildUpdaterProxyOptions(githubProxyConfig.enabled, githubProxyConfig.url),
     [githubProxyConfig.enabled, githubProxyConfig.url],
   )
+
+  const handleConfirmClearGitCache = async () => {
+    if (clearingGitCache) return
+    setClearingGitCache(true)
+    try {
+      const cleared = await onClearGitCacheNow()
+      if (cleared) setConfirmingClearGitCache(false)
+    } finally {
+      setClearingGitCache(false)
+    }
+  }
 
   const handleCheckUpdate = useCallback(async () => {
     if (!isTauri) return
@@ -368,7 +382,7 @@ const SettingsPage = ({
                   <button
                     className="btn btn-secondary settings-browse"
                     type="button"
-                    onClick={onClearGitCacheNow}
+                    onClick={() => setConfirmingClearGitCache(true)}
                   >
                     {t('cleanNow')}
                   </button>
@@ -600,6 +614,16 @@ const SettingsPage = ({
           </div>
         </div>
       </div>
+      <ConfirmActionModal
+        open={confirmingClearGitCache}
+        loading={clearingGitCache}
+        title={t('gitCacheConfirm.title')}
+        body={t('gitCacheConfirm.body')}
+        cancelLabel={t('cancel')}
+        confirmLabel={t('gitCacheConfirm.confirm')}
+        onRequestClose={() => setConfirmingClearGitCache(false)}
+        onConfirm={() => void handleConfirmClearGitCache()}
+      />
     </div>
   )
 }
