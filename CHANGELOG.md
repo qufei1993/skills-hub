@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 
 ## [0.10.0]
 
+### Changed
+- **Compact My Skills header**: Replaced overview cards with scope filters and counts, removed the duplicate scope dropdown, and show a compact sync-issue shortcut only when attention is needed.
+
 ### Added
 - **Multi-device Skill library sync**: Added Git-based device sync with GitHub, GitLab, and Gitee support. Browser authorization is the primary setup path, with Token/SSH retained as advanced options. Users can choose an existing private repository or create one from the app, check changes without modifying files, and run manual sync with optional startup sync.
 - **Safe three-way reconciliation**: Skills are matched by stable identity, source, or identical content. Independent file changes merge automatically, while overlapping edits and delete-versus-edit cases stay isolated per Skill for explicit local, remote, or keep-both resolution.

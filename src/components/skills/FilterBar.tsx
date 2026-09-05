@@ -6,7 +6,6 @@ import type { TagWithCountDto } from './types'
 type FilterBarProps = {
   sortBy: 'updated' | 'name'
   searchQuery: string
-  scopeFilter: 'all' | 'global' | 'project'
   tags: TagWithCountDto[]
   selectedTagIds: number[]
   includeUntagged: boolean
@@ -17,7 +16,6 @@ type FilterBarProps = {
   viewMode: 'list' | 'cards'
   onSortChange: (value: 'updated' | 'name') => void
   onSearchChange: (value: string) => void
-  onScopeFilterChange: (value: 'all' | 'global' | 'project') => void
   onToggleTag: (tagId: number) => void
   onToggleUntagged: () => void
   onClearTags: () => void
@@ -30,7 +28,6 @@ type FilterBarProps = {
 const FilterBar = ({
   sortBy,
   searchQuery,
-  scopeFilter,
   tags,
   selectedTagIds,
   includeUntagged,
@@ -41,7 +38,6 @@ const FilterBar = ({
   viewMode,
   onSortChange,
   onSearchChange,
-  onScopeFilterChange,
   onToggleTag,
   onToggleUntagged,
   onClearTags,
@@ -53,11 +49,6 @@ const FilterBar = ({
   const [tagMenuOpen, setTagMenuOpen] = useState(false)
   const [tagQuery, setTagQuery] = useState('')
   const tagMenuRef = useRef<HTMLDivElement | null>(null)
-  const scopeOptions: { value: 'all' | 'global' | 'project'; label: string }[] = [
-    { value: 'all', label: t('scope.all') },
-    { value: 'global', label: t('scope.global') },
-    { value: 'project', label: t('scope.project') },
-  ]
   const selectedTagSet = useMemo(() => new Set(selectedTagIds), [selectedTagIds])
   const selectedCount = selectedTagIds.length + (includeUntagged ? 1 : 0)
   const filteredTags = useMemo(() => {
@@ -83,23 +74,6 @@ const FilterBar = ({
         {t('allSkills')}（{totalCount}）
       </div>
       <div className="filter-actions">
-        <button className="btn btn-secondary sort-btn" type="button">
-          {scopeOptions.find((option) => option.value === scopeFilter)?.label ?? t('scope.all')}
-          <ChevronDown size={12} />
-          <select
-            aria-label={t('scope.filterLabel')}
-            value={scopeFilter}
-            onChange={(event) =>
-              onScopeFilterChange(event.target.value as 'all' | 'global' | 'project')
-            }
-          >
-            {scopeOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </button>
         <button className="btn btn-secondary sort-btn" type="button">
           {sortBy === 'updated' ? t('sortUpdated') : t('sortName')}
           <ArrowUpDown size={12} />

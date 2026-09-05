@@ -8,6 +8,7 @@ import {
   type MutableRefObject,
   type SetStateAction,
 } from 'react'
+import { AlertTriangle, ArrowRight } from 'lucide-react'
 import type { DownloadOptions, Update } from '@tauri-apps/plugin-updater'
 import './App.css'
 import './figma.css'
@@ -3600,22 +3601,10 @@ function App() {
     (skill) => getSkillScope(skill) === 'global',
   ).length
   const projectSkillCount = managedSkills.length - globalSkillCount
-  const enabledSkillCount = managedSkills.filter((skill) => skill.enabled !== false).length
   const syncIssueCount = managedSkills.filter((skill) => {
     const state = getSkillSyncState(skill)
     return state === 'source-error' || state === 'partial' || state === 'failed'
   }).length
-  const unsyncedSkillCount = managedSkills.filter(
-    (skill) => getSkillSyncState(skill) === 'idle',
-  ).length
-  const dashboardSyncStatus =
-    syncIssueCount > 0
-      ? { className: 'error', label: t('stats.needsAttention', { count: syncIssueCount }) }
-      : unsyncedSkillCount > 0
-        ? { className: 'idle', label: t('stats.notSyncedCount', { count: unsyncedSkillCount }) }
-        : enabledSkillCount === managedSkills.length
-          ? { className: 'healthy', label: t('stats.allNormal') }
-          : { className: 'idle', label: t('stats.enabledCount', { count: enabledSkillCount }) }
   const pendingUpdateCount = autoUpdateConfig?.last_failed ?? 0
 
   const handleManagementTabChange = (tab: ManagementTab) => {
@@ -3684,48 +3673,39 @@ function App() {
           />
         ) : activeView === 'myskills' ? (
           <div className="dashboard-stack">
-            <section className="dashboard-stats" aria-label={t('navMySkills')}>
-              <article>
-                <span>{t('stats.managed')}</span>
-                <strong>{managedSkills.length}</strong>
-              </article>
-              <article>
-                <span>{t('stats.global')}</span>
-                <strong>{globalSkillCount}</strong>
-              </article>
-              <article>
-                <span>{t('stats.project')}</span>
-                <strong>{projectSkillCount}</strong>
-              </article>
-              <article className={`dashboard-status-card${syncIssueCount > 0 ? ' actionable' : ''}`}>
+            <section className="skills-overview" aria-label={t('navMySkills')}>
+              <div className="skills-scope-tabs" role="group" aria-label={t('scope.filterLabel')}>
+                {(['all', 'global', 'project'] as const).map((scope) => (
+                  <button
+                    key={scope}
+                    type="button"
+                    className={`skills-scope-tab${scopeFilter === scope ? ' active' : ''}`}
+                    aria-pressed={scopeFilter === scope}
+                    onClick={() => handleScopeFilterChange(scope)}
+                  >
+                    {t(`scope.${scope}`)}
+                    <span>{scope === 'all' ? managedSkills.length : scope === 'global' ? globalSkillCount : projectSkillCount}</span>
+                  </button>
+                ))}
+              </div>
+              {syncIssueCount > 0 ? (
                 <button
-                  className="dashboard-status-button"
+                  className="skills-sync-issue"
                   type="button"
-                  disabled={syncIssueCount === 0}
                   onClick={() => handleManagementTabChange('updates')}
-                  aria-label={
-                    syncIssueCount > 0
-                      ? `${dashboardSyncStatus.label}，${t('stats.viewIssues')}`
-                      : dashboardSyncStatus.label
-                  }
-                  title={syncIssueCount > 0 ? t('stats.viewIssues') : undefined}
                 >
-                  <span>{t('stats.syncStatus')}</span>
-                  <strong className={`status-summary ${dashboardSyncStatus.className}`}>
-                    <i />{dashboardSyncStatus.label}
-                  </strong>
-                  {syncIssueCount > 0 ? (
-                    <span className="dashboard-status-action">
-                      {t('stats.viewIssues')} <span aria-hidden="true">→</span>
-                    </span>
-                  ) : null}
+                  <AlertTriangle size={16} aria-hidden="true" />
+                  <span>{t('stats.syncIssues', { count: syncIssueCount })}</span>
+                  <span className="skills-sync-issue-action">
+                    {t('stats.viewIssues')}
+                    <ArrowRight size={15} aria-hidden="true" />
+                  </span>
                 </button>
-              </article>
+              ) : null}
             </section>
             <FilterBar
               sortBy={sortBy}
               searchQuery={searchQuery}
-              scopeFilter={scopeFilter}
               tags={tags}
               selectedTagIds={selectedTagIds}
               includeUntagged={includeUntagged}
@@ -3736,7 +3716,6 @@ function App() {
               viewMode={skillViewMode}
               onSortChange={handleSortChange}
               onSearchChange={handleSearchChange}
-              onScopeFilterChange={handleScopeFilterChange}
               onToggleTag={handleToggleTagFilter}
               onToggleUntagged={handleToggleUntaggedFilter}
               onClearTags={handleClearTagFilters}
