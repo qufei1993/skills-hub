@@ -134,6 +134,12 @@ src-tauri/src/                # Rust backend
 3. **Verify after changes**: Always run `npm run check` after implementation to ensure lint, build, and all Rust checks pass. Fix any errors before presenting the result.
 4. **Keep changes minimal**: Only modify what is necessary for the requirement. Do not refactor, add comments, or "improve" unrelated code.
 
+## Security Red Lines
+
+- Token、密码和私钥只能存入系统安全凭据存储，禁止进入数据库、配置文件、日志、URL 或同步仓库。
+- 只有用户主动操作或明确开启的后台功能才能读取凭据；页面加载、Tab 切换、状态展示和普通启动不得读取。
+- 开发版必须使用独立的凭据命名空间；授权、凭据、同步相关改动必须通过防泄漏与访问边界测试。
+
 ## Important Notes
 
 - Path handling must support `~` expansion (backend has `expand_home_path()`)

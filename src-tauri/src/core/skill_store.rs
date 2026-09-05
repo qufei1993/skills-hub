@@ -20,6 +20,8 @@ const SCHEMA_VERSION: i32 = 6;
 const PRE_RELEASE_DEVICE_SYNC_SCHEMA_VERSION: i32 = 7;
 const DEVICE_SYNC_SCHEMA_VERSION_KEY: &str = "schema.device_sync";
 const DEVICE_SYNC_SCHEMA_VERSION: &str = "1";
+const DEVICE_SYNC_STARTUP_CREDENTIAL_CONSENT_MIGRATION: &str =
+    "migration.device_sync_startup_credential_consent_v1";
 
 const DEVICE_SYNC_SCHEMA_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS device_sync_config (
@@ -379,6 +381,9 @@ impl SkillStore {
     }
 
     pub fn save_device_sync_config(&self, config: &DeviceSyncConfig) -> Result<()> {
+        if let Some(schedule) = &config.auto_sync_schedule {
+            schedule.validate()?;
+        }
         let json = serde_json::to_string(config)?;
         self.with_conn(|conn| {
             conn.execute(
@@ -391,6 +396,21 @@ impl SkillStore {
             )?;
             Ok(())
         })
+    }
+
+    pub fn migrate_device_sync_startup_credential_consent(&self) -> Result<()> {
+        if self
+            .get_setting(DEVICE_SYNC_STARTUP_CREDENTIAL_CONSENT_MIGRATION)?
+            .is_some()
+        {
+            return Ok(());
+        }
+
+        if let Some(mut config) = self.get_device_sync_config()? {
+            config.auto_check = false;
+            self.save_device_sync_config(&config)?;
+        }
+        self.set_setting(DEVICE_SYNC_STARTUP_CREDENTIAL_CONSENT_MIGRATION, "complete")
     }
 
     pub fn clear_device_sync_config(&self) -> Result<()> {
@@ -436,7 +456,19 @@ impl SkillStore {
         error: Option<&str>,
     ) -> Result<()> {
         self.with_conn(|conn| {
-            conn.execute(
+            let tx = conn.unchecked_transaction()?;
+            tx.execute(
+                "INSERT INTO settings (key, value) VALUES ('device_sync_last_run', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![serde_json::to_string(&(status, finished_at))?],
+            )?;
+            if status == "success" && added == 0 && updated == 0 && deleted == 0 && conflicted == 0
+            {
+                tx.execute("DELETE FROM device_sync_runs WHERE id = ?1", params![id])?;
+                tx.commit()?;
+                return Ok(());
+            }
+            tx.execute(
                 "UPDATE device_sync_runs SET
                    finished_at = ?2, status = ?3, added = ?4, updated = ?5,
                    deleted = ?6, conflicted = ?7, commit_hash = ?8, error = ?9
@@ -453,6 +485,7 @@ impl SkillStore {
                     error
                 ],
             )?;
+            tx.commit()?;
             Ok(())
         })
     }
@@ -638,12 +671,37 @@ impl SkillStore {
         })
     }
 
-    pub fn resolve_device_sync_conflict(&self, id: &str) -> Result<()> {
+    pub fn resolve_device_sync_conflicts_and_save_config_if_clear(
+        &self,
+        ids: &[String],
+        config: &DeviceSyncConfig,
+    ) -> Result<()> {
+        let config_json = serde_json::to_string(config)?;
         self.with_conn(|conn| {
-            conn.execute(
-                "UPDATE device_sync_conflicts SET status = 'resolved' WHERE id = ?1",
-                params![id],
+            let transaction = conn.unchecked_transaction()?;
+            for id in ids {
+                transaction.execute(
+                    "UPDATE device_sync_conflicts SET status = 'resolved'
+                     WHERE id = ?1 AND status = 'pending'",
+                    params![id],
+                )?;
+            }
+            let pending: i64 = transaction.query_row(
+                "SELECT COUNT(*) FROM device_sync_conflicts WHERE status = 'pending'",
+                [],
+                |row| row.get(0),
             )?;
+            if pending == 0 {
+                transaction.execute(
+                    "INSERT INTO device_sync_config (id, config_json, updated_at)
+                     VALUES (1, ?1, ?2)
+                     ON CONFLICT(id) DO UPDATE SET
+                       config_json = excluded.config_json,
+                       updated_at = excluded.updated_at",
+                    params![config_json, now_ms()],
+                )?;
+            }
+            transaction.commit()?;
             Ok(())
         })
     }

@@ -228,6 +228,10 @@ export type SkillFileEntry = {
 
 export type DeviceSyncProvider = 'github' | 'gitlab' | 'gitee'
 
+export type DeviceSyncSchedule =
+  | { mode: 'interval'; minutes: number }
+  | { mode: 'daily'; time: string }
+
 export type DeviceSyncConfigDto = {
   provider: DeviceSyncProvider
   remote_url: string
@@ -235,6 +239,7 @@ export type DeviceSyncConfigDto = {
   username?: string | null
   auto_check: boolean
   auto_sync: boolean
+  auto_sync_schedule?: DeviceSyncSchedule | null
   has_credential: boolean
 }
 
@@ -295,6 +300,10 @@ export type DeviceSyncRunResult = {
 }
 
 export type DeviceSyncStatus = {
+  schedule_status?: {
+    state: 'disabled' | 'initializing' | 'scheduled' | 'backoff' | 'paused' | 'running' | 'waiting'
+    next_at: number | null
+  } | null
   configured: boolean
   is_running: boolean
   provider: DeviceSyncProvider
@@ -332,6 +341,7 @@ export type DeviceSyncConflict = {
   skill_id: string
   skill_name: string
   files: string[]
+  base_commit?: string | null
   created_at: number
   status: string
 }

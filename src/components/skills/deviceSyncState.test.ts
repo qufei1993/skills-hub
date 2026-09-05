@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   buildDeviceSyncForm,
+  isDeviceSyncScheduleValid,
   classifyRepositoryLoadFailure,
   getDeviceSyncExperience,
   getDeviceSyncRunOutcome,
@@ -11,11 +12,22 @@ import {
   getDeviceConnectionState,
   getOtherDeviceSummary,
   getDeviceSyncSetupProgress,
+  filterRepositories,
   withTimeout,
 } from './deviceSyncState'
 
 describe('device sync UI state', () => {
-  it('defaults to GitHub, automatic checks, and manual sync', () => {
+  it('rejects invalid intervals and times before saving', () => {
+    for (const minutes of [0, 4, 5.5, NaN, 43201]) {
+      expect(isDeviceSyncScheduleValid({ mode: 'interval', minutes })).toBe(false)
+    }
+    expect(isDeviceSyncScheduleValid({ mode: 'interval', minutes: 5 })).toBe(true)
+    for (const time of ['', '9:00', '24:00', '12:60']) {
+      expect(isDeviceSyncScheduleValid({ mode: 'daily', time })).toBe(false)
+    }
+    expect(isDeviceSyncScheduleValid({ mode: 'daily', time: '09:00' })).toBe(true)
+  })
+  it('defaults to GitHub with all startup credential access disabled', () => {
     expect(buildDeviceSyncForm()).toEqual({
       provider: 'github',
       remoteUrl: '',
@@ -24,8 +36,9 @@ describe('device sync UI state', () => {
       token: '',
       oauthCredentialKey: '',
       accountLogin: '',
-      autoCheck: true,
+      autoCheck: false,
       autoSync: false,
+      schedule: { mode: 'interval', minutes: 15 },
     })
   })
 
@@ -260,6 +273,24 @@ describe('device sync UI state', () => {
     expect(reduceRepositoryPicker(false, 'toggle')).toBe(true)
     expect(reduceRepositoryPicker(true, 'toggle')).toBe(false)
     expect(reduceRepositoryPicker(true, 'close')).toBe(false)
+  })
+
+  it('closes the repository picker after selecting a repository', () => {
+    expect(reduceRepositoryPicker(true, 'select')).toBe(false)
+  })
+
+  it('filters repositories by name without changing their order', () => {
+    const repositories = [
+      { name: 'skills-hub-sync', clone_url: 'https://example/sync.git', web_url: 'https://example/sync', private: true },
+      { name: 'article-reviewer', clone_url: 'https://example/reviewer.git', web_url: 'https://example/reviewer', private: true },
+      { name: 'AI-Article', clone_url: 'https://example/article.git', web_url: 'https://example/article', private: true },
+    ]
+
+    expect(filterRepositories(repositories, 'article').map(({ name }) => name)).toEqual([
+      'article-reviewer',
+      'AI-Article',
+    ])
+    expect(filterRepositories(repositories, '  ')).toBe(repositories)
   })
 
   it('does not start a duplicate repository request when reopening during loading', () => {

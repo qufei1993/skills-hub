@@ -41,6 +41,7 @@ uuid = { version = "1", features = ["v4"] }
 urlencoding = "2.1"
 trash = "=3.3.1"
 fs2 = "0.4"
+chrono = { version = "0.4.43", default-features = false, features = ["clock"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }

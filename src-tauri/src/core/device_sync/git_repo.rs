@@ -168,7 +168,7 @@ pub fn discover_devices(repo: &Repository) -> Result<Vec<DeviceSyncDevice>> {
 pub fn discover_devices_at(repo: &Repository, head: Oid) -> Result<Vec<DeviceSyncDevice>> {
     let mut walk = repo.revwalk().context("read device sync history")?;
     walk.push(head)?;
-    walk.set_sorting(git2::Sort::TIME)?;
+    walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
     let mut seen = HashSet::new();
     let mut devices = Vec::new();
     for oid in walk {
@@ -193,6 +193,27 @@ pub fn discover_devices_at(repo: &Repository, head: Oid) -> Result<Vec<DeviceSyn
         });
     }
     Ok(devices)
+}
+
+pub fn latest_device_commit_at(
+    repo: &Repository,
+    head: Oid,
+    device_id: &str,
+) -> Result<Option<Oid>> {
+    let mut walk = repo.revwalk().context("read device sync history")?;
+    walk.push(head)?;
+    walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
+    for oid in walk {
+        let commit = repo.find_commit(oid?)?;
+        if commit
+            .message()
+            .and_then(|message| trailer_value(message, "Skills-Hub-Device-ID"))
+            == Some(device_id)
+        {
+            return Ok(Some(commit.id()));
+        }
+    }
+    Ok(None)
 }
 
 pub fn remote_head(repo: &Repository, config: &DeviceSyncConfig) -> Option<Oid> {

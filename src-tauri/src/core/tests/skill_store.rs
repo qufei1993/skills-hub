@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use crate::core::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
 use crate::core::{
-    device_sync::credentials::MemoryCredentialStore, github_token::resolve_github_token,
+    device_sync::{credentials::MemoryCredentialStore, types::DeviceSyncConfig},
+    github_token::resolve_github_token,
 };
 use rusqlite::Connection;
 
@@ -751,6 +752,36 @@ fn update_skill_description_backfills() {
             .as_deref(),
         Some("backfilled")
     );
+}
+
+#[test]
+fn startup_credential_consent_migration_disables_legacy_auto_check_only_once() {
+    let (_dir, store) = make_store();
+    store
+        .save_device_sync_config(&DeviceSyncConfig {
+            auto_check: true,
+            auto_sync: false,
+            ..DeviceSyncConfig::default()
+        })
+        .unwrap();
+
+    store
+        .migrate_device_sync_startup_credential_consent()
+        .unwrap();
+    let migrated = store.get_device_sync_config().unwrap().unwrap();
+    assert!(!migrated.auto_check);
+
+    store
+        .save_device_sync_config(&DeviceSyncConfig {
+            auto_check: true,
+            ..migrated
+        })
+        .unwrap();
+    store
+        .migrate_device_sync_startup_credential_consent()
+        .unwrap();
+
+    assert!(store.get_device_sync_config().unwrap().unwrap().auto_check);
 }
 
 #[test]
