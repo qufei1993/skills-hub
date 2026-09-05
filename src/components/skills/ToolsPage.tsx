@@ -17,6 +17,7 @@ import type {
   ToolStatusDto,
 } from './types'
 import ToolIcon from './ToolIcon'
+import ConfirmActionModal from './modals/ConfirmActionModal'
 
 const AVATAR_INPUT_MAX_BYTES = 2 * 1024 * 1024
 const AVATAR_SIZE = 128
@@ -86,6 +87,7 @@ const ToolsPage = ({
   const [customToolProjectDir, setCustomToolProjectDir] = useState('')
   const [customToolSyncMode, setCustomToolSyncMode] = useState<SyncMode>('auto')
   const [editingCustomToolKey, setEditingCustomToolKey] = useState<string | null>(null)
+  const [pendingRemoveCustomTool, setPendingRemoveCustomTool] = useState<CustomToolConfigDto | null>(null)
   const [savingCustomTool, setSavingCustomTool] = useState(false)
   const [avatarError, setAvatarError] = useState('')
   const [showMissingTools, setShowMissingTools] = useState(false)
@@ -171,14 +173,24 @@ const ToolsPage = ({
     })
   }
 
-  const removeCustomTool = (key: string) => {
-    if (editingCustomToolKey === key) resetCustomToolForm()
-    void updateToolConfig({
-      ...effectiveToolConfig,
-      custom_tools: effectiveToolConfig.custom_tools.filter(
-        (tool) => tool.key !== key,
-      ),
-    })
+  const removeCustomTool = async () => {
+    if (!pendingRemoveCustomTool || savingCustomTool) return
+    setSavingCustomTool(true)
+    try {
+      const saved = await updateToolConfig({
+        ...effectiveToolConfig,
+        custom_tools: effectiveToolConfig.custom_tools.filter(
+          (tool) => tool.key !== pendingRemoveCustomTool.key,
+        ),
+      })
+      if (!saved) return
+      if (editingCustomToolKey === pendingRemoveCustomTool.key) {
+        resetCustomToolForm()
+      }
+      setPendingRemoveCustomTool(null)
+    } finally {
+      setSavingCustomTool(false)
+    }
   }
 
   const saveCustomTool = async () => {
@@ -337,7 +349,9 @@ const ToolsPage = ({
                 className="icon-btn danger"
                 title={t('toolManagement.removeCustom')}
                 aria-label={t('toolManagement.removeCustom')}
-                onClick={() => removeCustomTool(tool.key)}
+                onClick={() =>
+                  setPendingRemoveCustomTool(customToolsByKey.get(tool.key) ?? null)
+                }
                 disabled={savingCustomTool}
               >
                 <Trash2 size={16} />
@@ -597,6 +611,19 @@ const ToolsPage = ({
         </section>
         </div>
       </div>
+      <ConfirmActionModal
+        open={Boolean(pendingRemoveCustomTool)}
+        loading={savingCustomTool}
+        title={t('toolManagement.removeCustomTitle')}
+        body={t('toolManagement.removeCustomBody', {
+          name: pendingRemoveCustomTool?.label ?? '',
+          path: pendingRemoveCustomTool?.skills_dir ?? '',
+        })}
+        cancelLabel={t('cancel')}
+        confirmLabel={t('toolManagement.removeCustomConfirm')}
+        onRequestClose={() => setPendingRemoveCustomTool(null)}
+        onConfirm={() => void removeCustomTool()}
+      />
     </div>
   )
 }
