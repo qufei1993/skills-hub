@@ -1,5 +1,10 @@
 # Skills Hub - Project Rules
 
+## Communication
+
+- Reply to the user in Chinese.
+- Write PR titles and descriptions in English, even when the conversation is in Chinese. Preserve the language of existing bilingual project documentation.
+
 ## Overview
 
 Skills Hub is a cross-platform desktop app (Tauri 2 + React 19) for managing AI Agent Skills and syncing them to 47+ AI coding tools. Core concept: "Install once, sync everywhere."
@@ -21,7 +26,8 @@ Skills Hub is a cross-platform desktop app (Tauri 2 + React 19) for managing AI 
 npm run dev              # Vite dev server (port 5173)
 npm run tauri:dev        # Tauri dev window (frontend + backend)
 npm run build            # tsc + vite build
-npm run check            # Full check: lint + build + rust:fmt:check + rust:clippy + rust:test
+npm run check            # Full check: lint + test + build + rust:fmt:check + rust:clippy + rust:test
+npm test                 # Frontend regression tests
 npm run lint             # ESLint (flat config v9)
 npm run rust:test        # cargo test
 npm run rust:clippy      # Rust lint
@@ -133,6 +139,26 @@ src-tauri/src/                # Rust backend
 2. **Implement completely**: For features involving both frontend and backend, modify both sides in one pass — including Tauri command registration, DTO types, i18n translations (both EN and ZH), and UI.
 3. **Verify after changes**: Always run `npm run check` after implementation to ensure lint, build, and all Rust checks pass. Fix any errors before presenting the result.
 4. **Keep changes minimal**: Only modify what is necessary for the requirement. Do not refactor, add comments, or "improve" unrelated code.
+
+### Branch Baseline
+
+- Unless the user specifies another base, fetch `origin/main` before starting a new fix or feature branch, and create the branch from that freshly fetched ref. Use the `codex/` branch prefix.
+- Do not assume local `main` is current. Verify and report the base commit; if fetching fails, do not describe the baseline as the latest main.
+- Preserve existing work when changing branches or updating the baseline. Do not overwrite a divergent local `main`. After a baseline update, sync dependencies with the lockfile and rerun the required checks.
+
+### Bug Fixes and Manual Review
+
+- For bug-fix requests, include regression tests without waiting for a separate reminder. Reproduce the reported failure before fixing it, then verify the corrected behavior and relevant boundary cases. Tests should exercise observable behavior and submitted data, not source-text patterns.
+- Run the full `npm run check` on the final code before committing, including frontend tests. Do not claim checks passed based only on a previous baseline or a partial run.
+- After completing a user-facing bug fix, start the desktop development environment with `npm run tauri:dev` for manual review unless the user asks otherwise. Confirm the process starts successfully from the intended checkout; a browser preview or the installed release app is not a substitute.
+- Before reopening development, check for an existing process and port usage. Reuse or restart only the relevant project's process, and keep the development environment available for the user.
+
+### Release Records and Pull Requests
+
+- Record user-visible fixes under the current version in both `CHANGELOG.md` and `docs/CHANGELOG.zh.md`, and add a focused record under `docs/releases/v<current-version>/` describing the cause, corrected behavior, and validation. Determine the version from the project files; do not bump it or move the entry to `Unreleased` unless requested.
+- When asked to submit a PR, include the implementation, regression tests, and release records in the submission. Push the working branch and open the PR against `main` unless another target is specified.
+- Use an English PR title and description. Explain the concrete problem, resulting behavior, and checks actually completed. Follow the repository's PR template if present.
+- If an open PR already exists for the branch, update it instead of creating a duplicate. Verify its title, description, base, and head after creation or editing, and return its link. Do not merge without authorization.
 
 ## Important Notes
 
