@@ -142,4 +142,6 @@ src-tauri/src/                # Rust backend
 - Version numbers must stay in sync between `package.json` and `src-tauri/tauri.conf.json` (validate with `npm run version:check`)
 - Rust crate is named `app_lib` (not the default package name) — use `app_lib::...` for imports
 - Database has a schema migration mechanism (`migrate_legacy_db_if_needed`) — consider migrations when modifying table structures
+- Additive, feature-only database tables must use a feature-specific schema marker in `settings`; do not raise the shared `PRAGMA user_version` when the previous stable release can safely ignore the change
+- Every database migration must include both an upgrade test and a previous-stable-version compatibility test; incompatible shared-schema changes require an explicit compatibility design before implementation
 - Tool adapter list is in `tool_adapters/mod.rs` — adding a new AI tool requires both a `ToolId` enum variant and an adapter instance

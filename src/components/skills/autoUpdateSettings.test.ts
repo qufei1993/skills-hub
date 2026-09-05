@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   getAutoUpdateProgressCounts,
+  getAutoUpdateRunningReset,
   getAutoUpdateTaskStatusKey,
   getAutoUpdateToastKey,
   isAutoUpdatePossiblyStalled,
@@ -10,6 +11,17 @@ import {
   shouldKeepWaitingForTriggeredAutoUpdate,
   summarizeAutoUpdateErrors,
 } from './autoUpdateSettings'
+
+describe('getAutoUpdateRunningReset', () => {
+  it('clears every outcome count before polling the new run', () => {
+    expect(getAutoUpdateRunningReset()).toEqual({
+      last_checked: 0,
+      last_unchanged: 0,
+      last_updated: 0,
+      last_failed: 0,
+    })
+  })
+})
 
 describe('getAutoUpdateToastKey', () => {
   it('uses enable and disable messages only when the toggle changes', () => {
@@ -207,6 +219,23 @@ describe('isAutoUpdatePossiblyStalled', () => {
         succeeded: [],
         failed: [],
         running: { skill_id: 'a', name: 'A' },
+        pending: [],
+      },
+    }, 1_000 + 11 * 60 * 1000)).toBe(false)
+  })
+
+  it('does not mark a run with an unchanged completed item as stalled', () => {
+    expect(isAutoUpdatePossiblyStalled({
+      last_status: 'running',
+      last_run_at: 1_000,
+      last_unchanged: 1,
+      last_updated: 0,
+      last_failed: 0,
+      progress: {
+        total: 60,
+        succeeded: [{ skill_id: 'a', name: 'A' }],
+        failed: [],
+        running: null,
         pending: [],
       },
     }, 1_000 + 11 * 60 * 1000)).toBe(false)

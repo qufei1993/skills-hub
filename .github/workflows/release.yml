@@ -16,6 +16,10 @@ concurrency:
 jobs:
   release:
     runs-on: ${{ matrix.os }}
+    env:
+      SKILLS_HUB_GITHUB_CLIENT_ID: ${{ secrets.SKILLS_HUB_GITHUB_CLIENT_ID }}
+      SKILLS_HUB_GITLAB_CLIENT_ID: ${{ secrets.SKILLS_HUB_GITLAB_CLIENT_ID }}
+      SKILLS_HUB_GITEE_AUTH_RELAY_URL: ${{ secrets.SKILLS_HUB_GITEE_AUTH_RELAY_URL }}
     strategy:
       fail-fast: false
       matrix:

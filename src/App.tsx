@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type MutableRefObject,
@@ -15,6 +16,7 @@ import { Toaster, toast } from 'sonner'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import ExplorePage from './components/skills/ExplorePage'
+import DeviceSyncPage from './components/skills/DeviceSyncPage'
 import FilterBar from './components/skills/FilterBar'
 import SkillDetailView from './components/skills/SkillDetailView'
 import Header from './components/skills/Header'
@@ -41,11 +43,20 @@ import ToolsPage from './components/skills/ToolsPage'
 import UpdatesPage from './components/skills/UpdatesPage'
 import WindowResizeHandles from './components/WindowResizeHandles'
 import {
+  getAutoUpdateRunningReset,
   getAutoUpdateToastKey,
   shouldKeepWaitingForTriggeredAutoUpdate,
 } from './components/skills/autoUpdateSettings'
 import { selectLocalizedReleaseNotes } from './components/skills/releaseNotes'
-import { requiresStorageMigrationConfirmation } from './components/skills/storagePathChange'
+import {
+  requiresStorageMigrationConfirmation,
+} from './components/skills/storagePathChange'
+import {
+  buildGithubTokenSaveRequest,
+  githubTokenSettingsReducer,
+  githubTokenStatusErrorMessage,
+  initialGithubTokenSettingsState,
+} from './components/skills/githubTokenSettings'
 import {
   getSkillSyncState,
   getToolSyncState,
@@ -68,6 +79,7 @@ import type {
   FeaturedSkillDto,
   GitSkillCandidate,
   GithubProxyConfigDto,
+  GithubTokenStatusDto,
   InstallResultDto,
   LocalSkillCandidate,
   ManagedSkill,
@@ -89,7 +101,13 @@ type SkillScopeState = Record<
   }
 >
 
-type ActiveView = 'myskills' | 'explore' | 'detail' | 'settings' | 'manage'
+type ActiveView =
+  | 'myskills'
+  | 'explore'
+  | 'detail'
+  | 'settings'
+  | 'manage'
+  | 'device-sync'
 type ManagementTab = 'tags' | 'tools' | 'updates'
 type UpdaterProxyOptions = { proxy?: string }
 type UpdaterDownloadOptions = DownloadOptions & UpdaterProxyOptions
@@ -189,6 +207,7 @@ function App() {
   )
   const [activeView, setActiveView] = useState<ActiveView>('myskills')
   const [managementTab, setManagementTab] = useState<ManagementTab>('tags')
+  const [deviceSyncConflictCount, setDeviceSyncConflictCount] = useState(0)
   const [detailSkill, setDetailSkill] = useState<ManagedSkill | null>(null)
   const [tags, setTags] = useState<TagWithCountDto[]>([])
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([])
@@ -301,6 +320,31 @@ function App() {
       if (raw.startsWith('SKILL_TARGET_OVERLAPS_SOURCE|')) {
         const path = raw.split('|')[1] ?? ''
         return t('errors.targetOverlapsSource', { path })
+      }
+      if (raw.startsWith('TARGET_MODIFIED|')) {
+        const path = raw.slice('TARGET_MODIFIED|'.length)
+        return t('errors.targetModified', { path })
+      }
+      if (raw.startsWith('UPDATE_IN_PROGRESS|')) {
+        return t('errors.updateInProgress')
+      }
+      if (raw.startsWith('CENTRAL_MODIFIED|')) {
+        const path = raw.slice('CENTRAL_MODIFIED|'.length)
+        return t('errors.centralModified', { path })
+      }
+      if (raw.startsWith('ROLLBACK_CONFLICT|')) {
+        try {
+          const detail = JSON.parse(raw.slice('ROLLBACK_CONFLICT|'.length)) as {
+            target?: string
+            recovery?: string
+          }
+          return t('errors.rollbackConflict', {
+            target: detail.target ?? '',
+            recovery: detail.recovery ?? '',
+          })
+        } catch {
+          return t('errors.rollbackConflictUnknown')
+        }
       }
       if (raw.startsWith('PROJECT_SCOPE_UNSUPPORTED|')) {
         const tool = raw.split('|')[1] ?? ''
@@ -568,9 +612,13 @@ function App() {
 
   useEffect(() => {
     if (!isTauri) return
-    invokeTauri<string>('get_github_token')
-      .then((token) => setGithubToken(token))
-      .catch(() => {})
+    invokeTauri<GithubTokenStatusDto>('get_github_token_status')
+      .then((status) => {
+        dispatchGithubToken({ type: 'status_loaded', hasToken: status.has_token })
+      })
+      .catch((err) => {
+        setError(githubTokenStatusErrorMessage(err))
+      })
   }, [isTauri, invokeTauri])
 
   useEffect(() => {
@@ -955,7 +1003,11 @@ function App() {
   const [storagePathChanging, setStoragePathChanging] = useState(false)
   const [gitCacheCleanupDays, setGitCacheCleanupDays] = useState<number>(30)
   const [gitCacheTtlSecs, setGitCacheTtlSecs] = useState<number>(60)
-  const [githubToken, setGithubToken] = useState<string>('')
+  const [githubToken, dispatchGithubToken] = useReducer(
+    githubTokenSettingsReducer,
+    false,
+    initialGithubTokenSettingsState,
+  )
   const [githubProxyConfig, setGithubProxyConfig] =
     useState<GithubProxyConfigDto>({
       enabled: false,
@@ -1162,18 +1214,35 @@ function App() {
     },
     [invokeTauri, isTauri],
   )
-  const handleGithubTokenChange = useCallback(
-    async (nextToken: string) => {
-      setGithubToken(nextToken)
-      if (!isTauri) return
-      try {
-        await invokeTauri('set_github_token', { token: nextToken })
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-      }
-    },
-    [invokeTauri, isTauri],
-  )
+  const handleGithubTokenDraftChange = useCallback((draft: string) => {
+    dispatchGithubToken({ type: 'draft_changed', draft })
+  }, [])
+  const handleGithubTokenSave = useCallback(async () => {
+    const request = buildGithubTokenSaveRequest(githubToken.draft)
+    if (!request) return
+    if (!isTauri) {
+      dispatchGithubToken({ type: 'save_succeeded' })
+      return
+    }
+    try {
+      await invokeTauri('set_github_token', request)
+      dispatchGithubToken({ type: 'save_succeeded' })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }, [githubToken.draft, invokeTauri, isTauri])
+  const handleGithubTokenRemove = useCallback(async () => {
+    if (!isTauri) {
+      dispatchGithubToken({ type: 'remove_succeeded' })
+      return
+    }
+    try {
+      await invokeTauri('set_github_token', { token: '' })
+      dispatchGithubToken({ type: 'remove_succeeded' })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }, [invokeTauri, isTauri])
   const handleGithubProxyConfigChange = useCallback(
     async (enabled: boolean, port: number) => {
       const normalizedPort = Math.max(1, Math.min(Math.round(port), 65535))
@@ -1280,6 +1349,7 @@ function App() {
         last_status: prev?.last_status ?? null,
         last_error: prev?.last_error ?? null,
         last_checked: prev?.last_checked ?? 0,
+        last_unchanged: prev?.last_unchanged ?? 0,
         last_updated: prev?.last_updated ?? 0,
         last_failed: prev?.last_failed ?? 0,
         progress: prev?.progress ?? {
@@ -1326,9 +1396,7 @@ function App() {
       last_finished_at: null,
       last_status: 'running',
       last_error: null,
-      last_checked: 0,
-      last_updated: 0,
-      last_failed: 0,
+      ...getAutoUpdateRunningReset(),
       progress: {
         total: 0,
         succeeded: [],
@@ -1461,7 +1529,7 @@ function App() {
   }, [featuredSkills.length, invokeTauri])
 
   const handleViewChange = useCallback(
-    (view: 'myskills' | 'explore' | 'manage') => {
+    (view: 'myskills' | 'explore' | 'manage' | 'device-sync') => {
       setShowAddModal(false)
       setActiveView(view)
       if (view !== 'myskills') {
@@ -3469,8 +3537,8 @@ function App() {
     setError(null)
     try {
       setActionMessage(t('actions.updating', { name: skill.name }))
-      await invokeTauri<UpdateResultDto>('update_managed_skill', { skillId: skill.id })
-      const updatedText = t('status.updated', { name: skill.name })
+      const result = await invokeTauri<UpdateResultDto>('update_managed_skill', { skillId: skill.id })
+      const updatedText = t(result.changed ? 'status.updated' : 'status.unchanged', { name: skill.name })
       setActionMessage(updatedText)
       setSuccessToastMessage(updatedText)
       setActionMessage(null)
@@ -3572,6 +3640,7 @@ function App() {
         tagCount={tags.length}
         toolCount={toolStatus?.tools.length ?? 0}
         updateCount={pendingUpdateCount}
+        syncConflictCount={deviceSyncConflictCount}
         appVersion={appVersion}
         updateAvailableVersion={updateAvailableVersion}
         updateChecking={updateChecking}
@@ -3589,7 +3658,14 @@ function App() {
       <WindowResizeHandles enabled={isTauri} />
 
       <main className="skills-main">
-        {activeView === 'detail' && detailSkill ? (
+        <DeviceSyncPage
+          active={activeView === 'device-sync'}
+          isTauri={isTauri}
+          onSkillsChanged={loadManagedSkills}
+          onConflictCountChange={setDeviceSyncConflictCount}
+          t={t}
+        />
+        {activeView === 'device-sync' ? null : activeView === 'detail' && detailSkill ? (
           <SkillDetailView
             skill={detailSkill}
             onBack={handleBackToList}
@@ -3830,8 +3906,11 @@ function App() {
             onGitCacheCleanupDaysChange={handleGitCacheCleanupDaysChange}
             onGitCacheTtlSecsChange={handleGitCacheTtlSecsChange}
             onClearGitCacheNow={handleClearGitCacheNow}
-            githubToken={githubToken}
-            onGithubTokenChange={handleGithubTokenChange}
+            githubTokenDraft={githubToken.draft}
+            githubTokenConfigured={githubToken.hasToken}
+            onGithubTokenDraftChange={handleGithubTokenDraftChange}
+            onGithubTokenSave={handleGithubTokenSave}
+            onGithubTokenRemove={handleGithubTokenRemove}
             githubProxyConfig={githubProxyConfig}
             onGithubProxyConfigChange={handleGithubProxyConfigChange}
             discoveryScanEnabledCount={

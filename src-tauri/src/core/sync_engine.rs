@@ -2,6 +2,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use super::content_hash::hash_dir_strict;
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -117,6 +120,258 @@ pub fn sync_dir_copy_with_overwrite(
         target_path: target.to_path_buf(),
         replaced: did_replace,
     })
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn sync_managed_copy_with_expected_hash(
+    source: &Path,
+    target: &Path,
+    expected_hash: &str,
+) -> Result<SyncOutcome> {
+    let mut replacement = PreparedDirReplacement::prepare_copy(
+        source,
+        target,
+        Some(expected_hash.to_string()),
+        true,
+    )?;
+    let replaced = replacement.activate()?;
+    replacement.verify_backup_unchanged()?;
+    replacement.commit();
+
+    Ok(SyncOutcome {
+        mode_used: SyncMode::Copy,
+        target_path: target.to_path_buf(),
+        replaced,
+    })
+}
+
+pub(crate) struct PreparedDirReplacement {
+    target: PathBuf,
+    staging: Option<PathBuf>,
+    backup: Option<PathBuf>,
+    expected_hash: Option<String>,
+    prepared_hash: String,
+    allow_missing: bool,
+    activated: bool,
+}
+
+impl PreparedDirReplacement {
+    pub(crate) fn prepare_copy(
+        source: &Path,
+        target: &Path,
+        expected_hash: Option<String>,
+        allow_missing: bool,
+    ) -> Result<Self> {
+        ensure_paths_do_not_overlap(source, target)?;
+        ensure_parent_dir(target)?;
+        let parent = target
+            .parent()
+            .context("managed copy target has no parent")?;
+        let staging = parent.join(format!(".skills-hub-sync-{}", Uuid::new_v4()));
+        if let Err(err) = copy_dir_recursive(source, &staging) {
+            let _ = remove_path_permanently(&staging);
+            return Err(err);
+        }
+        Self::from_staging(staging, target.to_path_buf(), expected_hash, allow_missing)
+    }
+
+    pub(crate) fn from_staging(
+        staging: PathBuf,
+        target: PathBuf,
+        expected_hash: Option<String>,
+        allow_missing: bool,
+    ) -> Result<Self> {
+        if std::fs::symlink_metadata(&staging).is_err() {
+            anyhow::bail!("replacement staging path not found: {:?}", staging);
+        }
+        let prepared_hash = match hash_dir_strict(&staging)
+            .with_context(|| format!("hash replacement staging {:?}", staging))
+        {
+            Ok(hash) => hash,
+            Err(err) => {
+                let _ = remove_path_permanently(&staging);
+                return Err(err);
+            }
+        };
+        if let Err(err) = ensure_parent_dir(&target) {
+            let _ = remove_path_permanently(&staging);
+            return Err(err);
+        }
+        Ok(Self {
+            target,
+            staging: Some(staging),
+            backup: None,
+            expected_hash,
+            prepared_hash,
+            allow_missing,
+            activated: false,
+        })
+    }
+
+    pub(crate) fn activate(&mut self) -> Result<bool> {
+        let parent = self
+            .target
+            .parent()
+            .context("replacement target has no parent")?;
+        let backup = parent.join(format!(".skills-hub-backup-{}", Uuid::new_v4()));
+        let had_target = match std::fs::symlink_metadata(&self.target) {
+            Ok(_) => true,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
+            Err(err) => return Err(err).with_context(|| format!("stat {:?}", self.target)),
+        };
+
+        if !had_target && !self.allow_missing {
+            anyhow::bail!("replacement target not found: {:?}", self.target);
+        }
+
+        if had_target {
+            std::fs::rename(&self.target, &backup)
+                .with_context(|| format!("prepare replacement backup {:?}", self.target))?;
+            self.backup = Some(backup);
+            if let Err(err) = self.verify_backup_unchanged() {
+                self.restore_backup_before_activation()?;
+                return Err(err);
+            }
+        }
+
+        let staging = self
+            .staging
+            .as_ref()
+            .context("replacement staging path already consumed")?;
+        if let Err(replace_err) = std::fs::rename(staging, &self.target) {
+            if let Err(restore_err) = self.restore_backup_before_activation() {
+                anyhow::bail!(
+                    "replace {:?} failed: {}; restore backup failed: {:#}",
+                    self.target,
+                    replace_err,
+                    restore_err
+                );
+            }
+            return Err(replace_err).with_context(|| format!("replace {:?}", self.target));
+        }
+        self.staging = None;
+        self.activated = true;
+        Ok(had_target)
+    }
+
+    pub(crate) fn verify_backup_unchanged(&self) -> Result<()> {
+        let (Some(expected_hash), Some(backup)) = (&self.expected_hash, &self.backup) else {
+            return Ok(());
+        };
+        let metadata = std::fs::symlink_metadata(backup)
+            .with_context(|| format!("stat replacement backup {:?}", backup))?;
+        let matches = metadata.is_dir()
+            && !metadata.file_type().is_symlink()
+            && hash_dir_strict(backup)
+                .map(|actual_hash| actual_hash == *expected_hash)
+                .unwrap_or(false);
+        if !matches {
+            anyhow::bail!("TARGET_MODIFIED|{}", self.target.to_string_lossy());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn rollback(&mut self) -> Result<()> {
+        if self.activated {
+            let parent = self
+                .target
+                .parent()
+                .context("replacement target has no parent")?;
+            let recovery = parent.join(format!(".skills-hub-recovery-{}", Uuid::new_v4()));
+            let had_backup = self.backup.is_some();
+            let current_exists = match std::fs::symlink_metadata(&self.target) {
+                Ok(_) => true,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
+                Err(err) => {
+                    return Err(err).with_context(|| format!("stat {:?}", self.target));
+                }
+            };
+            if current_exists {
+                std::fs::rename(&self.target, &recovery)
+                    .with_context(|| format!("isolate rollback content {:?}", self.target))?;
+            }
+            self.activated = false;
+            self.restore_backup_before_activation()?;
+
+            if current_exists {
+                let metadata = std::fs::symlink_metadata(&recovery)
+                    .with_context(|| format!("stat rollback content {:?}", recovery))?;
+                let unchanged = metadata.is_dir()
+                    && !metadata.file_type().is_symlink()
+                    && hash_dir_strict(&recovery)
+                        .map(|hash| hash == self.prepared_hash)
+                        .unwrap_or(false);
+                if unchanged {
+                    remove_path_permanently(&recovery)
+                        .with_context(|| format!("remove rolled back content {:?}", recovery))?;
+                } else {
+                    let preserved_at = if had_backup {
+                        recovery
+                    } else {
+                        std::fs::rename(&recovery, &self.target).with_context(|| {
+                            format!("restore concurrently modified target {:?}", self.target)
+                        })?;
+                        self.target.clone()
+                    };
+                    let detail = serde_json::json!({
+                        "target": self.target.to_string_lossy(),
+                        "recovery": preserved_at.to_string_lossy(),
+                    });
+                    anyhow::bail!("ROLLBACK_CONFLICT|{detail}");
+                }
+            }
+        } else {
+            self.restore_backup_before_activation()?;
+        }
+        if let Some(staging) = self.staging.take() {
+            remove_path_permanently(&staging)
+                .with_context(|| format!("remove replacement staging {:?}", staging))?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn commit(&mut self) {
+        self.activated = false;
+        if let Some(backup) = self.backup.take() {
+            if let Err(err) = remove_path_permanently(&backup) {
+                eprintln!(
+                    "[sync] failed to clean committed backup {:?}: {err:#}",
+                    backup
+                );
+            }
+        }
+        if let Some(staging) = self.staging.take() {
+            if let Err(err) = remove_path_permanently(&staging) {
+                eprintln!(
+                    "[sync] failed to clean committed staging {:?}: {err:#}",
+                    staging
+                );
+            }
+        }
+    }
+
+    fn restore_backup_before_activation(&mut self) -> Result<()> {
+        if let Some(backup) = self.backup.as_ref() {
+            std::fs::rename(backup, &self.target)
+                .with_context(|| format!("restore replacement backup {:?}", backup))?;
+            self.backup = None;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for PreparedDirReplacement {
+    fn drop(&mut self) {
+        if self.activated || self.backup.is_some() {
+            if let Err(err) = self.rollback() {
+                eprintln!("[sync] failed to roll back {:?}: {err:#}", self.target);
+            }
+        } else if let Some(staging) = self.staging.take() {
+            if let Err(err) = remove_path_permanently(&staging) {
+                eprintln!("[sync] failed to clean staging {:?}: {err:#}", staging);
+            }
+        }
+    }
 }
 
 pub fn sync_dir_with_mode_with_overwrite(
@@ -260,6 +515,19 @@ pub(crate) fn remove_path_any(path: &Path) -> Result<()> {
     remove_path_safely_with(path, |path| {
         trash::delete(path).map_err(anyhow::Error::from)
     })
+}
+
+fn remove_path_permanently(path: &Path) -> Result<()> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err).with_context(|| format!("stat {:?}", path)),
+    };
+    if metadata.file_type().is_symlink() || metadata.is_file() {
+        std::fs::remove_file(path).with_context(|| format!("remove file {:?}", path))
+    } else {
+        std::fs::remove_dir_all(path).with_context(|| format!("remove dir {:?}", path))
+    }
 }
 
 pub(crate) fn remove_path_safely_with<F>(path: &Path, recycle: F) -> Result<()>

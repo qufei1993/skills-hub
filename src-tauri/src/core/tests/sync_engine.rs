@@ -1,9 +1,11 @@
 use std::fs;
+use std::path::PathBuf;
 
 use crate::core::sync_engine::{
     copy_dir_recursive, path_is_protected_real_content, remove_path_safely_with,
     sync_dir_for_tool_with_overwrite, sync_dir_hybrid, sync_dir_hybrid_with_overwrite,
-    sync_dir_with_mode_with_overwrite, SyncMode,
+    sync_dir_with_mode_with_overwrite, sync_managed_copy_with_expected_hash,
+    PreparedDirReplacement, SyncMode,
 };
 
 #[test]
@@ -183,6 +185,189 @@ fn explicit_copy_mode_copies_directory() {
 
     assert_eq!(out.mode_used, SyncMode::Copy);
     assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"ok");
+}
+
+#[test]
+fn managed_copy_replaces_only_content_matching_the_expected_hash() {
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("a.txt"), b"new").unwrap();
+    let target_root = tempfile::tempdir().unwrap();
+    let target = target_root.path().join("target");
+    fs::create_dir_all(&target).unwrap();
+    fs::write(target.join("a.txt"), b"old").unwrap();
+    let expected_hash = crate::core::content_hash::hash_dir(&target).unwrap();
+
+    let outcome =
+        sync_managed_copy_with_expected_hash(source.path(), &target, &expected_hash).unwrap();
+
+    assert!(outcome.replaced);
+    assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"new");
+    assert!(fs::read_dir(target_root.path()).unwrap().all(|entry| !entry
+        .unwrap()
+        .file_name()
+        .to_string_lossy()
+        .starts_with(".skills-hub-")));
+}
+
+#[test]
+fn managed_copy_preserves_a_real_directory_with_unexpected_content() {
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("a.txt"), b"new").unwrap();
+    let expected = tempfile::tempdir().unwrap();
+    fs::write(expected.path().join("a.txt"), b"old").unwrap();
+    let expected_hash = crate::core::content_hash::hash_dir(expected.path()).unwrap();
+    let target_root = tempfile::tempdir().unwrap();
+    let target = target_root.path().join("target");
+    fs::create_dir_all(&target).unwrap();
+    fs::write(target.join("a.txt"), b"manual").unwrap();
+
+    let error =
+        sync_managed_copy_with_expected_hash(source.path(), &target, &expected_hash).unwrap_err();
+
+    assert!(format!("{error:#}").contains("TARGET_MODIFIED"));
+    assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"manual");
+}
+
+#[test]
+fn managed_copy_preserves_a_target_with_only_added_git_metadata() {
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("a.txt"), b"new").unwrap();
+    let target_root = tempfile::tempdir().unwrap();
+    let target = target_root.path().join("target");
+    fs::create_dir_all(target.join(".git")).unwrap();
+    fs::write(target.join("a.txt"), b"old").unwrap();
+    let clean = tempfile::tempdir().unwrap();
+    fs::write(clean.path().join("a.txt"), b"old").unwrap();
+    let expected_hash = crate::core::content_hash::hash_dir_strict(clean.path()).unwrap();
+    fs::write(target.join(".git/history"), b"keep").unwrap();
+
+    let error =
+        sync_managed_copy_with_expected_hash(source.path(), &target, &expected_hash).unwrap_err();
+
+    assert!(format!("{error:#}").contains("TARGET_MODIFIED"));
+    assert_eq!(fs::read(target.join(".git/history")).unwrap(), b"keep");
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_copy_preserves_a_target_with_only_an_added_internal_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("a.txt"), b"new").unwrap();
+    let target_root = tempfile::tempdir().unwrap();
+    let target = target_root.path().join("target");
+    fs::create_dir_all(&target).unwrap();
+    fs::write(target.join("a.txt"), b"old").unwrap();
+    let expected_hash = crate::core::content_hash::hash_dir_strict(&target).unwrap();
+    symlink("a.txt", target.join("shortcut")).unwrap();
+
+    let error =
+        sync_managed_copy_with_expected_hash(source.path(), &target, &expected_hash).unwrap_err();
+
+    assert!(format!("{error:#}").contains("TARGET_MODIFIED"));
+    assert_eq!(
+        fs::read_link(target.join("shortcut")).unwrap(),
+        PathBuf::from("a.txt")
+    );
+}
+
+#[test]
+fn managed_copy_rechecks_the_actual_directory_after_staging() {
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("a.txt"), b"new").unwrap();
+    let target_root = tempfile::tempdir().unwrap();
+    let target = target_root.path().join("target");
+    fs::create_dir_all(&target).unwrap();
+    fs::write(target.join("a.txt"), b"old").unwrap();
+    let expected_hash = crate::core::content_hash::hash_dir(&target).unwrap();
+    let mut replacement =
+        PreparedDirReplacement::prepare_copy(source.path(), &target, Some(expected_hash), true)
+            .unwrap();
+
+    fs::write(target.join("a.txt"), b"manual-after-staging").unwrap();
+    let error = replacement.activate().unwrap_err();
+
+    assert!(format!("{error:#}").contains("TARGET_MODIFIED"));
+    assert_eq!(
+        fs::read(target.join("a.txt")).unwrap(),
+        b"manual-after-staging"
+    );
+    drop(replacement);
+    assert!(fs::read_dir(target_root.path()).unwrap().all(|entry| !entry
+        .unwrap()
+        .file_name()
+        .to_string_lossy()
+        .starts_with(".skills-hub-")));
+}
+
+#[test]
+fn rollback_preserves_changes_written_after_activation() {
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("a.txt"), b"new").unwrap();
+    let target_root = tempfile::tempdir().unwrap();
+    let target = target_root.path().join("target");
+    fs::create_dir_all(&target).unwrap();
+    fs::write(target.join("a.txt"), b"old").unwrap();
+    let expected_hash = crate::core::content_hash::hash_dir(&target).unwrap();
+    let mut replacement =
+        PreparedDirReplacement::prepare_copy(source.path(), &target, Some(expected_hash), true)
+            .unwrap();
+    replacement.activate().unwrap();
+    fs::write(target.join("user-created.txt"), b"keep me").unwrap();
+
+    let error = replacement.rollback().unwrap_err();
+
+    assert!(format!("{error:#}").contains("ROLLBACK_CONFLICT"));
+    assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"old");
+    let recovery = fs::read_dir(target_root.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(".skills-hub-recovery-")
+        })
+        .expect("concurrent changes should be preserved in a recovery directory");
+    assert_eq!(
+        fs::read(recovery.join("user-created.txt")).unwrap(),
+        b"keep me"
+    );
+}
+
+#[test]
+fn rollback_preserves_git_metadata_written_after_activation() {
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("a.txt"), b"new").unwrap();
+    let target_root = tempfile::tempdir().unwrap();
+    let target = target_root.path().join("target");
+    fs::create_dir_all(&target).unwrap();
+    fs::write(target.join("a.txt"), b"old").unwrap();
+    let expected_hash = crate::core::content_hash::hash_dir_strict(&target).unwrap();
+    let mut replacement =
+        PreparedDirReplacement::prepare_copy(source.path(), &target, Some(expected_hash), true)
+            .unwrap();
+    replacement.activate().unwrap();
+    fs::create_dir_all(target.join(".git")).unwrap();
+    fs::write(target.join(".git/history"), b"keep").unwrap();
+
+    let error = replacement.rollback().unwrap_err();
+
+    assert!(format!("{error:#}").contains("ROLLBACK_CONFLICT"));
+    let recovery = fs::read_dir(target_root.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(".skills-hub-recovery-")
+        })
+        .unwrap();
+    assert_eq!(fs::read(recovery.join(".git/history")).unwrap(), b"keep");
 }
 
 #[cfg(unix)]

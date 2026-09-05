@@ -6,9 +6,18 @@ All notable changes to this project will be documented in this file.
 
 ## [0.10.0]
 
+### Added
+- **Multi-device Skill library sync**: Added Git-based device sync with GitHub, GitLab, and Gitee support. Browser authorization is the primary setup path, with Token/SSH retained as advanced options. Users can choose an existing private repository or create one from the app, check changes without modifying files, and run manual sync with optional startup sync.
+- **Safe three-way reconciliation**: Skills are matched by stable identity, source, or identical content. Independent file changes merge automatically, while overlapping edits and delete-versus-edit cases stay isolated per Skill for explicit local, remote, or keep-both resolution.
+- **Local recovery and history**: Actual content changes create Git versions, remote deletions move local Skills to a 30-day recycle bin, and the app records sync runs, conflicts, and recovery actions.
+
 ### Fixed
-- **Safe Skills storage migration and removal**: Changing the central Skills storage now rejects paths that overlap tool sync directories, original local sources, or the current storage tree; existing Skills require explicit migration confirmation, and sync operations independently reject overlapping source and target paths. Changing a custom tool directory also blocks targets that overlap an original local Skill, keeps the previous configuration and files unchanged, and shows an actionable localized message. Real files and directories removed by the app are moved to the system recycle bin while original local sources are preserved ([#123](https://github.com/qufei1993/skills-hub/issues/123), [PR #125](https://github.com/qufei1993/skills-hub/pull/125)).
+- **Safe Skills storage migration, removal, and automatic replacement**: Changing the central Skills storage now rejects paths that overlap tool sync directories, original local sources, or the current storage tree; existing Skills require explicit migration confirmation, and sync operations independently reject overlapping source and target paths. Changing a custom tool directory also blocks targets that overlap an original local Skill, keeps the previous configuration and files unchanged, and shows an actionable localized message. User-initiated removal of real managed content uses the system recycle bin; automatic updates do not. Automatic updates skip unchanged Skills, report checked, up-to-date, updated, and failed outcomes separately, use canonical content-and-permission fingerprints, serialize a whole update run, deduplicate shared physical targets, and replace the central copy and only those copy targets proven unchanged. While the process remains running, any validation or metadata failure rolls the whole update back; unexpected target content and writes racing with rollback are preserved for manual review. Original local sources are always preserved ([#123](https://github.com/qufei1993/skills-hub/issues/123), [PR #125](https://github.com/qufei1993/skills-hub/pull/125)).
 - **Kimi Code CLI sync paths and identity**: Corrected global, project, and detection directories to use Kimi Code's `.kimi-code` layout (including `KIMI_CODE_HOME`) and replaced the generic Kimi mark with the official Kimi Code product icon. Automatic updates safely create targets in the current Kimi directory and update legacy records without deleting or moving anything at the old path; conflicting content at the new path is preserved and reported for manual resolution ([#122](https://github.com/qufei1993/skills-hub/issues/122)).
+
+### Security
+- **Platform credential storage**: HTTPS access tokens are stored in macOS Keychain, Windows Credential Manager, or Linux Secret Service and are never written to the sync repository or SQLite. SSH remotes use the system SSH agent.
+- **Portable sync boundary**: Sync includes Skill content and portable metadata only. Tool targets, project paths, app settings, caches, and credentials remain device-local; private-key files are rejected and common secret/build files are excluded.
 
 ## [0.9.1] - 2026-08-29
 
@@ -245,7 +254,8 @@ All notable changes to this project will be documented in this file.
 ### Performance
 - Git import and batch install optimizations: cached clones reduce repeated fetches; timeouts and non‑interactive git improve stability.
 
-[Unreleased]: https://github.com/qufei1993/skills-hub/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/qufei1993/skills-hub/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/qufei1993/skills-hub/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/qufei1993/skills-hub/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/qufei1993/skills-hub/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/qufei1993/skills-hub/compare/v0.8.0...v0.8.1
