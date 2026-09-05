@@ -612,13 +612,42 @@ fn push_skill_dirs_from_base(out: &mut Vec<PathBuf>, base_dir: &Path) {
     }
 }
 
+const MAX_SKILL_SCAN_DEPTH: usize = 4;
+
+fn collect_nested_standard_skills(out: &mut Vec<PathBuf>, base: &Path, depth: usize) {
+    if depth == 0 || !std::fs::symlink_metadata(base).is_ok_and(|metadata| metadata.is_dir()) {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(base) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let known_hidden = depth == MAX_SKILL_SCAN_DEPTH
+            && matches!(name.as_ref(), ".curated" | ".experimental" | ".system");
+        if (is_hidden_dir_name(&name) && !known_hidden)
+            || matches!(name.as_ref(), "node_modules" | "target" | "dist")
+        {
+            continue;
+        }
+        let path = entry.path();
+        if path.join("SKILL.md").is_file() {
+            out.push(path);
+        } else {
+            collect_nested_standard_skills(out, &path, depth - 1);
+        }
+    }
+}
+
 fn collect_skill_dirs(repo_dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
 
-    // 1) Fast path: known skill locations such as skills/* and .claude/skills/*.
-    for base in SKILL_SCAN_BASES {
-        push_skill_dirs_from_base(&mut out, &repo_dir.join(base));
-    }
+    collect_nested_standard_skills(&mut out, &repo_dir.join("skills"), MAX_SKILL_SCAN_DEPTH);
+    push_skill_dirs_from_base(&mut out, &repo_dir.join(".claude/skills"));
 
     // 2) Root-level skills: repo/my-skill/SKILL.md.
     // 3) Root-level skill containers: repo/*skill*/my-skill/SKILL.md.
@@ -1384,7 +1413,13 @@ pub fn list_git_skills<R: tauri::Runtime>(
                 subpath: subpath.to_string(),
             });
         } else if dir.is_dir() {
-            for p in collect_skill_dirs(&dir) {
+            let mut dirs = Vec::new();
+            if subpath == "skills" {
+                collect_nested_standard_skills(&mut dirs, &dir, MAX_SKILL_SCAN_DEPTH);
+            } else {
+                dirs = collect_skill_dirs(&dir);
+            }
+            for p in dirs {
                 let (name, desc) = extract_skill_info(&p, &repo_dir);
                 let rel = p
                     .strip_prefix(&repo_dir)

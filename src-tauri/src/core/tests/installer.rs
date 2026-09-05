@@ -1465,3 +1465,158 @@ fn collect_skill_dirs_deduplicates_known_root_containers() {
     assert_eq!(dirs.len(), 1);
     assert!(dirs[0].ends_with("skills/technical-writer"));
 }
+
+#[test]
+fn nested_skill_discovery_respects_container_boundaries() {
+    let dir = tempfile::tempdir().unwrap();
+    let expected = [
+        "skills/.curated/category/curated",
+        "skills/engineering/code-review",
+        "skills/one/two/three/deep",
+    ];
+    for path in expected.iter().chain(
+        [
+            "skills/engineering/code-review/examples/sample",
+            "skills/one/two/three/four/too-deep",
+            "skills/.hidden/ignored",
+            "skills/node_modules/ignored",
+            "skills/target/ignored",
+            "skills/dist/ignored",
+            "agent-pack/category/ignored",
+            "agent-skills/category/ignored",
+        ]
+        .iter(),
+    ) {
+        let skill = dir.path().join(path);
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "---\nname: example\n---\n").unwrap();
+    }
+    let actual = super::collect_skill_dirs(dir.path());
+    assert_eq!(actual, expected.map(|path| dir.path().join(path)));
+    let mut selected = Vec::new();
+    super::collect_nested_standard_skills(
+        &mut selected,
+        &dir.path().join("skills"),
+        super::MAX_SKILL_SCAN_DEPTH,
+    );
+    selected.sort();
+    assert_eq!(selected, actual);
+}
+
+#[cfg(unix)]
+#[test]
+fn nested_skill_discovery_does_not_follow_symlinks() {
+    let dir = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    fs::create_dir_all(outside.path().join("skill")).unwrap();
+    fs::write(
+        outside.path().join("skill/SKILL.md"),
+        "---\nname: outside\n---\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("skills/category")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("skills/category/link")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("skills/.curated")).unwrap();
+    std::os::unix::fs::symlink(
+        dir.path().join("skills"),
+        dir.path().join("skills/category/loop"),
+    )
+    .unwrap();
+    assert!(super::collect_skill_dirs(dir.path()).is_empty());
+}
+
+#[test]
+fn lists_and_installs_nested_git_skill() {
+    let app = tauri::test::mock_app();
+    let (_dir, store) = make_store();
+    let central = tempfile::tempdir().unwrap();
+    set_central_path(&store, central.path());
+    let source = tempfile::tempdir().unwrap();
+    let subpath = "skills/engineering/code-review";
+    fs::create_dir_all(source.path().join(subpath)).unwrap();
+    fs::write(
+        source.path().join(subpath).join("SKILL.md"),
+        "---\nname: code-review\ndescription: Review code\n---\n",
+    )
+    .unwrap();
+    let repo = init_git_repo(source.path());
+    commit_all(&repo, "add nested skill");
+    let url = source.path().to_string_lossy();
+    let candidates = super::list_git_skills(app.handle(), &store, &url).unwrap();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].subpath, subpath);
+    assert_eq!(candidates[0].description.as_deref(), Some("Review code"));
+    let installed = super::install_git_skill_from_selection(
+        app.handle(),
+        &store,
+        &url,
+        &candidates[0].subpath,
+        None,
+    )
+    .unwrap();
+    assert_eq!(installed.name, "code-review");
+    assert!(installed.central_path.join("SKILL.md").is_file());
+}
+
+#[test]
+fn issue_129_discovers_and_installs_skills_across_categories() {
+    let app = tauri::test::mock_app();
+    let (_dir, store) = make_store();
+    let central = tempfile::tempdir().unwrap();
+    set_central_path(&store, central.path());
+    let source = tempfile::tempdir().unwrap();
+    let skills = [
+        ("code-review", "skills/engineering/code-review"),
+        ("handoff", "skills/productivity/handoff"),
+        ("tdd", "skills/engineering/tdd"),
+    ];
+    for (name, subpath) in skills {
+        let path = source.path().join(subpath);
+        fs::create_dir_all(&path).unwrap();
+        fs::write(
+            path.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: Description of {name}\n---\n"),
+        )
+        .unwrap();
+        fs::write(path.join("content.txt"), name).unwrap();
+    }
+    fs::create_dir_all(source.path().join("skills/deprecated")).unwrap();
+    let repo = init_git_repo(source.path());
+    commit_all(&repo, "add categorized skills for issue 129");
+    let url = source.path().to_string_lossy();
+
+    let candidates = super::list_git_skills(app.handle(), &store, &url).unwrap();
+    let actual: Vec<_> = candidates
+        .iter()
+        .map(|candidate| (candidate.name.as_str(), candidate.subpath.as_str()))
+        .collect();
+    assert_eq!(actual, skills);
+
+    let error = super::install_git_skill(app.handle(), &store, &url, None, None)
+        .err()
+        .expect("a categorized multi-skill repo must require selection");
+    assert!(format!("{error:#}").contains("MULTI_SKILLS|"));
+
+    for candidate in candidates {
+        let installed = super::install_git_skill_from_selection(
+            app.handle(),
+            &store,
+            &url,
+            &candidate.subpath,
+            None,
+        )
+        .unwrap();
+        assert_eq!(installed.name, candidate.name);
+        assert_eq!(
+            fs::read_to_string(installed.central_path.join("content.txt")).unwrap(),
+            candidate.name
+        );
+        assert!(!installed.central_path.join("skills").exists());
+        let record = store.get_skill_by_id(&installed.skill_id).unwrap().unwrap();
+        assert_eq!(
+            record.source_subpath.as_deref(),
+            Some(candidate.subpath.as_str())
+        );
+        assert_eq!(record.description, candidate.description);
+    }
+}
