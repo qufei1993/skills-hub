@@ -19,6 +19,7 @@ import remarkGfm from 'remark-gfm'
 import ExplorePage from './components/skills/ExplorePage'
 import DeviceSyncPage from './components/skills/DeviceSyncPage'
 import FilterBar from './components/skills/FilterBar'
+import { getSkillsView } from './components/skills/skillsView'
 import SkillDetailView from './components/skills/SkillDetailView'
 import Header from './components/skills/Header'
 import LoadingOverlay from './components/skills/LoadingOverlay'
@@ -929,49 +930,20 @@ function App() {
     [skillScopeState],
   )
 
-  const visibleSkills = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase()
-    const selectedTagSet = new Set(selectedTagIds)
-    const hasTagFilter = selectedTagIds.length > 0 || includeUntagged
-    const filtered = managedSkills.filter((skill) => {
-      if (scopeFilter !== 'all' && getSkillScope(skill) !== scopeFilter) return false
-      if (hasTagFilter) {
-        const matchesSelectedTag = skill.tags.some((tag) => selectedTagSet.has(tag.id))
-        const matchesUntagged = includeUntagged && skill.tags.length === 0
-        if (!matchesSelectedTag && !matchesUntagged) return false
-      }
-      if (!query) return true
-      return (
-        skill.name.toLowerCase().includes(query) ||
-        skill.central_path.toLowerCase().includes(query) ||
-        skill.source_type.toLowerCase().includes(query) ||
-        skill.tags.some((tag) => tag.name.toLowerCase().includes(query))
-      )
-    })
-    const sorted = [...filtered].sort((a, b) => {
-      if (sortBy === 'name') {
-        return a.name.localeCompare(b.name)
-      }
-      return (b.updated_at ?? 0) - (a.updated_at ?? 0)
-    })
-    return sorted
-  }, [
-    getSkillScope,
-    includeUntagged,
-    managedSkills,
-    scopeFilter,
-    searchQuery,
-    selectedTagIds,
-    sortBy,
-  ])
+  const { visibleSkills, filterTags, filterUntaggedCount, bulkSelectedSkills } = useMemo(
+    () => getSkillsView({
+      managedSkills, tags, scopeFilter, searchQuery, selectedTagIds,
+      includeUntagged, sortBy, bulkSelectedIds, getSkillScope,
+    }),
+    [managedSkills, tags, scopeFilter, searchQuery, selectedTagIds,
+      includeUntagged, sortBy, bulkSelectedIds, getSkillScope],
+  )
+  const hasListFilters = scopeFilter !== 'all' || searchQuery.trim() !== '' ||
+    selectedTagIds.length > 0 || includeUntagged
   const untaggedCount = useMemo(
     () => managedSkills.filter((skill) => skill.tags.length === 0).length,
     [managedSkills],
   )
-  const bulkSelectedSkills = useMemo(() => {
-    const selectedSet = new Set(bulkSelectedIds)
-    return managedSkills.filter((skill) => selectedSet.has(skill.id))
-  }, [bulkSelectedIds, managedSkills])
 
   const bulkSelectedNames = useMemo(
     () => bulkSelectedSkills.map((skill) => skill.name),
@@ -1730,13 +1702,24 @@ function App() {
     setActiveView('manage')
   }, [])
 
+  const handleClearListFilters = useCallback(() => {
+    setScopeFilter('all')
+    setSearchQuery('')
+    setSelectedTagIds([])
+    setIncludeUntagged(false)
+  }, [])
+
   const handleReviewUntagged = useCallback(() => {
+    setScopeFilter('all')
+    setSearchQuery('')
     setSelectedTagIds([])
     setIncludeUntagged(true)
     setActiveView('myskills')
   }, [])
 
   const handleViewTag = useCallback((tagId: number) => {
+    setScopeFilter('all')
+    setSearchQuery('')
     setSelectedTagIds([tagId])
     setIncludeUntagged(false)
     setActiveView('myskills')
@@ -1778,7 +1761,7 @@ function App() {
   }, [visibleSkills])
 
   const handleOpenBulkSync = useCallback(() => {
-    if (bulkSelectedIds.length === 0) return
+    if (bulkSelectedSkills.length === 0) return
     if (bulkSelectedSkills.some((skill) => skill.enabled === false)) {
       toast.error(t('bulk.enableBeforeSync'))
       return
@@ -1800,7 +1783,7 @@ function App() {
     )
     setShowBulkSyncModal(true)
   }, [
-    bulkSelectedIds.length,
+    bulkSelectedSkills.length,
     bulkSelectedSkills,
     getSkillScope,
     installedToolIds,
@@ -1821,18 +1804,18 @@ function App() {
   }, [loading])
 
   const handleOpenBulkDelete = useCallback(() => {
-    if (bulkSelectedIds.length === 0) return
+    if (bulkSelectedSkills.length === 0) return
     setShowBulkDeleteModal(true)
-  }, [bulkSelectedIds.length])
+  }, [bulkSelectedSkills.length])
 
   const handleCloseBulkDelete = useCallback(() => {
     if (!loading) setShowBulkDeleteModal(false)
   }, [loading])
 
   const handleOpenBulkTags = useCallback(() => {
-    if (bulkSelectedIds.length === 0) return
+    if (bulkSelectedSkills.length === 0) return
     setShowBulkTagsModal(true)
-  }, [bulkSelectedIds.length])
+  }, [bulkSelectedSkills.length])
 
   const handleCloseBulkTags = useCallback(() => {
     if (!loading) setShowBulkTagsModal(false)
@@ -3706,13 +3689,12 @@ function App() {
             <FilterBar
               sortBy={sortBy}
               searchQuery={searchQuery}
-              tags={tags}
+              tags={filterTags}
               selectedTagIds={selectedTagIds}
               includeUntagged={includeUntagged}
-              untaggedCount={untaggedCount}
-              totalCount={visibleSkills.length}
+              untaggedCount={filterUntaggedCount}
               bulkMode={bulkMode}
-              bulkSelectedCount={bulkSelectedIds.length}
+              bulkSelectedCount={bulkSelectedSkills.length}
               viewMode={skillViewMode}
               onSortChange={handleSortChange}
               onSearchChange={handleSearchChange}
@@ -3724,7 +3706,16 @@ function App() {
               onViewModeChange={setSkillViewMode}
               t={t}
             />
+            {hasListFilters ? (
+              <div className="skills-filter-summary" role="status">
+                <span>{t('filters.resultCount', { count: visibleSkills.length })}</span>
+                <button type="button" onClick={handleClearListFilters}>{t('filters.clear')}</button>
+              </div>
+            ) : null}
             <SkillsList
+              hasManagedSkills={managedSkills.length > 0}
+              hasFilters={hasListFilters}
+              onClearFilters={handleClearListFilters}
               plan={plan}
               visibleSkills={visibleSkills}
               installedTools={installedTools}
@@ -3752,7 +3743,7 @@ function App() {
             {bulkMode ? (
               <div className="bulk-action-bar">
                 <div className="bulk-action-copy">
-                  <strong>{t('bulk.selected', { count: bulkSelectedIds.length })}</strong>
+                  <strong>{t('bulk.selected', { count: bulkSelectedSkills.length })}</strong>
                   <span>{t('bulk.helper')}</span>
                 </div>
                 <div className="bulk-action-buttons">
@@ -3770,7 +3761,7 @@ function App() {
                     className="btn btn-secondary"
                     type="button"
                     onClick={handleOpenBulkTags}
-                    disabled={loading || bulkSelectedIds.length === 0}
+                    disabled={loading || bulkSelectedSkills.length === 0}
                   >
                     {t('bulk.tags')}
                   </button>
@@ -3780,7 +3771,7 @@ function App() {
                     onClick={handleOpenBulkSync}
                     disabled={
                       loading ||
-                      bulkSelectedIds.length === 0 ||
+                      bulkSelectedSkills.length === 0 ||
                       bulkHasDisabledSelected
                     }
                   >
@@ -3790,7 +3781,7 @@ function App() {
                     className="btn btn-secondary"
                     type="button"
                     onClick={() => void handleToggleBulkEnabled()}
-                    disabled={loading || bulkSelectedIds.length === 0}
+                    disabled={loading || bulkSelectedSkills.length === 0}
                   >
                     {bulkShouldEnable ? t('bulk.enable') : t('bulk.disable')}
                   </button>
@@ -3798,7 +3789,7 @@ function App() {
                     className="btn btn-danger"
                     type="button"
                     onClick={handleOpenBulkDelete}
-                    disabled={loading || bulkSelectedIds.length === 0}
+                    disabled={loading || bulkSelectedSkills.length === 0}
                   >
                     {t('bulk.delete')}
                   </button>
@@ -3974,7 +3965,7 @@ function App() {
       <BulkSyncModal
         open={showBulkSyncModal}
         loading={loading}
-        selectedCount={bulkSelectedIds.length}
+        selectedCount={bulkSelectedSkills.length}
         installedTools={installedTools}
         selectedToolIds={bulkSyncToolIds}
         onToggleTool={handleToggleBulkSyncTool}

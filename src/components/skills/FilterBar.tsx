@@ -10,7 +10,6 @@ type FilterBarProps = {
   selectedTagIds: number[]
   includeUntagged: boolean
   untaggedCount: number
-  totalCount: number
   bulkMode: boolean
   bulkSelectedCount: number
   viewMode: 'list' | 'cards'
@@ -32,7 +31,6 @@ const FilterBar = ({
   selectedTagIds,
   includeUntagged,
   untaggedCount,
-  totalCount,
   bulkMode,
   bulkSelectedCount,
   viewMode,
@@ -70,9 +68,6 @@ const FilterBar = ({
 
   return (
     <div className="filter-bar">
-      <div className="filter-title">
-        {t('allSkills')}（{totalCount}）
-      </div>
       <div className="filter-actions">
         <button className="btn btn-secondary sort-btn" type="button">
           {sortBy === 'updated' ? t('sortUpdated') : t('sortName')}
@@ -127,6 +122,8 @@ const FilterBar = ({
                   className={`tag-filter-option${includeUntagged ? ' selected' : ''}`}
                   type="button"
                   onClick={onToggleUntagged}
+                  disabled={untaggedCount === 0 && !includeUntagged}
+                  aria-pressed={includeUntagged}
                 >
                   <span className="tag-check">{includeUntagged ? <Check size={14} /> : null}</span>
                   <span>{t('untagged')}</span>
@@ -140,6 +137,8 @@ const FilterBar = ({
                       className={`tag-filter-option${selected ? ' selected' : ''}`}
                       type="button"
                       onClick={() => onToggleTag(tag.id)}
+                      disabled={tag.skill_count === 0 && !selected}
+                      aria-pressed={selected}
                     >
                       <span className="tag-check">{selected ? <Check size={14} /> : null}</span>
                       <span>{tag.name}</span>

@@ -5921,3 +5921,25 @@
   .skills-sync-issue { margin-left: auto; }
   .skills-sync-issue-action { margin-left: 0; }
 }
+
+.skills-filter-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.skills-filter-summary button {
+  background: transparent;
+  border: 0;
+  padding: 4px 0;
+  color: var(--accent-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.skills-filter-summary button:hover { text-decoration: underline; }
+.skills-filter-summary button:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+.skills-empty-state { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.tag-filter-option:disabled { opacity: .45; cursor: not-allowed; }
