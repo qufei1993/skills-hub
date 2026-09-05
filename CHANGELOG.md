@@ -6,12 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ## [0.10.0]
 
+### Changed
+- **Compact My Skills header**: Replaced overview cards with scope filters and counts, removed the duplicate scope dropdown, and show a compact sync-issue shortcut only when attention is needed.
+
 ### Added
 - **Multi-device Skill library sync**: Added Git-based device sync with GitHub, GitLab, and Gitee support. Browser authorization is the primary setup path, with Token/SSH retained as advanced options. Users can choose an existing private repository or create one from the app, check changes without modifying files, and run manual sync with optional startup sync.
 - **Safe three-way reconciliation**: Skills are matched by stable identity, source, or identical content. Independent file changes merge automatically, while overlapping edits and delete-versus-edit cases stay isolated per Skill for explicit local, remote, or keep-both resolution.
 - **Local recovery and history**: Actual content changes create Git versions, remote deletions move local Skills to a 30-day recycle bin, and the app records sync runs, conflicts, and recovery actions.
 
 ### Fixed
+- **Scope-aware filtering and bulk actions**: Tag and untagged counts now follow scope and search without being narrowed by selected tags. Bulk actions and confirmation counts exclude hidden selections. Filtered empty states offer a reset, and opening a tag from management clears stale scope/search filters.
 - **Filtered Skill installation**: Git and local import dialogs now install only checked Skills in the current search results, matching the displayed selection count. Hidden selections are preserved when clearing the search but are not installed while filtered out. Installation is disabled when no visible, valid Skill is selected.
 - **Nested Git Skill discovery**: Repositories such as `mattpocock/skills` now support `skills/<category>/<skill>/SKILL.md` when added through the repository root or the standard `skills/` folder URL. Scanning is limited to four directory levels within `skills/`, stops at each Skill, and skips directory symlinks and common dependency/build directories ([#129](https://github.com/qufei1993/skills-hub/issues/129), [PR #131](https://github.com/qufei1993/skills-hub/pull/131)).
 - **Destructive action confirmations**: Removing a custom tool or manually clearing the Git cache now requires an in-app confirmation that states exactly what is removed and what remains untouched. Custom tool removal preserves all Skill files in the configured tool directory, while Git cache cleanup does not affect installed Skills or local source folders.

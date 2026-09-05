@@ -11,6 +11,9 @@ type GithubInfo = {
 
 type SkillsListProps = {
   plan: OnboardingPlan | null
+  hasManagedSkills: boolean
+  hasFilters: boolean
+  onClearFilters: () => void
   visibleSkills: ManagedSkill[]
   installedTools: ToolOption[]
   loading: boolean
@@ -36,6 +39,9 @@ type SkillsListProps = {
 }
 
 const SkillsList = ({
+  hasManagedSkills,
+  hasFilters,
+  onClearFilters,
   plan,
   visibleSkills,
   installedTools,
@@ -112,7 +118,14 @@ const SkillsList = ({
       ) : null}
 
       {visibleSkills.length === 0 ? (
-        <div className="empty">{t('skillsEmpty')}</div>
+        <div className="empty skills-empty-state">
+          <span>{t(hasManagedSkills ? 'filters.noResults' : 'skillsEmpty')}</span>
+          {hasManagedSkills && hasFilters ? (
+            <button className="btn btn-secondary" type="button" onClick={onClearFilters}>
+              {t('filters.clear')}
+            </button>
+          ) : null}
+        </div>
       ) : (
         <div className={`skills-table ${viewMode}-view`}>
           {visibleSkills.map((skill) => (
