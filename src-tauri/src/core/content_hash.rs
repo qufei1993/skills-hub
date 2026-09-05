@@ -95,7 +95,7 @@ fn hash_dir_with_mode(path: &Path, strict: bool) -> Result<String> {
         entries.push((relative, entry));
     }
 
-    entries.sort_by(|left, right| path_bytes(&left.0).cmp(&path_bytes(&right.0)));
+    entries.sort_by_key(|entry| path_bytes(&entry.0));
 
     for (relative, entry) in entries {
         if entry.file_type().is_dir() {
