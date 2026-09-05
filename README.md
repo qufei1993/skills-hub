@@ -89,7 +89,7 @@ Skills Hub includes 47 built-in tool adapters and supports custom skills directo
 | `opencode` | OpenCode | `.config/opencode/skills` | `.agents/skills` | `.config/opencode` |
 | `antigravity` | Antigravity | `.gemini/config/skills` | `.agents/skills` | `.gemini/config` |
 | `amp` | Amp | `.config/agents/skills` | `.agents/skills` | `.config/agents` |
-| `kimi_cli` | Kimi Code CLI | `.config/agents/skills` | `.agents/skills` | `.config/agents` |
+| `kimi_cli` | Kimi Code CLI | `.kimi-code/skills` (or `$KIMI_CODE_HOME/skills`) | `.kimi-code/skills` | `.kimi-code` (or `$KIMI_CODE_HOME`) |
 | `augment` | Augment | `.augment/skills` | `.augment/skills` | `.augment` |
 | `openclaw` | OpenClaw | `.openclaw/skills` | `skills` | `.openclaw` |
 | `copaw` | Copaw | `.copaw/skill_pool` | `.copaw/skill_pool` | `.copaw` |

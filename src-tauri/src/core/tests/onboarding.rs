@@ -151,26 +151,37 @@ fn persists_and_sanitizes_scan_config() {
 fn scan_settings_deduplicate_shared_dirs_and_include_claude_plugins() {
     let home = tempfile::tempdir().unwrap();
     fs::create_dir_all(home.path().join(".config/agents")).unwrap();
+    fs::create_dir_all(home.path().join(".kimi-code")).unwrap();
     fs::create_dir_all(home.path().join(".claude/plugins")).unwrap();
-    let shared_key = super::tool_scan_source_key(".config/agents/skills");
+    let amp_key = super::tool_scan_source_key(".config/agents/skills");
+    let kimi_key = super::tool_scan_source_key(".kimi-code/skills");
 
     let settings = super::get_discovery_scan_settings_in_home(
         home.path(),
         &home.path().join(".claude"),
         super::DiscoveryScanConfig {
-            disabled_source_keys: vec![shared_key.clone()],
+            disabled_source_keys: vec![amp_key.clone()],
         },
     );
 
-    let shared = settings
+    let amp = settings
         .sources
         .iter()
-        .find(|source| source.key == shared_key)
+        .find(|source| source.key == amp_key)
         .unwrap();
-    assert_eq!(shared.path, home.path().join(".config/agents/skills"));
-    assert!(shared.label.contains("Amp"));
-    assert!(shared.label.contains("Kimi Code CLI"));
-    assert!(!shared.enabled);
+    assert_eq!(amp.path, home.path().join(".config/agents/skills"));
+    assert!(amp.label.contains("Amp"));
+    assert!(!amp.label.contains("Kimi Code CLI"));
+    assert!(!amp.enabled);
+
+    let kimi = settings
+        .sources
+        .iter()
+        .find(|source| source.key == kimi_key)
+        .unwrap();
+    assert_eq!(kimi.path, home.path().join(".kimi-code/skills"));
+    assert_eq!(kimi.label, "Kimi Code CLI");
+    assert!(kimi.enabled);
     assert_eq!(
         settings
             .sources

@@ -5,6 +5,8 @@ import {
   getAutoUpdateToastKey,
   isAutoUpdatePossiblyStalled,
   parseAutoUpdateFailureItems,
+  parseToolSyncPathChangedError,
+  parseToolSyncTargetConflictError,
   shouldKeepWaitingForTriggeredAutoUpdate,
   summarizeAutoUpdateErrors,
 } from './autoUpdateSettings'
@@ -38,6 +40,56 @@ describe('summarizeAutoUpdateErrors', () => {
 
   it('returns no summaries for empty errors', () => {
     expect(summarizeAutoUpdateErrors('').summaries).toEqual([])
+  })
+
+  it('classifies a stale tool sync path separately', () => {
+    const result = summarizeAutoUpdateErrors(
+      'skill-a: TOOL_SYNC_PATH_CHANGED|Kimi Code CLI|/Users/may/.kimi-code/skills/skill-a',
+    )
+
+    expect(result.summaries).toEqual([
+      { key: 'autoUpdateErrorToolPathChanged', count: 1 },
+    ])
+  })
+
+  it('classifies a conflicting current tool target separately', () => {
+    const result = summarizeAutoUpdateErrors(
+      'skill-a: TOOL_SYNC_TARGET_CONFLICT|Kimi Code CLI|/Users/may/.kimi-code/skills/skill-a',
+    )
+
+    expect(result.summaries).toEqual([
+      { key: 'autoUpdateErrorToolPathChanged', count: 1 },
+    ])
+  })
+})
+
+describe('parseToolSyncPathChangedError', () => {
+  it('extracts the tool and current target path for an actionable message', () => {
+    expect(
+      parseToolSyncPathChangedError(
+        'TOOL_SYNC_PATH_CHANGED|Kimi Code CLI|/Users/may/.kimi-code/skills/demo',
+      ),
+    ).toEqual({
+      tool: 'Kimi Code CLI',
+      expectedPath: '/Users/may/.kimi-code/skills/demo',
+    })
+  })
+
+  it('leaves unrelated failures untouched', () => {
+    expect(parseToolSyncPathChangedError('network timeout')).toBeNull()
+  })
+})
+
+describe('parseToolSyncTargetConflictError', () => {
+  it('extracts a conflicting target without exposing the protocol code', () => {
+    expect(
+      parseToolSyncTargetConflictError(
+        'TOOL_SYNC_TARGET_CONFLICT|Kimi Code CLI|/Users/may/.kimi-code/skills/demo',
+      ),
+    ).toEqual({
+      tool: 'Kimi Code CLI',
+      expectedPath: '/Users/may/.kimi-code/skills/demo',
+    })
   })
 })
 

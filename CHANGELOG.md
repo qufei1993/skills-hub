@@ -4,8 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.10.0]
+
 ### Fixed
 - **Safe Skills storage migration and removal**: Changing the central Skills storage now rejects paths that overlap tool sync directories, original local sources, or the current storage tree; existing Skills require explicit migration confirmation, and sync operations independently reject overlapping source and target paths. Changing a custom tool directory also blocks targets that overlap an original local Skill, keeps the previous configuration and files unchanged, and shows an actionable localized message. Real files and directories removed by the app are moved to the system recycle bin while original local sources are preserved ([#123](https://github.com/qufei1993/skills-hub/issues/123), [PR #125](https://github.com/qufei1993/skills-hub/pull/125)).
+- **Kimi Code CLI sync paths and identity**: Corrected global, project, and detection directories to use Kimi Code's `.kimi-code` layout (including `KIMI_CODE_HOME`) and replaced the generic Kimi mark with the official Kimi Code product icon. Automatic updates safely create targets in the current Kimi directory and update legacy records without deleting or moving anything at the old path; conflicting content at the new path is preserved and reported for manual resolution ([#122](https://github.com/qufei1993/skills-hub/issues/122)).
 
 ## [0.9.1] - 2026-08-29
 

@@ -86,7 +86,7 @@ Explore 汇总精选仓库中的 Skill，并支持在线搜索。点击 Install 
 | `opencode` | OpenCode | `.config/opencode/skills` | `.agents/skills` | `.config/opencode` |
 | `antigravity` | Antigravity | `.gemini/config/skills` | `.agents/skills` | `.gemini/config` |
 | `amp` | Amp | `.config/agents/skills` | `.agents/skills` | `.config/agents` |
-| `kimi_cli` | Kimi Code CLI | `.config/agents/skills` | `.agents/skills` | `.config/agents` |
+| `kimi_cli` | Kimi Code CLI | `.kimi-code/skills`（或 `$KIMI_CODE_HOME/skills`） | `.kimi-code/skills` | `.kimi-code`（或 `$KIMI_CODE_HOME`） |
 | `augment` | Augment | `.augment/skills` | `.augment/skills` | `.augment` |
 | `openclaw` | OpenClaw | `.openclaw/skills` | `skills` | `.openclaw` |
 | `copaw` | Copaw | `.copaw/skill_pool` | `.copaw/skill_pool` | `.copaw` |

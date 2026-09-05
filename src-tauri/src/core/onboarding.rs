@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use super::central_repo::resolve_central_repo_path;
 use super::content_hash::hash_dir;
 use super::skill_store::SkillStore;
-use super::tool_adapters::{default_tool_adapters, scan_tool_dir, DetectedSkill};
+use super::tool_adapters::{
+    default_tool_adapters, resolve_adapter_path_in_home, scan_tool_dir, DetectedSkill,
+};
 
 const DISCOVERY_SCAN_CONFIG_SETTING: &str = "discovery_scan_config_v1";
 const CLAUDE_PLUGIN_SOURCE_KEY: &str = "claude_plugins";
@@ -118,9 +120,13 @@ fn get_discovery_scan_settings_in_home(
     let mut source_indexes = HashMap::<String, usize>::new();
 
     for adapter in default_tool_adapters() {
-        if !home.join(adapter.relative_detect_dir).exists() {
+        let detect_dir =
+            resolve_adapter_path_in_home(&adapter, home, adapter.relative_detect_dir, "");
+        if !detect_dir.exists() {
             continue;
         }
+        let skills_dir =
+            resolve_adapter_path_in_home(&adapter, home, adapter.relative_skills_dir, "skills");
         let key = tool_scan_source_key(adapter.relative_skills_dir);
         if let Some(index) = source_indexes.get(&key).copied() {
             let source = &mut sources[index];
@@ -133,7 +139,7 @@ fn get_discovery_scan_settings_in_home(
             enabled: !disabled.contains(&key),
             key,
             label: adapter.display_name.to_string(),
-            path: home.join(adapter.relative_skills_dir),
+            path: skills_dir,
         });
     }
 
@@ -224,17 +230,21 @@ fn build_onboarding_plan_with_claude_dir(
     let mut scanned_claude = false;
 
     for adapter in &adapters {
-        if !home.join(adapter.relative_detect_dir).exists() {
+        let detect_dir =
+            resolve_adapter_path_in_home(adapter, home, adapter.relative_detect_dir, "");
+        if !detect_dir.exists() {
             continue;
         }
-        if disabled_source_keys.contains(&tool_scan_source_key(adapter.relative_skills_dir)) {
+        let dir =
+            resolve_adapter_path_in_home(adapter, home, adapter.relative_skills_dir, "skills");
+        let source_key = tool_scan_source_key(adapter.relative_skills_dir);
+        if disabled_source_keys.contains(&source_key) {
             continue;
         }
         scanned += 1;
         if adapter.id.as_key() == "claude_code" {
             scanned_claude = true;
         }
-        let dir = home.join(adapter.relative_skills_dir);
         let detected = scan_tool_dir(adapter, &dir)?;
         all_detected.extend(filter_detected(
             detected,

@@ -4,9 +4,9 @@ use crate::core::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
 use crate::core::sync_engine::SyncMode;
 use crate::core::tool_adapters::{
     adapter_by_key, adapters_sharing_project_skills_dir, adapters_sharing_skills_dir,
-    default_tool_adapters, load_tool_config, project_relative_skills_dir, resolve_project_path,
-    save_tool_config, scan_tool_dir, supports_project_scope, CustomToolConfig, ToolAdapter,
-    ToolConfig, ToolId,
+    default_tool_adapters, load_tool_config, project_relative_skills_dir,
+    resolve_adapter_path_in_home_with_kimi_home, resolve_project_path, save_tool_config,
+    scan_tool_dir, supports_project_scope, CustomToolConfig, ToolAdapter, ToolConfig, ToolId,
 };
 
 fn make_custom_tool(key: &str, label: &str, skills_dir: &str) -> CustomToolConfig {
@@ -331,13 +331,49 @@ fn antigravity_adapter_uses_current_global_skill_dir() {
 }
 
 #[test]
-fn adapters_sharing_skills_dir_groups_amp_and_kimi() {
+fn kimi_adapter_uses_kimi_code_directories() {
+    let kimi = adapter_by_key("kimi_cli").unwrap();
+
+    assert_eq!(kimi.relative_skills_dir, ".kimi-code/skills");
+    assert_eq!(kimi.relative_detect_dir, ".kimi-code");
+    assert_eq!(project_relative_skills_dir(&kimi), ".kimi-code/skills");
+}
+
+#[test]
+fn kimi_adapter_honors_kimi_code_home() {
+    let home = tempfile::tempdir().unwrap();
+    let kimi_home = tempfile::tempdir().unwrap();
+    let kimi = adapter_by_key("kimi_cli").unwrap();
+    assert_eq!(
+        resolve_adapter_path_in_home_with_kimi_home(
+            &kimi,
+            home.path(),
+            kimi.relative_skills_dir,
+            "skills",
+            Some(kimi_home.path()),
+        ),
+        kimi_home.path().join("skills")
+    );
+    assert_eq!(
+        resolve_adapter_path_in_home_with_kimi_home(
+            &kimi,
+            home.path(),
+            kimi.relative_detect_dir,
+            "",
+            Some(kimi_home.path()),
+        ),
+        kimi_home.path()
+    );
+}
+
+#[test]
+fn adapters_sharing_skills_dir_keeps_amp_separate_from_kimi() {
     let amp = adapter_by_key("amp").unwrap();
     let group = adapters_sharing_skills_dir(&amp);
     let keys: std::collections::HashSet<&'static str> =
         group.into_iter().map(|a| a.id.as_key()).collect();
     assert!(keys.contains("amp"));
-    assert!(keys.contains("kimi_cli"));
+    assert!(!keys.contains("kimi_cli"));
 }
 
 #[test]
@@ -349,7 +385,6 @@ fn project_relative_skills_dir_maps_supported_agents() {
         ("gemini_cli", ".agents/skills"),
         ("github_copilot", ".agents/skills"),
         ("amp", ".agents/skills"),
-        ("kimi_cli", ".agents/skills"),
         ("antigravity", ".agents/skills"),
         ("cline", ".agents/skills"),
     ];
@@ -359,6 +394,9 @@ fn project_relative_skills_dir_maps_supported_agents() {
         assert_eq!(project_relative_skills_dir(&adapter), expected, "{key}");
         assert!(supports_project_scope(&adapter), "{key}");
     }
+
+    let kimi = adapter_by_key("kimi_cli").unwrap();
+    assert_eq!(project_relative_skills_dir(&kimi), ".kimi-code/skills");
 
     let claude = adapter_by_key("claude_code").unwrap();
     assert_eq!(project_relative_skills_dir(&claude), ".claude/skills");
@@ -415,7 +453,7 @@ fn adapters_sharing_project_skills_dir_groups_agents_tools() {
     assert!(keys.contains("gemini_cli"));
     assert!(keys.contains("github_copilot"));
     assert!(keys.contains("amp"));
-    assert!(keys.contains("kimi_cli"));
+    assert!(!keys.contains("kimi_cli"));
     assert!(keys.contains("antigravity"));
     assert!(keys.contains("cline"));
     assert!(!keys.contains("claude_code"));

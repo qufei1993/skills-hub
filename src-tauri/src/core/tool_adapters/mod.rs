@@ -515,10 +515,10 @@ pub fn default_tool_adapters() -> Vec<ToolAdapter> {
         ToolAdapter {
             id: ToolId::KimiCli,
             display_name: "Kimi Code CLI",
-            // add-skill global path: ~/.config/agents/skills/
-            // NOTE: Shares the same skills directory with Amp.
-            relative_skills_dir: ".config/agents/skills",
-            relative_detect_dir: ".config/agents",
+            // Kimi Code stores user-level skills under KIMI_CODE_HOME/skills.
+            // The default KIMI_CODE_HOME is ~/.kimi-code.
+            relative_skills_dir: ".kimi-code/skills",
+            relative_detect_dir: ".kimi-code",
         },
         ToolAdapter {
             id: ToolId::Augment,
@@ -796,7 +796,7 @@ pub fn default_tool_adapters() -> Vec<ToolAdapter> {
     ]
 }
 
-/// Tools can share the same global skills directory (e.g. Amp and Kimi Code CLI).
+/// Tools can share the same global skills directory.
 /// Use this to coordinate UI warnings and avoid duplicate filesystem operations.
 pub fn adapters_sharing_skills_dir(adapter: &ToolAdapter) -> Vec<ToolAdapter> {
     default_tool_adapters()
@@ -821,7 +821,12 @@ pub fn adapter_by_key(key: &str) -> Option<ToolAdapter> {
 
 pub fn resolve_default_path(adapter: &ToolAdapter) -> Result<PathBuf> {
     let home = dirs::home_dir().context("failed to resolve home directory")?;
-    Ok(home.join(adapter.relative_skills_dir))
+    Ok(resolve_adapter_path_in_home(
+        adapter,
+        &home,
+        adapter.relative_skills_dir,
+        "skills",
+    ))
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -835,7 +840,8 @@ pub fn supports_project_scope(adapter: &ToolAdapter) -> bool {
 
 pub fn project_relative_skills_dir(adapter: &ToolAdapter) -> &'static str {
     match adapter.id {
-        ToolId::Amp | ToolId::KimiCli => ".agents/skills",
+        ToolId::KimiCli => ".kimi-code/skills",
+        ToolId::Amp => ".agents/skills",
         ToolId::Antigravity => ".agents/skills",
         ToolId::Augment => ".augment/skills",
         ToolId::ClaudeCode => ".claude/skills",
@@ -885,7 +891,45 @@ pub fn project_relative_skills_dir(adapter: &ToolAdapter) -> &'static str {
 
 pub fn resolve_detect_path(adapter: &ToolAdapter) -> Result<PathBuf> {
     let home = dirs::home_dir().context("failed to resolve home directory")?;
-    Ok(home.join(adapter.relative_detect_dir))
+    Ok(resolve_adapter_path_in_home(
+        adapter,
+        &home,
+        adapter.relative_detect_dir,
+        "",
+    ))
+}
+
+pub(crate) fn resolve_adapter_path_in_home(
+    adapter: &ToolAdapter,
+    home: &Path,
+    relative_path: &str,
+    kimi_suffix: &str,
+) -> PathBuf {
+    let kimi_home = std::env::var_os("KIMI_CODE_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    resolve_adapter_path_in_home_with_kimi_home(
+        adapter,
+        home,
+        relative_path,
+        kimi_suffix,
+        kimi_home.as_deref(),
+    )
+}
+
+pub(crate) fn resolve_adapter_path_in_home_with_kimi_home(
+    adapter: &ToolAdapter,
+    home: &Path,
+    relative_path: &str,
+    kimi_suffix: &str,
+    kimi_home: Option<&Path>,
+) -> PathBuf {
+    if adapter.id == ToolId::KimiCli {
+        if let Some(kimi_home) = kimi_home {
+            return kimi_home.join(kimi_suffix);
+        }
+    }
+    home.join(relative_path)
 }
 
 pub fn is_tool_installed(adapter: &ToolAdapter) -> Result<bool> {
