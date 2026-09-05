@@ -4,9 +4,9 @@ use crate::core::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
 use crate::core::sync_engine::SyncMode;
 use crate::core::tool_adapters::{
     adapter_by_key, adapters_sharing_project_skills_dir, adapters_sharing_skills_dir,
-    default_tool_adapters, load_tool_config, project_relative_skills_dir, resolve_project_path,
-    save_tool_config, scan_tool_dir, supports_project_scope, CustomToolConfig, ToolAdapter,
-    ToolConfig, ToolId,
+    default_tool_adapters, load_tool_config, project_relative_skills_dir,
+    resolve_adapter_path_in_home_with_kimi_home, resolve_project_path, save_tool_config,
+    scan_tool_dir, supports_project_scope, CustomToolConfig, ToolAdapter, ToolConfig, ToolId,
 };
 
 fn make_custom_tool(key: &str, label: &str, skills_dir: &str) -> CustomToolConfig {
@@ -142,6 +142,96 @@ fn saving_changed_custom_tool_migrates_existing_targets_and_preserves_key() {
 }
 
 #[test]
+fn changing_custom_tool_directory_to_local_source_returns_safe_error_and_preserves_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = SkillStore::new(dir.path().join("test.db"));
+    store.ensure_schema().unwrap();
+
+    let original = dir.path().join("source/skill-a");
+    fs::create_dir_all(&original).unwrap();
+    fs::write(original.join("source-marker.txt"), "original").unwrap();
+    let central = dir.path().join("central/skill-a");
+    fs::create_dir_all(&central).unwrap();
+    fs::write(central.join("SKILL.md"), "# Skill A").unwrap();
+    let old_root = dir.path().join("old-tools");
+
+    save_tool_config(
+        &store,
+        ToolConfig {
+            disabled_builtin_tools: Vec::new(),
+            custom_tools: vec![make_custom_tool(
+                "custom_casey",
+                "Casey",
+                old_root.to_string_lossy().as_ref(),
+            )],
+        },
+    )
+    .unwrap();
+
+    store
+        .upsert_skill(&SkillRecord {
+            id: "skill-a".to_string(),
+            name: "skill-a".to_string(),
+            description: None,
+            source_type: "local".to_string(),
+            source_ref: Some(original.to_string_lossy().to_string()),
+            source_subpath: None,
+            source_revision: None,
+            central_path: central.to_string_lossy().to_string(),
+            content_hash: None,
+            created_at: 1,
+            updated_at: 1,
+            last_sync_at: None,
+            last_seen_at: 1,
+            enabled: true,
+            status: "ok".to_string(),
+        })
+        .unwrap();
+    let old_target = old_root.join("skill-a");
+    fs::create_dir_all(&old_target).unwrap();
+    fs::write(old_target.join("SKILL.md"), "# Skill A").unwrap();
+    store
+        .upsert_skill_target(&SkillTargetRecord {
+            id: "target-a".to_string(),
+            skill_id: "skill-a".to_string(),
+            tool: "custom_casey".to_string(),
+            scope: "global".to_string(),
+            project_path: None,
+            target_path: old_target.to_string_lossy().to_string(),
+            mode: "copy".to_string(),
+            status: "ok".to_string(),
+            last_error: None,
+            synced_at: Some(1),
+        })
+        .unwrap();
+
+    let err = save_tool_config(
+        &store,
+        ToolConfig {
+            disabled_builtin_tools: Vec::new(),
+            custom_tools: vec![make_custom_tool(
+                "custom_casey",
+                "Casey",
+                original.parent().unwrap().to_string_lossy().as_ref(),
+            )],
+        },
+    )
+    .unwrap_err();
+
+    assert!(err.to_string().starts_with("SKILL_TARGET_OVERLAPS_SOURCE|"));
+    assert_eq!(
+        fs::read_to_string(original.join("source-marker.txt")).unwrap(),
+        "original"
+    );
+    assert!(old_target.join("SKILL.md").is_file());
+    let config = load_tool_config(&store).unwrap();
+    assert_eq!(
+        config.custom_tools[0].skills_dir,
+        old_root.to_string_lossy()
+    );
+}
+
+#[test]
 fn legacy_custom_tool_config_defaults_avatar_and_sync_mode() {
     let config: ToolConfig = serde_json::from_str(
         r#"{
@@ -241,13 +331,49 @@ fn antigravity_adapter_uses_current_global_skill_dir() {
 }
 
 #[test]
-fn adapters_sharing_skills_dir_groups_amp_and_kimi() {
+fn kimi_adapter_uses_kimi_code_directories() {
+    let kimi = adapter_by_key("kimi_cli").unwrap();
+
+    assert_eq!(kimi.relative_skills_dir, ".kimi-code/skills");
+    assert_eq!(kimi.relative_detect_dir, ".kimi-code");
+    assert_eq!(project_relative_skills_dir(&kimi), ".kimi-code/skills");
+}
+
+#[test]
+fn kimi_adapter_honors_kimi_code_home() {
+    let home = tempfile::tempdir().unwrap();
+    let kimi_home = tempfile::tempdir().unwrap();
+    let kimi = adapter_by_key("kimi_cli").unwrap();
+    assert_eq!(
+        resolve_adapter_path_in_home_with_kimi_home(
+            &kimi,
+            home.path(),
+            kimi.relative_skills_dir,
+            "skills",
+            Some(kimi_home.path()),
+        ),
+        kimi_home.path().join("skills")
+    );
+    assert_eq!(
+        resolve_adapter_path_in_home_with_kimi_home(
+            &kimi,
+            home.path(),
+            kimi.relative_detect_dir,
+            "",
+            Some(kimi_home.path()),
+        ),
+        kimi_home.path()
+    );
+}
+
+#[test]
+fn adapters_sharing_skills_dir_keeps_amp_separate_from_kimi() {
     let amp = adapter_by_key("amp").unwrap();
     let group = adapters_sharing_skills_dir(&amp);
     let keys: std::collections::HashSet<&'static str> =
         group.into_iter().map(|a| a.id.as_key()).collect();
     assert!(keys.contains("amp"));
-    assert!(keys.contains("kimi_cli"));
+    assert!(!keys.contains("kimi_cli"));
 }
 
 #[test]
@@ -259,7 +385,6 @@ fn project_relative_skills_dir_maps_supported_agents() {
         ("gemini_cli", ".agents/skills"),
         ("github_copilot", ".agents/skills"),
         ("amp", ".agents/skills"),
-        ("kimi_cli", ".agents/skills"),
         ("antigravity", ".agents/skills"),
         ("cline", ".agents/skills"),
     ];
@@ -269,6 +394,9 @@ fn project_relative_skills_dir_maps_supported_agents() {
         assert_eq!(project_relative_skills_dir(&adapter), expected, "{key}");
         assert!(supports_project_scope(&adapter), "{key}");
     }
+
+    let kimi = adapter_by_key("kimi_cli").unwrap();
+    assert_eq!(project_relative_skills_dir(&kimi), ".kimi-code/skills");
 
     let claude = adapter_by_key("claude_code").unwrap();
     assert_eq!(project_relative_skills_dir(&claude), ".claude/skills");
@@ -325,7 +453,7 @@ fn adapters_sharing_project_skills_dir_groups_agents_tools() {
     assert!(keys.contains("gemini_cli"));
     assert!(keys.contains("github_copilot"));
     assert!(keys.contains("amp"));
-    assert!(keys.contains("kimi_cli"));
+    assert!(!keys.contains("kimi_cli"));
     assert!(keys.contains("antigravity"));
     assert!(keys.contains("cline"));
     assert!(!keys.contains("claude_code"));

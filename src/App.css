@@ -4036,6 +4036,11 @@
   object-fit: contain;
 }
 
+.tool-brand-icon.kimi-code-icon img {
+  width: 100%;
+  height: 100%;
+}
+
 .tool-brand-icon.custom-avatar img {
   width: 100%;
   height: 100%;

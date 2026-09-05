@@ -650,6 +650,12 @@ export const resources = {
         '{{count}} Git update(s) failed because GitHub or the network was unreachable.',
       autoUpdateErrorRateLimited:
         '{{count}} GitHub request(s) were rate limited. Add a GitHub Token or try later.',
+      autoUpdateErrorToolPathChanged:
+        '{{count}} tool target(s) could not be migrated automatically.',
+      autoUpdateFailureToolPathChanged:
+        '{{tool}} now uses {{path}}. Automatic update did not write to the old path. Manually resync this Skill to use the current path.',
+      autoUpdateFailureToolTargetConflict:
+        '{{tool}} now uses {{path}}, but different content already exists there. Nothing was overwritten or removed. Resolve the conflict, then update again.',
       autoUpdateErrorOther:
         '{{count}} update(s) failed for other reasons.',
       autoUpdateViewProgress: 'View Progress',
@@ -1569,6 +1575,12 @@ export const resources = {
         '{{count}} 个 Git 更新失败，原因是 GitHub 或网络不可访问。',
       autoUpdateErrorRateLimited:
         '{{count}} 个 GitHub 请求触发限流。可配置 GitHub Token 或稍后重试。',
+      autoUpdateErrorToolPathChanged:
+        '{{count}} 个工具目标无法自动迁移，请处理下面的冲突。',
+      autoUpdateFailureToolPathChanged:
+        '{{tool}} 当前应同步到 {{path}}。本次自动更新未写入旧路径，请手动重新同步该 Skill。',
+      autoUpdateFailureToolTargetConflict:
+        '{{tool}} 当前应同步到 {{path}}，但该位置已有不同内容。本次未覆盖或删除任何文件，请处理冲突后重新更新。',
       autoUpdateErrorOther: '{{count}} 个更新因其他原因失败。',
       autoUpdateViewProgress: '查看进度',
       autoUpdateProgressTitle: '自动更新进度',

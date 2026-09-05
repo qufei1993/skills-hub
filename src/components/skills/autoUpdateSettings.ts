@@ -54,6 +54,41 @@ export type AutoUpdateErrorSummary = {
   count: number
 }
 
+export type ToolSyncPathChangedError = {
+  tool: string
+  expectedPath: string
+}
+
+export function parseToolSyncPathChangedError(
+  reason: string | null | undefined,
+): ToolSyncPathChangedError | null {
+  return parseToolSyncError(reason, 'TOOL_SYNC_PATH_CHANGED|')
+}
+
+export function parseToolSyncTargetConflictError(
+  reason: string | null | undefined,
+): ToolSyncPathChangedError | null {
+  return parseToolSyncError(reason, 'TOOL_SYNC_TARGET_CONFLICT|')
+}
+
+function parseToolSyncError(
+  reason: string | null | undefined,
+  prefix: string,
+): ToolSyncPathChangedError | null {
+  if (!reason?.startsWith(prefix)) {
+    return null
+  }
+  const payload = reason.slice(prefix.length)
+  const separatorIndex = payload.indexOf('|')
+  if (separatorIndex <= 0 || separatorIndex === payload.length - 1) {
+    return null
+  }
+  return {
+    tool: payload.slice(0, separatorIndex),
+    expectedPath: payload.slice(separatorIndex + 1),
+  }
+}
+
 export function summarizeAutoUpdateErrors(rawError: string | null | undefined) {
   const lines = (rawError ?? '')
     .split('\n')
@@ -158,6 +193,12 @@ export function isAutoUpdatePossiblyStalled(
 
 function classifyAutoUpdateError(line: string) {
   const lower = line.toLowerCase()
+  if (
+    line.includes('TOOL_SYNC_PATH_CHANGED|') ||
+    line.includes('TOOL_SYNC_TARGET_CONFLICT|')
+  ) {
+    return 'autoUpdateErrorToolPathChanged'
+  }
   if (
     lower.includes('source path not found') ||
     lower.includes('central path not found')

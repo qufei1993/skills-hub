@@ -19,8 +19,12 @@ use super::github_download::{
 use super::github_token::{resolve_github_token, SystemGithubTokenStore};
 use super::network_proxy::get_github_proxy_url;
 use super::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
-use super::sync_engine::copy_dir_recursive;
-use super::sync_engine::PreparedDirReplacement;
+use super::sync_engine::{
+    copy_dir_recursive, sync_dir_for_tool_with_overwrite, PreparedDirReplacement, SyncMode,
+};
+use super::tool_adapters::{
+    adapter_by_key, is_tool_installed, project_relative_skills_dir, resolve_default_path, ToolId,
+};
 
 pub struct InstallResult {
     pub skill_id: String,
@@ -692,6 +696,32 @@ pub struct UpdateResult {
     pub changed: bool,
 }
 
+fn expected_builtin_target_path(
+    adapter: &super::tool_adapters::ToolAdapter,
+    skill_name: &str,
+    target: &SkillTargetRecord,
+) -> Result<PathBuf> {
+    let root = if target.scope == "project" {
+        let project_path = target
+            .project_path
+            .as_deref()
+            .context("project target is missing its project path")?;
+        PathBuf::from(project_path).join(project_relative_skills_dir(adapter))
+    } else {
+        resolve_default_path(adapter)?
+    };
+    Ok(root.join(skill_name))
+}
+
+fn sync_mode_key(mode: SyncMode) -> &'static str {
+    match mode {
+        SyncMode::Auto => "auto",
+        SyncMode::Symlink => "symlink",
+        SyncMode::Junction => "junction",
+        SyncMode::Copy => "copy",
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct UpdateFileLock(std::fs::File);
 
@@ -1075,9 +1105,82 @@ fn update_managed_skill_from_source_inner<R: tauri::Runtime>(
     let mut updated_targets: Vec<String> = Vec::new();
     let mut prepared_targets: Vec<PreparedTargetUpdate> = Vec::new();
     let mut grouped_targets: BTreeMap<PathBuf, Vec<SkillTargetRecord>> = BTreeMap::new();
-    for t in targets {
+    let mut legacy_target_records: BTreeMap<String, SkillTargetRecord> = BTreeMap::new();
+    for mut t in targets {
         if t.status == "disabled" {
             continue;
+        }
+        if t.scope == "global" {
+            if let Some(adapter) = adapter_by_key(&t.tool) {
+                if !is_tool_installed(&adapter).unwrap_or(false) {
+                    continue;
+                }
+            }
+        }
+        if let Some(adapter) = adapter_by_key(&t.tool) {
+            if adapter.id == ToolId::KimiCli {
+                let expected_target = expected_builtin_target_path(&adapter, &record.name, &t)?;
+                if Path::new(&t.target_path) != expected_target {
+                    if t.mode == "copy" {
+                        if std::fs::symlink_metadata(&expected_target).is_ok() {
+                            let expected_hash = hash_dir_strict(&expected_target).ok();
+                            if expected_hash.as_deref() != Some(previous_strict_hash.as_str()) {
+                                let error = format!(
+                                    "TOOL_SYNC_TARGET_CONFLICT|{}|{}",
+                                    adapter.display_name,
+                                    expected_target.to_string_lossy()
+                                );
+                                record_target_sync_failure(store, &t, &error)?;
+                                anyhow::bail!(error);
+                            }
+                        }
+                        legacy_target_records.insert(t.id.clone(), t.clone());
+                        t.target_path = expected_target.to_string_lossy().to_string();
+                    } else {
+                        let migrated_mode = match sync_dir_for_tool_with_overwrite(
+                            adapter.id.as_key(),
+                            &central_path,
+                            &expected_target,
+                            false,
+                        ) {
+                            Ok(outcome) => sync_mode_key(outcome.mode_used),
+                            Err(_sync_error)
+                                if std::fs::symlink_metadata(&expected_target).is_ok() =>
+                            {
+                                let same_content = hash_dir(&central_path)
+                                    .and_then(|source_hash| {
+                                        hash_dir(&expected_target)
+                                            .map(|target_hash| source_hash == target_hash)
+                                    })
+                                    .unwrap_or(false);
+                                if !same_content {
+                                    let error = format!(
+                                        "TOOL_SYNC_TARGET_CONFLICT|{}|{}",
+                                        adapter.display_name,
+                                        expected_target.to_string_lossy()
+                                    );
+                                    record_target_sync_failure(store, &t, &error)?;
+                                    anyhow::bail!(error);
+                                }
+                                "copy"
+                            }
+                            Err(sync_error) => {
+                                record_target_sync_failure(store, &t, &format!("{sync_error:#}"))?;
+                                return Err(sync_error);
+                            }
+                        };
+                        let mut migrated = t.clone();
+                        migrated.target_path = expected_target.to_string_lossy().to_string();
+                        migrated.mode = migrated_mode.to_string();
+                        migrated.status = "ok".to_string();
+                        migrated.last_error = None;
+                        migrated.synced_at = Some(now);
+                        store.upsert_skill_target(&migrated)?;
+                        updated_targets.push(t.tool.clone());
+                        continue;
+                    }
+                }
+            }
         }
         let force_copy = t.mode == "copy" || t.tool == "cursor";
         if force_copy {
@@ -1097,11 +1200,21 @@ fn update_managed_skill_from_source_inner<R: tauri::Runtime>(
             Err(err) => {
                 let failure = format!("{err:#}");
                 for target in &originals {
+                    let target = legacy_target_records.get(&target.id).unwrap_or(target);
                     record_target_sync_failure(store, target, &failure)?;
                 }
                 return Err(err);
             }
         };
+        let original_records = originals
+            .iter()
+            .map(|target| {
+                legacy_target_records
+                    .get(&target.id)
+                    .cloned()
+                    .unwrap_or_else(|| target.clone())
+            })
+            .collect();
         let updated = originals
             .iter()
             .map(|target| SkillTargetRecord {
@@ -1119,7 +1232,7 @@ fn update_managed_skill_from_source_inner<R: tauri::Runtime>(
             .collect();
         updated_targets.extend(originals.iter().map(|target| target.tool.clone()));
         prepared_targets.push(PreparedTargetUpdate {
-            originals,
+            originals: original_records,
             updated,
             replacement,
         });

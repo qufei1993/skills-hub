@@ -10,6 +10,8 @@ import {
   getAutoUpdateTaskStatusKey,
   isAutoUpdatePossiblyStalled,
   parseAutoUpdateFailureItems,
+  parseToolSyncPathChangedError,
+  parseToolSyncTargetConflictError,
 } from './autoUpdateSettings'
 
 type AutoUpdateScheduleType = 'interval' | 'daily'
@@ -400,16 +402,29 @@ const UpdatesPage = ({
               {t('autoUpdateIssuesTitle')}
             </div>
             <div className="updates-issue-list">
-              {autoUpdateProgressForDisplay.failed.map((item) => (
-                <div className="updates-issue-item" key={item.skill_id}>
-                  <strong>{item.name || item.skill_id}</strong>
-                  {item.reason ? (
-                    <code>
-                      {formatUpdateFailure(item.reason, t)}
-                    </code>
-                  ) : null}
-                </div>
-              ))}
+              {autoUpdateProgressForDisplay.failed.map((item) => {
+                const pathChanged = parseToolSyncPathChangedError(item.reason)
+                const targetConflict = parseToolSyncTargetConflictError(item.reason)
+                const reason = targetConflict
+                  ? t('autoUpdateFailureToolTargetConflict', {
+                      tool: targetConflict.tool,
+                      path: targetConflict.expectedPath,
+                    })
+                  : pathChanged
+                    ? t('autoUpdateFailureToolPathChanged', {
+                        tool: pathChanged.tool,
+                        path: pathChanged.expectedPath,
+                      })
+                    : item.reason
+                      ? formatUpdateFailure(item.reason, t)
+                      : null
+                return (
+                  <div className="updates-issue-item" key={item.skill_id}>
+                    <strong>{item.name || item.skill_id}</strong>
+                    {reason ? <code>{reason}</code> : null}
+                  </div>
+                )
+              })}
             </div>
             {autoUpdateConfig?.last_error ? (
               <button
