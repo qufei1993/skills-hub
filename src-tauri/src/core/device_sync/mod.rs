@@ -1397,7 +1397,9 @@ mod tests {
 
     #[test]
     fn unknown_visibility_and_unconfirmed_public_upload_stop_before_credentials_or_network() {
-        let _guard = TEST_SYNC_LOCK.lock().unwrap();
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
         let root = tempfile::tempdir().unwrap();
         let mut config = DeviceSyncConfig {
             remote_url: "https://example.invalid/sync.git".into(),
@@ -2748,9 +2750,12 @@ mod tests {
             a.get_skill_by_id("one").unwrap().unwrap().source_ref,
             owner.source_ref
         );
+        let central_b = root.path().join("central-b");
         let b = make_store(root.path(), "local-b", &config);
+        b.set_setting("central_repo_path", central_b.to_string_lossy().as_ref())
+            .unwrap();
         let wb = root.path().join("workspace-b");
-        let sb = DeviceSyncService::new(&b, &credentials, wb, root.path().join("central-b"));
+        let sb = DeviceSyncService::new(&b, &credentials, wb, central_b.clone());
         sb.sync().unwrap();
         let mut imported = b.get_skill_by_id("one").unwrap().unwrap();
         assert_eq!(imported.source_ref.as_deref(), None);
@@ -2795,12 +2800,7 @@ mod tests {
             .get_setting("device_sync.source_origin.one")
             .unwrap()
             .is_none());
-        add_skill(
-            &b,
-            &root.path().join("central-b"),
-            "reinstalled",
-            "# Local skill",
-        );
+        add_skill(&b, &central_b, "reinstalled", "# Local skill");
         let own_source_b = root.path().join("device-b-project");
         fs::create_dir(&own_source_b).unwrap();
         fs::write(own_source_b.join("SKILL.md"), "# Local skill").unwrap();
