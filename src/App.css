@@ -6004,3 +6004,94 @@
 .device-sync-failure-details summary:hover { text-decoration: underline; }
 .device-sync-failure-details summary:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 3px; }
 .device-sync-failure-details p { margin: 8px 0 0; color: var(--text-secondary); overflow-wrap: anywhere; }
+
+/* Compact scope filters and actionable sync status. */
+.skills-overview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.skills-scope-tabs {
+  display: flex;
+  align-self: stretch;
+  gap: 8px;
+}
+
+.skills-scope-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  margin-bottom: -1px;
+  padding: 0 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.skills-scope-tab span { font-variant-numeric: tabular-nums; }
+.skills-scope-tab:hover { background: var(--accent-soft-bg); color: var(--accent-primary); }
+.skills-scope-tab.active { color: var(--accent-primary); border-bottom-color: var(--accent-primary); font-weight: 600; }
+.skills-scope-tab:focus-visible,
+.skills-sync-issue:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: -2px; border-radius: 4px; }
+
+.skills-sync-issue {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  margin: 4px 0 8px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--status-error) 24%, var(--border-subtle));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--status-error) 4%, var(--bg-panel));
+  color: var(--status-error);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.skills-sync-issue:hover { background: color-mix(in srgb, var(--status-error) 9%, var(--bg-panel)); }
+.skills-sync-issue > svg { flex-shrink: 0; }
+.skills-sync-issue-action { display: inline-flex; align-items: center; gap: 8px; margin-left: 16px; font-weight: 600; white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .skills-overview { column-gap: 8px; }
+  .skills-scope-tabs { gap: 0; }
+  .skills-scope-tab { padding: 0 10px; }
+  .skills-sync-issue { margin-left: auto; }
+  .skills-sync-issue-action { margin-left: 0; }
+}
+
+.skills-filter-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.skills-filter-summary button {
+  background: transparent;
+  border: 0;
+  padding: 4px 0;
+  color: var(--accent-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.skills-filter-summary button:hover { text-decoration: underline; }
+.skills-filter-summary button:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+.skills-empty-state { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.tag-filter-option:disabled { opacity: .45; cursor: not-allowed; }

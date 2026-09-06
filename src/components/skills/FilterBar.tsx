@@ -6,18 +6,15 @@ import type { TagWithCountDto } from './types'
 type FilterBarProps = {
   sortBy: 'updated' | 'name'
   searchQuery: string
-  scopeFilter: 'all' | 'global' | 'project'
   tags: TagWithCountDto[]
   selectedTagIds: number[]
   includeUntagged: boolean
   untaggedCount: number
-  totalCount: number
   bulkMode: boolean
   bulkSelectedCount: number
   viewMode: 'list' | 'cards'
   onSortChange: (value: 'updated' | 'name') => void
   onSearchChange: (value: string) => void
-  onScopeFilterChange: (value: 'all' | 'global' | 'project') => void
   onToggleTag: (tagId: number) => void
   onToggleUntagged: () => void
   onClearTags: () => void
@@ -30,18 +27,15 @@ type FilterBarProps = {
 const FilterBar = ({
   sortBy,
   searchQuery,
-  scopeFilter,
   tags,
   selectedTagIds,
   includeUntagged,
   untaggedCount,
-  totalCount,
   bulkMode,
   bulkSelectedCount,
   viewMode,
   onSortChange,
   onSearchChange,
-  onScopeFilterChange,
   onToggleTag,
   onToggleUntagged,
   onClearTags,
@@ -53,11 +47,6 @@ const FilterBar = ({
   const [tagMenuOpen, setTagMenuOpen] = useState(false)
   const [tagQuery, setTagQuery] = useState('')
   const tagMenuRef = useRef<HTMLDivElement | null>(null)
-  const scopeOptions: { value: 'all' | 'global' | 'project'; label: string }[] = [
-    { value: 'all', label: t('scope.all') },
-    { value: 'global', label: t('scope.global') },
-    { value: 'project', label: t('scope.project') },
-  ]
   const selectedTagSet = useMemo(() => new Set(selectedTagIds), [selectedTagIds])
   const selectedCount = selectedTagIds.length + (includeUntagged ? 1 : 0)
   const filteredTags = useMemo(() => {
@@ -79,27 +68,7 @@ const FilterBar = ({
 
   return (
     <div className="filter-bar">
-      <div className="filter-title">
-        {t('allSkills')}（{totalCount}）
-      </div>
       <div className="filter-actions">
-        <button className="btn btn-secondary sort-btn" type="button">
-          {scopeOptions.find((option) => option.value === scopeFilter)?.label ?? t('scope.all')}
-          <ChevronDown size={12} />
-          <select
-            aria-label={t('scope.filterLabel')}
-            value={scopeFilter}
-            onChange={(event) =>
-              onScopeFilterChange(event.target.value as 'all' | 'global' | 'project')
-            }
-          >
-            {scopeOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </button>
         <button className="btn btn-secondary sort-btn" type="button">
           {sortBy === 'updated' ? t('sortUpdated') : t('sortName')}
           <ArrowUpDown size={12} />
@@ -153,6 +122,8 @@ const FilterBar = ({
                   className={`tag-filter-option${includeUntagged ? ' selected' : ''}`}
                   type="button"
                   onClick={onToggleUntagged}
+                  disabled={untaggedCount === 0 && !includeUntagged}
+                  aria-pressed={includeUntagged}
                 >
                   <span className="tag-check">{includeUntagged ? <Check size={14} /> : null}</span>
                   <span>{t('untagged')}</span>
@@ -166,6 +137,8 @@ const FilterBar = ({
                       className={`tag-filter-option${selected ? ' selected' : ''}`}
                       type="button"
                       onClick={() => onToggleTag(tag.id)}
+                      disabled={tag.skill_count === 0 && !selected}
+                      aria-pressed={selected}
                     >
                       <span className="tag-check">{selected ? <Check size={14} /> : null}</span>
                       <span>{tag.name}</span>
