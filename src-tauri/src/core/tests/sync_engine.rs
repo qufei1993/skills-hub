@@ -188,6 +188,59 @@ fn explicit_copy_mode_copies_directory() {
 }
 
 #[test]
+fn managed_copy_accepts_python_bytecode_cache() {
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("a.txt"), b"new").unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let target = root.path().join("target");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("a.txt"), b"old").unwrap();
+    let expected = crate::core::content_hash::hash_dir_strict(&target).unwrap();
+    fs::create_dir(target.join("__pycache__")).unwrap();
+    fs::write(target.join("__pycache__/module.cpython-313.pyc"), b"cache").unwrap();
+    sync_managed_copy_with_expected_hash(source.path(), &target, &expected).unwrap();
+    assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"new");
+}
+
+#[test]
+fn managed_copy_rollback_preserves_new_python_cache() {
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("a.txt"), b"new").unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let target = root.path().join("target");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("a.txt"), b"old").unwrap();
+    let expected = crate::core::content_hash::hash_dir_for_sync_conflict(&target).unwrap();
+    let mut replacement =
+        PreparedDirReplacement::prepare_managed_copy(source.path(), &target, Some(expected), true)
+            .unwrap();
+    replacement.activate().unwrap();
+    fs::create_dir(target.join("__pycache__")).unwrap();
+    fs::write(target.join("__pycache__/module.pyc"), b"new cache").unwrap();
+    assert!(replacement
+        .rollback()
+        .unwrap_err()
+        .to_string()
+        .contains("ROLLBACK_CONFLICT"));
+    assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"old");
+    let recovery = fs::read_dir(root.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(".skills-hub-recovery-")
+        })
+        .unwrap();
+    assert_eq!(
+        fs::read(recovery.join("__pycache__/module.pyc")).unwrap(),
+        b"new cache"
+    );
+}
+
+#[test]
 fn managed_copy_replaces_only_content_matching_the_expected_hash() {
     let source = tempfile::tempdir().unwrap();
     fs::write(source.path().join("a.txt"), b"new").unwrap();

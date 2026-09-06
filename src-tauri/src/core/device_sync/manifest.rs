@@ -65,12 +65,30 @@ impl SyncManifest {
             fs::write(metadata_path, serde_json::to_vec_pretty(skill)?)?;
         }
         let gitignore = root.join(".gitignore");
-        if !gitignore.exists() {
-            fs::write(
-                gitignore,
-                ".DS_Store\n.env\n.env.*\nnode_modules/\ntarget/\ndist/\nbuild/\n*.pem\n*.key\n",
-            )?;
+        let previous = if gitignore.exists() {
+            fs::read_to_string(&gitignore)?
+        } else {
+            String::new()
+        };
+        let mut rules: Vec<&str> = previous
+            .lines()
+            .filter(|line| !matches!(*line, "dist/" | "build/"))
+            .collect();
+        for rule in [
+            ".DS_Store",
+            ".env",
+            ".env.*",
+            "node_modules/",
+            "target/",
+            "__pycache__/",
+            "*.pem",
+            "*.key",
+        ] {
+            if !rules.contains(&rule) {
+                rules.push(rule);
+            }
         }
+        fs::write(gitignore, format!("{}\n", rules.join("\n")))?;
         Ok(())
     }
 }
@@ -184,11 +202,95 @@ pub fn replace_directory(source: &Path, destination: &Path) -> Result<()> {
     let staging = parent.join(format!(".sync-{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&staging)?;
     copy_skill_files(source, &staging)?;
-    if destination.exists() {
-        fs::remove_dir_all(destination)?;
-    }
-    fs::rename(&staging, destination).with_context(|| format!("replace {:?}", destination))?;
+    let mut replacement = crate::core::sync_engine::PreparedDirReplacement::from_staging(
+        staging,
+        destination.to_path_buf(),
+        None,
+        true,
+    )?;
+    replacement.activate()?;
+    replacement.commit();
     Ok(())
+}
+
+pub(super) fn copy_local_files(source: &Path, destination: &Path) -> Result<()> {
+    for entry in WalkDir::new(source).follow_links(false) {
+        let entry = entry?;
+        let target = destination.join(entry.path().strip_prefix(source)?);
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(target)?;
+        } else if entry.file_type().is_file() {
+            fs::copy(entry.path(), target)?;
+        } else if entry.file_type().is_symlink() {
+            copy_local_link(entry.path(), &target)?;
+        } else {
+            bail!("unsafe local sync path");
+        }
+    }
+    Ok(())
+}
+
+fn copy_local_link(source: &Path, target: &Path) -> Result<()> {
+    let link = fs::read_link(source)?;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(link, target)?;
+    #[cfg(windows)]
+    if source.is_dir() {
+        std::os::windows::fs::symlink_dir(link, target)?;
+    } else {
+        std::os::windows::fs::symlink_file(link, target)?;
+    }
+    #[cfg(not(any(unix, windows)))]
+    bail!("local symlink preservation is unsupported");
+    Ok(())
+}
+
+pub(crate) fn prepare_library_directory(
+    source: &Path,
+    destination: &Path,
+) -> Result<(tempfile::TempDir, Option<String>)> {
+    let parent = destination.parent().context("missing library parent")?;
+    fs::create_dir_all(parent)?;
+    let staging = tempfile::Builder::new()
+        .prefix(".sync-library-")
+        .tempdir_in(parent)?;
+    copy_skill_files(source, staging.path())?;
+    let expected = if destination.exists() {
+        let hash = crate::core::content_hash::hash_dir_strict(destination)?;
+        let mut retained = Vec::<PathBuf>::new();
+        for entry in WalkDir::new(destination).follow_links(false) {
+            let entry = entry?;
+            if entry.path() == destination
+                || retained.iter().any(|path| entry.path().starts_with(path))
+            {
+                continue;
+            }
+            if is_ignored(&entry) || entry.file_type().is_symlink() {
+                let target = staging.path().join(entry.path().strip_prefix(destination)?);
+                if entry.file_type().is_dir() {
+                    copy_local_files(entry.path(), &target)?;
+                    retained.push(entry.path().to_path_buf());
+                } else {
+                    fs::create_dir_all(target.parent().unwrap())?;
+                    anyhow::ensure!(
+                        fs::symlink_metadata(&target).is_err(),
+                        "unsafe local sync path collision"
+                    );
+                    if entry.file_type().is_symlink() {
+                        copy_local_link(entry.path(), &target)?;
+                    } else if entry.file_type().is_file() {
+                        fs::copy(entry.path(), target)?;
+                    } else {
+                        bail!("unsafe local sync path");
+                    }
+                }
+            }
+        }
+        Some(hash)
+    } else {
+        None
+    };
+    Ok((staging, expected))
 }
 
 pub fn hash_files(root: &Path) -> Result<BTreeMap<String, String>> {
@@ -275,12 +377,11 @@ fn is_ignored(entry: &DirEntry) -> bool {
             | ".env.local"
             | "node_modules"
             | "target"
-            | "dist"
-            | "build"
             | "__pycache__"
             | ".DS_Store"
             | "Thumbs.db"
-    ) || name.ends_with(".pem")
+    ) || name.starts_with(".env.")
+        || name.ends_with(".pem")
         || name.ends_with(".key")
         || name == "id_rsa"
         || name == "id_ed25519"
@@ -354,4 +455,48 @@ mod tests {
         fs::write(source.path().join("deploy.pem"), "private").unwrap();
         assert!(copy_skill_files(source.path(), target.path()).is_err());
     }
+}
+#[test]
+fn legacy_ignore_rules_allow_real_documents_after_migration() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(root.path()).unwrap();
+    fs::write(
+        root.path().join(".gitignore"),
+        "dist/\nbuild/\ncustom-cache/\n",
+    )
+    .unwrap();
+    SyncManifest::empty().write(root.path()).unwrap();
+    assert!(!repo
+        .status_should_ignore(Path::new("skills/one/content/dist/guide.md"))
+        .unwrap());
+    assert!(!repo
+        .status_should_ignore(Path::new("skills/one/content/build/manual.md"))
+        .unwrap());
+    assert!(repo
+        .status_should_ignore(Path::new("skills/one/content/.env.production"))
+        .unwrap());
+    assert!(repo
+        .status_should_ignore(Path::new("custom-cache/item"))
+        .unwrap());
+}
+
+#[test]
+#[cfg(unix)]
+fn local_dependency_links_survive_without_being_followed_or_uploaded() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("remote");
+    let local = root.path().join("local");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("SKILL.md"), "remote").unwrap();
+    fs::create_dir_all(local.join("node_modules/.bin")).unwrap();
+    std::os::unix::fs::symlink("../../outside", local.join("node_modules/.bin/tool")).unwrap();
+    let (staging, _) = prepare_library_directory(&source, &local).unwrap();
+    assert_eq!(
+        fs::read_link(staging.path().join("node_modules/.bin/tool")).unwrap(),
+        PathBuf::from("../../outside")
+    );
+    let exported = root.path().join("export");
+    fs::create_dir_all(&exported).unwrap();
+    copy_skill_files(staging.path(), &exported).unwrap();
+    assert!(!exported.join("node_modules").exists());
 }

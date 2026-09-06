@@ -19,6 +19,35 @@ fn make_store() -> (tempfile::TempDir, SkillStore) {
     (dir, store)
 }
 
+#[test]
+fn updated_library_with_pending_tools_is_partial_not_ok() {
+    let (_dir, store) = make_store();
+    record_auto_update_result(
+        &store,
+        &AutoUpdateRunResult {
+            checked: 1,
+            unchanged: 0,
+            updated: 1,
+            failed: 0,
+            errors: vec![],
+            progress: AutoUpdateProgressSnapshot {
+                total: 1,
+                succeeded: vec![AutoUpdateSkillProgress {
+                    skill_id: "one".into(),
+                    name: "one".into(),
+                    reason: Some("TOOLS_PENDING|1".into()),
+                }],
+                ..Default::default()
+            },
+        },
+    )
+    .unwrap();
+    let config = get_auto_update_config(&store).unwrap();
+    assert_eq!(config.last_status.as_deref(), Some("partial"));
+    assert_eq!(config.last_failed, 0);
+    assert_eq!(config.last_updated, 1);
+}
+
 fn make_skill(id: &str, source_type: &str, central_path: &str) -> SkillRecord {
     SkillRecord {
         id: id.to_string(),

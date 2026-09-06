@@ -13,6 +13,7 @@ const KINDS: &[&str] = &[
     "push",
     "fetch",
     "storage",
+    "targetModified",
     "unknown",
 ];
 
@@ -29,7 +30,9 @@ pub(crate) fn safe_message(raw: &str) -> String {
     }
     let lower = raw.to_lowercase();
     let has = |needles: &[&str]| needles.iter().any(|needle| lower.contains(needle));
-    let kind = if has(&["device_sync_public_upload_confirmation"]) {
+    let kind = if has(&["target_modified|", "central_modified|"]) {
+        "targetModified"
+    } else if has(&["device_sync_public_upload_confirmation"]) {
         "publicUpload"
     } else if has(&["device_sync_visibility_unknown"]) {
         "visibility"
@@ -122,6 +125,7 @@ mod tests {
             ("certificate verify failed", "tls"),
             ("authentication failed", "auth"),
             ("keyring locked", "credential"),
+            ("TARGET_MODIFIED|private/local/path", "targetModified"),
             ("text merge snapshot hash mismatch", "integrity"),
             ("no space left on device", "disk"),
             ("permission denied", "permission"),

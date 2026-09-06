@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import SkillIssueNotice from './SkillIssueNotice'
 import {
   ArrowLeft,
   ChevronDown,
@@ -560,6 +561,7 @@ const SkillDetailView = ({
 
   return (
     <div className="detail-view">
+      <SkillIssueNotice skill={skill} tools={tools} t={t} />
       <div className="detail-header">
         <button className="detail-back-btn" type="button" onClick={onBack}>
           <ArrowLeft size={16} />

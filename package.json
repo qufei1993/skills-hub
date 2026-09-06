@@ -20,7 +20,7 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:icon:desktop": "node scripts/tauri-icon-desktop.mjs",
-    "tauri:build": "npm run version:check && tauri build",
+    "tauri:build": "npm run version:check && node scripts/build-desktop.mjs",
     "tauri:build:mac:dmg": "npm run tauri:build -- --bundles dmg",
     "tauri:build:mac:universal:dmg": "npm run tauri:build -- --target universal-apple-darwin --bundles dmg",
     "tauri:build:win:exe": "npm run tauri:build -- --bundles nsis",

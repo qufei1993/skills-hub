@@ -5,7 +5,8 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import type { TFunction } from 'i18next'
-import type { AutoUpdateConfigDto } from './types'
+import type { AutoUpdateConfigDto, ManagedSkill } from './types'
+import { historicalIssueState } from './skillIssueState'
 import {
   getAutoUpdateTaskStatusKey,
   isAutoUpdatePossiblyStalled,
@@ -25,6 +26,7 @@ type AutoUpdateScheduleInput = {
 }
 
 type UpdatesPageProps = {
+  skills?: ManagedSkill[]
   autoUpdateConfig: AutoUpdateConfigDto | null
   onAutoUpdateConfigChange: (
     enabled: boolean,
@@ -67,6 +69,7 @@ function formatUpdateFailure(reason: string, t: TFunction): string {
 }
 
 const UpdatesPage = ({
+  skills = [],
   autoUpdateConfig,
   onAutoUpdateConfigChange,
   onRunAutoUpdateNow,
@@ -153,7 +156,7 @@ const UpdatesPage = ({
           pending: [],
         }
   const autoUpdateStatusClass =
-    autoUpdateConfig?.last_status === 'error'
+    autoUpdateConfig?.last_status === 'error' || autoUpdateConfig?.last_status === 'partial'
       ? 'error'
       : autoUpdateConfig?.last_status === 'ok'
         ? 'success'
@@ -330,6 +333,7 @@ const UpdatesPage = ({
         </section>
 
         <aside className={`updates-summary-card ${autoUpdateStatusClass}`}>
+          <p className="device-sync-no-change-note">{t('deviceSync.historicalRunNote')}</p>
           <div className="updates-summary-head">
             <span>{t('autoUpdateRunResultTitle')}</span>
             <strong>{autoUpdateStatus}</strong>
@@ -395,6 +399,7 @@ const UpdatesPage = ({
             </strong>
           </div>
         ) : null}
+        {autoUpdateProgressForDisplay.succeeded.filter(item => item.reason?.startsWith('TOOLS_PENDING|')).map(item => <div className="updates-issue-item" key={`pending-${item.skill_id}`}><strong>{item.name || item.skill_id}</strong><p>{t('deviceSync.runToolsPending', { count: Number(item.reason?.split('|')[1]) || 0 })}</p></div>)}
         {autoUpdateProgressForDisplay.failed.length > 0 ? (
           <div className="updates-issue-block">
             <div className="updates-section-label">
@@ -421,6 +426,7 @@ const UpdatesPage = ({
                 return (
                   <div className="updates-issue-item" key={item.skill_id}>
                     <strong>{item.name || item.skill_id}</strong>
+                    <span>{t(`deviceSync.issueHistory.${historicalIssueState(skills.find(skill => skill.id === item.skill_id), autoUpdateConfig?.last_finished_at ?? autoUpdateConfig?.last_run_at ?? 0)}`)}</span>
                     {reason ? <code>{reason}</code> : null}
                   </div>
                 )

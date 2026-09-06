@@ -161,6 +161,8 @@ pub struct SyncRunResult {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SyncStatus {
     #[serde(default)]
+    pub tool_issues: Vec<ToolSyncIssue>,
+    #[serde(default)]
     pub schedule_status: Option<super::scheduler::ScheduleSummary>,
     pub configured: bool,
     pub is_running: bool,
@@ -174,6 +176,12 @@ pub struct SyncStatus {
     pub conflict_count: usize,
     pub last_run_status: Option<String>,
     pub last_run_at: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ToolSyncIssue {
+    pub skill_name: String,
+    pub tool: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

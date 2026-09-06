@@ -1275,7 +1275,26 @@ pub async fn sync_skill_to_tool(
         if let Some(existing) =
             store.get_skill_target(&skillId, &tool, scope, project_path_for_record.as_deref())?
         {
+            if existing.mode == "copy"
+                && existing.target_path == target.to_string_lossy()
+                && overwrite != Some(true)
+            {
+                let previous =
+                    crate::core::content_hash::hash_dir_for_sync_conflict(sourcePath.as_ref())?;
+                crate::core::tool_distribution::refresh_copy(
+                    &store,
+                    &skillId,
+                    sourcePath.as_ref(),
+                    &target,
+                    Some(&previous),
+                )?;
+                return Ok(SyncResultDto {
+                    mode_used: "copy".into(),
+                    target_path: existing.target_path,
+                });
+            }
             if existing.status == "ok"
+                && overwrite != Some(true)
                 && existing.target_path == target.to_string_lossy()
                 && target.exists()
             {
@@ -1561,6 +1580,7 @@ pub struct UpdateResultDto {
     pub content_hash: Option<String>,
     pub source_revision: Option<String>,
     pub updated_targets: Vec<String>,
+    pub pending_targets: Vec<String>,
     pub changed: bool,
 }
 
@@ -1580,6 +1600,7 @@ pub async fn update_managed_skill(
             content_hash: res.content_hash,
             source_revision: res.source_revision,
             updated_targets: res.updated_targets,
+            pending_targets: res.pending_targets,
             changed: res.changed,
         })
     })
@@ -1774,6 +1795,8 @@ pub struct ManagedSkillDto {
     pub last_sync_at: Option<i64>,
     pub enabled: bool,
     pub status: String,
+    pub source_error: Option<String>,
+    pub source_checked_at: Option<i64>,
     pub tags: Vec<TagDto>,
     pub targets: Vec<SkillTargetDto>,
 }
@@ -2092,10 +2115,17 @@ fn managed_skill_status(skill: &SkillRecord) -> String {
 
 fn get_managed_skills_impl(store: &SkillStore) -> Result<Vec<ManagedSkillDto>, String> {
     let skills = store.list_skills().map_err(|err| err.to_string())?;
+    let checks = store.source_checks().map_err(format_anyhow_error)?;
     Ok(skills
         .into_iter()
         .map(|skill| {
-            let status = managed_skill_status(&skill);
+            let source_check = checks.get(&skill.id);
+            let source_error = source_check.and_then(|check| check.0.clone());
+            let status = if source_error.is_some() {
+                "error".into()
+            } else {
+                managed_skill_status(&skill)
+            };
             let targets = store
                 .list_skill_targets(&skill.id)
                 .unwrap_or_default()
@@ -2122,6 +2152,8 @@ fn get_managed_skills_impl(store: &SkillStore) -> Result<Vec<ManagedSkillDto>, S
                 .collect();
 
             ManagedSkillDto {
+                source_error,
+                source_checked_at: source_check.map(|check| check.1),
                 id: skill.id,
                 name: skill.name,
                 description: skill.description,

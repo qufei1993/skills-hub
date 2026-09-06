@@ -70,7 +70,19 @@ fn update_file_attributes(hasher: &mut Sha256, metadata: &std::fs::Metadata) {
     hasher.update([u8::from(metadata.permissions().readonly())]);
 }
 
-fn hash_dir_with_mode(path: &Path, strict: bool) -> Result<String> {
+fn is_python_cache(entry: &DirEntry) -> bool {
+    if entry.file_type().is_dir() {
+        return entry.file_name() == OsStr::new("__pycache__");
+    }
+    entry.file_type().is_file()
+        && entry.path().parent().and_then(Path::file_name) == Some(OsStr::new("__pycache__"))
+        && matches!(
+            entry.path().extension().and_then(OsStr::to_str),
+            Some("pyc" | "pyo")
+        )
+}
+
+fn hash_dir_with_mode(path: &Path, strict: bool, ignore_python_cache: bool) -> Result<String> {
     let mut hasher = Sha256::new();
     let mut entries: Vec<(PathBuf, DirEntry)> = Vec::new();
 
@@ -80,6 +92,9 @@ fn hash_dir_with_mode(path: &Path, strict: bool) -> Result<String> {
         .filter_entry(|entry| strict || !is_ignored(entry))
     {
         let entry = entry?;
+        if ignore_python_cache && entry.depth() > 0 && is_python_cache(&entry) {
+            continue;
+        }
         if !strict && is_ignored(&entry) {
             continue;
         }
@@ -128,11 +143,15 @@ fn hash_dir_with_mode(path: &Path, strict: bool) -> Result<String> {
 }
 
 pub fn hash_dir(path: &Path) -> Result<String> {
-    hash_dir_with_mode(path, false)
+    hash_dir_with_mode(path, false, false)
 }
 
 pub fn hash_dir_strict(path: &Path) -> Result<String> {
-    hash_dir_with_mode(path, true)
+    hash_dir_with_mode(path, true, false)
+}
+
+pub fn hash_dir_for_sync_conflict(path: &Path) -> Result<String> {
+    hash_dir_with_mode(path, true, true)
 }
 
 #[cfg(test)]

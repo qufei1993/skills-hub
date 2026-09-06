@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ## [0.10.0]
 
 ### Changed
+- **Compact Skill warnings**: Moved card warnings beside the copy icon; click to inspect reasons and recovery guidance without expanding the card.
 - **Compact My Skills header**: Replaced overview cards with scope filters and counts, removed the duplicate scope dropdown, and show a compact sync-issue shortcut only when attention is needed.
 
 ### Added
@@ -16,6 +17,11 @@ All notable changes to this project will be documented in this file.
 - **Local recovery and history**: Actual content changes create Git versions, remote deletions move local Skills to a 30-day recycle bin, and the app records sync runs, conflicts, and recovery actions.
 
 ### Fixed
+- **Consistent Skill issue status**: Preserve source-update errors across device sync, refresh current issues across pages, and distinguish pending tool distribution from complete success.
+- **Separate cloud sync from tool distribution**: Tool-copy failures no longer fail central-library synchronization. Existing tool sync and device sync share guarded copy refresh; pending tools remain visible with a My Skills entry point. Conflict choices now show local/remote without a recommendation.
+- **Shared sync targets and device-code feedback**: Refresh a same-Skill shared tool directory once while updating every copy record; keep cross-Skill overwrite protection. Device-code copying now confirms success and reports failures with retry support.
+- **Desktop OAuth packaging**: Require an explicit GitHub public Client ID before packaged builds. Local builds may read only this key from an explicitly selected env file; missing or malformed configuration now stops the build instead of shipping a disabled authorization button.
+- **Device-sync file retention and tool copies**: Preserve device-local excluded files and links during library updates, sync legitimate `dist`/`build` documents, migrate legacy ignore rules, refresh protected tool copies, and accept remote-deletion conflicts with recoverable local content. Library metadata and copy baselines are committed atomically; Python bytecode caches no longer count as user edits during copy conflict checks.
 - **Persistent device sync failure reasons**: The dashboard shows the latest failure reason and history entries expose expandable recovery guidance instead of zero-count summaries. Manual failures refresh immediately. New history stores allowlisted diagnostic codes; legacy errors and IPC responses are sanitized before display.
 - **Automatic text reconciliation**: Device sync now uses libgit2 to merge non-overlapping edits within the same UTF-8 file. Unresolved, binary, oversized, deletion and metadata conflicts remain explicit. Remote push rejections stop synchronization before local application.
 - **Scope-aware filtering and bulk actions**: Tag and untagged counts now follow scope and search without being narrowed by selected tags. Bulk actions and confirmation counts exclude hidden selections. Filtered empty states offer a reset, and opening a tag from management clears stale scope/search filters.

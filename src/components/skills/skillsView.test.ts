@@ -19,6 +19,11 @@ const defaults = {
 }
 
 describe('scope-aware Skills view', () => {
+  it('filters current issues without including disabled or healthy Skills', () => {
+    const bad = { ...skill('bad', []), status: 'error' };
+    const view = getSkillsView({ ...defaults, issuesOnly: true, managedSkills: [bad, { ...bad, id: 'disabled', enabled: false }, skill('good', [])] });
+    expect(view.visibleSkills.map(item => item.id)).toEqual(['bad']);
+  })
   it('counts tags and untagged Skills within scope and search, independently of selected tags', () => {
     const view = getSkillsView({ ...defaults, scopeFilter: 'project', selectedTagIds: [2] })
     expect(view.visibleSkills.map((item) => item.id)).toEqual(['project-both'])

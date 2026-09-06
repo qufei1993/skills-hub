@@ -263,7 +263,11 @@ pub fn run_auto_update_now<R: tauri::Runtime>(
                 progress.succeeded.push(AutoUpdateSkillProgress {
                     skill_id,
                     name: update.name,
-                    reason: None,
+                    reason: if update.pending_targets.is_empty() {
+                        None
+                    } else {
+                        Some(format!("TOOLS_PENDING|{}", update.pending_targets.len()))
+                    },
                 });
             }
             Err(err) => {
@@ -357,7 +361,18 @@ pub fn run_due_auto_update<R: tauri::Runtime>(
 }
 
 fn record_auto_update_result(store: &SkillStore, result: &AutoUpdateRunResult) -> Result<()> {
-    let status = if result.failed == 0 { "ok" } else { "error" };
+    let pending = result.progress.succeeded.iter().any(|item| {
+        item.reason
+            .as_deref()
+            .is_some_and(|reason| reason.starts_with("TOOLS_PENDING|"))
+    });
+    let status = if result.failed > 0 {
+        "error"
+    } else if pending {
+        "partial"
+    } else {
+        "ok"
+    };
     let finished_at = now_ms();
     store.set_setting(AUTO_UPDATE_LAST_RUN_AT_KEY, &finished_at.to_string())?;
     store.set_setting(AUTO_UPDATE_LAST_FINISHED_AT_KEY, &finished_at.to_string())?;
