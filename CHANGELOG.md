@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - **Local recovery and history**: Actual content changes create Git versions, remote deletions move local Skills to a 30-day recycle bin, and the app records sync runs, conflicts, and recovery actions.
 
 ### Fixed
+- **Skill details with missing sources**: Source warnings no longer consume the full detail workspace, so the managed copy in the central repository remains available for inspection when an original local source is missing.
 - **Consistent Skill issue status**: Preserve source-update errors across device sync, refresh current issues across pages, and distinguish pending tool distribution from complete success.
 - **Separate cloud sync from tool distribution**: Tool-copy failures no longer fail central-library synchronization. Existing tool sync and device sync share guarded copy refresh; pending tools remain visible with a My Skills entry point. Conflict choices now show local/remote without a recommendation.
 - **Shared sync targets and device-code feedback**: Refresh a same-Skill shared tool directory once while updating every copy record; keep cross-Skill overwrite protection. Device-code copying now confirms success and reports failures with retry support.
