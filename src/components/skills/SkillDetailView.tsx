@@ -1,3 +1,4 @@
+import { hasUnboundLocalSource } from './skillSourceState'
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import SkillIssueNotice from './SkillIssueNotice'
 import {
@@ -514,9 +515,10 @@ const SkillDetailView = ({
     })
   }, [])
 
+  const unboundSource = hasUnboundLocalSource(skill)
   const isGitSource = skill.source_type.toLowerCase().includes('git')
-  const sourceValue = skill.source_ref?.trim() || skill.central_path
-  const sourceLabel = isGitSource
+  const sourceValue = unboundSource ? '' : skill.source_ref?.trim() || skill.central_path
+  const sourceLabel = unboundSource ? t('deviceSync.unboundSource') : isGitSource
     ? sourceValue.replace(/^https?:\/\/(www\.)?github\.com\//, '')
     : compactSourcePath(sourceValue)
 
@@ -637,15 +639,14 @@ const SkillDetailView = ({
             <button
               className="detail-source-copy"
               type="button"
-              title={sourceValue}
-              aria-label={`${isGitSource ? t('detail.copySource') : t('detail.copyPath')}：${sourceValue}`}
+              disabled={unboundSource}
+              title={unboundSource ? t('deviceSync.unboundSourceHelp') : sourceValue}
+              aria-label={unboundSource ? t('deviceSync.unboundSourceHelp') : `${isGitSource ? t('detail.copySource') : t('detail.copyPath')}：${sourceValue}`}
               onClick={() => void handleCopySource()}
             >
               <SourceIcon size={13} />
               <span className="detail-source-text">{sourceLabel}</span>
-              <span className="detail-copy-action" aria-hidden="true">
-                <Copy size={13} />
-              </span>
+              {!unboundSource ? <span className="detail-copy-action" aria-hidden="true"><Copy size={13} /></span> : null}
             </button>
             <span className="detail-meta-item">
               <Clock size={13} />

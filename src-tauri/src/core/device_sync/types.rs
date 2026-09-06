@@ -142,8 +142,18 @@ pub struct PendingOAuthAuthorization {
     pub account: ProviderAccount,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SyncChangeItem {
+    pub skill_id: String,
+    pub name: String,
+    pub kind: String,
+    pub direction: String,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SyncChangeSummary {
+    #[serde(default)]
+    pub items: Vec<SyncChangeItem>,
     pub added: usize,
     pub updated: usize,
     pub deleted: usize,
@@ -196,6 +206,7 @@ pub struct DeviceSyncDevice {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SyncHistoryEntry {
+    pub items: Option<Vec<SyncChangeItem>>,
     pub id: String,
     pub started_at: i64,
     pub finished_at: Option<i64>,

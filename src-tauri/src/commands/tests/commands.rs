@@ -1392,6 +1392,11 @@ fn managed_skill_status_keeps_existing_local_sources_healthy() {
     };
 
     assert_eq!(managed_skill_status(&skill), "ok");
+    let mut unbound = skill;
+    unbound.source_ref = None;
+    assert_eq!(managed_skill_status(&unbound), "ok");
+    unbound.source_ref = Some("/definitely-missing-source".into());
+    assert_eq!(managed_skill_status(&unbound), "error");
 }
 
 #[test]
@@ -1436,4 +1441,42 @@ fn record_skill_target_failure_persists_error_status() {
     assert_eq!(target.last_error.as_deref(), Some("permission denied"));
     assert_eq!(target.mode, "copy");
     assert!(target.synced_at.is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn imported_local_skill_can_resync_its_existing_tool_link() {
+    let (dir, store) = make_store();
+    let central = dir.path().join("central");
+    let target = dir.path().join("tool");
+    std::fs::create_dir(&central).unwrap();
+    std::fs::write(central.join("SKILL.md"), "# Test").unwrap();
+    std::os::unix::fs::symlink(&central, &target).unwrap();
+    let mut skill = SkillRecord {
+        id: "imported".into(),
+        name: "imported".into(),
+        description: None,
+        source_type: "local".into(),
+        source_ref: Some(central.to_string_lossy().into()),
+        source_subpath: None,
+        source_revision: None,
+        central_path: central.to_string_lossy().into(),
+        content_hash: None,
+        created_at: 1,
+        updated_at: 1,
+        last_sync_at: Some(1),
+        last_seen_at: 1,
+        enabled: true,
+        status: "ok".into(),
+    };
+    store.upsert_skill(&skill).unwrap();
+    ensure_target_does_not_overlap_local_source(&store, &skill.id, &target).unwrap();
+    // An independent original source remains protected, even when reached through a link.
+    let original = dir.path().join("original");
+    std::fs::create_dir(&original).unwrap();
+    std::fs::remove_file(&target).unwrap();
+    std::os::unix::fs::symlink(&original, &target).unwrap();
+    skill.source_ref = Some(original.to_string_lossy().into());
+    store.upsert_skill(&skill).unwrap();
+    assert!(ensure_target_does_not_overlap_local_source(&store, &skill.id, &target).is_err());
 }

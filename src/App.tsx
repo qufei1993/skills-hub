@@ -1,3 +1,4 @@
+import { hasUnboundLocalSource } from './components/skills/skillSourceState'
 import {
   useCallback,
   useEffect,
@@ -404,11 +405,12 @@ function App() {
   }
 
   const getSkillSourceLabel = (skill: ManagedSkill) => {
+    if (hasUnboundLocalSource(skill)) return t('deviceSync.unboundSource')
     const key = skill.source_type.toLowerCase()
     if (key.includes('git') && skill.source_ref) {
       return skill.source_ref
     }
-    return skill.central_path
+    return skill.source_ref?.trim() || skill.central_path
   }
 
   const getGithubInfo = (url: string | null | undefined) => {
@@ -501,6 +503,10 @@ function App() {
       setError(err instanceof Error ? err.message : String(err))
     }
   }, [invokeTauri])
+
+  const handleDeviceSyncSkillsChanged = useCallback(async () => {
+    await Promise.all([loadManagedSkills(), loadTags()])
+  }, [loadManagedSkills, loadTags])
 
   useEffect(() => {
     if (isTauri) {
@@ -3490,6 +3496,10 @@ function App() {
 
   const handleUpdateManaged = useCallback(
     async (skill: ManagedSkill) => {
+    if (hasUnboundLocalSource(skill)) {
+      toast.info(t('deviceSync.unboundSourceHelp'))
+      return
+    }
     setLoading(true)
     setLoadingStartAt(Date.now())
     setError(null)
@@ -3611,7 +3621,7 @@ function App() {
         <DeviceSyncPage
           active={activeView === 'device-sync'}
           isTauri={isTauri}
-          onSkillsChanged={loadManagedSkills}
+          onSkillsChanged={handleDeviceSyncSkillsChanged}
               onOpenToolIssues={() => setActiveView('myskills')}
               toolLabels={Object.fromEntries(tools.map((tool) => [tool.id, tool.label]))}
           onConflictCountChange={setDeviceSyncConflictCount}

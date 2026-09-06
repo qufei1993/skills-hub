@@ -77,7 +77,7 @@ fn sync_failure_history_never_persists_raw_secrets_and_sanitizes_legacy_errors()
     let (dir, store) = make_store();
     store.start_device_sync_run("run", 1).unwrap();
     store.finish_device_sync_run("run", 2, "failed", 0, 0, 0, 0, None,
-        Some("fetch device sync repository: connection timed out https://user:super-secret@example.com?access_token=super-secret")).unwrap();
+        Some("fetch device sync repository: connection timed out https://user:super-secret@example.com?access_token=super-secret"), None).unwrap();
     assert_eq!(
         store.list_device_sync_history(1).unwrap()[0]
             .error
@@ -349,6 +349,9 @@ fn device_alias_is_local_and_preserves_the_discovered_name() {
 fn changing_sync_repository_clears_repository_scoped_state() {
     let (_dir, store) = make_store();
     store
+        .set_setting("device_sync.shared_source.one", "old repository")
+        .unwrap();
+    store
         .upsert_device_sync_device(&crate::core::device_sync::types::DeviceSyncDevice {
             id: "old-device".to_string(),
             name: "Old device".to_string(),
@@ -365,6 +368,10 @@ fn changing_sync_repository_clears_repository_scoped_state() {
         .list_device_sync_devices("current")
         .unwrap()
         .is_empty());
+    assert!(store
+        .get_setting("device_sync.shared_source.one")
+        .unwrap()
+        .is_none());
 }
 
 #[test]
@@ -967,4 +974,114 @@ fn legacy_database_migration_scrubs_app_managed_source_and_backup_files() {
             "backup secret remained in {db_path:?} or its SQLite sidecars"
         );
     }
+}
+
+#[test]
+fn crashed_sync_does_not_claim_later_legacy_local_installs() {
+    let (_dir, store) = make_store();
+    store.start_device_sync_run("crashed", 10).unwrap();
+    assert!(!store
+        .was_skill_imported_by_device_sync("later", 1000)
+        .unwrap());
+}
+
+#[test]
+fn migration_rebinds_imported_source_but_preserves_original_source() {
+    let (_dir, store) = make_store();
+    for (id, source) in [
+        ("imported", "/central/imported"),
+        ("local", "/original/local"),
+    ] {
+        let skill = SkillRecord {
+            id: id.into(),
+            name: id.into(),
+            description: None,
+            source_type: "local".into(),
+            source_ref: Some(source.into()),
+            source_subpath: None,
+            source_revision: None,
+            central_path: format!("/central/{id}"),
+            content_hash: None,
+            created_at: 1,
+            updated_at: 1,
+            last_sync_at: Some(1),
+            last_seen_at: 1,
+            enabled: true,
+            status: "ok".into(),
+        };
+        store.upsert_skill(&skill).unwrap();
+    }
+    store
+        .commit_central_repo_migration(
+            &[
+                ("imported".into(), "/new/imported".into(), 2),
+                ("local".into(), "/new/local".into(), 2),
+            ],
+            "/new",
+        )
+        .unwrap();
+    assert!(store
+        .was_skill_imported_by_device_sync("imported", 1000)
+        .unwrap());
+    assert!(!store
+        .was_skill_imported_by_device_sync("local", 1000)
+        .unwrap());
+    assert_eq!(
+        store
+            .get_skill_by_id("imported")
+            .unwrap()
+            .unwrap()
+            .source_ref
+            .as_deref(),
+        Some("/new/imported")
+    );
+    assert_eq!(
+        store
+            .get_skill_by_id("local")
+            .unwrap()
+            .unwrap()
+            .source_ref
+            .as_deref(),
+        Some("/original/local")
+    );
+}
+
+#[test]
+fn history_can_load_beyond_fifty_without_duplicates() {
+    let (_dir, store) = make_store();
+    for i in 0..55 {
+        let id = format!("run-{i:02}");
+        store.start_device_sync_run(&id, 1).unwrap();
+        store
+            .finish_device_sync_run(&id, 2, "success", 1, 0, 0, 0, None, None, Some(&[]))
+            .unwrap();
+    }
+    let initial = store.list_device_sync_history(50).unwrap();
+    let expanded = store.list_device_sync_history(100).unwrap();
+    assert_eq!(initial.len(), 50);
+    assert_eq!(expanded.len(), 55);
+    assert_eq!(
+        initial.iter().map(|run| &run.id).collect::<Vec<_>>(),
+        expanded[..50].iter().map(|run| &run.id).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        expanded
+            .iter()
+            .map(|run| &run.id)
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        55
+    );
+}
+
+#[test]
+fn a_finished_sync_window_does_not_prove_local_source_ownership() {
+    let (_dir, store) = make_store();
+    store.start_device_sync_run("unrelated", 10).unwrap();
+    store
+        .finish_device_sync_run("unrelated", 100, "success", 1, 0, 0, 0, None, None, None)
+        .unwrap();
+    assert!(!store
+        .was_skill_imported_by_device_sync("locally-installed", 50)
+        .unwrap());
 }

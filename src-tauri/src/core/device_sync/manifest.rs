@@ -32,6 +32,27 @@ pub struct PortableSkill {
     pub files: BTreeMap<String, String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct SharedSource {
+    source_type: String,
+    source_ref: Option<String>,
+    source_subpath: Option<String>,
+    source_revision: Option<String>,
+}
+
+impl SharedSource {
+    pub(crate) fn from_skill(skill: &PortableSkill) -> Self {
+        let mut portable = skill.clone();
+        strip_local_source(&mut portable);
+        Self {
+            source_type: portable.source_type,
+            source_ref: portable.source_ref,
+            source_subpath: portable.source_subpath,
+            source_revision: portable.source_revision,
+        }
+    }
+}
+
 impl SyncManifest {
     pub fn empty() -> Self {
         Self {
@@ -46,7 +67,23 @@ impl SyncManifest {
             return Ok(Self::empty());
         }
         let bytes = fs::read(&path).with_context(|| format!("read {:?}", path))?;
-        serde_json::from_slice(&bytes).context("decode device sync manifest")
+        Self::decode(&bytes)
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self> {
+        let mut manifest: Self =
+            serde_json::from_slice(bytes).context("decode device sync manifest")?;
+        for skill in manifest.skills.values_mut() {
+            let file_count = skill.files.len();
+            skill
+                .files
+                .retain(|path, _| path.rsplit('/').next() != Some(".skills-hub-cache.json"));
+            if file_count != skill.files.len() {
+                skill.content_hash = portable_hash(skill);
+            }
+            strip_local_source(skill);
+        }
+        Ok(manifest)
     }
 
     pub fn write(&self, root: &Path) -> Result<()> {
@@ -102,34 +139,52 @@ pub fn export_library(store: &SkillStore, destination: &Path) -> Result<SyncMani
             continue;
         }
         let target = skill_dir(destination, &skill.id);
-        if target.exists() {
-            fs::remove_dir_all(&target)?;
-        }
-        fs::create_dir_all(&target)?;
-        copy_skill_files(source, &target)?;
-        let files = hash_files(&target)?;
-        let tags = store
-            .get_skill_tags(&skill.id)?
-            .into_iter()
-            .map(|tag| tag.name)
-            .collect();
-        let mut portable = PortableSkill {
-            id: skill.id,
-            name: skill.name,
-            description: skill.description,
-            source_type: skill.source_type,
-            source_ref: skill.source_ref,
-            source_subpath: skill.source_subpath,
-            source_revision: skill.source_revision,
-            tags,
-            content_hash: aggregate_hash(&files),
-            files,
-        };
-        portable.content_hash = portable_hash(&portable);
+        let portable = export_skill(store, skill, &target)?;
         manifest.skills.insert(portable.id.clone(), portable);
     }
     manifest.write(destination)?;
     Ok(manifest)
+}
+
+pub(super) fn export_skill(
+    store: &SkillStore,
+    skill: SkillRecord,
+    target: &Path,
+) -> Result<PortableSkill> {
+    if target.exists() {
+        fs::remove_dir_all(target)?;
+    }
+    fs::create_dir_all(target)?;
+    copy_skill_files(Path::new(&skill.central_path), target)?;
+    let files = hash_files(target)?;
+    let tags = store
+        .get_skill_tags(&skill.id)?
+        .into_iter()
+        .map(|tag| tag.name)
+        .collect();
+    let mut portable = PortableSkill {
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        source_type: skill.source_type,
+        source_ref: skill.source_ref,
+        source_subpath: skill.source_subpath,
+        source_revision: skill.source_revision,
+        tags,
+        content_hash: aggregate_hash(&files),
+        files,
+    };
+    if let Some(value) = store.get_setting(&format!("device_sync.shared_source.{}", portable.id))? {
+        let shared: SharedSource =
+            serde_json::from_str(&value).context("read shared Skill source")?;
+        portable.source_type = shared.source_type;
+        portable.source_ref = shared.source_ref;
+        portable.source_subpath = shared.source_subpath;
+        portable.source_revision = shared.source_revision;
+    }
+    strip_local_source(&mut portable);
+    portable.content_hash = portable_hash(&portable);
+    Ok(portable)
 }
 
 pub fn skill_dir(root: &Path, skill_id: &str) -> PathBuf {
@@ -324,6 +379,15 @@ pub fn aggregate_hash(files: &BTreeMap<String, String>) -> String {
     hex::encode(hasher.finalize())
 }
 
+fn strip_local_source(skill: &mut PortableSkill) {
+    if skill.source_type == "local" {
+        skill.source_ref = None;
+        skill.source_subpath = None;
+        skill.source_revision = None;
+        skill.content_hash = portable_hash(skill);
+    }
+}
+
 pub fn portable_hash(skill: &PortableSkill) -> String {
     let mut hasher = Sha256::new();
     hasher.update(metadata_hash(skill).as_bytes());
@@ -354,9 +418,21 @@ pub fn record_from_portable(skill: &PortableSkill, central_path: &Path, now: i64
         name: skill.name.clone(),
         description: skill.description.clone(),
         source_type: skill.source_type.clone(),
-        source_ref: skill.source_ref.clone(),
-        source_subpath: skill.source_subpath.clone(),
-        source_revision: skill.source_revision.clone(),
+        source_ref: if skill.source_type == "local" {
+            None
+        } else {
+            skill.source_ref.clone()
+        },
+        source_subpath: if skill.source_type == "local" {
+            None
+        } else {
+            skill.source_subpath.clone()
+        },
+        source_revision: if skill.source_type == "local" {
+            None
+        } else {
+            skill.source_revision.clone()
+        },
         central_path: central_path.to_string_lossy().to_string(),
         content_hash: Some(skill.content_hash.clone()),
         created_at: now,
@@ -373,6 +449,7 @@ fn is_ignored(entry: &DirEntry) -> bool {
     matches!(
         name.as_ref(),
         ".git"
+            | ".skills-hub-cache.json"
             | ".env"
             | ".env.local"
             | "node_modules"
@@ -387,7 +464,7 @@ fn is_ignored(entry: &DirEntry) -> bool {
         || name == "id_ed25519"
 }
 
-fn validate_relative_path(path: &Path) -> Result<()> {
+pub(super) fn validate_relative_path(path: &Path) -> Result<()> {
     if path.is_absolute()
         || path
             .components()
@@ -401,6 +478,42 @@ fn validate_relative_path(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decoding_legacy_local_sources_removes_machine_paths_and_normalizes_hashes() {
+        let raw = serde_json::json!({"format_version": 1, "skills": {"one": {
+            "id": "one", "name": "one", "description": null,
+            "source_type": "local", "source_ref": "C:\\Users\\alice\\project",
+            "source_subpath": "/Users/alice/project", "source_revision": "local-only",
+            "tags": [], "content_hash": "legacy-hash", "files": {"SKILL.md":"hash"}
+        }}});
+        let normalized = SyncManifest::decode(&serde_json::to_vec(&raw).unwrap()).unwrap();
+        let skill = &normalized.skills["one"];
+        assert!(skill.source_ref.is_none());
+        assert!(skill.source_subpath.is_none());
+        assert!(skill.source_revision.is_none());
+        assert_eq!(skill.content_hash, portable_hash(skill));
+        let serialized = serde_json::to_string(&normalized).unwrap();
+        assert!(!serialized.contains("alice"));
+        let imported = record_from_portable(skill, Path::new("/device-b/central/one"), 1);
+        assert_eq!(imported.source_ref.as_deref(), None);
+    }
+
+    #[test]
+    fn legacy_cache_files_are_ignored_without_ignoring_skill_documents() {
+        let raw = serde_json::json!({"format_version": 1, "skills": {"one": {
+            "id": "one", "name": "one", "description": null,
+            "source_type": "git", "source_ref": "https://example.com/repo.git",
+            "source_subpath": null, "source_revision": null,
+            "tags": [], "content_hash": "old-cache-hash",
+            "files": {"SKILL.md":"content", ".skills-hub-cache.json":"old-time", "nested/.skills-hub-cache.json":"old-time", "dist/guide.md":"document"}
+        }}});
+        let snapshot = SyncManifest::decode(&serde_json::to_vec(&raw).unwrap()).unwrap();
+        let skill = &snapshot.skills["one"];
+        assert_eq!(skill.files.len(), 2);
+        assert!(skill.files.contains_key("dist/guide.md"));
+        assert_eq!(skill.content_hash, portable_hash(skill));
+    }
 
     #[test]
     fn aggregate_hash_is_stable() {
