@@ -79,6 +79,7 @@ impl<'a> DeviceSyncService<'a> {
             git_repo::remote_head(&repo, item).map(|oid| oid.to_string())
         });
         Ok(SyncStatus {
+            tool_issues: self.store.list_tool_sync_issues()?,
             schedule_status: None,
             configured: config.is_some(),
             is_running: is_device_sync_running(),
@@ -302,17 +303,30 @@ impl<'a> DeviceSyncService<'a> {
         let mut config = self.require_config()?;
         let repo_root = self.workspace_root.join("repository");
         let manifest = SyncManifest::read(&repo_root)?;
-        let remote = manifest
-            .skills
-            .get(&conflict.skill_id)
-            .context("remote skill no longer exists")?;
+        let remote = manifest.skills.get(&conflict.skill_id);
+        if remote.is_none() {
+            if matches!(resolution, ConflictResolution::UseRemote) {
+                self.apply_remote_deletions(&MergePlan {
+                    delete_local: BTreeSet::from([conflict.skill_id.clone()]),
+                    ..MergePlan::default()
+                })?;
+            }
+            config.last_synced_commit = Some(conflict.remote_commit);
+            return self
+                .store
+                .resolve_device_sync_conflicts_and_save_config_if_clear(
+                    &[conflict_id.to_string()],
+                    &config,
+                );
+        }
+        let remote = remote.unwrap();
         if matches!(resolution, ConflictResolution::KeepBoth) {
             if let Some(local) = self.store.get_skill_by_id(&conflict.skill_id)? {
                 let new_id = Uuid::new_v4().to_string();
                 let source = PathBuf::from(&local.central_path);
                 let duplicate_name = format!("{} (Local)", local.name);
                 let destination = unique_skill_path(&self.central_root, &duplicate_name, &new_id);
-                manifest::replace_directory(&source, &destination)?;
+                manifest::copy_local_files(&source, &destination)?;
                 let mut duplicate = local;
                 duplicate.id = new_id;
                 duplicate.name = duplicate_name;
@@ -355,7 +369,7 @@ impl<'a> DeviceSyncService<'a> {
             bail!("device sync trash content is missing");
         }
         let destination = unique_skill_path(&self.central_root, &entry.skill_name, &entry.skill_id);
-        manifest::replace_directory(&source, &destination)?;
+        manifest::copy_local_files(&source, &destination)?;
         let files = manifest::hash_files(&destination)?;
         let now = now_ms();
         self.store
@@ -713,7 +727,12 @@ impl<'a> DeviceSyncService<'a> {
         repo_root: &Path,
         conflicts: &BTreeSet<String>,
     ) -> Result<()> {
+        use crate::core::content_hash::{hash_dir_for_sync_conflict, hash_dir_strict};
+        use crate::core::sync_engine::PreparedDirReplacement;
         fs::create_dir_all(&self.central_root)?;
+        let mut replacements = Vec::<PreparedDirReplacement>::new();
+        let mut records = Vec::new();
+        let mut distribution = Vec::new();
         for (id, skill) in &manifest.skills {
             if conflicts.contains(id) {
                 continue;
@@ -727,14 +746,63 @@ impl<'a> DeviceSyncService<'a> {
                 .as_ref()
                 .map(|record| PathBuf::from(&record.central_path))
                 .unwrap_or_else(|| unique_skill_path(&self.central_root, &skill.name, id));
-            manifest::replace_directory(&source, &destination)?;
+            let (staging, expected) = manifest::prepare_library_directory(&source, &destination)?;
+            let new_hash = hash_dir_strict(staging.path())?;
+            let previous_conflict_hash = if destination.exists() {
+                Some(hash_dir_for_sync_conflict(&destination)?)
+            } else {
+                None
+            };
+            if existing.as_ref().is_some_and(|record| record.enabled) {
+                distribution.push((id.clone(), destination.clone(), previous_conflict_hash));
+            }
+            if expected.as_ref() != Some(&new_hash) {
+                replacements.push(PreparedDirReplacement::from_staging(
+                    staging.keep(),
+                    destination.clone(),
+                    expected,
+                    true,
+                )?);
+            }
             let mut record = manifest::record_from_portable(skill, &destination, now_ms());
             if let Some(existing) = existing {
                 record.created_at = existing.created_at;
                 record.enabled = existing.enabled;
             }
-            self.store.upsert_skill(&record)?;
-            self.store.set_skill_tag_names(id, &skill.tags)?;
+            records.push((record, skill.tags.clone()));
+        }
+        for index in 0..replacements.len() {
+            if let Err(error) = replacements[index].activate() {
+                for replacement in replacements[..=index].iter_mut().rev() {
+                    replacement.rollback()?;
+                }
+                return Err(error);
+            }
+        }
+        for replacement in &replacements {
+            replacement.verify_backup_unchanged()?;
+        }
+        self.store.commit_device_sync_library(&records, &[])?;
+        for replacement in &mut replacements {
+            replacement.commit();
+        }
+        for (id, source, previous) in distribution {
+            let targets = self.store.list_skill_targets(&id)?;
+            let paths: BTreeSet<_> = targets
+                .iter()
+                .filter(|target| target.mode == "copy" && target.status != "disabled")
+                .map(|target| PathBuf::from(&target.target_path))
+                .collect();
+            for path in paths {
+                // Failures remain attached to the tool record, not the cloud merge.
+                let _ = crate::core::tool_distribution::refresh_copy(
+                    self.store,
+                    &id,
+                    &source,
+                    &path,
+                    previous.as_deref(),
+                );
+            }
         }
         Ok(())
     }
@@ -1131,6 +1199,335 @@ mod tests {
         };
         git_repo::push(&seed, &config, None, first).unwrap();
         (bare, config)
+    }
+
+    #[test]
+    fn sync_preserves_local_only_files_and_publishes_distribution_documents() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let (bare, config) = seed_remote(root.path());
+        let store = make_store(root.path(), "preserve", &config);
+        let central = root.path().join("central");
+        add_skill_in_directory(&store, &central, "one", "one", "# One");
+        for (path, content) in [
+            ("dist/guide.md", "official guide"),
+            ("build/manual.md", "manual"),
+            (".env", "LOCAL_ONLY=value"),
+            (".env.production", "LOCAL_ONLY_PROD=value"),
+            ("scripts/__pycache__/test.pyc", "cache"),
+        ] {
+            let path = central.join("one").join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, content).unwrap();
+        }
+        let credentials = MemoryCredentialStore::default();
+        let service = DeviceSyncService::new(
+            &store,
+            &credentials,
+            root.path().join("workspace"),
+            central.clone(),
+        );
+        service.sync().unwrap();
+        service.sync().unwrap();
+        assert_eq!(
+            fs::read_to_string(central.join("one/.env")).unwrap(),
+            "LOCAL_ONLY=value"
+        );
+        assert_eq!(
+            fs::read_to_string(central.join("one/dist/guide.md")).unwrap(),
+            "official guide"
+        );
+        assert!(central.join("one/scripts/__pycache__/test.pyc").exists());
+        let repo = Repository::open_bare(bare).unwrap();
+        let tree = repo
+            .find_reference("refs/heads/main")
+            .unwrap()
+            .peel_to_tree()
+            .unwrap();
+        assert!(tree
+            .get_path(Path::new("skills/one/content/dist/guide.md"))
+            .is_ok());
+        assert!(tree
+            .get_path(Path::new("skills/one/content/build/manual.md"))
+            .is_ok());
+        assert!(tree
+            .get_path(Path::new("skills/one/content/.env.production"))
+            .is_err());
+    }
+
+    #[test]
+    fn tool_edits_do_not_fail_cloud_sync_and_retry_clears_tool_issue() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let (bare, config) = seed_remote(root.path());
+        let credentials = MemoryCredentialStore::default();
+        let central = root.path().join("central");
+        let store = make_store(root.path(), "tool-boundary", &config);
+        add_skill_in_directory(&store, &central, "one", "one", "# Central");
+        let target = root.path().join("tool/one");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("SKILL.md"), "# Tool edit").unwrap();
+        store
+            .upsert_skill_target(&SkillTargetRecord {
+                id: "copy".into(),
+                skill_id: "one".into(),
+                tool: "cursor".into(),
+                scope: "global".into(),
+                project_path: None,
+                target_path: target.to_string_lossy().into(),
+                mode: "copy".into(),
+                status: "ok".into(),
+                last_error: None,
+                synced_at: None,
+            })
+            .unwrap();
+        let service = DeviceSyncService::new(
+            &store,
+            &credentials,
+            root.path().join("workspace"),
+            central.clone(),
+        );
+        let healthy_path = root.path().join("other-tool/one");
+        let mut healthy = store.list_skill_targets("one").unwrap().remove(0);
+        healthy.id = "healthy".into();
+        healthy.tool = "codex".into();
+        healthy.target_path = healthy_path.to_string_lossy().into();
+        store.upsert_skill_target(&healthy).unwrap();
+        assert_eq!(service.sync().unwrap().status, "success");
+        assert_eq!(
+            fs::read_to_string(healthy_path.join("SKILL.md")).unwrap(),
+            "# Central"
+        );
+        assert_eq!(
+            service.status().unwrap().last_run_status.as_deref(),
+            Some("success")
+        );
+        assert_eq!(service.status().unwrap().tool_issues.len(), 1);
+        let repo = Repository::open_bare(bare).unwrap();
+        let head = repo
+            .find_reference("refs/heads/main")
+            .unwrap()
+            .target()
+            .unwrap();
+        let tree = repo.find_commit(head).unwrap().tree().unwrap();
+        let entry = tree
+            .get_path(Path::new("skills/one/content/SKILL.md"))
+            .unwrap();
+        assert_eq!(repo.find_blob(entry.id()).unwrap().content(), b"# Central");
+        assert_eq!(
+            fs::read_to_string(target.join("SKILL.md")).unwrap(),
+            "# Tool edit"
+        );
+        assert_eq!(service.sync().unwrap().status, "success");
+        assert_eq!(
+            repo.find_reference("refs/heads/main").unwrap().target(),
+            Some(head)
+        );
+        fs::write(target.join("SKILL.md"), "# Central").unwrap();
+        crate::core::tool_distribution::refresh_copy(
+            &store,
+            "one",
+            &central.join("one"),
+            &target,
+            None,
+        )
+        .unwrap();
+        assert!(service.status().unwrap().tool_issues.is_empty());
+        assert_eq!(store.list_skill_targets("one").unwrap()[0].status, "ok");
+    }
+
+    #[test]
+    fn remote_updates_refresh_copies_without_overwriting_edited_targets() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let (_, config) = seed_remote(root.path());
+        let credentials = MemoryCredentialStore::default();
+        let central = root.path().join("central");
+        let store = make_store(root.path(), "copies", &config);
+        add_skill_in_directory(&store, &central, "one", "one", "# Original");
+        let service = DeviceSyncService::new(
+            &store,
+            &credentials,
+            root.path().join("workspace"),
+            central.clone(),
+        );
+        let target = root.path().join("tool/one");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("SKILL.md"), "# Original").unwrap();
+        #[cfg(unix)]
+        for directory in [&target, &central.join("one")] {
+            fs::create_dir_all(directory.join("node_modules/.bin")).unwrap();
+            std::os::unix::fs::symlink("../tool", directory.join("node_modules/.bin/tool"))
+                .unwrap();
+        }
+        store
+            .upsert_skill_target(&SkillTargetRecord {
+                id: "copy".into(),
+                skill_id: "one".into(),
+                tool: "cursor".into(),
+                scope: "project".into(),
+                project_path: Some(root.path().to_string_lossy().into()),
+                target_path: target.to_string_lossy().into(),
+                mode: "copy".into(),
+                status: "ok".into(),
+                last_error: None,
+                synced_at: None,
+            })
+            .unwrap();
+        let incoming = root.path().join("incoming");
+        let mut shared = store.list_skill_targets("one").unwrap().remove(0);
+        shared.id = "shared-copy".into();
+        shared.tool = "codex".into();
+        store.upsert_skill_target(&shared).unwrap();
+        store
+            .set_setting(
+                "device_sync.target_baseline.copy",
+                &serde_json::to_string(&(target.to_string_lossy(), "stale-before-source-update"))
+                    .unwrap(),
+            )
+            .unwrap();
+        manifest::export_library(&store, &incoming).unwrap();
+        fs::write(skill_dir(&incoming, "one").join("SKILL.md"), "# Remote").unwrap();
+        let remote = SyncManifest::read(&incoming).unwrap();
+        service
+            .apply_repository_to_library(&remote, &incoming, &BTreeSet::new())
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(target.join("SKILL.md")).unwrap(),
+            "# Remote"
+        );
+        for record in store.list_skill_targets("one").unwrap() {
+            assert!(record.synced_at.is_some());
+            assert!(store
+                .get_setting(&format!("device_sync.target_baseline.{}", record.id))
+                .unwrap()
+                .is_some());
+        }
+        #[cfg(unix)]
+        assert_eq!(
+            fs::read_link(target.join("node_modules/.bin/tool")).unwrap(),
+            PathBuf::from("../tool")
+        );
+        fs::write(target.join("SKILL.md"), "# User edit").unwrap();
+        fs::write(skill_dir(&incoming, "one").join("SKILL.md"), "# Next").unwrap();
+        service
+            .apply_repository_to_library(&remote, &incoming, &BTreeSet::new())
+            .unwrap();
+        assert!(store
+            .list_skill_targets("one")
+            .unwrap()
+            .iter()
+            .all(|t| t.status == "error"));
+        assert_eq!(
+            fs::read_to_string(target.join("SKILL.md")).unwrap(),
+            "# User edit"
+        );
+        assert_eq!(
+            fs::read_to_string(central.join("one/SKILL.md")).unwrap(),
+            "# Next"
+        );
+        add_skill_in_directory(&store, &central, "other", "other", "# Other");
+        let mut foreign = store.list_skill_targets("one").unwrap().remove(0);
+        foreign.id = "foreign".into();
+        foreign.skill_id = "other".into();
+        store.upsert_skill_target(&foreign).unwrap();
+        service
+            .apply_repository_to_library(&remote, &incoming, &BTreeSet::new())
+            .unwrap();
+        assert!(store
+            .list_skill_targets("one")
+            .unwrap()
+            .iter()
+            .all(|t| t.status == "error"));
+        assert_eq!(
+            fs::read_to_string(target.join("SKILL.md")).unwrap(),
+            "# User edit"
+        );
+        assert_eq!(
+            fs::read_to_string(central.join("one/SKILL.md")).unwrap(),
+            "# Next"
+        );
+    }
+
+    #[test]
+    fn accepting_remote_deletion_keeps_recoverable_local_content() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let (_, config) = seed_remote(root.path());
+        let credentials = MemoryCredentialStore::default();
+        let store = make_store(root.path(), "deletion", &config);
+        let central = root.path().join("central");
+        add_skill_in_directory(&store, &central, "one", "one", "# Local edit");
+        let workspace = root.path().join("workspace");
+        SyncManifest::empty()
+            .write(&workspace.join("repository"))
+            .unwrap();
+        let conflict = SyncConflict {
+            id: "delete-conflict".into(),
+            skill_id: "one".into(),
+            skill_name: "one".into(),
+            base_commit: None,
+            local_commit: String::new(),
+            remote_commit: "remote".into(),
+            files: vec!["*".into()],
+            created_at: 1,
+            status: "pending".into(),
+        };
+        store.upsert_device_sync_conflict(&conflict).unwrap();
+        let service = DeviceSyncService::new(&store, &credentials, workspace, central.clone());
+        service
+            .resolve_conflict(&conflict.id, ConflictResolution::UseRemote)
+            .unwrap();
+        assert!(store.get_skill_by_id("one").unwrap().is_none());
+        let trash = store.list_device_sync_trash().unwrap();
+        assert_eq!(
+            fs::read_to_string(Path::new(&trash[0].trash_path).join("SKILL.md")).unwrap(),
+            "# Local edit"
+        );
+        assert!(store.list_device_sync_conflicts().unwrap().is_empty());
+    }
+
+    #[test]
+    fn library_metadata_failure_rolls_back_all_files_and_records() {
+        let root = tempfile::tempdir().unwrap();
+        let (_, config) = seed_remote(root.path());
+        let store = make_store(root.path(), "metadata", &config);
+        let central = root.path().join("central");
+        for id in ["one", "two"] {
+            add_skill_in_directory(&store, &central, id, id, "original");
+        }
+        let before = store.get_skill_by_id("one").unwrap().unwrap();
+        let incoming = root.path().join("incoming");
+        let mut remote = manifest::export_library(&store, &incoming).unwrap();
+        remote.skills.get_mut("one").unwrap().description = Some("new metadata".into());
+        remote.skills.get_mut("two").unwrap().tags = vec![String::new()];
+        fs::write(skill_dir(&incoming, "one").join("SKILL.md"), "new content").unwrap();
+        let credentials = MemoryCredentialStore::default();
+        let service = DeviceSyncService::new(
+            &store,
+            &credentials,
+            root.path().join("workspace"),
+            central.clone(),
+        );
+        assert!(service
+            .apply_repository_to_library(&remote, &incoming, &BTreeSet::new())
+            .is_err());
+        assert_eq!(
+            store.get_skill_by_id("one").unwrap().unwrap().description,
+            before.description
+        );
+        assert_eq!(
+            fs::read_to_string(central.join("one/SKILL.md")).unwrap(),
+            "original"
+        );
     }
 
     fn make_store(root: &Path, name: &str, config: &DeviceSyncConfig) -> SkillStore {
@@ -1815,6 +2212,9 @@ mod tests {
         let first = service.sync().unwrap();
         let history = store.list_device_sync_history(20).unwrap();
         assert_eq!(history.len(), 1);
+        let mut source_failed = store.get_skill_by_id("one").unwrap().unwrap();
+        source_failed.status = "error".into();
+        store.upsert_skill(&source_failed).unwrap();
         let mut device = store.list_device_sync_devices("").unwrap().remove(0);
         device.last_seen_at = 1;
         store.upsert_device_sync_device(&device).unwrap();
@@ -1822,8 +2222,16 @@ mod tests {
             let result = service.sync().unwrap();
             assert_eq!(result.changes, SyncChangeSummary::default());
             assert_eq!(result.commit, first.commit);
+            assert_eq!(
+                store.get_skill_by_id("one").unwrap().unwrap().status,
+                "error"
+            );
         }
         assert_eq!(store.list_device_sync_history(20).unwrap().len(), 1);
+        assert_eq!(
+            service.status().unwrap().last_run_status.as_deref(),
+            Some("unchanged")
+        );
         assert!(store.list_device_sync_devices("").unwrap()[0].last_seen_at > 1);
         fs::write(central.join("one/SKILL.md"), "# Updated").unwrap();
         service.sync().unwrap();
@@ -1850,7 +2258,7 @@ mod tests {
         assert_eq!(store.list_device_sync_history(20).unwrap().len(), 3);
         assert_eq!(
             service.status().unwrap().last_run_status.as_deref(),
-            Some("success")
+            Some("unchanged")
         );
     }
 
@@ -2111,8 +2519,12 @@ mod tests {
                 skill_id: "local-one".to_string(),
                 tool: "cursor".to_string(),
                 scope: "project".to_string(),
-                project_path: Some("/computer-b/project".to_string()),
-                target_path: "/computer-b/project/.cursor/skills/one".to_string(),
+                project_path: Some(root.path().join("project").to_string_lossy().into()),
+                target_path: root
+                    .path()
+                    .join("project/.cursor/skills/one")
+                    .to_string_lossy()
+                    .into(),
                 mode: "copy".to_string(),
                 status: "ok".to_string(),
                 last_error: None,
@@ -2133,7 +2545,7 @@ mod tests {
             store_b.list_skill_targets("one").unwrap()[0]
                 .project_path
                 .as_deref(),
-            Some("/computer-b/project")
+            Some(root.path().join("project").to_str().unwrap())
         );
 
         fs::write(central_a.join("one/notes.txt"), "from a").unwrap();

@@ -42,6 +42,8 @@ export type TagWithCountDto = TagDto & {
 }
 
 export type ManagedSkill = {
+  source_error?: string | null
+  source_checked_at?: number | null
   id: string
   name: string
   description?: string | null
@@ -145,6 +147,7 @@ export type UpdateResultDto = {
   content_hash?: string | null
   source_revision?: string | null
   updated_targets: string[]
+  pending_targets?: string[]
   changed: boolean
 }
 
@@ -305,6 +308,7 @@ export type DeviceSyncRunResult = {
 }
 
 export type DeviceSyncStatus = {
+  tool_issues?: { skill_name: string; tool: string }[]
   schedule_status?: {
     state: 'disabled' | 'initializing' | 'scheduled' | 'backoff' | 'paused' | 'running' | 'waiting' | 'needs_confirmation'
     next_at: number | null

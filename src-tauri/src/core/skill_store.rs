@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use tauri::Manager;
 use uuid::Uuid;
 
@@ -252,6 +252,25 @@ impl SkillStore {
             }
 
             conn.execute_batch(DEVICE_SYNC_SCHEMA_V1)?;
+            conn.execute_batch("CREATE TABLE IF NOT EXISTS skill_source_checks (
+                skill_id TEXT PRIMARY KEY REFERENCES skills(id) ON DELETE CASCADE,
+                error_code TEXT NULL, checked_at INTEGER NOT NULL
+            );")?;
+            if conn.query_row("SELECT value FROM settings WHERE key='migration.source_checks_v1'", [], |row| row.get::<_,String>(0)).optional()?.is_none() {
+                let tx = conn.unchecked_transaction()?;
+                tx.execute("INSERT OR IGNORE INTO skill_source_checks SELECT id,'unknown',0 FROM skills WHERE status='error'", [])?;
+                let legacy = tx.query_row("SELECT value FROM settings WHERE key='skill_auto_update_last_error'", [], |row| row.get::<_,String>(0)).optional()?.unwrap_or_default();
+                for line in legacy.lines() {
+                    if let Some((id, reason)) = line.split_once(": ") {
+                        if matches!(super::skill_issues::safe_code(reason), "sourceMissing" | "repoPathMissing") {
+                            tx.execute("INSERT OR IGNORE INTO skill_source_checks (skill_id,error_code,checked_at) SELECT id,'recheck',0 FROM skills WHERE id=?1", params![id])?;
+                        }
+                    }
+                }
+                tx.execute("UPDATE skills SET status='error' WHERE id IN (SELECT skill_id FROM skill_source_checks WHERE error_code IS NOT NULL)", [])?;
+                tx.execute("INSERT INTO settings (key,value) VALUES ('migration.source_checks_v1','1')", [])?;
+                tx.commit()?;
+            }
             conn.execute(
                 "INSERT INTO settings (key, value) VALUES (?1, ?2)
                  ON CONFLICT(key) DO NOTHING",
@@ -457,13 +476,20 @@ impl SkillStore {
     ) -> Result<()> {
         self.with_conn(|conn| {
             let tx = conn.unchecked_transaction()?;
+            let unchanged = status == "success"
+                && added == 0
+                && updated == 0
+                && deleted == 0
+                && conflicted == 0;
             tx.execute(
                 "INSERT INTO settings (key, value) VALUES ('device_sync_last_run', ?1)
                  ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                params![serde_json::to_string(&(status, finished_at))?],
+                params![serde_json::to_string(&(
+                    if unchanged { "unchanged" } else { status },
+                    finished_at
+                ))?],
             )?;
-            if status == "success" && added == 0 && updated == 0 && deleted == 0 && conflicted == 0
-            {
+            if unchanged {
                 tx.execute("DELETE FROM device_sync_runs WHERE id = ?1", params![id])?;
                 tx.commit()?;
                 return Ok(());
@@ -773,6 +799,30 @@ impl SkillStore {
         })
     }
 
+    pub fn record_source_failure(&self, skill_id: &str, raw: &str) -> Result<()> {
+        self.with_conn(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute("UPDATE skills SET status='error' WHERE id=?1", params![skill_id])?;
+            tx.execute("INSERT INTO skill_source_checks (skill_id,error_code,checked_at) VALUES (?1,?2,?3)
+                ON CONFLICT(skill_id) DO UPDATE SET error_code=excluded.error_code,checked_at=excluded.checked_at",
+                params![skill_id, super::skill_issues::safe_code(raw), now_ms()])?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    pub fn source_checks(
+        &self,
+    ) -> Result<std::collections::HashMap<String, (Option<String>, i64)>> {
+        self.with_conn(|conn| {
+            let mut statement =
+                conn.prepare("SELECT skill_id,error_code,checked_at FROM skill_source_checks")?;
+            let rows =
+                statement.query_map([], |row| Ok((row.get(0)?, (row.get(1)?, row.get(2)?))))?;
+            Ok(rows.collect::<rusqlite::Result<_>>()?)
+        })
+    }
+
     pub fn upsert_skill_target(&self, record: &SkillTargetRecord) -> Result<()> {
         self.with_conn(|conn| {
             upsert_skill_target_with_conn(conn, record)?;
@@ -788,10 +838,44 @@ impl SkillStore {
         self.with_conn(|conn| {
             let transaction = conn.unchecked_transaction()?;
             upsert_skill_with_conn(&transaction, skill)?;
+            transaction.execute("INSERT INTO skill_source_checks (skill_id,error_code,checked_at) VALUES (?1,NULL,?2)
+                ON CONFLICT(skill_id) DO UPDATE SET error_code=NULL,checked_at=excluded.checked_at", params![skill.id, now_ms()])?;
             for target in targets {
                 upsert_skill_target_with_conn(&transaction, target)?;
             }
             transaction.commit()?;
+            Ok(())
+        })
+    }
+
+    pub(crate) fn commit_device_sync_library(
+        &self,
+        skills: &[(SkillRecord, Vec<String>)],
+        targets: &[(SkillTargetRecord, String)],
+    ) -> Result<()> {
+        self.with_conn(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            let now = now_ms();
+            for (skill, tags) in skills {
+                let mut local = skill.clone();
+                if let Some(status) = tx.query_row("SELECT status FROM skills WHERE id=?1", params![skill.id], |row| row.get::<_,String>(0)).optional()? {
+                    local.status = status;
+                }
+                upsert_skill_with_conn(&tx, &local)?;
+                tx.execute("DELETE FROM skill_tag_links WHERE skill_id = ?1", params![skill.id])?;
+                for name in tags {
+                    let normalized = normalize_tag_name(name)?;
+                    tx.execute("INSERT INTO skill_tags (name, created_at, updated_at) VALUES (?1, ?2, ?2) ON CONFLICT(name) DO NOTHING", params![normalized, now])?;
+                    let tag_id: i64 = tx.query_row("SELECT id FROM skill_tags WHERE name = ?1 COLLATE NOCASE", params![normalized], |row| row.get(0))?;
+                    tx.execute("INSERT OR IGNORE INTO skill_tag_links (skill_id, tag_id, created_at) VALUES (?1, ?2, ?3)", params![skill.id, tag_id, now])?;
+                }
+            }
+            for (target, hash) in targets {
+                upsert_skill_target_with_conn(&tx, target)?;
+                tx.execute("INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![format!("device_sync.target_baseline.{}", target.id), serde_json::to_string(&(&target.target_path, hash))?])?;
+            }
+            tx.commit()?;
             Ok(())
         })
     }
@@ -934,6 +1018,10 @@ impl SkillStore {
                 )?;
                 conn.execute(
                     "UPDATE skill_tag_links SET skill_id = ?1 WHERE skill_id = ?2",
+                    params![new_id, old_id],
+                )?;
+                conn.execute(
+                    "UPDATE skill_source_checks SET skill_id=?1 WHERE skill_id=?2",
                     params![new_id, old_id],
                 )?;
                 conn.execute("DELETE FROM skills WHERE id = ?1", params![old_id])?;
@@ -1218,6 +1306,28 @@ impl SkillStore {
                 |row| row.get(0),
             )?;
             Ok(count > 0)
+        })
+    }
+
+    pub fn is_target_used_by_other_skill(&self, path: &str, skill_id: &str) -> Result<bool> {
+        self.with_conn(|conn| {
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM skill_targets WHERE target_path = ?1 AND skill_id != ?2 AND status != 'disabled')",
+                params![path, skill_id],
+                |row| row.get(0),
+            ).map_err(Into::into)
+        })
+    }
+
+    pub fn list_tool_sync_issues(
+        &self,
+    ) -> Result<Vec<crate::core::device_sync::types::ToolSyncIssue>> {
+        self.with_conn(|conn| {
+            let mut statement = conn.prepare("SELECT DISTINCT s.name, t.tool FROM skill_targets t JOIN skills s ON s.id=t.skill_id WHERE s.enabled=1 AND t.status='error' ORDER BY s.name,t.tool")?;
+            let rows = statement.query_map([], |row| Ok(crate::core::device_sync::types::ToolSyncIssue {
+                skill_name: row.get(0)?, tool: row.get(1)?,
+            }))?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })
     }
 

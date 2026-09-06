@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { getFullySyncedTools, getToolSyncState } from './skillSyncStatus'
 import type { ManagedSkill, ToolOption } from './types'
 import ToolIcon from './ToolIcon'
+import SkillIssueNotice from './SkillIssueNotice'
 
 type GithubInfo = { label: string; href: string }
 
@@ -104,6 +105,7 @@ const SkillCard = ({
               >
                 <Copy size={12} />
               </button>
+              <SkillIssueNotice compact skill={skill} tools={installedTools} t={t} />
             </div>
             <div className={`skill-description${skill.description?.trim() ? '' : ' empty'}`} title={description}>
               {description}

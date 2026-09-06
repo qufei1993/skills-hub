@@ -43,6 +43,7 @@ import StoragePathMigrationModal from './components/skills/modals/StoragePathMig
 import SettingsPage from './components/skills/SettingsPage'
 import ToolsPage from './components/skills/ToolsPage'
 import UpdatesPage from './components/skills/UpdatesPage'
+import { useSkillStatusRefresh } from './components/skills/useSkillStatusRefresh'
 import WindowResizeHandles from './components/WindowResizeHandles'
 import {
   getAutoUpdateRunningReset,
@@ -201,6 +202,7 @@ function App() {
     [language, updateBody],
   )
   const [searchQuery, setSearchQuery] = useState('')
+  const [issuesOnly, setIssuesOnly] = useState(false)
   const [sortBy, setSortBy] = useState<'updated' | 'name'>('updated')
   const [scopeFilter, setScopeFilter] = useState<'all' | 'global' | 'project'>('all')
   const [skillViewMode, setSkillViewMode] = useState<'list' | 'cards'>(() =>
@@ -485,6 +487,7 @@ function App() {
     try {
       const result = await invokeTauri<ManagedSkill[]>('get_managed_skills')
       setManagedSkills(result)
+      setDetailSkill(current => current ? result.find(skill => skill.id === current.id) ?? null : null)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -937,12 +940,12 @@ function App() {
   const { visibleSkills, filterTags, filterUntaggedCount, bulkSelectedSkills } = useMemo(
     () => getSkillsView({
       managedSkills, tags, scopeFilter, searchQuery, selectedTagIds,
-      includeUntagged, sortBy, bulkSelectedIds, getSkillScope,
+      includeUntagged, sortBy, bulkSelectedIds, getSkillScope, issuesOnly,
     }),
     [managedSkills, tags, scopeFilter, searchQuery, selectedTagIds,
-      includeUntagged, sortBy, bulkSelectedIds, getSkillScope],
+      includeUntagged, sortBy, bulkSelectedIds, getSkillScope, issuesOnly],
   )
-  const hasListFilters = scopeFilter !== 'all' || searchQuery.trim() !== '' ||
+  const hasListFilters = issuesOnly || scopeFilter !== 'all' || searchQuery.trim() !== '' ||
     selectedTagIds.length > 0 || includeUntagged
   const untaggedCount = useMemo(
     () => managedSkills.filter((skill) => skill.tags.length === 0).length,
@@ -996,7 +999,6 @@ function App() {
   const [autoUpdateConfig, setAutoUpdateConfig] =
     useState<AutoUpdateConfigDto | null>(null)
   const [autoUpdateTriggering, setAutoUpdateTriggering] = useState(false)
-  const autoUpdateLastRunRef = useRef<number | null>(null)
   const updaterProxyOptions = useMemo(
     () => buildUpdaterProxyOptions(githubProxyConfig.enabled, githubProxyConfig.url),
     [githubProxyConfig.enabled, githubProxyConfig.url],
@@ -1053,47 +1055,8 @@ function App() {
     }
   }, [updaterProxyOptions])
 
-  useEffect(() => {
-    if (!isTauri) return
-    if (activeView !== 'manage' || managementTab !== 'updates') return
-
-    let cancelled = false
-    const refreshAutoUpdateConfig = async () => {
-      const config = await invokeTauri<AutoUpdateConfigDto>('get_auto_update_config')
-      if (cancelled) return
-
-      const previousLastRun = autoUpdateLastRunRef.current
-      const nextLastRun = config.last_run_at ?? null
-      autoUpdateLastRunRef.current = nextLastRun
-      setAutoUpdateConfig(config)
-
-      if (
-        previousLastRun !== null &&
-        nextLastRun !== null &&
-        nextLastRun !== previousLastRun &&
-        config.last_status !== 'running'
-      ) {
-        await loadManagedSkills()
-      }
-    }
-
-    void refreshAutoUpdateConfig().catch(() => {})
-    const timer = window.setInterval(() => {
-      void refreshAutoUpdateConfig().catch(() => {})
-    }, autoUpdateConfig?.last_status === 'running' ? 2000 : 10000)
-
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
-  }, [
-    activeView,
-    managementTab,
-    autoUpdateConfig?.last_status,
-    invokeTauri,
-    isTauri,
-    loadManagedSkills,
-  ])
+  const readAutoUpdateStatus = useCallback(() => invokeTauri<AutoUpdateConfigDto>('get_auto_update_config'), [invokeTauri])
+  useSkillStatusRefresh(isTauri, readAutoUpdateStatus, setAutoUpdateConfig, loadManagedSkills)
 
   const handlePickStoragePath = useCallback(async () => {
     try {
@@ -1707,6 +1670,7 @@ function App() {
   }, [])
 
   const handleClearListFilters = useCallback(() => {
+    setIssuesOnly(false)
     setScopeFilter('all')
     setSearchQuery('')
     setSelectedTagIds([])
@@ -3534,7 +3498,11 @@ function App() {
       const result = await invokeTauri<UpdateResultDto>('update_managed_skill', { skillId: skill.id })
       const updatedText = t(result.changed ? 'status.updated' : 'status.unchanged', { name: skill.name })
       setActionMessage(updatedText)
-      setSuccessToastMessage(updatedText)
+      if (result.pending_targets?.length) {
+        toast.warning(t('deviceSync.skillUpdatedToolsPending', { name: skill.name, count: result.pending_targets.length }))
+      } else {
+        setSuccessToastMessage(updatedText)
+      }
       setActionMessage(null)
       await loadManagedSkills()
     } catch (err) {
@@ -3644,6 +3612,8 @@ function App() {
           active={activeView === 'device-sync'}
           isTauri={isTauri}
           onSkillsChanged={loadManagedSkills}
+              onOpenToolIssues={() => setActiveView('myskills')}
+              toolLabels={Object.fromEntries(tools.map((tool) => [tool.id, tool.label]))}
           onConflictCountChange={setDeviceSyncConflictCount}
           t={t}
         />
@@ -3679,7 +3649,8 @@ function App() {
                 <button
                   className="skills-sync-issue"
                   type="button"
-                  onClick={() => handleManagementTabChange('updates')}
+                  aria-pressed={issuesOnly}
+                  onClick={() => { handleClearListFilters(); setIssuesOnly(!issuesOnly) }}
                 >
                   <AlertTriangle size={16} aria-hidden="true" />
                   <span>{t('stats.syncIssues', { count: syncIssueCount })}</span>
@@ -3712,7 +3683,7 @@ function App() {
             />
             {hasListFilters ? (
               <div className="skills-filter-summary" role="status">
-                <span>{t('filters.resultCount', { count: visibleSkills.length })}</span>
+                <span>{issuesOnly ? t('deviceSync.currentIssuesFilter') + ' · ' : ''}{t('filters.resultCount', { count: visibleSkills.length })}</span>
                 <button type="button" onClick={handleClearListFilters}>{t('filters.clear')}</button>
               </div>
             ) : null}
@@ -3863,6 +3834,7 @@ function App() {
                 />
               ) : (
                 <UpdatesPage
+                  skills={managedSkills}
                   autoUpdateConfig={autoUpdateConfig}
                   onAutoUpdateConfigChange={handleAutoUpdateConfigChange}
                   onRunAutoUpdateNow={handleTriggerAutoUpdateTaskNow}

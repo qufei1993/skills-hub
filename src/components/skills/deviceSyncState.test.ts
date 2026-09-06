@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   buildDeviceSyncForm,
+  getSyncFailureKind,
   selectSyncRepository,
   changeSyncRepositoryUrl,
   isDeviceSyncScheduleValid,
@@ -17,6 +18,11 @@ import {
   filterRepositories,
   withTimeout,
 } from './deviceSyncState'
+
+it('recognizes protected tool edits without exposing raw paths', () => {
+  expect(getSyncFailureKind('DEVICE_SYNC_FAILURE_targetModified')).toBe('targetModified')
+  expect(getSyncFailureKind('TARGET_MODIFIED|/private/path')).toBe('unknown')
+})
 
 describe('device sync UI state', () => {
   it('binds provider visibility to the selected repository and forgets it after URL edits', () => {

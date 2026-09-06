@@ -16,6 +16,63 @@ fn make_store() -> (tempfile::TempDir, SkillStore) {
 }
 
 #[test]
+fn source_failure_survives_cloud_sync_and_restart_until_source_success() {
+    let (dir, store) = make_store();
+    let skill = SkillRecord {
+        id: "source".into(),
+        name: "source".into(),
+        description: None,
+        source_type: "local".into(),
+        source_ref: Some("/source".into()),
+        source_subpath: None,
+        source_revision: None,
+        central_path: "/central".into(),
+        content_hash: None,
+        created_at: 1,
+        updated_at: 1,
+        last_sync_at: None,
+        last_seen_at: 1,
+        enabled: true,
+        status: "ok".into(),
+    };
+    store.upsert_skill(&skill).unwrap();
+    store
+        .record_source_failure(
+            "source",
+            "source path not found: https://token:secret@example.com",
+        )
+        .unwrap();
+    store
+        .commit_device_sync_library(&[(skill.clone(), vec![])], &[])
+        .unwrap();
+    let reopened = SkillStore::new(dir.path().join("test.db"));
+    reopened.ensure_schema().unwrap();
+    assert_eq!(
+        reopened.get_skill_by_id("source").unwrap().unwrap().status,
+        "error"
+    );
+    assert_eq!(
+        reopened.source_checks().unwrap()["source"].0.as_deref(),
+        Some("sourceMissing")
+    );
+    reopened.adopt_skill_id("source", "new-id").unwrap();
+    assert_eq!(
+        reopened.source_checks().unwrap()["new-id"].0.as_deref(),
+        Some("sourceMissing")
+    );
+    let mut restored = reopened.get_skill_by_id("new-id").unwrap().unwrap();
+    restored.status = "ok".into();
+    reopened.commit_skill_update(&restored, &[]).unwrap();
+    assert_eq!(reopened.source_checks().unwrap()["new-id"].0, None);
+    assert_eq!(
+        reopened.get_skill_by_id("new-id").unwrap().unwrap().status,
+        "ok"
+    );
+    reopened.delete_skill("new-id").unwrap();
+    assert!(reopened.source_checks().unwrap().is_empty());
+}
+
+#[test]
 fn sync_failure_history_never_persists_raw_secrets_and_sanitizes_legacy_errors() {
     let (dir, store) = make_store();
     store.start_device_sync_run("run", 1).unwrap();
@@ -63,6 +120,36 @@ fn sqlite_visible_files_contain(db_path: &std::path::Path, needle: &[u8]) -> boo
     .into_iter()
     .filter_map(|path| std::fs::read(path).ok())
     .any(|bytes| bytes.windows(needle.len()).any(|window| window == needle))
+}
+
+#[test]
+fn legacy_source_failure_requires_recheck_and_is_not_reimported_after_recovery() {
+    let (_dir, store) = make_store();
+    let skill = make_skill("legacy", "legacy", "/tmp/central", 1);
+    store.upsert_skill(&skill).unwrap();
+    store
+        .set_setting(
+            "skill_auto_update_last_error",
+            "legacy: source path not found: old/path",
+        )
+        .unwrap();
+    store.delete_setting("migration.source_checks_v1").unwrap();
+    store.ensure_schema().unwrap();
+    assert_eq!(
+        store.source_checks().unwrap()["legacy"].0.as_deref(),
+        Some("recheck")
+    );
+    assert_eq!(
+        store.get_skill_by_id("legacy").unwrap().unwrap().status,
+        "error"
+    );
+    store.commit_skill_update(&skill, &[]).unwrap();
+    store.ensure_schema().unwrap();
+    assert_eq!(store.source_checks().unwrap()["legacy"].0, None);
+    assert_eq!(
+        store.get_skill_by_id("legacy").unwrap().unwrap().status,
+        "ok"
+    );
 }
 
 fn make_skill(id: &str, name: &str, central_path: &str, updated_at: i64) -> SkillRecord {

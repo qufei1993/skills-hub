@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::content_hash::hash_dir_strict;
+use super::content_hash::{hash_dir_for_sync_conflict, hash_dir_strict};
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -128,7 +128,7 @@ pub fn sync_managed_copy_with_expected_hash(
     target: &Path,
     expected_hash: &str,
 ) -> Result<SyncOutcome> {
-    let mut replacement = PreparedDirReplacement::prepare_copy(
+    let mut replacement = PreparedDirReplacement::prepare_managed_copy(
         source,
         target,
         Some(expected_hash.to_string()),
@@ -150,12 +150,24 @@ pub(crate) struct PreparedDirReplacement {
     staging: Option<PathBuf>,
     backup: Option<PathBuf>,
     expected_hash: Option<String>,
+    ignore_python_cache: bool,
     prepared_hash: String,
     allow_missing: bool,
     activated: bool,
 }
 
 impl PreparedDirReplacement {
+    pub(crate) fn prepare_managed_copy(
+        source: &Path,
+        target: &Path,
+        expected_hash: Option<String>,
+        allow_missing: bool,
+    ) -> Result<Self> {
+        let mut replacement = Self::prepare_copy(source, target, expected_hash, allow_missing)?;
+        replacement.ignore_python_cache = true;
+        Ok(replacement)
+    }
+
     pub(crate) fn prepare_copy(
         source: &Path,
         target: &Path,
@@ -202,6 +214,7 @@ impl PreparedDirReplacement {
             staging: Some(staging),
             backup: None,
             expected_hash,
+            ignore_python_cache: false,
             prepared_hash,
             allow_missing,
             activated: false,
@@ -260,9 +273,14 @@ impl PreparedDirReplacement {
         };
         let metadata = std::fs::symlink_metadata(backup)
             .with_context(|| format!("stat replacement backup {:?}", backup))?;
+        let hash = if self.ignore_python_cache {
+            hash_dir_for_sync_conflict
+        } else {
+            hash_dir_strict
+        };
         let matches = metadata.is_dir()
             && !metadata.file_type().is_symlink()
-            && hash_dir_strict(backup)
+            && hash(backup)
                 .map(|actual_hash| actual_hash == *expected_hash)
                 .unwrap_or(false);
         if !matches {
@@ -448,7 +466,7 @@ fn ensure_parent_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn ensure_paths_do_not_overlap(source: &Path, target: &Path) -> Result<()> {
+pub(crate) fn ensure_paths_do_not_overlap(source: &Path, target: &Path) -> Result<()> {
     if paths_overlap(source, target)? {
         anyhow::bail!(
             "source and target paths overlap: {:?} and {:?}",

@@ -12,6 +12,44 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => undefi
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
 
 describe('DeviceSyncPage', () => {
+  it('explains a no-change run above historical failures', async () => {
+    invokeMock.mockImplementation((command: string) => {
+      if (command === 'get_device_sync_config') return Promise.resolve({ provider: 'github', remote_url: 'https://github.com/example/sync.git', branch: 'main', has_credential: true })
+      if (command === 'get_device_sync_status') return Promise.resolve({ configured: true, last_run_status: 'unchanged', last_run_at: 2000, conflict_count: 0 })
+      if (command === 'get_device_sync_history') return Promise.resolve([{ id: 'old', started_at: 1000, finished_at: 1000, status: 'failed', error: 'DEVICE_SYNC_FAILURE_auth' }])
+      if (command === 'get_device_sync_pending_oauth') return Promise.resolve(null)
+      return Promise.resolve([])
+    })
+    render(<DeviceSyncPage active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} onOpenToolIssues={vi.fn()} t={((key: string) => key) as TFunction} />)
+    expect(await screen.findByText('deviceSync.confirmedInSync')).toBeTruthy()
+    expect(screen.getByText('deviceSync.lastConfirmedValue')).toBeTruthy()
+    fireEvent.click(screen.getByRole('tab', { name: 'deviceSync.history' }))
+    expect(screen.getByText('deviceSync.noChangeHistoryNote')).toBeTruthy()
+    expect(screen.getAllByText('deviceSync.status.failed').length).toBeGreaterThan(0)
+    expect(screen.queryByText('deviceSync.visualState.healthy')).toBeNull()
+  })
+  it('keeps cloud success visible and offers navigation for pending tools', async () => {
+    invokeMock.mockImplementation((command: string) => {
+      if (command === 'get_device_sync_config') return Promise.resolve({ provider: 'github', remote_url: 'https://github.com/example/sync.git', branch: 'main', has_credential: true, visibility: 'private' })
+      if (command === 'get_device_sync_status') return Promise.resolve({ configured: true, is_running: false, last_run_status: 'success', last_run_at: 2000, conflict_count: 0, tool_issues: [{ skill_name: 'example', tool: 'hermes' }] })
+      if (command === 'get_device_sync_pending_oauth') return Promise.resolve(null)
+      return Promise.resolve([])
+    })
+    const open = vi.fn()
+    render(<DeviceSyncPage active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} onOpenToolIssues={open} t={((key: string) => key) as TFunction} />)
+    expect(await screen.findByText('deviceSync.visualState.healthy')).toBeTruthy()
+    expect(screen.queryByText('example')).toBeNull()
+    const details = screen.getByRole('button', { name: 'deviceSync.showToolIssues' })
+    expect(details.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(details)
+    expect(screen.getByText('example')).toBeTruthy()
+    expect(screen.getByText('hermes')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'deviceSync.hideToolIssues' }))
+    expect(screen.queryByText('example')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'deviceSync.openToolIssues' }))
+    expect(open).toHaveBeenCalledOnce()
+    expect(screen.queryByText('deviceSync.failureReasons.targetModified')).toBeNull()
+  })
   it('refreshes the saved failure immediately after a failed manual sync', async () => {
     let failed = false
     invokeMock.mockImplementation((command: string) => {
@@ -23,7 +61,7 @@ describe('DeviceSyncPage', () => {
       return Promise.resolve([])
     })
     const t = ((key: string) => key) as TFunction
-    render(<DeviceSyncPage active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} t={t} />)
+    render(<DeviceSyncPage onOpenToolIssues={vi.fn()} active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} t={t} />)
     await screen.findByText('deviceSync.visualState.healthy')
     fireEvent.click(screen.getByRole('button', { name: 'deviceSync.syncLocalRepository' }))
     expect(await screen.findByText('deviceSync.failureReasons.auth')).toBeTruthy()
@@ -37,7 +75,7 @@ describe('DeviceSyncPage', () => {
       return Promise.resolve([])
     })
     const t = ((key: string) => key) as TFunction
-    render(<DeviceSyncPage active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} t={t} />)
+    render(<DeviceSyncPage onOpenToolIssues={vi.fn()} active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} t={t} />)
     const reason = error === 'DEVICE_SYNC_FAILURE_network' ? 'network' : 'unknown'
     expect(await screen.findByText(`deviceSync.failureReasons.${reason}`)).toBeTruthy()
     fireEvent.click(screen.getByRole('tab', { name: 'deviceSync.history' }))
@@ -66,7 +104,7 @@ describe('DeviceSyncPage', () => {
     })
     const t = ((key: string, options?: { count?: number; value?: string }) =>
       `${key}${options?.count !== undefined ? ` ${options.count}` : ''}${options?.value ? ` ${options.value}` : ''}`) as TFunction
-    render(<DeviceSyncPage active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} t={t} />)
+    render(<DeviceSyncPage onOpenToolIssues={vi.fn()} active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} t={t} />)
     const summary = await screen.findByRole('region', { name: 'deviceSync.scheduleSummary' })
     expect(within(summary).getByText('deviceSync.scheduleInterval 15')).toBeTruthy()
     expect(summary.querySelector('time')?.dateTime).toBe('2026-05-28T20:26:40.000Z')
@@ -116,7 +154,7 @@ describe('DeviceSyncPage', () => {
       return Promise.resolve([])
     })
     const t = ((key: string, options?: { value?: string }) => key === 'deviceSync.scheduleDaily' ? `${key} ${options?.value}` : key) as TFunction
-    render(<DeviceSyncPage active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} t={t} />)
+    render(<DeviceSyncPage onOpenToolIssues={vi.fn()} active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} t={t} />)
     const summary = await screen.findByRole('region', { name: 'deviceSync.scheduleSummary' })
     expect(within(summary).getByText(label)).toBeTruthy()
     expect(Boolean(summary.querySelector('time'))).toBe(state === 'backoff')
@@ -126,7 +164,7 @@ describe('DeviceSyncPage', () => {
     const t = ((key: string) => key) as TFunction
 
     render(
-      <DeviceSyncPage
+      <DeviceSyncPage onOpenToolIssues={vi.fn()}
         active={false}
         isTauri={false}
         onSkillsChanged={vi.fn(async () => undefined)}
@@ -169,7 +207,7 @@ describe('DeviceSyncPage', () => {
     const t = ((key: string) => key) as TFunction
 
     render(
-      <DeviceSyncPage
+      <DeviceSyncPage onOpenToolIssues={vi.fn()}
         active
         isTauri
         onSkillsChanged={vi.fn(async () => undefined)}
@@ -238,7 +276,7 @@ describe('DeviceSyncPage', () => {
     const t = ((key: string) => key) as TFunction
 
     render(
-      <DeviceSyncPage
+      <DeviceSyncPage onOpenToolIssues={vi.fn()}
         active
         isTauri
         onSkillsChanged={vi.fn(async () => undefined)}

@@ -3,6 +3,55 @@ use std::fs;
 use crate::core::content_hash::hash_dir;
 
 #[test]
+fn sync_conflict_hash_ignores_only_python_cache_files() {
+    use super::{hash_dir_for_sync_conflict, hash_dir_strict};
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("SKILL.md"), b"original").unwrap();
+    let expected = hash_dir_for_sync_conflict(dir.path()).unwrap();
+    let strict = hash_dir_strict(dir.path()).unwrap();
+    fs::create_dir(dir.path().join("__pycache__")).unwrap();
+    fs::write(
+        dir.path().join("__pycache__/module.cpython-313.pyc"),
+        b"cache",
+    )
+    .unwrap();
+    assert_eq!(hash_dir_for_sync_conflict(dir.path()).unwrap(), expected);
+    assert_ne!(hash_dir_strict(dir.path()).unwrap(), strict);
+    fs::write(dir.path().join("__pycache__/notes.md"), b"user notes").unwrap();
+    assert_ne!(hash_dir_for_sync_conflict(dir.path()).unwrap(), expected);
+}
+
+#[cfg(unix)]
+#[test]
+fn sync_conflict_hash_protects_document_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let document = dir.path().join("SKILL.md");
+    fs::write(&document, b"original").unwrap();
+    fs::set_permissions(&document, fs::Permissions::from_mode(0o644)).unwrap();
+    let expected = super::hash_dir_for_sync_conflict(dir.path()).unwrap();
+    fs::set_permissions(&document, fs::Permissions::from_mode(0o600)).unwrap();
+    assert_ne!(
+        super::hash_dir_for_sync_conflict(dir.path()).unwrap(),
+        expected
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn sync_conflict_hash_protects_symlinks_disguised_as_python_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("SKILL.md"), b"original").unwrap();
+    let expected = super::hash_dir_for_sync_conflict(dir.path()).unwrap();
+    fs::create_dir(dir.path().join("__pycache__")).unwrap();
+    std::os::unix::fs::symlink("../SKILL.md", dir.path().join("__pycache__/module.pyc")).unwrap();
+    assert_ne!(
+        super::hash_dir_for_sync_conflict(dir.path()).unwrap(),
+        expected
+    );
+}
+
+#[test]
 fn hash_changes_with_content_and_ignores_git_dir() {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path();
