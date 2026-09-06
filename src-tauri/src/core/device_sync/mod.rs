@@ -1,4 +1,5 @@
 pub mod credentials;
+mod device_registry;
 pub(crate) mod errors;
 mod git_repo;
 pub mod manifest;
@@ -9,7 +10,7 @@ pub mod scheduler;
 mod text_merge;
 pub mod types;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -21,8 +22,8 @@ use self::credentials::CredentialStore;
 use self::manifest::{portable_hash, skill_dir, SyncManifest};
 use self::merge::{plan_merge_with_text, MergePlan};
 use self::types::{
-    ConflictResolution, DeviceSyncConfig, DeviceSyncDevice, SyncChangeSummary, SyncConflict,
-    SyncRunResult, SyncStatus, TrashEntry,
+    ConflictResolution, DeviceSyncConfig, DeviceSyncDevice, SyncChangeItem, SyncChangeSummary,
+    SyncConflict, SyncRunResult, SyncStatus, TrashEntry,
 };
 use crate::core::skill_store::SkillStore;
 
@@ -34,7 +35,17 @@ pub struct DeviceSyncService<'a> {
 }
 
 static SYNC_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+const RESOLVED_SYNC_KEY: &str = "device_sync.resolved_conflicts";
 const INCOMPLETE_SYNC_KEY: &str = "device_sync.incomplete_sync";
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct ResolvedSyncConflict {
+    base_commit: Option<String>,
+    remote_url: String,
+    branch: String,
+    skill_id: String,
+    remote_commit: String,
+}
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct IncompleteSync {
@@ -183,14 +194,15 @@ impl<'a> DeviceSyncService<'a> {
         self.ingest_discovered_devices(&repo, remote_oid)?;
         let remote = SyncManifest::read(&repo_path)?;
         let device = self.local_device_identity()?;
-        let (base, base_commit) = self.base_manifest(&repo, &config, remote_oid, &device.id)?;
+        let (mut base, base_commit) = self.base_manifest(&repo, &config, remote_oid, &device.id)?;
         let export = self.fresh_export()?;
         let mut local = SyncManifest::read(&export)?;
         reconcile_identities(&mut local, &remote, &export)?;
+        let resolved_bases = self.apply_resolved_bases(&repo, &config, base_commit, &mut base)?;
         let plan = plan_merge_with_text(&base, &local, &remote, |id, path| {
             merge_snapshot_file(
                 &repo,
-                base_commit,
+                resolved_bases.get(id).copied().or(base_commit),
                 remote_oid,
                 &export,
                 [&base, &local, &remote],
@@ -198,7 +210,7 @@ impl<'a> DeviceSyncService<'a> {
                 path,
             )
         })?;
-        let summary = summarize(&plan);
+        let summary = summarize(&plan, &local, &remote);
         let _ = fs::remove_dir_all(export);
         if remote_oid.is_none() && local.skills.is_empty() {
             return Ok(SyncChangeSummary::default());
@@ -207,15 +219,8 @@ impl<'a> DeviceSyncService<'a> {
     }
 
     pub fn devices(&self) -> Result<Vec<DeviceSyncDevice>> {
-        let config = self.require_config()?;
-        let repo_path = self.workspace_root.join("repository");
+        self.require_config()?;
         let current = self.local_device_identity()?;
-        if repo_path.join(".git").is_dir() {
-            let repo = git2::Repository::open(&repo_path).context("open device sync repository")?;
-            if git_repo::origin_matches(&repo, &config) {
-                self.ingest_discovered_devices(&repo, git_repo::remote_head(&repo, &config))?;
-            }
-        }
         self.store.list_device_sync_devices(&current.id)
     }
 
@@ -262,6 +267,7 @@ impl<'a> DeviceSyncService<'a> {
                 done.changes.conflicted,
                 done.commit.as_deref(),
                 None,
+                Some(&done.changes.items),
             )?,
             Err(err) => self.store.finish_device_sync_run(
                 &run_id,
@@ -273,6 +279,7 @@ impl<'a> DeviceSyncService<'a> {
                 0,
                 None,
                 Some(&errors::safe_message(&format!("{err:#}"))),
+                None,
             )?,
         }
         result.map_err(|err| anyhow::anyhow!(errors::format_error(err)))
@@ -290,20 +297,21 @@ impl<'a> DeviceSyncService<'a> {
             .into_iter()
             .find(|item| item.id == conflict_id)
             .context("device sync conflict not found")?;
+        let config = self.require_config()?;
         if matches!(resolution, ConflictResolution::KeepLocal) {
-            let mut config = self.require_config()?;
-            config.last_synced_commit = Some(conflict.remote_commit);
-            return self
-                .store
-                .resolve_device_sync_conflicts_and_save_config_if_clear(
-                    &[conflict_id.to_string()],
-                    &config,
-                );
+            return self.remember_resolved_conflict(&config, &conflict, &[]);
         }
-        let mut config = self.require_config()?;
         let repo_root = self.workspace_root.join("repository");
-        let manifest = SyncManifest::read(&repo_root)?;
+        let repo = git2::Repository::open(&repo_root)?;
+        anyhow::ensure!(
+            git_repo::origin_matches(&repo, &config),
+            "sync repository changed"
+        );
+        let commit = git2::Oid::from_str(&conflict.remote_commit)?;
+        let manifest = git_repo::manifest_at(&repo, commit)?;
         let remote = manifest.skills.get(&conflict.skill_id);
+        let local = self.store.get_skill_by_id(&conflict.skill_id)?;
+        let mut changes = Vec::new();
         if remote.is_none() {
             if matches!(resolution, ConflictResolution::UseRemote) {
                 self.apply_remote_deletions(&MergePlan {
@@ -311,15 +319,36 @@ impl<'a> DeviceSyncService<'a> {
                     ..MergePlan::default()
                 })?;
             }
-            config.last_synced_commit = Some(conflict.remote_commit);
-            return self
-                .store
-                .resolve_device_sync_conflicts_and_save_config_if_clear(
-                    &[conflict_id.to_string()],
-                    &config,
-                );
+            if let Some(local) =
+                local.filter(|_| matches!(resolution, ConflictResolution::UseRemote))
+            {
+                changes.push(SyncChangeItem {
+                    skill_id: local.id,
+                    name: local.name,
+                    kind: "deleted".into(),
+                    direction: "download".into(),
+                });
+            }
+            return self.remember_resolved_conflict(&config, &conflict, &changes);
         }
         let remote = remote.unwrap();
+        let snapshot = git_repo::skill_snapshot_at(&repo, commit, remote)?;
+        let content_changed = if let Some(local) = &local {
+            let staging = tempfile::tempdir()?;
+            !Path::new(&local.central_path).is_dir()
+                || manifest::export_skill(self.store, local.clone(), staging.path())?.content_hash
+                    != remote.content_hash
+        } else {
+            true
+        };
+        if content_changed {
+            changes.push(SyncChangeItem {
+                skill_id: remote.id.clone(),
+                name: remote.name.clone(),
+                kind: if local.is_some() { "updated" } else { "added" }.into(),
+                direction: "download".into(),
+            });
+        }
         if matches!(resolution, ConflictResolution::KeepBoth) {
             if let Some(local) = self.store.get_skill_by_id(&conflict.skill_id)? {
                 let new_id = Uuid::new_v4().to_string();
@@ -330,9 +359,20 @@ impl<'a> DeviceSyncService<'a> {
                 let mut duplicate = local;
                 duplicate.id = new_id;
                 duplicate.name = duplicate_name;
+                if duplicate.source_type == "local"
+                    && duplicate.source_ref.as_deref() == Some(duplicate.central_path.as_str())
+                {
+                    duplicate.source_ref = Some(destination.to_string_lossy().to_string());
+                }
                 duplicate.central_path = destination.to_string_lossy().to_string();
                 duplicate.updated_at = now_ms();
                 self.store.upsert_skill(&duplicate)?;
+                changes.push(SyncChangeItem {
+                    skill_id: duplicate.id.clone(),
+                    name: duplicate.name.clone(),
+                    kind: "added".into(),
+                    direction: "merge".into(),
+                });
                 let tags = self.store.get_skill_tags(&conflict.skill_id)?;
                 self.store.set_skill_tag_names(
                     &duplicate.id,
@@ -345,15 +385,10 @@ impl<'a> DeviceSyncService<'a> {
                 format_version: manifest.format_version,
                 skills: std::collections::BTreeMap::from([(remote.id.clone(), remote.clone())]),
             },
-            &repo_root,
+            snapshot.path(),
             &BTreeSet::new(),
         )?;
-        config.last_synced_commit = Some(conflict.remote_commit);
-        self.store
-            .resolve_device_sync_conflicts_and_save_config_if_clear(
-                &[conflict_id.to_string()],
-                &config,
-            )
+        self.remember_resolved_conflict(&config, &conflict, &changes)
     }
 
     pub fn restore_trash(&self, trash_id: &str) -> Result<()> {
@@ -416,6 +451,15 @@ impl<'a> DeviceSyncService<'a> {
                 commit: config.last_synced_commit,
                 changes: SyncChangeSummary {
                     conflicted: pending_conflicts.len(),
+                    items: pending_conflicts
+                        .iter()
+                        .map(|conflict| SyncChangeItem {
+                            skill_id: conflict.skill_id.clone(),
+                            name: conflict.skill_name.clone(),
+                            kind: "conflicted".into(),
+                            direction: "merge".into(),
+                        })
+                        .collect(),
                     ..SyncChangeSummary::default()
                 },
                 message: "device sync requires conflict resolution".to_string(),
@@ -431,18 +475,21 @@ impl<'a> DeviceSyncService<'a> {
             .context(read_failure_context(&config))?;
         let parent = git_repo::fetch_and_checkout(&repo, &config, token.as_deref())
             .context(read_failure_context(&config))?;
+        let mut registry = device_registry::DeviceRegistry::read_at(&repo, parent)?;
+        self.ingest_discovered_devices(&repo, parent)?;
         let mut remote = SyncManifest::read(&repo_path)?;
         let device = self.local_device_identity()?;
-        let (base, base_commit) = self.base_manifest(&repo, &config, parent, &device.id)?;
+        let (mut base, base_commit) = self.base_manifest(&repo, &config, parent, &device.id)?;
         let export = self.fresh_export()?;
         let mut local = SyncManifest::read(&export)?;
         for (old_id, new_id) in reconcile_identities(&mut local, &remote, &export)? {
             self.store.adopt_skill_id(&old_id, &new_id)?;
         }
+        let resolved_bases = self.apply_resolved_bases(&repo, &config, base_commit, &mut base)?;
         let plan = plan_merge_with_text(&base, &local, &remote, |id, path| {
             merge_snapshot_file(
                 &repo,
-                base_commit,
+                resolved_bases.get(id).copied().or(base_commit),
                 parent,
                 &export,
                 [&base, &local, &remote],
@@ -451,17 +498,20 @@ impl<'a> DeviceSyncService<'a> {
             )
         })?;
         self.record_conflicts(&plan, &local, &remote, base_commit, parent)?;
+        let changes = summarize(&plan, &local, &remote);
         if !plan.conflicts.is_empty() {
             let _ = fs::remove_dir_all(&export);
             return Ok(SyncRunResult {
                 status: "conflicts".to_string(),
                 commit: config.last_synced_commit,
-                changes: summarize(&plan),
+                changes,
                 message: "device sync requires conflict resolution".to_string(),
             });
         }
         apply_plan_to_repository(&plan, &local, &export, &mut remote, &repo_path)?;
         remote.write(&repo_path)?;
+        registry.record(&device);
+        registry.write(&repo_path)?;
 
         let message = format!(
             "Sync Skills Hub library\n\nSkills-Hub-Device-ID: {}\nSkills-Hub-Device-Name: {}",
@@ -501,12 +551,12 @@ impl<'a> DeviceSyncService<'a> {
         config.last_synced_commit = final_oid.map(|oid| oid.to_string());
         self.store.save_device_sync_config(&config)?;
         self.clear_incomplete_sync(&config)?;
+        self.clear_resolved_conflicts(&config)?;
         self.ingest_discovered_devices(&repo, final_oid)?;
         let mut current = device;
         current.last_commit = final_oid.map(|oid| oid.to_string());
         current.last_seen_at = now_ms();
         self.store.upsert_device_sync_device(&current)?;
-        let changes = summarize(&plan);
         Ok(SyncRunResult {
             status: if changes.conflicted > 0 {
                 "conflicts"
@@ -548,7 +598,7 @@ impl<'a> DeviceSyncService<'a> {
         let Some(remote_head) = remote_head else {
             return Ok(());
         };
-        for device in git_repo::discover_devices_at(repo, remote_head)? {
+        for device in device_registry::DeviceRegistry::read_at(repo, Some(remote_head))?.devices() {
             self.store.upsert_device_sync_device(&device)?;
         }
         Ok(())
@@ -599,6 +649,82 @@ impl<'a> DeviceSyncService<'a> {
             .join(format!("export-{}", Uuid::new_v4()));
         manifest::export_library(self.store, &export)?;
         Ok(export)
+    }
+
+    fn resolved_conflicts(&self) -> Result<Vec<ResolvedSyncConflict>> {
+        self.store.get_setting(RESOLVED_SYNC_KEY)?.map_or_else(
+            || Ok(Vec::new()),
+            |raw| serde_json::from_str(&raw).context("decode resolved device sync conflicts"),
+        )
+    }
+
+    fn remember_resolved_conflict(
+        &self,
+        config: &DeviceSyncConfig,
+        conflict: &SyncConflict,
+        changes: &[SyncChangeItem],
+    ) -> Result<()> {
+        let mut entries = self.resolved_conflicts()?;
+        entries.retain(|entry| {
+            entry.remote_url != config.remote_url
+                || entry.branch != config.branch
+                || entry.skill_id != conflict.skill_id
+        });
+        entries.push(ResolvedSyncConflict {
+            base_commit: conflict.base_commit.clone(),
+            remote_url: config.remote_url.clone(),
+            branch: config.branch.clone(),
+            skill_id: conflict.skill_id.clone(),
+            remote_commit: conflict.remote_commit.clone(),
+        });
+        self.store.resolve_device_sync_conflict_with_state(
+            &conflict.id,
+            RESOLVED_SYNC_KEY,
+            &serde_json::to_string(&entries)?,
+            changes,
+            &conflict.remote_commit,
+        )
+    }
+
+    fn apply_resolved_bases(
+        &self,
+        repo: &git2::Repository,
+        config: &DeviceSyncConfig,
+        base_commit: Option<git2::Oid>,
+        base: &mut SyncManifest,
+    ) -> Result<BTreeMap<String, git2::Oid>> {
+        let mut commits = BTreeMap::new();
+        for entry in self.resolved_conflicts()?.into_iter().filter(|entry| {
+            entry.remote_url == config.remote_url
+                && entry.branch == config.branch
+                && entry.base_commit == base_commit.map(|oid| oid.to_string())
+        }) {
+            let oid = git2::Oid::from_str(&entry.remote_commit)
+                .context("decode resolved conflict commit")?;
+            let mut snapshot = git_repo::manifest_at(repo, oid)?;
+            match snapshot.skills.remove(&entry.skill_id) {
+                Some(skill) => {
+                    base.skills.insert(entry.skill_id.clone(), skill);
+                }
+                None => {
+                    base.skills.remove(&entry.skill_id);
+                }
+            }
+            commits.insert(entry.skill_id, oid);
+        }
+        Ok(commits)
+    }
+
+    fn clear_resolved_conflicts(&self, config: &DeviceSyncConfig) -> Result<()> {
+        let mut entries = self.resolved_conflicts()?;
+        entries
+            .retain(|entry| entry.remote_url != config.remote_url || entry.branch != config.branch);
+        if entries.is_empty() {
+            self.store.delete_setting(RESOLVED_SYNC_KEY)
+        } else {
+            self.store
+                .set_setting(RESOLVED_SYNC_KEY, &serde_json::to_string(&entries)?)
+        }
     }
 
     fn base_manifest(
@@ -766,6 +892,16 @@ impl<'a> DeviceSyncService<'a> {
             }
             let mut record = manifest::record_from_portable(skill, &destination, now_ms());
             if let Some(existing) = existing {
+                if existing.source_type == "local"
+                    && record.source_type == "local"
+                    && !self
+                        .store
+                        .was_skill_imported_by_device_sync(id, existing.created_at)?
+                {
+                    record.source_ref = existing.source_ref.clone();
+                    record.source_subpath = existing.source_subpath.clone();
+                    record.source_revision = existing.source_revision.clone();
+                }
                 record.created_at = existing.created_at;
                 record.enabled = existing.enabled;
             }
@@ -999,13 +1135,57 @@ fn copy_local_skill(
     Ok(())
 }
 
-fn summarize(plan: &MergePlan) -> SyncChangeSummary {
-    SyncChangeSummary {
-        added: plan.take_local.len() + plan.take_remote.len(),
-        updated: plan.merge_files.len(),
-        deleted: plan.delete_local.len() + plan.delete_remote.len(),
-        conflicted: plan.conflicts.len(),
+fn summarize(plan: &MergePlan, local: &SyncManifest, remote: &SyncManifest) -> SyncChangeSummary {
+    let mut summary = SyncChangeSummary::default();
+    let mut add = |id: &String, kind: &str, direction: &str| {
+        match kind {
+            "added" => summary.added += 1,
+            "updated" => summary.updated += 1,
+            "deleted" => summary.deleted += 1,
+            "conflicted" => summary.conflicted += 1,
+            _ => unreachable!(),
+        }
+        summary.items.push(SyncChangeItem {
+            skill_id: id.clone(),
+            name: local
+                .skills
+                .get(id)
+                .or_else(|| remote.skills.get(id))
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| id.clone()),
+            kind: kind.into(),
+            direction: direction.into(),
+        });
+    };
+    for (ids, direction) in [
+        (&plan.take_local, "upload"),
+        (&plan.take_remote, "download"),
+    ] {
+        for id in ids {
+            add(
+                id,
+                if local.skills.contains_key(id) && remote.skills.contains_key(id) {
+                    "updated"
+                } else {
+                    "added"
+                },
+                direction,
+            );
+        }
     }
+    for id in plan.merge_files.keys() {
+        add(id, "updated", "merge");
+    }
+    for id in &plan.delete_local {
+        add(id, "deleted", "download");
+    }
+    for id in &plan.delete_remote {
+        add(id, "deleted", "upload");
+    }
+    for id in plan.conflicts.keys() {
+        add(id, "conflicted", "merge");
+    }
+    summary
 }
 
 fn unique_skill_path(root: &Path, name: &str, id: &str) -> PathBuf {
@@ -1323,9 +1503,19 @@ mod tests {
             "# Tool edit"
         );
         assert_eq!(service.sync().unwrap().status, "success");
+        let after = repo
+            .find_reference("refs/heads/main")
+            .unwrap()
+            .peel_to_commit()
+            .unwrap();
         assert_eq!(
-            repo.find_reference("refs/heads/main").unwrap().target(),
-            Some(head)
+            after
+                .tree()
+                .unwrap()
+                .get_path(Path::new("skills"))
+                .unwrap()
+                .id(),
+            tree.get_path(Path::new("skills")).unwrap().id()
         );
         fs::write(target.join("SKILL.md"), "# Central").unwrap();
         crate::core::tool_distribution::refresh_copy(
@@ -1467,16 +1657,21 @@ mod tests {
         let central = root.path().join("central");
         add_skill_in_directory(&store, &central, "one", "one", "# Local edit");
         let workspace = root.path().join("workspace");
-        SyncManifest::empty()
-            .write(&workspace.join("repository"))
-            .unwrap();
+        let repo =
+            git2::Repository::clone(&config.remote_url, workspace.join("repository")).unwrap();
+        let remote_commit = repo
+            .find_reference("refs/remotes/origin/main")
+            .unwrap()
+            .target()
+            .unwrap()
+            .to_string();
         let conflict = SyncConflict {
             id: "delete-conflict".into(),
             skill_id: "one".into(),
             skill_name: "one".into(),
             base_commit: None,
             local_commit: String::new(),
-            remote_commit: "remote".into(),
+            remote_commit,
             files: vec!["*".into()],
             created_at: 1,
             status: "pending".into(),
@@ -1539,6 +1734,209 @@ mod tests {
 
     fn add_skill(store: &SkillStore, central: &Path, id: &str, content: &str) {
         add_skill_in_directory(store, central, id, "one", content);
+    }
+
+    #[test]
+    fn shared_device_registry_publishes_all_devices_and_cache_reads_need_no_repository() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let (bare, config) = seed_remote(root.path());
+        let credentials = MemoryCredentialStore::default();
+        let a = make_store(root.path(), "registry-a", &config);
+        let b = make_store(root.path(), "registry-b", &config);
+        a.set_setting("device_sync.local_device_id", "office")
+            .unwrap();
+        b.set_setting("device_sync.local_device_id", "home")
+            .unwrap();
+        let service_a = DeviceSyncService::new(
+            &a,
+            &credentials,
+            root.path().join("wa"),
+            root.path().join("ca"),
+        );
+        let service_b = DeviceSyncService::new(
+            &b,
+            &credentials,
+            root.path().join("wb"),
+            root.path().join("cb"),
+        );
+        service_a.sync().unwrap();
+        service_b.sync().unwrap();
+        service_a.sync().unwrap();
+        let remote = Repository::open_bare(bare).unwrap();
+        let commit = remote
+            .find_reference("refs/heads/main")
+            .unwrap()
+            .peel_to_commit()
+            .unwrap();
+        let tree = commit.tree().unwrap();
+        let entry = tree
+            .get_path(Path::new("devices.json"))
+            .expect("shared registry must be published");
+        let blob = remote.find_blob(entry.id()).unwrap();
+        let registry: serde_json::Value = serde_json::from_slice(blob.content()).unwrap();
+        assert_eq!(registry["version"], 1);
+        assert_eq!(registry["devices"].as_object().unwrap().len(), 2);
+        assert!(
+            registry["devices"]["office"]["lastSyncedAt"]
+                .as_i64()
+                .unwrap()
+                > 0
+        );
+        assert!(registry["devices"]["home"]["name"].is_string());
+        assert_eq!(registry["devices"]["office"].as_object().unwrap().len(), 2);
+        assert_eq!(service_b.devices().unwrap().len(), 2);
+        service_b.check().unwrap();
+        fs::write(
+            root.path().join("wb/repository/.git/HEAD"),
+            "invalid git head",
+        )
+        .unwrap();
+        assert_eq!(service_b.devices().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn device_registry_migrates_legacy_devices_and_reads_later_legacy_commits() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let (_, config) = seed_remote(root.path());
+        let seed = Repository::open(root.path().join("seed")).unwrap();
+        let old = git_repo::commit_all_allow_empty(
+            &seed,
+            "Legacy sync\n\nSkills-Hub-Device-ID: legacy\nSkills-Hub-Device-Name: Old Mac",
+            seed.head().unwrap().target(),
+        )
+        .unwrap()
+        .unwrap();
+        git_repo::push(&seed, &config, None, old).unwrap();
+        let credentials = MemoryCredentialStore::default();
+        let store = make_store(root.path(), "new-client", &config);
+        store
+            .set_setting("device_sync.local_device_id", "new")
+            .unwrap();
+        let service = DeviceSyncService::new(
+            &store,
+            &credentials,
+            root.path().join("workspace"),
+            root.path().join("central"),
+        );
+        service.check().unwrap();
+        assert_eq!(service.devices().unwrap()[0].name, "Old Mac");
+        service.sync().unwrap();
+        let parent = git_repo::fetch_and_checkout(&seed, &config, None).unwrap();
+        let later = git_repo::commit_all_allow_empty(
+            &seed,
+            "Legacy sync\n\nSkills-Hub-Device-ID: later\nSkills-Hub-Device-Name: Old PC",
+            parent,
+        )
+        .unwrap()
+        .unwrap();
+        git_repo::push(&seed, &config, None, later).unwrap();
+        service.check().unwrap();
+        assert_eq!(service.devices().unwrap().len(), 3);
+        service.sync().unwrap();
+        let registry: serde_json::Value = serde_json::from_slice(
+            &fs::read(root.path().join("workspace/repository/devices.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(registry["devices"]["legacy"]["name"], "Old Mac");
+        assert_eq!(registry["devices"]["later"]["name"], "Old PC");
+        // Previous clients continue to discover new clients from commit trailers.
+        let repo = Repository::open(root.path().join("workspace/repository")).unwrap();
+        assert_eq!(git_repo::discover_devices(&repo).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn device_registry_stale_push_is_rejected_and_retry_preserves_both_writers() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let (_, config) = seed_remote(root.path());
+        let credentials = MemoryCredentialStore::default();
+        let store = make_store(root.path(), "current", &config);
+        store
+            .set_setting("device_sync.local_device_id", "current")
+            .unwrap();
+        let workspace = root.path().join("workspace");
+        let service = DeviceSyncService::new(
+            &store,
+            &credentials,
+            workspace.clone(),
+            root.path().join("central"),
+        );
+        service.check().unwrap();
+        let stale = Repository::open(workspace.join("repository")).unwrap();
+        let parent = git_repo::remote_head(&stale, &config);
+        let seed_path = root.path().join("seed");
+        let other = Repository::open(&seed_path).unwrap();
+        let mut registry = device_registry::DeviceRegistry::read_at(&other, parent).unwrap();
+        registry.record(&DeviceSyncDevice {
+            id: "other".into(),
+            name: "Other computer".into(),
+            alias: None,
+            last_commit: None,
+            last_seen_at: 1234,
+            is_current: false,
+        });
+        registry.write(&seed_path).unwrap();
+        let other_head = git_repo::commit_all(&other, "Other writer", parent)
+            .unwrap()
+            .unwrap();
+        git_repo::push(&other, &config, None, other_head).unwrap();
+        let mut registry = device_registry::DeviceRegistry::read_at(&stale, parent).unwrap();
+        registry.record(&service.local_device_identity().unwrap());
+        registry.write(&workspace.join("repository")).unwrap();
+        let stale_head = git_repo::commit_all(&stale, "Stale writer", parent)
+            .unwrap()
+            .unwrap();
+        assert!(git_repo::push(&stale, &config, None, stale_head).is_err());
+        service.sync().unwrap();
+        let records = service.devices().unwrap();
+        assert_eq!(records.len(), 2);
+        assert!(records
+            .iter()
+            .any(|device| device.name == "Other computer" && device.last_seen_at == 1234));
+    }
+
+    #[test]
+    fn device_registry_rejects_invalid_remote_data_without_publishing_or_exposing_contents() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let (bare, config) = seed_remote(root.path());
+        let seed_path = root.path().join("seed");
+        let seed = Repository::open(&seed_path).unwrap();
+        let parent = seed.head().unwrap().target();
+        fs::write(seed_path.join("devices.json"), "do-not-display-secret").unwrap();
+        let oid = git_repo::commit_all(&seed, "invalid registry", parent)
+            .unwrap()
+            .unwrap();
+        git_repo::push(&seed, &config, None, oid).unwrap();
+        let credentials = MemoryCredentialStore::default();
+        let store = make_store(root.path(), "invalid-registry", &config);
+        let service = DeviceSyncService::new(
+            &store,
+            &credentials,
+            root.path().join("workspace"),
+            root.path().join("central"),
+        );
+        let error = service
+            .sync()
+            .expect_err("invalid registry must not be overwritten");
+        assert!(!format!("{error:#}").contains("do-not-display-secret"));
+        assert_eq!(
+            Repository::open_bare(bare)
+                .unwrap()
+                .refname_to_id("refs/heads/main")
+                .unwrap(),
+            oid
+        );
     }
 
     #[test]
@@ -1918,6 +2316,338 @@ mod tests {
     }
 
     #[test]
+    fn sync_history_counts_updates_and_ignores_internal_cache() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let (_bare, config) = seed_remote(root.path());
+        let credentials = MemoryCredentialStore::default();
+        let central = root.path().join("central");
+        let store = make_store(root.path(), "counts", &config);
+        add_skill(&store, &central, "one", "# Original");
+        let service = DeviceSyncService::new(
+            &store,
+            &credentials,
+            root.path().join("workspace"),
+            central.clone(),
+        );
+        assert_eq!(service.sync().unwrap().changes.added, 1);
+        let other_store = make_store(root.path(), "other-counts", &config);
+        let other = DeviceSyncService::new(
+            &other_store,
+            &credentials,
+            root.path().join("other-workspace"),
+            root.path().join("other-central"),
+        );
+        other.sync().unwrap();
+        fs::write(central.join("one/SKILL.md"), "# Updated").unwrap();
+        let preview = service.check().unwrap();
+        assert_eq!((preview.added, preview.updated), (0, 1));
+        let result = service.sync().unwrap();
+        assert_eq!((result.changes.added, result.changes.updated), (0, 1));
+        let incoming = other.check().unwrap();
+        assert_eq!((incoming.added, incoming.updated), (0, 1));
+        assert_eq!(incoming.items[0].direction, "download");
+        other.sync().unwrap();
+        let stored = store.list_device_sync_history(10).unwrap();
+        let item = &stored[0].items.as_ref().unwrap()[0];
+        assert_eq!(
+            (&*item.skill_id, &*item.name, &*item.kind, &*item.direction),
+            ("one", "one", "updated", "upload")
+        );
+        fs::write(
+            central.join("one/.skills-hub-cache.json"),
+            r#"{"last_fetched_ms":123}"#,
+        )
+        .unwrap();
+        assert_eq!(service.check().unwrap(), SyncChangeSummary::default());
+        assert_eq!(
+            service.sync().unwrap().changes,
+            SyncChangeSummary::default()
+        );
+        assert_eq!(store.list_device_sync_history(10).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn local_source_paths_stay_on_their_device_and_legacy_imports_are_repaired() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let (_bare, config) = seed_remote(root.path());
+        let credentials = MemoryCredentialStore::default();
+        let ca = root.path().join("central-a");
+        let a = make_store(root.path(), "local-a", &config);
+        add_skill(&a, &ca, "one", "# Local skill");
+        let source = root.path().join("device-a-project");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "# Local skill").unwrap();
+        let mut owner = a.get_skill_by_id("one").unwrap().unwrap();
+        owner.source_type = "local".into();
+        owner.source_ref = Some(source.to_string_lossy().into());
+        owner.source_subpath = Some("/device-a-only/subpath".into());
+        a.upsert_skill(&owner).unwrap();
+        let wa = root.path().join("workspace-a");
+        let sa = DeviceSyncService::new(&a, &credentials, wa.clone(), ca);
+        sa.sync().unwrap();
+        let raw = fs::read_to_string(wa.join("repository/.skills-hub/manifest.json")).unwrap();
+        assert!(
+            !raw.contains("device-a-project"),
+            "local source paths must not be published"
+        );
+        assert!(!raw.contains("device-a-only"));
+        assert_eq!(
+            a.get_skill_by_id("one").unwrap().unwrap().source_ref,
+            owner.source_ref
+        );
+        let b = make_store(root.path(), "local-b", &config);
+        let wb = root.path().join("workspace-b");
+        let sb = DeviceSyncService::new(&b, &credentials, wb, root.path().join("central-b"));
+        sb.sync().unwrap();
+        let mut imported = b.get_skill_by_id("one").unwrap().unwrap();
+        assert_eq!(
+            imported.source_ref.as_deref(),
+            Some(imported.central_path.as_str())
+        );
+        // Simulate the previous release's imported foreign path, even though it exists here.
+        b.delete_setting("device_sync.source_origin.one").unwrap();
+        imported.source_ref = owner.source_ref.clone();
+        imported.source_subpath = owner.source_subpath.clone();
+        b.upsert_skill(&imported).unwrap();
+        b.record_source_failure("one", "source path not found")
+            .unwrap();
+        assert_eq!(sb.sync().unwrap().changes, SyncChangeSummary::default());
+        let repaired = b.get_skill_by_id("one").unwrap().unwrap();
+        assert_eq!(
+            repaired.source_ref.as_deref(),
+            Some(repaired.central_path.as_str())
+        );
+        assert!(repaired.source_subpath.is_none());
+        assert_eq!(repaired.status, "ok");
+        assert!(b.source_checks().unwrap().get("one").unwrap().0.is_none());
+        let app = tauri::test::mock_app();
+        crate::core::installer::update_managed_skill_from_source(app.handle(), &b, "one").unwrap();
+        b.delete_skill("one").unwrap();
+        assert!(b
+            .get_setting("device_sync.source_origin.one")
+            .unwrap()
+            .is_none());
+        add_skill(
+            &b,
+            &root.path().join("central-b"),
+            "reinstalled",
+            "# Local skill",
+        );
+        let own_source_b = root.path().join("device-b-project");
+        fs::create_dir(&own_source_b).unwrap();
+        fs::write(own_source_b.join("SKILL.md"), "# Local skill").unwrap();
+        let mut reinstalled = b.get_skill_by_id("reinstalled").unwrap().unwrap();
+        reinstalled.source_type = "local".into();
+        reinstalled.source_ref = Some(own_source_b.to_string_lossy().into());
+        b.upsert_skill(&reinstalled).unwrap();
+        sb.sync().unwrap();
+        assert!(b.get_skill_by_id("reinstalled").unwrap().is_none());
+        assert_eq!(
+            b.get_skill_by_id("one").unwrap().unwrap().source_ref,
+            reinstalled.source_ref
+        );
+        fs::remove_dir_all(&source).unwrap();
+        a.record_source_failure("one", "source path not found")
+            .unwrap();
+        sa.sync().unwrap();
+        let still_local = a.get_skill_by_id("one").unwrap().unwrap();
+        assert_eq!(still_local.source_ref, owner.source_ref);
+        assert_eq!(
+            still_local.status, "error",
+            "a genuinely missing local source must stay visible"
+        );
+    }
+
+    #[test]
+    fn remote_conflict_resolution_records_applied_changes() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let (_, config) = seed_remote(root.path());
+        let credentials = MemoryCredentialStore::default();
+        let ca = root.path().join("ca");
+        let cb = root.path().join("cb");
+        let a = make_store(root.path(), "review-a", &config);
+        let b = make_store(root.path(), "review-b", &config);
+        add_skill(&a, &ca, "shared", "# Remote");
+        add_skill(&b, &cb, "shared", "# Local");
+        let sa = DeviceSyncService::new(&a, &credentials, root.path().join("wa"), ca.clone());
+        let sb = DeviceSyncService::new(&b, &credentials, root.path().join("wb"), cb.clone());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::write(ca.join("one/run.sh"), "#!/bin/sh\necho ok\n").unwrap();
+            fs::set_permissions(ca.join("one/run.sh"), fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        sa.sync().unwrap();
+        assert_eq!(sb.sync().unwrap().changes.conflicted, 1);
+        let conflict = b.list_device_sync_conflicts().unwrap().remove(0);
+        b.delete_setting("device_sync_last_run").unwrap();
+        sb.resolve_conflict(&conflict.id, ConflictResolution::UseRemote)
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(cb.join("one/SKILL.md")).unwrap(),
+            "# Remote"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_ne!(
+                fs::metadata(cb.join("one/run.sh"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o111,
+                0
+            );
+        }
+        let immediate = b.list_device_sync_history(10).unwrap();
+        let resolution = immediate
+            .iter()
+            .find(|run| run.status == "resolved")
+            .unwrap();
+        assert_eq!(resolution.updated, 1);
+        let items = resolution.items.as_ref().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].skill_id, "shared");
+        assert_eq!(items[0].direction, "download");
+        assert_eq!(
+            resolution.commit.as_deref(),
+            Some(conflict.remote_commit.as_str())
+        );
+        assert_eq!(
+            sb.status().unwrap().last_run_status.as_deref(),
+            Some("conflicts")
+        );
+        assert_eq!(sb.sync().unwrap().changes, SyncChangeSummary::default());
+        let history = b.list_device_sync_history(10).unwrap();
+        assert!(history.iter().any(|run| run.status == "resolved"), "successfully imported remote conflict resolution must appear in history; actual statuses: {:?}", history.iter().map(|r| &r.status).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn conflict_resolution_uses_its_immutable_snapshot() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let (_, config) = seed_remote(root.path());
+        let credentials = MemoryCredentialStore::default();
+        let ca = root.path().join("ca");
+        let cb = root.path().join("cb");
+        let a = make_store(root.path(), "review-a", &config);
+        let b = make_store(root.path(), "review-b", &config);
+        add_skill(&a, &ca, "shared", "# A");
+        add_skill(&b, &cb, "shared", "# Local");
+        let sa = DeviceSyncService::new(&a, &credentials, root.path().join("wa"), ca.clone());
+        let sb = DeviceSyncService::new(&b, &credentials, root.path().join("wb"), cb.clone());
+        sa.sync().unwrap();
+        assert_eq!(sb.sync().unwrap().changes.conflicted, 1);
+        let conflict = b.list_device_sync_conflicts().unwrap().remove(0);
+        fs::write(ca.join("one/SKILL.md"), "# B").unwrap();
+        sa.sync().unwrap();
+        sb.check().unwrap();
+        sb.resolve_conflict(&conflict.id, ConflictResolution::UseRemote)
+            .unwrap();
+        assert_eq!(fs::read_to_string(cb.join("one/SKILL.md")).unwrap(), "# A");
+        fs::write(ca.join("one/SKILL.md"), "# A").unwrap();
+        sa.sync().unwrap();
+        let result = sb.sync().unwrap();
+        assert_eq!(result.changes.updated, 0);
+        sa.sync().unwrap();
+        assert_eq!(
+            fs::read_to_string(ca.join("one/SKILL.md")).unwrap(),
+            "# A",
+            "remote revert must not be overwritten by imported snapshot"
+        );
+    }
+
+    #[test]
+    fn first_sync_conflict_resolution_does_not_delete_unseen_remote_skills() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        for resolution in [
+            ConflictResolution::KeepLocal,
+            ConflictResolution::UseRemote,
+            ConflictResolution::KeepBoth,
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let (_bare, config) = seed_remote(root.path());
+            let credentials = MemoryCredentialStore::default();
+            let central_a = root.path().join("central-a");
+            let store_a = make_store(root.path(), "a", &config);
+            add_skill(&store_a, &central_a, "shared", "# Remote shared");
+            for n in 0..31 {
+                add_skill_in_directory(
+                    &store_a,
+                    &central_a,
+                    &format!("remote-{n}"),
+                    &format!("remote-{n}"),
+                    &format!("# Remote {n}"),
+                );
+            }
+            let service_a = DeviceSyncService::new(
+                &store_a,
+                &credentials,
+                root.path().join("workspace-a"),
+                central_a,
+            );
+            service_a.sync().unwrap();
+            let central_b = root.path().join("central-b");
+            let store_b = make_store(root.path(), "b", &config);
+            add_skill(&store_b, &central_b, "shared", "# Local shared");
+            let workspace_b = root.path().join("workspace-b");
+            let service_b = DeviceSyncService::new(
+                &store_b,
+                &credentials,
+                workspace_b.clone(),
+                central_b.clone(),
+            );
+            assert_eq!(service_b.sync().unwrap().changes.conflicted, 1);
+            let conflict = store_b.list_device_sync_conflicts().unwrap().remove(0);
+            service_b
+                .resolve_conflict(&conflict.id, resolution)
+                .unwrap();
+            let saved_choices = store_b.get_setting(RESOLVED_SYNC_KEY).unwrap().unwrap();
+            let restarted = DeviceSyncService::new(&store_b, &credentials, workspace_b, central_b);
+            let preview = restarted.check().unwrap();
+            assert_eq!(
+                preview.deleted, 0,
+                "unseen remote skills must be downloaded"
+            );
+            let result = restarted.sync().unwrap();
+            assert_eq!(result.changes.deleted, 0);
+            assert_eq!(result.changes.conflicted, 0);
+            for n in 0..31 {
+                assert!(store_b
+                    .get_skill_by_id(&format!("remote-{n}"))
+                    .unwrap()
+                    .is_some());
+            }
+            assert_eq!(service_a.sync().unwrap().changes.deleted, 0);
+            store_b
+                .set_setting(RESOLVED_SYNC_KEY, &saved_choices)
+                .unwrap();
+            let shared = store_a.get_skill_by_id("shared").unwrap().unwrap();
+            fs::write(
+                Path::new(&shared.central_path).join("SKILL.md"),
+                "# Later remote update",
+            )
+            .unwrap();
+            service_a.sync().unwrap();
+            assert_eq!(restarted.check().unwrap().conflicted, 0);
+            assert_eq!(restarted.sync().unwrap().changes.conflicted, 0);
+        }
+    }
+
+    #[test]
     fn reconnecting_the_same_device_recovers_its_repository_baseline() {
         let _test_guard = TEST_SYNC_LOCK
             .lock()
@@ -2209,7 +2939,7 @@ mod tests {
             root.path().join("workspace"),
             central.clone(),
         );
-        let first = service.sync().unwrap();
+        service.sync().unwrap();
         let history = store.list_device_sync_history(20).unwrap();
         assert_eq!(history.len(), 1);
         let mut source_failed = store.get_skill_by_id("one").unwrap().unwrap();
@@ -2221,7 +2951,24 @@ mod tests {
         for _ in 0..2 {
             let result = service.sync().unwrap();
             assert_eq!(result.changes, SyncChangeSummary::default());
-            assert_eq!(result.commit, first.commit);
+            let repo = Repository::open(root.path().join("workspace/repository")).unwrap();
+            let head = repo
+                .find_commit(git2::Oid::from_str(result.commit.as_deref().unwrap()).unwrap())
+                .unwrap();
+            assert_eq!(
+                head.tree()
+                    .unwrap()
+                    .get_path(Path::new("skills"))
+                    .unwrap()
+                    .id(),
+                head.parent(0)
+                    .unwrap()
+                    .tree()
+                    .unwrap()
+                    .get_path(Path::new("skills"))
+                    .unwrap()
+                    .id()
+            );
             assert_eq!(
                 store.get_skill_by_id("one").unwrap().unwrap().status,
                 "error"
@@ -2248,6 +2995,7 @@ mod tests {
                 0,
                 None,
                 Some("network unavailable"),
+                None,
             )
             .unwrap();
         assert_eq!(
@@ -2505,9 +3253,7 @@ mod tests {
         );
         let first = service_a.sync().unwrap();
         assert_eq!(first.changes.added, 1);
-        let first_commit = first.commit.unwrap();
         let unchanged = service_a.sync().unwrap();
-        assert_eq!(unchanged.commit.as_deref(), Some(first_commit.as_str()));
         assert_eq!(unchanged.changes, SyncChangeSummary::default());
 
         let central_b = root.path().join("central-b");
@@ -2580,7 +3326,8 @@ mod tests {
         service_b.restore_trash(&trash[0].id).unwrap();
         assert!(store_b.get_skill_by_id("one").unwrap().is_some());
         let history = store_b.list_device_sync_history(20).unwrap();
-        assert_eq!(history.len(), 3);
+        assert_eq!(history.len(), 4);
+        assert!(history.iter().any(|run| run.status == "resolved"));
         assert!(history.iter().any(|run| run.status == "conflicts"));
         assert!(history
             .iter()

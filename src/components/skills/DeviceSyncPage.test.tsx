@@ -12,6 +12,45 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => undefi
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
 
 describe('DeviceSyncPage', () => {
+  it('shows named changes and explicitly marks legacy history without details', async () => {
+    invokeMock.mockImplementation((command: string) => {
+      if (command === 'get_device_sync_config') return Promise.resolve({ provider: 'github', remote_url: 'https://github.com/example/sync.git', branch: 'main', has_credential: true, visibility: 'private' })
+      if (command === 'get_device_sync_status') return Promise.resolve({ configured: true, is_running: false, last_run_status: 'success', conflict_count: 0 })
+      if (command === 'get_device_sync_history') return Promise.resolve([
+        { id: 'new', started_at: 20, status: 'success', added: 0, updated: 1, deleted: 0, conflicted: 0, items: [{ skill_id: 'one', name: 'human-writing', kind: 'updated', direction: 'upload' }] },
+        { id: 'legacy', started_at: 10, status: 'success', added: 1, updated: 0, deleted: 0, conflicted: 0 },
+      ])
+      if (command === 'get_device_sync_pending_oauth') return Promise.resolve(null)
+      return Promise.resolve([])
+    })
+    const t = ((key: string) => key) as TFunction
+    render(<DeviceSyncPage active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} onOpenToolIssues={vi.fn()} t={t} />)
+    fireEvent.click(await screen.findByRole('tab', { name: 'deviceSync.history' }))
+    fireEvent.click(screen.getByText('deviceSync.changeDetails'))
+    expect(screen.getByText('human-writing')).toBeTruthy()
+    expect(screen.getByText('deviceSync.changeKind.updated')).toBeTruthy()
+    expect(screen.getByText('deviceSync.changeDirection.upload')).toBeTruthy()
+    expect(screen.getByText('deviceSync.legacyHistoryNote')).toBeTruthy()
+  })
+
+  it('loads older named changes beyond the first fifty records', async () => {
+    const history = Array.from({ length: 51 }, (_, i) => ({ id: `run-${i}`, started_at: 100-i, status: 'success', added: 1, updated: 0, deleted: 0, conflicted: 0, items: [{ skill_id: `skill-${i}`, name: `skill-${i}`, kind: 'added', direction: 'download' }] }))
+    invokeMock.mockImplementation((command: string, args?: { limit?: number }) => {
+      if (command === 'get_device_sync_config') return Promise.resolve({ provider: 'github', remote_url: 'https://github.com/example/sync.git', branch: 'main', has_credential: true })
+      if (command === 'get_device_sync_status') return Promise.resolve({ configured: true, last_run_status: 'success', conflict_count: 0 })
+      if (command === 'get_device_sync_history') return Promise.resolve(history.slice(0, args?.limit ?? 50))
+      if (command === 'get_device_sync_pending_oauth') return Promise.resolve(null)
+      return Promise.resolve([])
+    })
+    render(<DeviceSyncPage active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} onOpenToolIssues={vi.fn()} t={((key: string) => key) as TFunction} />)
+    fireEvent.click(await screen.findByRole('tab', { name: 'deviceSync.history' }))
+    expect(screen.getByText('skill-49')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'deviceSync.loadMoreHistory' }))
+    expect(await screen.findByText('skill-50')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'deviceSync.loadMoreHistory' })).toBeNull()
+    expect(screen.getAllByText('skill-0')).toHaveLength(1)
+  })
+
   it('explains a no-change run above historical failures', async () => {
     invokeMock.mockImplementation((command: string) => {
       if (command === 'get_device_sync_config') return Promise.resolve({ provider: 'github', remote_url: 'https://github.com/example/sync.git', branch: 'main', has_credential: true })
@@ -50,6 +89,41 @@ describe('DeviceSyncPage', () => {
     expect(open).toHaveBeenCalledOnce()
     expect(screen.queryByText('deviceSync.failureReasons.targetModified')).toBeNull()
   })
+  it('refreshes device records immediately after checking and keeps historical devices out of the sync summary', async () => {
+    let checked = false
+    invokeMock.mockImplementation((command: string) => {
+      if (command === 'get_device_sync_config') return Promise.resolve({ provider: 'github', remote_url: 'https://github.com/example/sync.git', branch: 'main', has_credential: true, visibility: 'private' })
+      if (command === 'get_device_sync_status') return Promise.resolve({ configured: true, is_running: false, last_run_status: 'success', last_run_at: 2000, conflict_count: 0 })
+      if (command === 'get_device_sync_devices') return Promise.resolve(checked ? [{ id: 'other', name: 'Home PC', alias: null, is_current: false, last_seen_at: 1000, last_commit: null }] : [])
+      if (command === 'check_device_sync') { checked = true; return Promise.resolve({ added: 0, updated: 0, deleted: 0, conflicted: 0 }) }
+      if (command === 'get_device_sync_pending_oauth') return Promise.resolve(null)
+      return Promise.resolve([])
+    })
+    const t = ((key: string) => key) as TFunction
+    render(<DeviceSyncPage active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} onOpenToolIssues={vi.fn()} t={t} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'deviceSync.check' }))
+    expect(await screen.findByText('Home PC')).toBeTruthy()
+    expect(screen.queryByText('deviceSync.deviceState.pending')).toBeNull()
+    expect(screen.queryByText('deviceSync.deviceState.stale')).toBeNull()
+    expect(screen.getByRole('tab', { name: /deviceSync.devices/ })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'deviceSync.connectAnotherDevice' }))
+    const guide = screen.getByRole('dialog', { name: 'deviceSync.connectAnotherDevice' })
+    expect(within(guide).getByText('deviceSync.connectGuideInstall')).toBeTruthy()
+    expect(within(guide).getByText('deviceSync.connectGuideRepository')).toBeTruthy()
+    expect(within(guide).getByText('deviceSync.connectGuideSync')).toBeTruthy()
+    expect(within(guide).getByText('deviceSync.connectGuideRefresh')).toBeTruthy()
+    expect(screen.queryByRole('dialog', { name: 'deviceSync.syncHelpTitle' })).toBeNull()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'deviceSync.connectAnotherDevice' }))
+    fireEvent.click(screen.getByRole('button', { name: 'deviceSync.syncHelpTrigger' }))
+    expect(screen.getByRole('dialog', { name: 'deviceSync.syncHelpTitle' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'deviceSync.connectAnotherDevice' }))
+    expect(screen.queryByRole('dialog', { name: 'deviceSync.syncHelpTitle' })).toBeNull()
+    fireEvent.mouseDown(document.body)
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
   it('refreshes the saved failure immediately after a failed manual sync', async () => {
     let failed = false
     invokeMock.mockImplementation((command: string) => {
@@ -61,7 +135,7 @@ describe('DeviceSyncPage', () => {
       return Promise.resolve([])
     })
     const t = ((key: string) => key) as TFunction
-    render(<DeviceSyncPage onOpenToolIssues={vi.fn()} active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} t={t} />)
+    render(<DeviceSyncPage active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} onOpenToolIssues={vi.fn()} t={t} />)
     await screen.findByText('deviceSync.visualState.healthy')
     fireEvent.click(screen.getByRole('button', { name: 'deviceSync.syncLocalRepository' }))
     expect(await screen.findByText('deviceSync.failureReasons.auth')).toBeTruthy()
@@ -75,7 +149,7 @@ describe('DeviceSyncPage', () => {
       return Promise.resolve([])
     })
     const t = ((key: string) => key) as TFunction
-    render(<DeviceSyncPage onOpenToolIssues={vi.fn()} active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} t={t} />)
+    render(<DeviceSyncPage active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} onOpenToolIssues={vi.fn()} t={t} />)
     const reason = error === 'DEVICE_SYNC_FAILURE_network' ? 'network' : 'unknown'
     expect(await screen.findByText(`deviceSync.failureReasons.${reason}`)).toBeTruthy()
     fireEvent.click(screen.getByRole('tab', { name: 'deviceSync.history' }))
@@ -104,7 +178,7 @@ describe('DeviceSyncPage', () => {
     })
     const t = ((key: string, options?: { count?: number; value?: string }) =>
       `${key}${options?.count !== undefined ? ` ${options.count}` : ''}${options?.value ? ` ${options.value}` : ''}`) as TFunction
-    render(<DeviceSyncPage onOpenToolIssues={vi.fn()} active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} t={t} />)
+    render(<DeviceSyncPage active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} onOpenToolIssues={vi.fn()} t={t} />)
     const summary = await screen.findByRole('region', { name: 'deviceSync.scheduleSummary' })
     expect(within(summary).getByText('deviceSync.scheduleInterval 15')).toBeTruthy()
     expect(summary.querySelector('time')?.dateTime).toBe('2026-05-28T20:26:40.000Z')
@@ -154,7 +228,7 @@ describe('DeviceSyncPage', () => {
       return Promise.resolve([])
     })
     const t = ((key: string, options?: { value?: string }) => key === 'deviceSync.scheduleDaily' ? `${key} ${options?.value}` : key) as TFunction
-    render(<DeviceSyncPage onOpenToolIssues={vi.fn()} active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} t={t} />)
+    render(<DeviceSyncPage active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} onOpenToolIssues={vi.fn()} t={t} />)
     const summary = await screen.findByRole('region', { name: 'deviceSync.scheduleSummary' })
     expect(within(summary).getByText(label)).toBeTruthy()
     expect(Boolean(summary.querySelector('time'))).toBe(state === 'backoff')
@@ -293,9 +367,9 @@ describe('DeviceSyncPage', () => {
     const exchange = screen.getByRole('group', { name: 'deviceSync.localRepositoryExchange' })
     expect(exchange.getAttribute('aria-busy')).toBe(String(isRunning))
     expect(exchange.classList.contains('is-syncing')).toBe(isRunning)
-    expect(screen.getByText('deviceSync.independentSyncNote')).toBeTruthy()
 
     fireEvent.click(trigger)
+    expect(screen.getByText('deviceSync.syncHelpOtherDevices')).toBeTruthy()
 
     expect(
       screen.getByRole('dialog', { name: 'deviceSync.syncHelpTitle' }),

@@ -865,8 +865,7 @@ fn storage_path_change_plan(
     }
     let local_sources = skills
         .iter()
-        .filter(|skill| skill.source_type == "local")
-        .filter_map(|skill| skill.source_ref.as_deref())
+        .filter_map(|skill| skill.external_local_source())
         .map(std::path::PathBuf::from)
         .collect::<Vec<_>>();
     validate_central_repo_path_change(current_base, new_base, &tool_roots, &local_sources)?;
@@ -1406,11 +1405,9 @@ fn skill_protected_paths(
     let Some(skill) = store.get_skill_by_id(skill_id)? else {
         return Ok(Vec::new());
     };
-    let mut paths = vec![std::path::PathBuf::from(skill.central_path)];
-    if skill.source_type == "local" {
-        if let Some(source) = skill.source_ref.filter(|source| !source.trim().is_empty()) {
-            paths.push(std::path::PathBuf::from(source));
-        }
+    let mut paths = vec![std::path::PathBuf::from(&skill.central_path)];
+    if let Some(source) = skill.external_local_source() {
+        paths.push(std::path::PathBuf::from(source));
     }
     Ok(paths)
 }
@@ -1423,10 +1420,7 @@ fn ensure_target_does_not_overlap_local_source(
     let Some(skill) = store.get_skill_by_id(skill_id)? else {
         return Ok(());
     };
-    if skill.source_type != "local" {
-        return Ok(());
-    }
-    if let Some(source) = skill.source_ref.filter(|source| !source.trim().is_empty()) {
+    if let Some(source) = skill.external_local_source() {
         let source = std::path::PathBuf::from(source);
         if paths_overlap(target, &source)? {
             anyhow::bail!(
@@ -1949,18 +1943,10 @@ pub async fn delete_managed_skill(
 
         let record = store.get_skill_by_id(&skillId)?;
         if let Some(skill) = record {
-            let path = std::path::PathBuf::from(skill.central_path);
-            let overlaps_local_source = if skill.source_type == "local" {
-                match skill
-                    .source_ref
-                    .as_deref()
-                    .filter(|source| !source.trim().is_empty())
-                {
-                    Some(source) => paths_overlap(&path, std::path::Path::new(source))?,
-                    None => false,
-                }
-            } else {
-                false
+            let path = std::path::PathBuf::from(&skill.central_path);
+            let overlaps_local_source = match skill.external_local_source() {
+                Some(source) => paths_overlap(&path, std::path::Path::new(source))?,
+                None => false,
             };
             if path.exists() && !overlaps_local_source {
                 if store.get_device_sync_config()?.is_some() {
@@ -2643,9 +2629,10 @@ pub async fn run_device_sync(
 #[tauri::command]
 pub fn get_device_sync_history(
     store: State<'_, SkillStore>,
+    limit: Option<usize>,
 ) -> Result<Vec<SyncHistoryEntry>, String> {
     store
-        .list_device_sync_history(50)
+        .list_device_sync_history(limit.unwrap_or(50).max(1))
         .map_err(format_anyhow_error)
 }
 

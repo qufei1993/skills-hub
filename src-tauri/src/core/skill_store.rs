@@ -172,6 +172,16 @@ pub struct SkillRecord {
     pub status: String,
 }
 
+impl SkillRecord {
+    pub fn external_local_source(&self) -> Option<&str> {
+        self.source_ref.as_deref().filter(|source| {
+            self.source_type == "local"
+                && !source.trim().is_empty()
+                && Path::new(source) != Path::new(&self.central_path)
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SkillTargetRecord {
     pub id: String,
@@ -316,7 +326,7 @@ impl SkillStore {
             let result = (|| -> Result<()> {
                 for (skill_id, central_path, updated_at) in updates {
                     let changed = conn.execute(
-                        "UPDATE skills SET central_path = ?1, updated_at = ?2 WHERE id = ?3",
+                        "UPDATE skills SET source_ref = CASE WHEN source_type = 'local' AND source_ref = central_path THEN ?1 ELSE source_ref END, central_path = ?1, updated_at = ?2 WHERE id = ?3",
                         params![central_path, updated_at, skill_id],
                     )?;
                     if changed != 1 {
@@ -444,7 +454,8 @@ impl SkillStore {
             conn.execute_batch(
                 "DELETE FROM device_sync_devices;
                  DELETE FROM device_sync_conflicts;
-                 DELETE FROM device_sync_runs;",
+                 DELETE FROM device_sync_runs;
+                 DELETE FROM settings WHERE key GLOB 'device_sync.run_items.*';",
             )?;
             Ok(())
         })
@@ -473,6 +484,7 @@ impl SkillStore {
         conflicted: usize,
         commit: Option<&str>,
         error: Option<&str>,
+        items: Option<&[crate::core::device_sync::types::SyncChangeItem]>,
     ) -> Result<()> {
         self.with_conn(|conn| {
             let tx = conn.unchecked_transaction()?;
@@ -511,6 +523,9 @@ impl SkillStore {
                     error.map(crate::core::device_sync::errors::safe_message)
                 ],
             )?;
+            if let Some(items) = items {
+                tx.execute("INSERT INTO settings (key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![format!("device_sync.run_items.{id}"), serde_json::to_string(items)?])?;
+            }
             tx.commit()?;
             Ok(())
         })
@@ -521,11 +536,31 @@ impl SkillStore {
             let mut stmt = conn.prepare(
                 "SELECT id, started_at, finished_at, status, added, updated, deleted,
                         conflicted, commit_hash, error
-                 FROM device_sync_runs ORDER BY started_at DESC LIMIT ?1",
+                 FROM device_sync_runs ORDER BY started_at DESC, id DESC LIMIT ?1",
             )?;
             let rows = stmt.query_map(params![limit as i64], |row| {
+                let id: String = row.get(0)?;
+                let raw: Option<String> = conn
+                    .query_row(
+                        "SELECT value FROM settings WHERE key=?1",
+                        params![format!("device_sync.run_items.{id}")],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let items = raw
+                    .map(|raw| {
+                        serde_json::from_str(&raw).map_err(|err| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                0,
+                                rusqlite::types::Type::Text,
+                                Box::new(err),
+                            )
+                        })
+                    })
+                    .transpose()?;
                 Ok(SyncHistoryEntry {
-                    id: row.get(0)?,
+                    items,
+                    id,
                     started_at: row.get(1)?,
                     finished_at: row.get(2)?,
                     status: row.get(3)?,
@@ -699,6 +734,38 @@ impl SkillStore {
         })
     }
 
+    pub fn resolve_device_sync_conflict_with_state(
+        &self,
+        id: &str,
+        key: &str,
+        value: &str,
+        changes: &[crate::core::device_sync::types::SyncChangeItem],
+        commit: &str,
+    ) -> Result<()> {
+        self.with_conn(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute("INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value", params![key, value])?;
+            let changed = tx.execute("UPDATE device_sync_conflicts SET status = 'resolved' WHERE id = ?1 AND status = 'pending'", params![id])?;
+            anyhow::ensure!(changed == 1, "device sync conflict is no longer pending");
+            if !changes.is_empty() {
+                let previous_run: Option<(String, i64)> = tx.query_row(
+                    "SELECT status, COALESCE(finished_at, started_at) FROM device_sync_runs WHERE status != 'resolved' ORDER BY started_at DESC, id DESC LIMIT 1",
+                    [], |row| Ok((row.get(0)?, row.get(1)?)),
+                ).optional()?;
+                if let Some(previous_run) = previous_run {
+                    tx.execute("INSERT OR IGNORE INTO settings (key,value) VALUES ('device_sync_last_run',?1)", params![serde_json::to_string(&previous_run)?])?;
+                }
+                let run_id = format!("resolution-{id}");
+                let now = now_ms();
+                let count = |kind: &str| changes.iter().filter(|item| item.kind == kind).count() as i64;
+                tx.execute("INSERT INTO device_sync_runs (id,started_at,finished_at,status,added,updated,deleted,conflicted,commit_hash) VALUES (?1,?2,?2,'resolved',?3,?4,?5,0,?6)", params![run_id, now, count("added"), count("updated"), count("deleted"), commit])?;
+                tx.execute("INSERT INTO settings (key,value) VALUES (?1,?2)", params![format!("device_sync.run_items.{run_id}"), serde_json::to_string(changes)?])?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
     pub fn resolve_device_sync_conflicts_and_save_config_if_clear(
         &self,
         ids: &[String],
@@ -794,7 +861,15 @@ impl SkillStore {
 
     pub fn upsert_skill(&self, record: &SkillRecord) -> Result<()> {
         self.with_conn(|conn| {
-            upsert_skill_with_conn(conn, record)?;
+            let tx = conn.unchecked_transaction()?;
+            upsert_skill_with_conn(&tx, record)?;
+            if record.source_type == "local" && record.last_sync_at.is_none() {
+                tx.execute(
+                    "INSERT OR IGNORE INTO settings (key,value) VALUES (?1,'local')",
+                    params![format!("device_sync.source_origin.{}", record.id)],
+                )?;
+            }
+            tx.commit()?;
             Ok(())
         })
     }
@@ -848,6 +923,23 @@ impl SkillStore {
         })
     }
 
+    pub(crate) fn was_skill_imported_by_device_sync(
+        &self,
+        id: &str,
+        created_at: i64,
+    ) -> Result<bool> {
+        if let Some(origin) = self.get_setting(&format!("device_sync.source_origin.{id}"))? {
+            return Ok(origin == "imported");
+        }
+        self.with_conn(|conn| {
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM device_sync_runs WHERE started_at <= ?2 AND finished_at >= ?2)
+                 OR EXISTS(SELECT 1 FROM device_sync_conflicts WHERE skill_id = ?1 AND created_at <= ?2 AND status = 'resolved')",
+                params![id, created_at], |row| row.get(0),
+            ).map_err(Into::into)
+        })
+    }
+
     pub(crate) fn commit_device_sync_library(
         &self,
         skills: &[(SkillRecord, Vec<String>)],
@@ -858,10 +950,20 @@ impl SkillStore {
             let now = now_ms();
             for (skill, tags) in skills {
                 let mut local = skill.clone();
-                if let Some(status) = tx.query_row("SELECT status FROM skills WHERE id=?1", params![skill.id], |row| row.get::<_,String>(0)).optional()? {
+                if let Some((status, source_type, source_ref)) = tx.query_row("SELECT status,source_type,source_ref FROM skills WHERE id=?1", params![skill.id], |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,Option<String>>(2)?))).optional()? {
                     local.status = status;
+                    if source_type == "local" && local.source_type == "local"
+                        && local.source_ref.as_deref() == Some(local.central_path.as_str())
+                        && source_ref != local.source_ref {
+                        let cleared = tx.execute("UPDATE skill_source_checks SET error_code=NULL,checked_at=?2 WHERE skill_id=?1 AND error_code='sourceMissing'", params![skill.id, now])?;
+                        if cleared > 0 { local.status = "ok".into(); }
+                    }
                 }
                 upsert_skill_with_conn(&tx, &local)?;
+                if local.source_type == "local" {
+                    let origin = if local.source_ref.as_deref() == Some(local.central_path.as_str()) { "imported" } else { "local" };
+                    tx.execute("INSERT OR IGNORE INTO settings (key,value) VALUES (?1,?2)", params![format!("device_sync.source_origin.{}", local.id), origin])?;
+                }
                 tx.execute("DELETE FROM skill_tag_links WHERE skill_id = ?1", params![skill.id])?;
                 for name in tags {
                     let normalized = normalize_tag_name(name)?;
@@ -979,7 +1081,13 @@ impl SkillStore {
 
     pub fn delete_skill(&self, skill_id: &str) -> Result<()> {
         self.with_conn(|conn| {
-            conn.execute("DELETE FROM skills WHERE id = ?1", params![skill_id])?;
+            let tx = conn.unchecked_transaction()?;
+            tx.execute("DELETE FROM skills WHERE id = ?1", params![skill_id])?;
+            tx.execute(
+                "DELETE FROM settings WHERE key = ?1",
+                params![format!("device_sync.source_origin.{skill_id}")],
+            )?;
+            tx.commit()?;
             Ok(())
         })
     }
@@ -1023,6 +1131,17 @@ impl SkillStore {
                 conn.execute(
                     "UPDATE skill_source_checks SET skill_id=?1 WHERE skill_id=?2",
                     params![new_id, old_id],
+                )?;
+                conn.execute(
+                    "DELETE FROM settings WHERE key = ?1",
+                    params![format!("device_sync.source_origin.{new_id}")],
+                )?;
+                conn.execute(
+                    "UPDATE settings SET key = ?1 WHERE key = ?2",
+                    params![
+                        format!("device_sync.source_origin.{new_id}"),
+                        format!("device_sync.source_origin.{old_id}")
+                    ],
                 )?;
                 conn.execute("DELETE FROM skills WHERE id = ?1", params![old_id])?;
                 Ok(())

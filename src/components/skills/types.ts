@@ -293,7 +293,15 @@ export type DeviceSyncRemoteRepository = {
   private: boolean
 }
 
+export type DeviceSyncChangeItem = {
+  skill_id: string
+  name: string
+  kind: 'added' | 'updated' | 'deleted' | 'conflicted'
+  direction: 'upload' | 'download' | 'merge'
+}
+
 export type DeviceSyncChangeSummary = {
+  items?: DeviceSyncChangeItem[] | null
   added: number
   updated: number
   deleted: number

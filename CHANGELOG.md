@@ -7,14 +7,20 @@ All notable changes to this project will be documented in this file.
 ## [0.10.0]
 
 ### Changed
+- **Reliable conflict adoption and complete history**: Conflict choices use their recorded Git snapshot, preserving executable files. Applied resolutions retain named details without claiming a full sync. Older history can be loaded beyond 50 entries. Synced local Skills can be redistributed, deleted, and moved between storage directories; interrupted legacy runs no longer claim later local installs.
+- **Accurate sync history with details**: Existing Skill changes now count as updates in either direction. Internal fetch-cache files are excluded, including legacy snapshots. New runs store named per-Skill changes with direction and expandable details; legacy counts are explicitly marked as uncorrected, and unresolved plans are not presented as applied changes.
+- **Device-local source bindings**: Local Skill source paths no longer travel in sync metadata. Receiving devices use their own managed directory, while local installations retain their source binding. Legacy imported paths and their missing-source errors are repaired without clearing unrelated issues; source ownership follows deletion, reinstall, and identity reconciliation.
+- **Safe conflict resolution on new devices**: Resolving a Skill conflict no longer advances the whole-library baseline. Unseen repository Skills are downloaded instead of being interpreted as local deletions; per-Skill choices survive restart and expire after a successful sync.
+- Fixed the other-device connection help to show dedicated setup steps and the current repository and branch.
 - **Compact Skill warnings**: Moved card warnings beside the copy icon; click to inspect reasons and recovery guidance without expanding the card.
+- **Compact device sync and shared device records**: Condensed sync status, repository details, and scheduling into a compact panel. Device records show sync history rather than connectivity or version estimates. A shared `devices.json` registers devices in the repository; checks refresh the local cache immediately, with legacy-client compatibility and safe retry after stale pushes.
 - **Compact My Skills header**: Replaced overview cards with scope filters and counts, removed the duplicate scope dropdown, and show a compact sync-issue shortcut only when attention is needed.
 
 ### Added
 - **Korean interface language**: Added Korean translations across the app, a three-language selector, and persistent Korean language preferences. Korean users receive English release notes when viewing app updates.
 - **Multi-device Skill library sync**: Added Git-based device sync with GitHub, GitLab, and Gitee support. Browser authorization is the primary setup path, with Token/SSH retained as advanced options. Users can choose an existing private repository or create one from the app, check changes without modifying files, and run manual sync with optional startup sync.
 - **Safe three-way reconciliation**: Skills are matched by stable identity, source, or identical content. Independent file changes merge automatically, while overlapping edits and delete-versus-edit cases stay isolated per Skill for explicit local, remote, or keep-both resolution.
-- **Local recovery and history**: Actual content changes create Git versions, remote deletions move local Skills to a 30-day recycle bin, and the app records sync runs, conflicts, and recovery actions.
+- **Local recovery and history**: Content changes and device registration updates create Git commits; remote deletions move local Skills to a 30-day recycle bin, and the app records sync runs, conflicts, and recovery actions.
 
 ### Fixed
 - **Skill details with missing sources**: Source warnings no longer consume the full detail workspace, so the managed copy in the central repository remains available for inspection when an original local source is missing.

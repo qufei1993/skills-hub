@@ -163,7 +163,60 @@ pub fn manifest_at(repo: &Repository, oid: Oid) -> Result<super::manifest::SyncM
         Err(_) => return Ok(super::manifest::SyncManifest::empty()),
     };
     let blob = repo.find_blob(entry.id())?;
-    serde_json::from_slice(blob.content()).context("decode base sync manifest")
+    super::manifest::SyncManifest::decode(blob.content())
+}
+
+pub fn skill_snapshot_at(
+    repo: &Repository,
+    oid: Oid,
+    skill: &super::manifest::PortableSkill,
+) -> Result<tempfile::TempDir> {
+    use super::manifest::{hash_files, skill_dir, validate_relative_path};
+    anyhow::ensure!(
+        !skill.id.is_empty()
+            && skill.id != "."
+            && skill.id != ".."
+            && !skill.id.contains(['/', '\\', ':']),
+        "unsafe sync skill id"
+    );
+    let snapshot = tempfile::tempdir()?;
+    let destination = skill_dir(snapshot.path(), &skill.id);
+    std::fs::create_dir_all(&destination)?;
+    let tree = repo.find_commit(oid)?.tree()?;
+    for relative in skill.files.keys() {
+        validate_relative_path(Path::new(relative))?;
+        anyhow::ensure!(
+            !relative.is_empty() && !relative.contains(['\\', ':']),
+            "unsafe sync file path"
+        );
+        let entry = tree.get_path(
+            &Path::new("skills")
+                .join(&skill.id)
+                .join("content")
+                .join(relative),
+        )?;
+        anyhow::ensure!(
+            matches!(entry.filemode(), 0o100644 | 0o100755),
+            "unsafe sync file type"
+        );
+        let blob = repo.find_blob(entry.id())?;
+        let target = destination.join(relative);
+        std::fs::create_dir_all(target.parent().context("missing snapshot parent")?)?;
+        std::fs::write(&target, blob.content())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                &target,
+                std::fs::Permissions::from_mode(entry.filemode() as u32 & 0o777),
+            )?;
+        }
+    }
+    anyhow::ensure!(
+        hash_files(&destination)? == skill.files,
+        "sync snapshot content mismatch"
+    );
+    Ok(snapshot)
 }
 
 #[cfg(test)]
@@ -173,6 +226,13 @@ pub fn discover_devices(repo: &Repository) -> Result<Vec<DeviceSyncDevice>> {
         None => return Ok(Vec::new()),
     };
     discover_devices_at(repo, head)
+}
+
+pub(super) fn device_identity(commit: &git2::Commit<'_>) -> Option<(String, String)> {
+    let message = commit.message()?;
+    let id = trailer_value(message, "Skills-Hub-Device-ID")?;
+    let name = trailer_value(message, "Skills-Hub-Device-Name").unwrap_or(id);
+    Some((id.to_string(), name.to_string()))
 }
 
 pub fn discover_devices_at(repo: &Repository, head: Oid) -> Result<Vec<DeviceSyncDevice>> {
