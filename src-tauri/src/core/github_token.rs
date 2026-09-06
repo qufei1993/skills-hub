@@ -11,7 +11,11 @@ use super::skill_store::SkillStore;
 
 const LEGACY_GITHUB_TOKEN_SETTING: &str = "github_token";
 const GITHUB_TOKEN_SECURE_CLEANUP_PENDING_SETTING: &str = "github_token_secure_cleanup_pending";
+const GITHUB_TOKEN_CONFIGURED_SETTING: &str = "github_token_configured_v1";
 pub const GITHUB_TOKEN_CREDENTIAL_KEY: &str = "github-search-personal-access-token-v1";
+#[cfg(debug_assertions)]
+pub(crate) const GITHUB_TOKEN_KEYRING_SERVICE: &str = "com.skills-hub.github-token.dev";
+#[cfg(not(debug_assertions))]
 pub(crate) const GITHUB_TOKEN_KEYRING_SERVICE: &str = "com.skills-hub.github-token";
 static GITHUB_TOKEN_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -103,15 +107,30 @@ pub fn resolve_github_token(
 ) -> Result<Option<String>> {
     let _guard = lock_github_token()?;
     migrate_legacy_github_token(store, credentials)?;
-    resolve_personal_access_token(
+    let token = resolve_personal_access_token(
         credentials,
         GITHUB_TOKEN_CREDENTIAL_KEY,
         &CredentialUsage::official(ProviderId::Github),
-    )
+    )?;
+    if token.is_some() {
+        store.set_setting(GITHUB_TOKEN_CONFIGURED_SETTING, "true")?;
+    } else {
+        store.delete_setting(GITHUB_TOKEN_CONFIGURED_SETTING)?;
+    }
+    Ok(token)
 }
 
-pub fn has_github_token(store: &SkillStore, credentials: &dyn CredentialStore) -> Result<bool> {
-    Ok(resolve_github_token(store, credentials)?.is_some())
+pub fn has_github_token(store: &SkillStore, _credentials: &dyn CredentialStore) -> Result<bool> {
+    if store
+        .get_setting(GITHUB_TOKEN_CONFIGURED_SETTING)?
+        .is_some_and(|value| value == "true")
+    {
+        return Ok(true);
+    }
+
+    Ok(store
+        .get_setting(LEGACY_GITHUB_TOKEN_SETTING)?
+        .is_some_and(|value| !value.trim().is_empty()))
 }
 
 pub fn set_github_token(
@@ -126,6 +145,7 @@ pub fn set_github_token(
         credentials
             .delete(GITHUB_TOKEN_CREDENTIAL_KEY)
             .context("delete GitHub token from system credential store")?;
+        store.delete_setting(GITHUB_TOKEN_CONFIGURED_SETTING)?;
     } else {
         save_personal_access_token(
             credentials,
@@ -135,6 +155,7 @@ pub fn set_github_token(
         )
         .context("save GitHub token to system credential store")?;
         securely_delete_legacy_github_token(store)?;
+        store.set_setting(GITHUB_TOKEN_CONFIGURED_SETTING, "true")?;
     }
     Ok(())
 }

@@ -228,13 +228,22 @@ export type SkillFileEntry = {
 
 export type DeviceSyncProvider = 'github' | 'gitlab' | 'gitee'
 
+export type DeviceSyncSchedule =
+  | { mode: 'interval'; minutes: number }
+  | { mode: 'daily'; time: string }
+
+export type RepositoryVisibility = 'public' | 'private' | 'internal' | 'unknown'
+
 export type DeviceSyncConfigDto = {
+  visibility?: RepositoryVisibility
+  public_upload_confirmed?: boolean
   provider: DeviceSyncProvider
   remote_url: string
   branch: string
   username?: string | null
   auto_check: boolean
   auto_sync: boolean
+  auto_sync_schedule?: DeviceSyncSchedule | null
   has_credential: boolean
 }
 
@@ -273,6 +282,7 @@ export type DeviceSyncPendingOAuth = {
 }
 
 export type DeviceSyncRemoteRepository = {
+  visibility?: RepositoryVisibility
   name: string
   web_url: string
   clone_url: string
@@ -295,6 +305,10 @@ export type DeviceSyncRunResult = {
 }
 
 export type DeviceSyncStatus = {
+  schedule_status?: {
+    state: 'disabled' | 'initializing' | 'scheduled' | 'backoff' | 'paused' | 'running' | 'waiting' | 'needs_confirmation'
+    next_at: number | null
+  } | null
   configured: boolean
   is_running: boolean
   provider: DeviceSyncProvider
@@ -332,6 +346,7 @@ export type DeviceSyncConflict = {
   skill_id: string
   skill_name: string
   files: string[]
+  base_commit?: string | null
   created_at: number
   status: string
 }

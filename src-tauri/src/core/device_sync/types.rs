@@ -27,6 +27,10 @@ pub struct CredentialUsage {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct DeviceSyncConfig {
+    #[serde(default)]
+    pub visibility: RepositoryVisibility,
+    #[serde(default)]
+    pub public_upload_confirmed: bool,
     pub provider: ProviderId,
     pub remote_url: String,
     pub branch: String,
@@ -34,19 +38,24 @@ pub struct DeviceSyncConfig {
     pub credential_key: Option<String>,
     pub auto_check: bool,
     pub auto_sync: bool,
+    #[serde(default)]
+    pub auto_sync_schedule: Option<super::scheduler::SyncSchedule>,
     pub last_synced_commit: Option<String>,
 }
 
 impl Default for DeviceSyncConfig {
     fn default() -> Self {
         Self {
+            visibility: RepositoryVisibility::Unknown,
+            public_upload_confirmed: false,
             provider: ProviderId::Github,
             remote_url: String::new(),
             branch: "main".to_string(),
             username: None,
             credential_key: None,
-            auto_check: true,
+            auto_check: false,
             auto_sync: false,
+            auto_sync_schedule: None,
             last_synced_commit: None,
         }
     }
@@ -60,11 +69,37 @@ pub struct ProviderAccount {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RemoteRepository {
+    #[serde(default)]
+    pub visibility: RepositoryVisibility,
     pub name: String,
     pub web_url: String,
     pub clone_url: String,
     pub ssh_url: Option<String>,
     pub private: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RepositoryVisibility {
+    Public,
+    Private,
+    Internal,
+    #[default]
+    Unknown,
+}
+
+impl DeviceSyncConfig {
+    pub fn uses_https(&self) -> bool {
+        reqwest::Url::parse(&self.remote_url).is_ok_and(|url| url.scheme() == "https")
+    }
+
+    pub fn needs_visibility_confirmation(&self) -> bool {
+        self.uses_https() && self.visibility == RepositoryVisibility::Unknown
+    }
+
+    pub fn needs_public_upload_confirmation(&self) -> bool {
+        self.visibility == RepositoryVisibility::Public && !self.public_upload_confirmed
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -125,6 +160,8 @@ pub struct SyncRunResult {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SyncStatus {
+    #[serde(default)]
+    pub schedule_status: Option<super::scheduler::ScheduleSummary>,
     pub configured: bool,
     pub is_running: bool,
     pub provider: ProviderId,
@@ -182,6 +219,28 @@ pub enum ConflictResolution {
     KeepLocal,
     UseRemote,
     KeepBoth,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DeviceSyncConfig;
+
+    #[test]
+    fn device_sync_defaults_do_not_access_remote_credentials_at_startup() {
+        let config = DeviceSyncConfig::default();
+
+        assert!(!config.auto_check);
+        assert!(!config.auto_sync);
+    }
+
+    #[test]
+    fn legacy_startup_sync_does_not_opt_into_recurring_sync() {
+        let mut value = serde_json::to_value(DeviceSyncConfig::default()).unwrap();
+        value.as_object_mut().unwrap().remove("auto_sync_schedule");
+        value["auto_sync"] = serde_json::json!(true);
+        let legacy: DeviceSyncConfig = serde_json::from_value(value).unwrap();
+        assert!(legacy.auto_sync_schedule.is_none());
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

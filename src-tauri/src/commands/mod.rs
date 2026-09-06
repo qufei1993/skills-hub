@@ -2260,17 +2260,24 @@ pub fn cancel_current_operation(cancel: State<'_, Arc<CancelToken>>) -> Result<(
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DeviceSyncConfigDto {
+    pub visibility: crate::core::device_sync::types::RepositoryVisibility,
+    pub public_upload_confirmed: bool,
     pub provider: ProviderId,
     pub remote_url: String,
     pub branch: String,
     pub username: Option<String>,
     pub auto_check: bool,
     pub auto_sync: bool,
+    pub auto_sync_schedule: Option<crate::core::device_sync::scheduler::SyncSchedule>,
     pub has_credential: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct SaveDeviceSyncConfigInput {
+    #[serde(default)]
+    pub visibility: crate::core::device_sync::types::RepositoryVisibility,
+    #[serde(default)]
+    pub public_upload_confirmed: bool,
     pub provider: ProviderId,
     pub remote_url: String,
     pub branch: String,
@@ -2279,6 +2286,8 @@ pub struct SaveDeviceSyncConfigInput {
     pub credential_key: Option<String>,
     pub auto_check: bool,
     pub auto_sync: bool,
+    #[serde(default)]
+    pub auto_sync_schedule: Option<crate::core::device_sync::scheduler::SyncSchedule>,
 }
 
 #[tauri::command]
@@ -2289,12 +2298,15 @@ pub fn get_device_sync_config(
         .get_device_sync_config()
         .map(|config| {
             config.map(|item| DeviceSyncConfigDto {
+                visibility: item.visibility,
+                public_upload_confirmed: item.public_upload_confirmed,
                 provider: item.provider,
                 remote_url: item.remote_url,
                 branch: item.branch,
                 username: item.username,
                 auto_check: item.auto_check,
-                auto_sync: item.auto_sync,
+                auto_sync: item.auto_sync && item.auto_sync_schedule.is_some(),
+                auto_sync_schedule: item.auto_sync_schedule,
                 has_credential: item.credential_key.is_some(),
             })
         })
@@ -2308,6 +2320,12 @@ pub fn save_device_sync_config(
 ) -> Result<DeviceSyncConfigDto, String> {
     let _sync_guard =
         crate::core::device_sync::try_lock_device_sync().map_err(format_anyhow_error)?;
+    if config.auto_sync && config.auto_sync_schedule.is_none() {
+        return Err("choose an automatic sync schedule".to_string());
+    }
+    if let Some(schedule) = &config.auto_sync_schedule {
+        schedule.validate().map_err(format_anyhow_error)?;
+    }
     if config.remote_url.trim().is_empty() {
         return Err("device sync repository URL is empty".to_string());
     }
@@ -2356,6 +2374,9 @@ pub fn save_device_sync_config(
         .filter(|token| !token.is_empty())
         .map(str::to_string);
     let saved = DeviceSyncConfig {
+        visibility: config.visibility,
+        public_upload_confirmed: config.public_upload_confirmed
+            && config.visibility == crate::core::device_sync::types::RepositoryVisibility::Public,
         provider: config.provider,
         remote_url: config.remote_url.trim().to_string(),
         branch: branch.to_string(),
@@ -2363,6 +2384,7 @@ pub fn save_device_sync_config(
         credential_key,
         auto_check: config.auto_check,
         auto_sync: config.auto_sync,
+        auto_sync_schedule: config.auto_sync_schedule,
         last_synced_commit: if same_repository {
             previous
                 .as_ref()
@@ -2421,7 +2443,10 @@ pub fn save_device_sync_config(
         username: saved.username,
         auto_check: saved.auto_check,
         auto_sync: saved.auto_sync,
+        auto_sync_schedule: saved.auto_sync_schedule,
         has_credential: saved.credential_key.is_some(),
+        visibility: saved.visibility,
+        public_upload_confirmed: saved.public_upload_confirmed,
     })
 }
 
@@ -2538,7 +2563,17 @@ pub fn get_device_sync_status(
     let (workspace, central) = device_sync_paths(&app, &store).map_err(format_anyhow_error)?;
     let credentials = SystemCredentialStore;
     let service = DeviceSyncService::new(&store, &credentials, workspace, central);
-    service.status().map_err(format_anyhow_error)
+    let mut status = service.status().map_err(format_anyhow_error)?;
+    let runtime = app
+        .try_state::<crate::core::device_sync::scheduler::SchedulerRuntime>()
+        .map(|state| state.inner().clone())
+        .unwrap_or_default();
+    status.schedule_status = Some(
+        runtime
+            .status(&store, status.conflict_count > 0, status.is_running)
+            .map_err(format_anyhow_error)?,
+    );
+    Ok(status)
 }
 
 #[tauri::command]
@@ -2553,8 +2588,8 @@ pub async fn check_device_sync(
         DeviceSyncService::new(&store, &credentials, workspace, central).check()
     })
     .await
-    .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(|_| "DEVICE_SYNC_FAILURE_unknown".to_string())?
+    .map_err(crate::core::device_sync::errors::format_error)
 }
 
 #[tauri::command]
@@ -2569,8 +2604,8 @@ pub async fn run_device_sync(
         DeviceSyncService::new(&store, &credentials, workspace, central).sync()
     })
     .await
-    .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(|_| "DEVICE_SYNC_FAILURE_unknown".to_string())?
+    .map_err(crate::core::device_sync::errors::format_error)
 }
 
 #[tauri::command]

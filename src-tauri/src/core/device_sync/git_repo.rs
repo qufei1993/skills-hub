@@ -134,7 +134,17 @@ pub fn push(
     repo.set_head(&local_ref)?;
     let mut remote = repo.find_remote("origin")?;
     let mut options = PushOptions::new();
-    options.remote_callbacks(callbacks(config, token));
+    let mut push_callbacks = callbacks(config, token);
+    push_callbacks.push_update_reference(|_, status| {
+        if status.is_some() {
+            Err(git2::Error::from_str(
+                "remote rejected device sync branch update",
+            ))
+        } else {
+            Ok(())
+        }
+    });
+    options.remote_callbacks(push_callbacks);
     options.follow_redirects(remote_redirect_policy(token));
     if let Some(proxy) = proxy_options(&config.remote_url) {
         options.proxy_options(proxy);
@@ -168,7 +178,7 @@ pub fn discover_devices(repo: &Repository) -> Result<Vec<DeviceSyncDevice>> {
 pub fn discover_devices_at(repo: &Repository, head: Oid) -> Result<Vec<DeviceSyncDevice>> {
     let mut walk = repo.revwalk().context("read device sync history")?;
     walk.push(head)?;
-    walk.set_sorting(git2::Sort::TIME)?;
+    walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
     let mut seen = HashSet::new();
     let mut devices = Vec::new();
     for oid in walk {
@@ -193,6 +203,27 @@ pub fn discover_devices_at(repo: &Repository, head: Oid) -> Result<Vec<DeviceSyn
         });
     }
     Ok(devices)
+}
+
+pub fn latest_device_commit_at(
+    repo: &Repository,
+    head: Oid,
+    device_id: &str,
+) -> Result<Option<Oid>> {
+    let mut walk = repo.revwalk().context("read device sync history")?;
+    walk.push(head)?;
+    walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
+    for oid in walk {
+        let commit = repo.find_commit(oid?)?;
+        if commit
+            .message()
+            .and_then(|message| trailer_value(message, "Skills-Hub-Device-ID"))
+            == Some(device_id)
+        {
+            return Ok(Some(commit.id()));
+        }
+    }
+    Ok(None)
 }
 
 pub fn remote_head(repo: &Repository, config: &DeviceSyncConfig) -> Option<Oid> {
@@ -397,6 +428,39 @@ mod tests {
 
         let remote = Repository::open_bare(&bare_path).unwrap();
         assert_eq!(remote.refname_to_id("refs/heads/main").unwrap(), second);
+    }
+
+    #[test]
+    fn stale_push_does_not_overwrite_remote_and_can_fetch_the_winning_commit() {
+        let temp = tempfile::tempdir().unwrap();
+        let bare = Repository::init_bare(temp.path().join("remote.git")).unwrap();
+        let config = DeviceSyncConfig {
+            remote_url: bare.path().to_string_lossy().to_string(),
+            ..DeviceSyncConfig::default()
+        };
+        let seed = Repository::init(temp.path().join("seed")).unwrap();
+        seed.remote("origin", &config.remote_url).unwrap();
+        let base = commit_file(&seed, "shared.md", "base", None);
+        push(&seed, &config, None, base).unwrap();
+        let other = open_or_clone(&temp.path().join("other"), &config, None).unwrap();
+        let stale_base = fetch_and_checkout(&other, &config, None).unwrap();
+        let winning = commit_file(&seed, "shared.md", "remote edit", Some(base));
+        push(&seed, &config, None, winning).unwrap();
+        let losing = commit_file(&other, "shared.md", "local edit", stale_base);
+        let error = push(&other, &config, None, losing).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<git2::Error>().unwrap().code(),
+            git2::ErrorCode::NotFastForward
+        );
+        assert_eq!(bare.refname_to_id("refs/heads/main").unwrap(), winning);
+        assert_eq!(
+            fetch_and_checkout(&other, &config, None).unwrap(),
+            Some(winning)
+        );
+        assert_eq!(
+            fs::read_to_string(other.workdir().unwrap().join("shared.md")).unwrap(),
+            "remote edit"
+        );
     }
 
     #[test]

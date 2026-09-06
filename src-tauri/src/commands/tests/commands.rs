@@ -167,6 +167,18 @@ impl CredentialStore for FailOnceDeleteCredentialStore {
 #[test]
 fn github_search_token_uses_a_keyring_service_isolated_from_device_sync() {
     assert_ne!(GITHUB_TOKEN_KEYRING_SERVICE, DEVICE_SYNC_KEYRING_SERVICE);
+    assert!(GITHUB_TOKEN_KEYRING_SERVICE.ends_with(".dev"));
+    assert!(DEVICE_SYNC_KEYRING_SERVICE.ends_with(".dev"));
+}
+
+#[test]
+fn github_token_status_does_not_read_the_system_credential_store() {
+    let (_dir, store) = make_store();
+    let credentials = FailingGithubTokenReadStore::default();
+
+    let status = get_github_token_status_impl(&store, &credentials).unwrap();
+
+    assert_eq!(status, GithubTokenStatusDto { has_token: false });
 }
 
 #[test]
@@ -195,7 +207,7 @@ fn github_search_token_rejects_an_oauth_credential_envelope() {
 }
 
 #[test]
-fn legacy_github_token_migrates_to_keychain_before_sqlite_is_cleared() {
+fn legacy_github_token_status_defers_migration_until_the_token_is_used() {
     let (_dir, store) = make_store();
     let credentials = MemoryCredentialStore::default();
     store
@@ -205,13 +217,19 @@ fn legacy_github_token_migrates_to_keychain_before_sqlite_is_cleared() {
     let status = get_github_token_status_impl(&store, &credentials).unwrap();
 
     assert_eq!(status, GithubTokenStatusDto { has_token: true });
-    assert_eq!(store.get_setting("github_token").unwrap(), None);
+    assert_eq!(
+        store.get_setting("github_token").unwrap().as_deref(),
+        Some("legacy-github-secret")
+    );
+    assert_eq!(credentials.get(GITHUB_TOKEN_CREDENTIAL_KEY).unwrap(), None);
+
     assert_eq!(
         resolve_github_token(&store, &credentials)
             .unwrap()
             .as_deref(),
         Some("legacy-github-secret")
     );
+    assert_eq!(store.get_setting("github_token").unwrap(), None);
     assert!(credentials
         .get(GITHUB_TOKEN_CREDENTIAL_KEY)
         .unwrap()
@@ -236,9 +254,9 @@ fn legacy_github_token_migration_erases_secret_from_database_and_wal_files() {
         SECRET.as_bytes()
     ));
 
-    let status = get_github_token_status_impl(&store, &MemoryCredentialStore::default()).unwrap();
+    let token = resolve_github_token(&store, &MemoryCredentialStore::default()).unwrap();
 
-    assert!(status.has_token);
+    assert!(token.is_some());
     assert_eq!(store.get_setting("github_token").unwrap(), None);
     assert!(!sqlite_visible_files_contain(
         store.db_path(),
@@ -274,7 +292,7 @@ fn legacy_github_token_cleanup_retries_after_a_busy_wal_checkpoint() {
     );
 
     let credentials = MemoryCredentialStore::default();
-    let error = get_github_token_status_impl(&store, &credentials)
+    let error = resolve_github_token(&store, &credentials)
         .unwrap_err()
         .to_string();
 
@@ -291,9 +309,9 @@ fn legacy_github_token_cleanup_retries_after_a_busy_wal_checkpoint() {
     ));
 
     reader.execute_batch("ROLLBACK;").unwrap();
-    let status = get_github_token_status_impl(&store, &credentials).unwrap();
+    let token = resolve_github_token(&store, &credentials).unwrap();
 
-    assert!(status.has_token);
+    assert!(token.is_some());
     assert_eq!(store.get_setting(CLEANUP_MARKER).unwrap(), None);
     assert!(!sqlite_visible_files_contain(
         store.db_path(),
@@ -309,7 +327,7 @@ fn failed_legacy_github_token_migration_keeps_the_sqlite_secret() {
         .set_setting("github_token", "legacy-github-secret")
         .unwrap();
 
-    let result = get_github_token_status_impl(&store, &credentials);
+    let result = resolve_github_token(&store, &credentials);
 
     assert!(result.is_err());
     assert_eq!(

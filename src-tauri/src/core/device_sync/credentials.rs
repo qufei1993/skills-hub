@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 
 use super::types::{CredentialUsage, ProviderId};
 
+#[cfg(debug_assertions)]
+pub(crate) const DEVICE_SYNC_KEYRING_SERVICE: &str = "com.skills-hub.device-sync.dev";
+#[cfg(not(debug_assertions))]
 pub(crate) const DEVICE_SYNC_KEYRING_SERVICE: &str = "com.skills-hub.device-sync";
 pub(crate) const GITHUB_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
 pub(crate) const GITLAB_TOKEN_URL: &str = "https://gitlab.com/oauth/token";

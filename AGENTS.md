@@ -139,6 +139,12 @@ src-tauri/src/                # Rust backend
 7. **Release records**: Record user-visible fixes under the current project version in `CHANGELOG.md`, `docs/CHANGELOG.zh.md`, and `docs/releases/v<version>/`; do not bump the version unless requested.
 8. **Pull requests**: When requested, submit code, tests, and release records against `main`, updating an existing branch PR when available. Describe the problem, fix, and validation; verify the PR and return its link. Do not merge without authorization.
 
+## Security Red Lines
+
+- Token、密码和私钥只能存入系统安全凭据存储，禁止进入数据库、配置文件、日志、URL 或同步仓库。
+- 只有用户主动操作或明确开启的后台功能才能读取凭据；页面加载、Tab 切换、状态展示和普通启动不得读取。
+- 开发版必须使用独立的凭据命名空间；授权、凭据、同步相关改动必须通过防泄漏与访问边界测试。
+
 ## Important Notes
 
 - Path handling must support `~` expansion (backend has `expand_home_path()`)

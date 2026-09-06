@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use crate::core::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
 use crate::core::{
-    device_sync::credentials::MemoryCredentialStore, github_token::resolve_github_token,
+    device_sync::{credentials::MemoryCredentialStore, types::DeviceSyncConfig},
+    github_token::resolve_github_token,
 };
 use rusqlite::Connection;
 
@@ -12,6 +13,39 @@ fn make_store() -> (tempfile::TempDir, SkillStore) {
     let store = SkillStore::new(db);
     store.ensure_schema().expect("ensure_schema");
     (dir, store)
+}
+
+#[test]
+fn sync_failure_history_never_persists_raw_secrets_and_sanitizes_legacy_errors() {
+    let (dir, store) = make_store();
+    store.start_device_sync_run("run", 1).unwrap();
+    store.finish_device_sync_run("run", 2, "failed", 0, 0, 0, 0, None,
+        Some("fetch device sync repository: connection timed out https://user:super-secret@example.com?access_token=super-secret")).unwrap();
+    assert_eq!(
+        store.list_device_sync_history(1).unwrap()[0]
+            .error
+            .as_deref(),
+        Some("DEVICE_SYNC_FAILURE_network")
+    );
+    assert!(!sqlite_visible_files_contain(
+        &dir.path().join("test.db"),
+        b"super-secret"
+    ));
+    store
+        .with_conn(|conn| {
+            conn.execute(
+                "UPDATE device_sync_runs SET error = ?1",
+                ["Authorization: Bearer legacy-secret"],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        store.list_device_sync_history(1).unwrap()[0]
+            .error
+            .as_deref(),
+        Some("DEVICE_SYNC_FAILURE_unknown")
+    );
 }
 
 fn sqlite_sidecar_path(db_path: &std::path::Path, suffix: &str) -> PathBuf {
@@ -751,6 +785,36 @@ fn update_skill_description_backfills() {
             .as_deref(),
         Some("backfilled")
     );
+}
+
+#[test]
+fn startup_credential_consent_migration_disables_legacy_auto_check_only_once() {
+    let (_dir, store) = make_store();
+    store
+        .save_device_sync_config(&DeviceSyncConfig {
+            auto_check: true,
+            auto_sync: false,
+            ..DeviceSyncConfig::default()
+        })
+        .unwrap();
+
+    store
+        .migrate_device_sync_startup_credential_consent()
+        .unwrap();
+    let migrated = store.get_device_sync_config().unwrap().unwrap();
+    assert!(!migrated.auto_check);
+
+    store
+        .save_device_sync_config(&DeviceSyncConfig {
+            auto_check: true,
+            ..migrated
+        })
+        .unwrap();
+    store
+        .migrate_device_sync_startup_credential_consent()
+        .unwrap();
+
+    assert!(store.get_device_sync_config().unwrap().unwrap().auto_check);
 }
 
 #[test]

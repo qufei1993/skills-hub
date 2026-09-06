@@ -194,7 +194,20 @@ impl GitProvider for ApiProvider {
 }
 
 fn normalize_repository(repo: RepositoryResponse) -> Result<RemoteRepository> {
+    use super::types::RepositoryVisibility;
+    let visibility = match repo.visibility.as_deref() {
+        Some("public") => RepositoryVisibility::Public,
+        Some("private") => RepositoryVisibility::Private,
+        Some("internal") => RepositoryVisibility::Internal,
+        Some(_) => RepositoryVisibility::Unknown,
+        None => match repo.private {
+            Some(true) => RepositoryVisibility::Private,
+            Some(false) => RepositoryVisibility::Public,
+            None => RepositoryVisibility::Unknown,
+        },
+    };
     Ok(RemoteRepository {
+        visibility,
         name: repo.name,
         web_url: repo.html_url.or(repo.web_url).unwrap_or_default(),
         clone_url: repo
@@ -208,6 +221,25 @@ fn normalize_repository(repo: RepositoryResponse) -> Result<RemoteRepository> {
                 .is_some_and(|value| value == "private")
         }),
     })
+}
+
+#[cfg(test)]
+#[test]
+fn missing_or_internal_visibility_is_not_anonymous_public_access() {
+    use super::types::RepositoryVisibility;
+    for (extra, expected) in [
+        ("", RepositoryVisibility::Unknown),
+        (
+            r#","visibility":"internal""#,
+            RepositoryVisibility::Internal,
+        ),
+        (r#","private":false"#, RepositoryVisibility::Public),
+        (r#","visibility":"private""#, RepositoryVisibility::Private),
+    ] {
+        let json = format!(r#"{{"name":"repo","clone_url":"https://example/repo.git"{extra}}}"#);
+        let repo = normalize_repository(serde_json::from_str(&json).unwrap()).unwrap();
+        assert_eq!(repo.visibility, expected);
+    }
 }
 
 fn sanitize_message(value: &str) -> String {

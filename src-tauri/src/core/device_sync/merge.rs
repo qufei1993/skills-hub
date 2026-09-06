@@ -11,6 +11,68 @@ pub struct MergePlan {
     pub conflicts: BTreeMap<String, Vec<String>>,
     pub delete_local: BTreeSet<String>,
     pub delete_remote: BTreeSet<String>,
+    pub merged_text: BTreeMap<String, BTreeMap<String, Vec<u8>>>,
+}
+
+pub fn plan_merge_with_text(
+    base: &SyncManifest,
+    local: &SyncManifest,
+    remote: &SyncManifest,
+    mut merge_file: impl FnMut(&str, &str) -> anyhow::Result<Option<Vec<u8>>>,
+) -> anyhow::Result<MergePlan> {
+    let mut plan = plan_merge(base, local, remote);
+    for (id, conflicts) in plan.conflicts.clone() {
+        let (Some(base_skill), Some(local_skill), Some(remote_skill)) = (
+            base.skills.get(&id),
+            local.skills.get(&id),
+            remote.skills.get(&id),
+        ) else {
+            continue;
+        };
+        let metadata = super::manifest::metadata_hash;
+        if metadata(local_skill) != metadata(base_skill)
+            && metadata(remote_skill) != metadata(base_skill)
+            && metadata(local_skill) != metadata(remote_skill)
+        {
+            continue;
+        }
+        if conflicts.iter().any(|path| {
+            !base_skill.files.contains_key(path)
+                || !local_skill.files.contains_key(path)
+                || !remote_skill.files.contains_key(path)
+        }) {
+            continue;
+        }
+        let mut merged = BTreeMap::new();
+        let mut unresolved = Vec::new();
+        for path in conflicts {
+            match merge_file(&id, &path)? {
+                Some(bytes) => {
+                    merged.insert(path, bytes);
+                }
+                None => unresolved.push(path),
+            }
+        }
+        if !unresolved.is_empty() {
+            plan.conflicts.insert(id, unresolved);
+            continue;
+        }
+        let paths = base_skill
+            .files
+            .keys()
+            .chain(local_skill.files.keys())
+            .filter(|path| base_skill.files.get(*path) != local_skill.files.get(*path))
+            .cloned()
+            .collect();
+        plan.merge_files.insert(id.clone(), paths);
+        if super::manifest::metadata_hash(base_skill) != super::manifest::metadata_hash(local_skill)
+        {
+            plan.take_local_metadata.insert(id.clone());
+        }
+        plan.conflicts.remove(&id);
+        plan.merged_text.insert(id, merged);
+    }
+    Ok(plan)
 }
 
 pub fn plan_merge(base: &SyncManifest, local: &SyncManifest, remote: &SyncManifest) -> MergePlan {
@@ -118,6 +180,88 @@ fn plan_skill_files(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn manifest(skill: PortableSkill) -> SyncManifest {
+        SyncManifest {
+            format_version: 1,
+            skills: BTreeMap::from([(skill.id.clone(), skill)]),
+        }
+    }
+
+    #[test]
+    fn text_plan_combines_merged_bytes_with_unilateral_files_and_metadata() {
+        let base = manifest(skill("one", &[("shared.md", "base"), ("deleted", "old")]));
+        let mut local_skill = skill("one", &[("shared.md", "local"), ("added", "new")]);
+        local_skill.name = "renamed".into();
+        let local = manifest(local_skill);
+        let remote = manifest(skill(
+            "one",
+            &[
+                ("shared.md", "remote"),
+                ("deleted", "old"),
+                ("remote-only", "new"),
+            ],
+        ));
+        let plan = plan_merge_with_text(&base, &local, &remote, |id, path| {
+            assert_eq!((id, path), ("one", "shared.md"));
+            Ok(Some(b"combined".to_vec()))
+        })
+        .unwrap();
+        assert!(plan.conflicts.is_empty());
+        assert_eq!(plan.merged_text["one"]["shared.md"], b"combined");
+        assert_eq!(
+            plan.merge_files["one"],
+            BTreeSet::from(["shared.md".into(), "added".into(), "deleted".into()])
+        );
+        assert!(plan.take_local_metadata.contains("one"));
+    }
+
+    #[test]
+    fn text_plan_discards_tentative_results_when_another_file_conflicts() {
+        let base = manifest(skill("one", &[("a", "base"), ("b", "base")]));
+        let local = manifest(skill("one", &[("a", "local"), ("b", "local")]));
+        let remote = manifest(skill("one", &[("a", "remote"), ("b", "remote")]));
+        let plan = plan_merge_with_text(&base, &local, &remote, |_, path| {
+            Ok((path == "a").then(|| b"merged".to_vec()))
+        })
+        .unwrap();
+        assert_eq!(plan.conflicts["one"], ["b"]);
+        assert!(plan.merged_text.is_empty());
+        assert!(plan.merge_files.is_empty());
+        assert!(
+            plan_merge_with_text(&base, &local, &remote, |_, _| anyhow::bail!("read failed"))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn text_plan_never_guesses_missing_bases_deleted_files_or_metadata_conflicts() {
+        let base = manifest(skill("one", &[("a", "base")]));
+        let local = manifest(skill("one", &[("a", "local")]));
+        let remote = manifest(skill("one", &[("a", "remote")]));
+        let deleted_file = manifest(skill("one", &[]));
+        let empty = SyncManifest::empty();
+        for (base, local, remote) in [
+            (&empty, &local, &remote),
+            (&base, &deleted_file, &remote),
+            (&base, &local, &deleted_file),
+            (&base, &empty, &remote),
+            (&base, &local, &empty),
+        ] {
+            let plan =
+                plan_merge_with_text(base, local, remote, |_, _| panic!("must not guess")).unwrap();
+            assert_eq!(plan.conflicts.len(), 1);
+        }
+        let mut local = local;
+        let mut remote = remote;
+        local.skills.get_mut("one").unwrap().name = "local-name".into();
+        remote.skills.get_mut("one").unwrap().name = "remote-name".into();
+        let plan = plan_merge_with_text(&base, &local, &remote, |_, _| {
+            panic!("must not merge metadata")
+        })
+        .unwrap();
+        assert_eq!(plan.conflicts["one"], ["_metadata"]);
+    }
 
     fn skill(id: &str, files: &[(&str, &str)]) -> PortableSkill {
         let files = files

@@ -1,4 +1,10 @@
-import type { DeviceSyncConfigDto, DeviceSyncProvider } from './types'
+import type {
+  DeviceSyncConfigDto,
+  DeviceSyncProvider,
+  DeviceSyncRemoteRepository,
+  DeviceSyncSchedule,
+  RepositoryVisibility,
+} from './types'
 
 export const REPOSITORY_LOAD_TIMEOUT_MS = 30_000
 const REPOSITORY_LOAD_TIMEOUT_ERROR = 'DEVICE_SYNC_REPOSITORY_LOAD_TIMEOUT'
@@ -41,6 +47,8 @@ export const classifyRepositoryLoadFailure = (error: unknown): RepositoryLoadFai
 }
 
 export type DeviceSyncFormState = {
+  visibility: RepositoryVisibility
+  publicUploadConfirmed: boolean
   provider: DeviceSyncProvider
   remoteUrl: string
   branch: string
@@ -50,11 +58,14 @@ export type DeviceSyncFormState = {
   accountLogin: string
   autoCheck: boolean
   autoSync: boolean
+  schedule: DeviceSyncSchedule
 }
 
 export const buildDeviceSyncForm = (
   config?: DeviceSyncConfigDto | null,
 ): DeviceSyncFormState => ({
+  visibility: config?.visibility ?? 'unknown',
+  publicUploadConfirmed: config?.public_upload_confirmed ?? false,
   provider: config?.provider ?? 'github',
   remoteUrl: config?.remote_url ?? '',
   branch: config?.branch ?? 'main',
@@ -62,9 +73,26 @@ export const buildDeviceSyncForm = (
   token: '',
   oauthCredentialKey: '',
   accountLogin: '',
-  autoCheck: config?.auto_check ?? true,
+  autoCheck: config?.auto_check ?? false,
   autoSync: config?.auto_sync ?? false,
+  schedule: config?.auto_sync_schedule ?? { mode: 'interval', minutes: 15 },
 })
+
+export const selectSyncRepository = (form: DeviceSyncFormState, repository: DeviceSyncRemoteRepository): DeviceSyncFormState => ({
+  ...form,
+  remoteUrl: repository.clone_url,
+  visibility: repository.visibility ?? (repository.private === true ? 'private' : repository.private === false ? 'public' : 'unknown'),
+  publicUploadConfirmed: form.remoteUrl === repository.clone_url && form.visibility === 'public' && repository.visibility === 'public' && form.publicUploadConfirmed,
+})
+
+export const changeSyncRepositoryUrl = (form: DeviceSyncFormState, remoteUrl: string): DeviceSyncFormState => ({
+  ...form, remoteUrl, visibility: 'unknown', publicUploadConfirmed: false,
+})
+
+export const isDeviceSyncScheduleValid = (schedule: DeviceSyncSchedule): boolean =>
+  schedule.mode === 'interval'
+    ? Number.isInteger(schedule.minutes) && schedule.minutes >= 5 && schedule.minutes <= 43200
+    : /^([01]\d|2[0-3]):[0-5]\d$/.test(schedule.time)
 
 export const getRepositoryDisplayName = (remoteUrl: string): string => {
   const normalized = remoteUrl.trim().replace(/\/+$/, '').replace(/\.git$/, '')
@@ -102,7 +130,7 @@ export type DeviceSyncVisualState =
   | 'conflicts'
   | 'syncing'
 export type DeviceSyncRunOutcome = 'complete' | 'conflicts'
-export type RepositoryPickerEvent = 'toggle' | 'close'
+export type RepositoryPickerEvent = 'toggle' | 'close' | 'select'
 export type RepositoryLoadState =
   | 'idle'
   | 'loading'
@@ -123,6 +151,17 @@ export const shouldLoadRepositoryPicker = (
   opening: boolean,
   loadState: RepositoryLoadState,
 ): boolean => opening && loadState !== 'loading' && loadState !== 'loaded'
+
+export const filterRepositories = (
+  repositories: DeviceSyncRemoteRepository[],
+  query: string,
+): DeviceSyncRemoteRepository[] => {
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  if (!normalizedQuery) return repositories
+  return repositories.filter(({ name }) =>
+    name.toLocaleLowerCase().includes(normalizedQuery),
+  )
+}
 
 export const getDeviceConnectionState = (
   device: { last_commit?: string | null; last_seen_at: number },
@@ -197,3 +236,8 @@ export const getDeviceSyncControls = ({
   canSave: !busy && remoteUrl.trim().length > 0,
   canCreateRepository: !busy && (hasCredential || token.trim().length > 0),
 })
+export const getSyncFailureKind = (error?: string | null) => {
+  const kinds = ['network', 'tls', 'auth', 'credential', 'visibility', 'publicUpload', 'privateKey', 'integrity', 'disk', 'permission', 'push', 'fetch', 'storage', 'unknown']
+  const kind = error?.startsWith('DEVICE_SYNC_FAILURE_') ? error.slice('DEVICE_SYNC_FAILURE_'.length) : ''
+  return kinds.includes(kind) ? kind : 'unknown'
+}
