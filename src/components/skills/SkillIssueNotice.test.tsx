@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
+/// <reference types="node" />
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import type { TFunction } from 'i18next'
 import type { ManagedSkill } from './types'
@@ -45,4 +48,27 @@ it('does not mark disabled Skills or healthy Skills as current issues', () => {
   expect(container.childElementCount).toBe(0)
   rerender(<SkillIssueNotice skill={{ ...skill, enabled: false, status: 'error' }} tools={[]} t={t} />)
   expect(container.childElementCount).toBe(0)
+})
+
+it('does not consume the detail workspace height when the source is missing', () => {
+  const appCss = readFileSync(resolve(process.cwd(), 'src/App.css'), 'utf8')
+  render(
+    <>
+      <style>{appCss}</style>
+      <div className="detail-view">
+        <SkillIssueNotice
+          skill={{ ...skill, status: 'error', source_error: 'sourceMissing' }}
+          tools={[]}
+          t={t}
+        />
+        <div data-testid="detail-content">detail content</div>
+      </div>
+    </>,
+  )
+
+  const notice = screen.getByText('deviceSync.viewIssueReason').closest('details')
+  expect(notice).not.toBeNull()
+  expect(getComputedStyle(notice!).marginBottom).toBe('10px')
+  expect(getComputedStyle(notice!).flexBasis).toBe('auto')
+  expect(screen.getByTestId('detail-content')).toBeTruthy()
 })
