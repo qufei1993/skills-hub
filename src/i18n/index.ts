@@ -8,7 +8,7 @@ const getStoredLanguage = () => {
   if (typeof window === 'undefined') return null
   try {
     const stored = window.localStorage.getItem(languageStorageKey)
-    if (stored === 'en' || stored === 'zh') return stored
+    if (stored === 'en' || stored === 'zh' || stored === 'ko') return stored
   } catch {
     // ignore storage failures
   }

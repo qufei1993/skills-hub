@@ -109,7 +109,7 @@ const settingsProps = (
   discoveryScanEnabledCount: 1,
   discoveryScanSourceCount: 1,
   onPickStoragePath: vi.fn(),
-  onToggleLanguage: vi.fn(),
+  onLanguageChange: vi.fn(),
   onThemeChange: vi.fn(),
   onGitCacheCleanupDaysChange: vi.fn(),
   onGitCacheTtlSecsChange: vi.fn(),
@@ -124,6 +124,22 @@ const settingsProps = (
 })
 
 describe('destructive action confirmations', () => {
+  it('selects Korean as the interface language', () => {
+    const onLanguageChange = vi.fn()
+    render(
+      <SettingsPage
+        {...settingsProps(vi.fn(async () => true))}
+        onLanguageChange={onLanguageChange}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('interfaceLanguage'), {
+      target: { value: 'ko' },
+    })
+
+    expect(onLanguageChange).toHaveBeenCalledWith('ko')
+  })
+
   it('waits for confirmation before removing a custom tool configuration', async () => {
     const onToolConfigChange = vi.fn(async () => true)
     renderToolsPage(onToolConfigChange)

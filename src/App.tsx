@@ -130,12 +130,16 @@ function App() {
   const skillScopeStorageKey = 'skills-project-scope-state-v1'
   const skillViewModeStorageKey = 'skills-view-mode'
   const sidebarCollapsedStorageKey = 'skills-sidebar-collapsed'
-  const toggleLanguage = useCallback(() => {
-    void i18n.changeLanguage(language === 'en' ? 'zh' : 'en')
-  }, [i18n, language])
+  const changeLanguage = useCallback((nextLanguage: string) => {
+    void i18n.changeLanguage(nextLanguage)
+  }, [i18n])
 
   useEffect(() => {
-    document.documentElement.lang = language.startsWith('zh') ? 'zh-CN' : 'en'
+    document.documentElement.lang = language.startsWith('zh')
+      ? 'zh-CN'
+      : language.startsWith('ko')
+        ? 'ko-KR'
+        : 'en'
   }, [language])
   const [themePreference, setThemePreference] = useState<'system' | 'light' | 'dark'>(
     'system',
@@ -543,7 +547,7 @@ function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    if (language !== 'en' && language !== 'zh') return
+    if (language !== 'en' && language !== 'zh' && language !== 'ko') return
     try {
       window.localStorage.setItem(languageStorageKey, language)
     } catch {
@@ -3877,7 +3881,7 @@ function App() {
             gitCacheTtlSecs={gitCacheTtlSecs}
             themePreference={themePreference}
             onPickStoragePath={handlePickStoragePath}
-            onToggleLanguage={toggleLanguage}
+            onLanguageChange={changeLanguage}
             onThemeChange={handleThemeChange}
             onGitCacheCleanupDaysChange={handleGitCacheCleanupDaysChange}
             onGitCacheTtlSecsChange={handleGitCacheTtlSecsChange}
