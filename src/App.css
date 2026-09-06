@@ -3230,6 +3230,14 @@
 .device-sync-schedule-summary > button:focus-visible,
 .device-sync-automation-section:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 3px; border-radius: 4px; }
 .device-sync-automation-section { scroll-margin-top: 12px; }
+.device-sync-visibility-settings { display: grid; gap: 10px; margin-top: 12px; }
+.device-sync-visibility-result { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.device-sync-visibility-result svg { flex-shrink: 0; margin-right: 2px; }
+.device-sync-visibility-result output { color: inherit; font: inherit; }
+.device-sync-visibility-settings small { color: var(--text-secondary); line-height: 1.5; }
+.device-sync-public-confirmation { display: flex; gap: 8px; align-items: flex-start; color: var(--status-warning); font-size: 12px; }
+.device-sync-visibility-notice { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0; color: var(--status-warning); font-size: 12px; }
+.device-sync-visibility-notice .btn { margin-left: auto; }
 @keyframes device-sync-exchange-dot { 0% { stroke-dashoffset: 0; opacity: 0; } 12%, 88% { opacity: 1; } 100% { stroke-dashoffset: -100; opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .is-syncing .device-sync-packet { display: none; animation: none; } }
 
@@ -5988,3 +5996,11 @@
     flex-direction: column;
   }
 }
+.device-sync-failure-reason { margin: 3px 0 0; color: var(--status-error); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.device-sync-failure-details { min-width: 0; font-size: 12px; line-height: 1.6; }
+.device-sync-failure-details[open] { padding-block: 10px; }
+@media (max-width: 760px) { .device-sync-failure-details { grid-column: 1 / -1; } }
+.device-sync-failure-details summary { color: var(--accent-primary); cursor: pointer; width: fit-content; }
+.device-sync-failure-details summary:hover { text-decoration: underline; }
+.device-sync-failure-details summary:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 3px; }
+.device-sync-failure-details p { margin: 8px 0 0; color: var(--text-secondary); overflow-wrap: anywhere; }

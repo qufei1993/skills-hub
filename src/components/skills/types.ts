@@ -232,7 +232,11 @@ export type DeviceSyncSchedule =
   | { mode: 'interval'; minutes: number }
   | { mode: 'daily'; time: string }
 
+export type RepositoryVisibility = 'public' | 'private' | 'internal' | 'unknown'
+
 export type DeviceSyncConfigDto = {
+  visibility?: RepositoryVisibility
+  public_upload_confirmed?: boolean
   provider: DeviceSyncProvider
   remote_url: string
   branch: string
@@ -278,6 +282,7 @@ export type DeviceSyncPendingOAuth = {
 }
 
 export type DeviceSyncRemoteRepository = {
+  visibility?: RepositoryVisibility
   name: string
   web_url: string
   clone_url: string
@@ -301,7 +306,7 @@ export type DeviceSyncRunResult = {
 
 export type DeviceSyncStatus = {
   schedule_status?: {
-    state: 'disabled' | 'initializing' | 'scheduled' | 'backoff' | 'paused' | 'running' | 'waiting'
+    state: 'disabled' | 'initializing' | 'scheduled' | 'backoff' | 'paused' | 'running' | 'waiting' | 'needs_confirmation'
     next_at: number | null
   } | null
   configured: boolean

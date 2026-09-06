@@ -15,6 +15,39 @@ fn make_store() -> (tempfile::TempDir, SkillStore) {
     (dir, store)
 }
 
+#[test]
+fn sync_failure_history_never_persists_raw_secrets_and_sanitizes_legacy_errors() {
+    let (dir, store) = make_store();
+    store.start_device_sync_run("run", 1).unwrap();
+    store.finish_device_sync_run("run", 2, "failed", 0, 0, 0, 0, None,
+        Some("fetch device sync repository: connection timed out https://user:super-secret@example.com?access_token=super-secret")).unwrap();
+    assert_eq!(
+        store.list_device_sync_history(1).unwrap()[0]
+            .error
+            .as_deref(),
+        Some("DEVICE_SYNC_FAILURE_network")
+    );
+    assert!(!sqlite_visible_files_contain(
+        &dir.path().join("test.db"),
+        b"super-secret"
+    ));
+    store
+        .with_conn(|conn| {
+            conn.execute(
+                "UPDATE device_sync_runs SET error = ?1",
+                ["Authorization: Bearer legacy-secret"],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        store.list_device_sync_history(1).unwrap()[0]
+            .error
+            .as_deref(),
+        Some("DEVICE_SYNC_FAILURE_unknown")
+    );
+}
+
 fn sqlite_sidecar_path(db_path: &std::path::Path, suffix: &str) -> PathBuf {
     let mut path = db_path.as_os_str().to_os_string();
     path.push(suffix);

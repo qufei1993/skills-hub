@@ -12,12 +12,48 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => undefi
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
 
 describe('DeviceSyncPage', () => {
+  it('refreshes the saved failure immediately after a failed manual sync', async () => {
+    let failed = false
+    invokeMock.mockImplementation((command: string) => {
+      if (command === 'get_device_sync_config') return Promise.resolve({ provider: 'github', remote_url: 'https://github.com/example/sync.git', branch: 'main', has_credential: true, visibility: 'private' })
+      if (command === 'get_device_sync_status') return Promise.resolve({ configured: true, is_running: false, last_run_status: failed ? 'failed' : 'success', last_run_at: 2000, conflict_count: 0 })
+      if (command === 'get_device_sync_history') return Promise.resolve(failed ? [{ id: 'failed', started_at: 1000, finished_at: 2000, status: 'failed', added: 0, updated: 0, deleted: 0, conflicted: 0, error: 'DEVICE_SYNC_FAILURE_auth' }] : [])
+      if (command === 'run_device_sync') { failed = true; return Promise.reject('DEVICE_SYNC_FAILURE_auth') }
+      if (command === 'get_device_sync_pending_oauth') return Promise.resolve(null)
+      return Promise.resolve([])
+    })
+    const t = ((key: string) => key) as TFunction
+    render(<DeviceSyncPage active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} t={t} />)
+    await screen.findByText('deviceSync.visualState.healthy')
+    fireEvent.click(screen.getByRole('button', { name: 'deviceSync.syncLocalRepository' }))
+    expect(await screen.findByText('deviceSync.failureReasons.auth')).toBeTruthy()
+  })
+  it.each(['DEVICE_SYNC_FAILURE_network', null, 'Authorization: Bearer do-not-display'])('shows safe persistent failure details for %s', async (error) => {
+    invokeMock.mockImplementation((command: string) => {
+      if (command === 'get_device_sync_config') return Promise.resolve({ provider: 'github', remote_url: 'https://github.com/example/sync.git', branch: 'main', has_credential: true, visibility: 'private' })
+      if (command === 'get_device_sync_status') return Promise.resolve({ configured: true, is_running: false, last_run_status: 'failed', last_run_at: 2000, conflict_count: 0 })
+      if (command === 'get_device_sync_history') return Promise.resolve([{ id: 'failed', started_at: 1000, finished_at: 2000, status: 'failed', added: 0, updated: 0, deleted: 0, conflicted: 0, error }])
+      if (command === 'get_device_sync_pending_oauth') return Promise.resolve(null)
+      return Promise.resolve([])
+    })
+    const t = ((key: string) => key) as TFunction
+    render(<DeviceSyncPage active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} t={t} />)
+    const reason = error === 'DEVICE_SYNC_FAILURE_network' ? 'network' : 'unknown'
+    expect(await screen.findByText(`deviceSync.failureReasons.${reason}`)).toBeTruthy()
+    fireEvent.click(screen.getByRole('tab', { name: 'deviceSync.history' }))
+    const details = screen.getByText('deviceSync.failureDetails').closest('details')!
+    fireEvent.click(within(details).getByText('deviceSync.failureDetails'))
+    expect(details.open).toBe(true)
+    expect(within(details).getByText(`deviceSync.failureReasons.${reason}`)).toBeTruthy()
+    expect(screen.queryByText('deviceSync.previewSummary')).toBeNull()
+    expect(document.body.textContent).not.toContain('do-not-display')
+  })
   it('shows the saved schedule and backend deadline, and opens automation without credential calls', async () => {
     invokeMock.mockImplementation((command: string) => {
       if (command === 'get_device_sync_config') return Promise.resolve({
         provider: 'github', remote_url: 'https://github.com/example/sync.git', branch: 'main',
         username: 'example', auto_check: false, auto_sync: true,
-        auto_sync_schedule: { mode: 'interval', minutes: 15 }, has_credential: true,
+        auto_sync_schedule: { mode: 'interval', minutes: 15 }, visibility: 'private', public_upload_confirmed: false, has_credential: true,
       })
       if (command === 'get_device_sync_status') return Promise.resolve({
         configured: true, is_running: false, provider: 'github', remote_url: 'https://github.com/example/sync.git',
@@ -41,6 +77,15 @@ describe('DeviceSyncPage', () => {
     fireEvent.change(screen.getByRole('spinbutton', { name: 'deviceSync.intervalMinutes' }), { target: { value: '30' } })
     expect(within(summary).getByText('deviceSync.scheduleInterval 15')).toBeTruthy()
     expect(invokeMock.mock.calls.length).toBe(before)
+    fireEvent.click(screen.getByText('deviceSync.advancedSettings'))
+    expect(screen.queryByRole('combobox', { name: 'deviceSync.repositoryVisibility' })).toBeNull()
+    expect(screen.getByLabelText('deviceSync.repositoryVisibility').textContent).toBe('deviceSync.visibility.private')
+    const errorToast = vi.spyOn(toast, 'error')
+    fireEvent.change(screen.getByLabelText('deviceSync.remoteUrl'), { target: { value: 'https://github.com/example/other.git' } })
+    expect(screen.getByLabelText('deviceSync.repositoryVisibility').textContent).toBe('deviceSync.visibility.unknown')
+    fireEvent.click(screen.getByRole('button', { name: 'deviceSync.saveChanges' }))
+    expect(errorToast).toHaveBeenCalledWith('deviceSync.visibilityUnknownHelp')
+    expect(invokeMock.mock.calls.length).toBe(before)
   })
   afterEach(() => {
     cleanup()
@@ -58,7 +103,7 @@ describe('DeviceSyncPage', () => {
       if (command === 'get_device_sync_config') return Promise.resolve({
         provider: 'github', remote_url: 'https://github.com/example/sync.git', branch: 'main',
         username: 'example', auto_check: false, auto_sync: enabled,
-        auto_sync_schedule: { mode: 'daily', time: '09:00' }, has_credential: true,
+        auto_sync_schedule: { mode: 'daily', time: '09:00' }, visibility: 'private', public_upload_confirmed: false, has_credential: true,
       })
       if (command === 'get_device_sync_status') return Promise.resolve({
         configured: true, is_running: state === 'running', provider: 'github',
@@ -154,7 +199,7 @@ describe('DeviceSyncPage', () => {
           username: 'example',
           auto_check: false,
           auto_sync: false,
-          has_credential: true,
+          visibility: 'private', public_upload_confirmed: false, has_credential: true,
         })
       }
       if (command === 'get_device_sync_status') {

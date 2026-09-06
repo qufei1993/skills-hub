@@ -8,6 +8,7 @@ use super::types::DeviceSyncConfig;
 #[serde(rename_all = "snake_case")]
 pub enum ScheduleState {
     Disabled,
+    NeedsConfirmation,
     Initializing,
     Scheduled,
     Backoff,
@@ -85,6 +86,9 @@ impl SchedulerRuntime {
         let Some(config) = config.filter(|c| c.auto_sync && c.auto_sync_schedule.is_some()) else {
             return without_time(ScheduleState::Disabled);
         };
+        if config.needs_visibility_confirmation() || config.needs_public_upload_confirmation() {
+            return without_time(ScheduleState::NeedsConfirmation);
+        }
         if running {
             return without_time(ScheduleState::Running);
         }

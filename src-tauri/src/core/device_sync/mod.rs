@@ -1,10 +1,12 @@
 pub mod credentials;
+pub(crate) mod errors;
 mod git_repo;
 pub mod manifest;
 pub mod merge;
 pub mod oauth;
 pub mod providers;
 pub mod scheduler;
+mod text_merge;
 pub mod types;
 
 use std::collections::BTreeSet;
@@ -17,7 +19,7 @@ use uuid::Uuid;
 
 use self::credentials::CredentialStore;
 use self::manifest::{portable_hash, skill_dir, SyncManifest};
-use self::merge::{plan_merge, MergePlan};
+use self::merge::{plan_merge_with_text, MergePlan};
 use self::types::{
     ConflictResolution, DeviceSyncConfig, DeviceSyncDevice, SyncChangeSummary, SyncConflict,
     SyncRunResult, SyncStatus, TrashEntry,
@@ -171,18 +173,30 @@ impl<'a> DeviceSyncService<'a> {
     pub fn check(&self) -> Result<SyncChangeSummary> {
         let _guard = try_lock_device_sync()?;
         let config = self.require_config()?;
-        let token = self.token(&config)?;
+        let token = self.read_token(&config)?;
         let repo_path = self.workspace_root.join("repository");
-        let repo = git_repo::open_or_clone(&repo_path, &config, token.as_deref())?;
-        let remote_oid = git_repo::fetch_and_checkout(&repo, &config, token.as_deref())?;
+        let repo = git_repo::open_or_clone(&repo_path, &config, token.as_deref())
+            .context(read_failure_context(&config))?;
+        let remote_oid = git_repo::fetch_and_checkout(&repo, &config, token.as_deref())
+            .context(read_failure_context(&config))?;
         self.ingest_discovered_devices(&repo, remote_oid)?;
         let remote = SyncManifest::read(&repo_path)?;
         let device = self.local_device_identity()?;
-        let (base, _) = self.base_manifest(&repo, &config, remote_oid, &device.id)?;
+        let (base, base_commit) = self.base_manifest(&repo, &config, remote_oid, &device.id)?;
         let export = self.fresh_export()?;
         let mut local = SyncManifest::read(&export)?;
         reconcile_identities(&mut local, &remote, &export)?;
-        let plan = plan_merge(&base, &local, &remote);
+        let plan = plan_merge_with_text(&base, &local, &remote, |id, path| {
+            merge_snapshot_file(
+                &repo,
+                base_commit,
+                remote_oid,
+                &export,
+                [&base, &local, &remote],
+                id,
+                path,
+            )
+        })?;
         let summary = summarize(&plan);
         let _ = fs::remove_dir_all(export);
         if remote_oid.is_none() && local.skills.is_empty() {
@@ -217,6 +231,8 @@ impl<'a> DeviceSyncService<'a> {
             return Ok(None);
         };
         if !current.auto_sync
+            || current.needs_visibility_confirmation()
+            || current.needs_public_upload_confirmation()
             || current.auto_sync_schedule.is_none()
             || current.remote_url != expected.remote_url
             || current.branch != expected.branch
@@ -255,10 +271,10 @@ impl<'a> DeviceSyncService<'a> {
                 0,
                 0,
                 None,
-                Some(&err.to_string()),
+                Some(&errors::safe_message(&format!("{err:#}"))),
             )?,
         }
-        result
+        result.map_err(|err| anyhow::anyhow!(errors::format_error(err)))
     }
 
     pub fn resolve_conflict(
@@ -391,10 +407,16 @@ impl<'a> DeviceSyncService<'a> {
                 message: "device sync requires conflict resolution".to_string(),
             });
         }
-        let token = self.token(&config)?;
+        anyhow::ensure!(
+            !config.needs_public_upload_confirmation(),
+            "DEVICE_SYNC_PUBLIC_UPLOAD_CONFIRMATION"
+        );
+        let token = self.read_token(&config)?;
         let repo_path = self.workspace_root.join("repository");
-        let repo = git_repo::open_or_clone(&repo_path, &config, token.as_deref())?;
-        let parent = git_repo::fetch_and_checkout(&repo, &config, token.as_deref())?;
+        let repo = git_repo::open_or_clone(&repo_path, &config, token.as_deref())
+            .context(read_failure_context(&config))?;
+        let parent = git_repo::fetch_and_checkout(&repo, &config, token.as_deref())
+            .context(read_failure_context(&config))?;
         let mut remote = SyncManifest::read(&repo_path)?;
         let device = self.local_device_identity()?;
         let (base, base_commit) = self.base_manifest(&repo, &config, parent, &device.id)?;
@@ -403,7 +425,17 @@ impl<'a> DeviceSyncService<'a> {
         for (old_id, new_id) in reconcile_identities(&mut local, &remote, &export)? {
             self.store.adopt_skill_id(&old_id, &new_id)?;
         }
-        let plan = plan_merge(&base, &local, &remote);
+        let plan = plan_merge_with_text(&base, &local, &remote, |id, path| {
+            merge_snapshot_file(
+                &repo,
+                base_commit,
+                parent,
+                &export,
+                [&base, &local, &remote],
+                id,
+                path,
+            )
+        })?;
         self.record_conflicts(&plan, &local, &remote, base_commit, parent)?;
         if !plan.conflicts.is_empty() {
             let _ = fs::remove_dir_all(&export);
@@ -434,7 +466,12 @@ impl<'a> DeviceSyncService<'a> {
         };
         let final_oid = if let Some(oid) = commit {
             self.remember_incomplete_sync(&config, base_commit)?;
-            git_repo::push(&repo, &config, token.as_deref(), oid)?;
+            let write_token = if token.is_some() {
+                token
+            } else {
+                self.token(&config)?
+            };
+            git_repo::push(&repo, &config, write_token.as_deref(), oid)?;
             git_repo::update_remote_head(&repo, &config, oid)?;
             Some(oid)
         } else {
@@ -515,6 +552,9 @@ impl<'a> DeviceSyncService<'a> {
     }
 
     fn token(&self, config: &DeviceSyncConfig) -> Result<Option<String>> {
+        if !config.uses_https() {
+            return Ok(None);
+        }
         match config.credential_key.as_deref() {
             Some(key) => {
                 let usage =
@@ -522,6 +562,20 @@ impl<'a> DeviceSyncService<'a> {
                 credentials::resolve_access_token(self.credentials, key, &usage)
             }
             None => Ok(None),
+        }
+    }
+
+    fn read_token(&self, config: &DeviceSyncConfig) -> Result<Option<String>> {
+        if !config.uses_https() {
+            return Ok(None);
+        }
+        match config.visibility {
+            types::RepositoryVisibility::Public => Ok(None),
+            types::RepositoryVisibility::Unknown => bail!("DEVICE_SYNC_VISIBILITY_UNKNOWN"),
+            types::RepositoryVisibility::Private | types::RepositoryVisibility::Internal => self
+                .token(config)?
+                .map(Some)
+                .context("DEVICE_SYNC_READ_CREDENTIAL_REQUIRED"),
         }
     }
 
@@ -714,6 +768,14 @@ impl<'a> DeviceSyncService<'a> {
     }
 }
 
+fn read_failure_context(config: &DeviceSyncConfig) -> &'static str {
+    if config.uses_https() && config.visibility == types::RepositoryVisibility::Public {
+        "DEVICE_SYNC_PUBLIC_READ_FAILED"
+    } else {
+        "read device sync repository"
+    }
+}
+
 fn local_device_name() -> String {
     let from_environment = ["COMPUTERNAME", "HOSTNAME"]
         .iter()
@@ -731,6 +793,74 @@ fn sanitize_device_name(value: String) -> String {
         .chars()
         .take(80)
         .collect()
+}
+
+fn merge_snapshot_file(
+    repo: &git2::Repository,
+    base_commit: Option<git2::Oid>,
+    remote_commit: Option<git2::Oid>,
+    local_root: &Path,
+    manifests: [&SyncManifest; 3],
+    id: &str,
+    path: &str,
+) -> Result<Option<Vec<u8>>> {
+    let safe = |value: &str| {
+        !value.is_empty()
+            && !value.contains(['\\', ':'])
+            && Path::new(value)
+                .components()
+                .all(|part| matches!(part, std::path::Component::Normal(_)))
+    };
+    anyhow::ensure!(
+        safe(id) && !id.contains('/') && safe(path),
+        "unsafe text merge path"
+    );
+    let (Some(base_commit), Some(remote_commit)) = (base_commit, remote_commit) else {
+        return Ok(None);
+    };
+    let relative = Path::new("skills").join(id).join("content").join(path);
+    let read_blob = |commit| -> Result<Option<Vec<u8>>> {
+        let tree = repo.find_commit(commit)?.tree()?;
+        let entry = tree
+            .get_path(&relative)
+            .context("text merge snapshot file missing")?;
+        anyhow::ensure!(
+            matches!(entry.filemode(), 0o100644 | 0o100755),
+            "unsafe text merge file mode"
+        );
+        let blob = repo.find_blob(entry.id())?;
+        Ok((blob.size() <= text_merge::MAX_TEXT_BYTES).then(|| blob.content().to_vec()))
+    };
+    let Some(base) = read_blob(base_commit)? else {
+        return Ok(None);
+    };
+    let Some(remote) = read_blob(remote_commit)? else {
+        return Ok(None);
+    };
+    let local_path = local_root.join(&relative);
+    let metadata =
+        fs::symlink_metadata(&local_path).context("local merge snapshot file missing")?;
+    anyhow::ensure!(
+        metadata.is_file()
+            && local_path
+                .canonicalize()?
+                .starts_with(local_root.canonicalize()?),
+        "unsafe local text merge snapshot"
+    );
+    if metadata.len() > text_merge::MAX_TEXT_BYTES as u64 {
+        return Ok(None);
+    }
+    let local = fs::read(local_path)?;
+    let mut versions = [base, local, remote];
+    for (index, (manifest, bytes)) in manifests.into_iter().zip(versions.iter_mut()).enumerate() {
+        let expected = manifest
+            .skills
+            .get(id)
+            .and_then(|skill| skill.files.get(path))
+            .context("text merge manifest file missing")?;
+        *bytes = text_merge::verify_snapshot(std::mem::take(bytes), expected, index != 1)?;
+    }
+    text_merge::merge_text(&versions[0], &versions[1], &versions[2])
 }
 
 fn apply_plan_to_repository(
@@ -764,6 +894,12 @@ fn apply_plan_to_repository(
             } else if destination.exists() {
                 fs::remove_file(destination)?;
             }
+        }
+        if let Some(files) = plan.merged_text.get(id) {
+            for (path, bytes) in files {
+                fs::write(content_root.join(path), bytes)?;
+            }
+            manifest::reject_private_keys(&content_root)?;
         }
         let mut merged = if plan.take_local_metadata.contains(id) {
             local_skill.clone()
@@ -894,6 +1030,91 @@ mod tests {
 
     static TEST_SYNC_LOCK: Mutex<()> = Mutex::new(());
 
+    #[test]
+    fn repository_visibility_controls_read_credentials_but_not_write_credentials() {
+        use types::RepositoryVisibility;
+        struct DenyCredentials;
+        impl CredentialStore for DenyCredentials {
+            fn get(&self, _: &str) -> Result<Option<String>> {
+                bail!("credential read attempted")
+            }
+            fn set(&self, _: &str, _: &str) -> Result<()> {
+                panic!("unexpected write")
+            }
+            fn delete(&self, _: &str) -> Result<()> {
+                panic!("unexpected delete")
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let store = SkillStore::new(root.path().join("store.db"));
+        store.ensure_schema().unwrap();
+        let service = DeviceSyncService::new(
+            &store,
+            &DenyCredentials,
+            root.path().join("workspace"),
+            root.path().join("central"),
+        );
+        let mut config = DeviceSyncConfig {
+            remote_url: "https://github.com/example/sync.git".into(),
+            credential_key: Some("test-key".into()),
+            visibility: RepositoryVisibility::Public,
+            ..Default::default()
+        };
+        assert_eq!(service.read_token(&config).unwrap(), None);
+        assert!(format!("{:#}", service.token(&config).unwrap_err())
+            .contains("credential read attempted"));
+        config.visibility = RepositoryVisibility::Private;
+        assert!(format!("{:#}", service.read_token(&config).unwrap_err())
+            .contains("credential read attempted"));
+        config.visibility = RepositoryVisibility::Unknown;
+        assert!(service
+            .read_token(&config)
+            .unwrap_err()
+            .to_string()
+            .contains("DEVICE_SYNC_VISIBILITY_UNKNOWN"));
+        config.remote_url = "git@github.com:example/sync.git".into();
+        assert_eq!(service.read_token(&config).unwrap(), None);
+        assert_eq!(service.token(&config).unwrap(), None);
+    }
+
+    #[test]
+    fn unknown_visibility_and_unconfirmed_public_upload_stop_before_credentials_or_network() {
+        let _guard = TEST_SYNC_LOCK.lock().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let mut config = DeviceSyncConfig {
+            remote_url: "https://example.invalid/sync.git".into(),
+            credential_key: Some("missing-token".into()),
+            auto_sync: true,
+            auto_sync_schedule: Some(scheduler::SyncSchedule::Interval { minutes: 5 }),
+            ..Default::default()
+        };
+        let store = make_store(root.path(), "unknown", &config);
+        let credentials = MemoryCredentialStore::default();
+        let workspace = root.path().join("workspace");
+        let service = DeviceSyncService::new(
+            &store,
+            &credentials,
+            workspace.clone(),
+            root.path().join("central"),
+        );
+        assert!(service
+            .check()
+            .unwrap_err()
+            .to_string()
+            .contains("DEVICE_SYNC_VISIBILITY_UNKNOWN"));
+        assert!(service.sync_scheduled(&config).unwrap().is_none());
+        assert!(store.list_device_sync_history(10).unwrap().is_empty());
+        config.visibility = types::RepositoryVisibility::Public;
+        store.save_device_sync_config(&config).unwrap();
+        assert!(service.sync_scheduled(&config).unwrap().is_none());
+        assert!(service
+            .sync()
+            .unwrap_err()
+            .to_string()
+            .contains("DEVICE_SYNC_PUBLIC_UPLOAD_CONFIRMATION"));
+        assert!(!workspace.exists());
+    }
+
     fn seed_remote(root: &Path) -> (PathBuf, DeviceSyncConfig) {
         let bare = root.join("remote.git");
         Repository::init_bare(&bare).unwrap();
@@ -921,6 +1142,351 @@ mod tests {
 
     fn add_skill(store: &SkillStore, central: &Path, id: &str, content: &str) {
         add_skill_in_directory(store, central, id, "one", content);
+    }
+
+    #[test]
+    fn text_merge_syncs_disjoint_paragraphs_and_check_does_not_modify_library() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let (bare, config) = seed_remote(root.path());
+        let credentials = MemoryCredentialStore::default();
+        let central_a = root.path().join("central-a");
+        let central_b = root.path().join("central-b");
+        let store_a = make_store(root.path(), "text-a", &config);
+        let store_b = make_store(root.path(), "text-b", &config);
+        let base = "# Skill\n\nFirst paragraph.\n\nSeparator.\n\nLast paragraph.\n";
+        let ours = "# Skill\n\nFirst paragraph.\n\nSeparator.\n\nUpdated by B.\n";
+        let theirs = "# Skill\n\nUpdated by A.\n\nSeparator.\n\nLast paragraph.\n";
+        let expected = "# Skill\n\nUpdated by A.\n\nSeparator.\n\nUpdated by B.\n";
+        add_skill(&store_a, &central_a, "one", base);
+        fs::write(central_a.join("one/remove.txt"), "remove later").unwrap();
+        let a = DeviceSyncService::new(
+            &store_a,
+            &credentials,
+            root.path().join("ws-a"),
+            central_a.clone(),
+        );
+        let b = DeviceSyncService::new(
+            &store_b,
+            &credentials,
+            root.path().join("ws-b"),
+            central_b.clone(),
+        );
+        a.sync().unwrap();
+        b.sync().unwrap();
+        fs::write(central_a.join("one/SKILL.md"), theirs).unwrap();
+        fs::write(central_a.join("one/remote.txt"), "remote-only").unwrap();
+        a.sync().unwrap();
+        fs::write(central_b.join("one/SKILL.md"), ours).unwrap();
+        fs::remove_file(central_b.join("one/remove.txt")).unwrap();
+        fs::write(central_b.join("one/local.txt"), "local-only").unwrap();
+        store_b
+            .set_skill_tag_names("one", &["merged-tag".to_string()])
+            .unwrap();
+        let before = Repository::open_bare(&bare)
+            .unwrap()
+            .refname_to_id("refs/heads/main")
+            .unwrap();
+        let check = b.check().unwrap();
+        assert_eq!(check.conflicted, 0);
+        assert_eq!(check.updated, 1);
+        assert_eq!(
+            fs::read_to_string(central_b.join("one/SKILL.md")).unwrap(),
+            ours
+        );
+        assert_eq!(
+            Repository::open_bare(&bare)
+                .unwrap()
+                .refname_to_id("refs/heads/main")
+                .unwrap(),
+            before
+        );
+        assert!(store_b.list_device_sync_conflicts().unwrap().is_empty());
+        let result = b.sync().unwrap();
+        assert_eq!(result.status, "success");
+        assert_eq!(
+            fs::read_to_string(central_b.join("one/SKILL.md")).unwrap(),
+            expected
+        );
+        assert!(!central_b.join("one/remove.txt").exists());
+        assert_eq!(
+            fs::read_to_string(central_b.join("one/local.txt")).unwrap(),
+            "local-only"
+        );
+        assert_eq!(
+            fs::read_to_string(central_b.join("one/remote.txt")).unwrap(),
+            "remote-only"
+        );
+        let remote_repo = Repository::open_bare(&bare).unwrap();
+        let oid = remote_repo.refname_to_id("refs/heads/main").unwrap();
+        let merged_manifest = git_repo::manifest_at(&remote_repo, oid).unwrap();
+        assert_eq!(
+            merged_manifest.skills["one"].files,
+            manifest::hash_files(&central_b.join("one")).unwrap()
+        );
+        assert_eq!(
+            merged_manifest.skills["one"].content_hash,
+            portable_hash(&merged_manifest.skills["one"])
+        );
+        assert_eq!(merged_manifest.skills["one"].tags, ["merged-tag"]);
+        a.sync().unwrap();
+        assert_eq!(
+            fs::read_to_string(central_a.join("one/SKILL.md")).unwrap(),
+            expected
+        );
+        let repeated = a.sync().unwrap();
+        assert_eq!(repeated.changes, SyncChangeSummary::default());
+    }
+
+    #[test]
+    fn text_merge_conflicts_and_push_failures_never_apply_or_publish_partial_results() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        for conflicting in [true, false] {
+            let root = tempfile::tempdir().unwrap();
+            let (bare, config) = seed_remote(root.path());
+            let credentials = MemoryCredentialStore::default();
+            let central_a = root.path().join("central-a");
+            let central_b = root.path().join("central-b");
+            let store_a = make_store(root.path(), "text-a", &config);
+            let store_b = make_store(root.path(), "text-b", &config);
+            add_skill(&store_a, &central_a, "one", "# Original\n");
+            let base = "a\nb\nc\nd\ne\n";
+            fs::write(central_a.join("one/shared.md"), base).unwrap();
+            let a = DeviceSyncService::new(
+                &store_a,
+                &credentials,
+                root.path().join("ws-a"),
+                central_a.clone(),
+            );
+            let b = DeviceSyncService::new(
+                &store_b,
+                &credentials,
+                root.path().join("ws-b"),
+                central_b.clone(),
+            );
+            a.sync().unwrap();
+            b.sync().unwrap();
+            let baseline = store_b
+                .get_device_sync_config()
+                .unwrap()
+                .unwrap()
+                .last_synced_commit;
+            fs::write(central_a.join("one/shared.md"), "A\nb\nc\nd\ne\n").unwrap();
+            if conflicting {
+                fs::write(central_a.join("one/SKILL.md"), "# From A\n").unwrap();
+            }
+            a.sync().unwrap();
+            fs::write(central_b.join("one/shared.md"), "a\nb\nc\nd\nB\n").unwrap();
+            if conflicting {
+                fs::write(central_b.join("one/SKILL.md"), "# From B\n").unwrap();
+            }
+            let before = Repository::open_bare(&bare)
+                .unwrap()
+                .refname_to_id("refs/heads/main")
+                .unwrap();
+            if !conflicting {
+                fs::write(bare.join("refs/heads/main.lock"), b"locked for test").unwrap();
+            }
+            let result = b.sync();
+            if conflicting {
+                assert_eq!(result.unwrap().status, "conflicts");
+                assert_eq!(
+                    store_b.list_device_sync_conflicts().unwrap()[0].files,
+                    ["SKILL.md"]
+                );
+                assert_eq!(
+                    fs::read_to_string(central_b.join("one/SKILL.md")).unwrap(),
+                    "# From B\n"
+                );
+            } else {
+                assert!(result.is_err(), "a rejected push must be an error");
+                assert!(store_b.list_device_sync_conflicts().unwrap().is_empty());
+            }
+            assert_eq!(
+                fs::read_to_string(central_b.join("one/shared.md")).unwrap(),
+                "a\nb\nc\nd\nB\n"
+            );
+            assert_eq!(
+                Repository::open_bare(&bare)
+                    .unwrap()
+                    .refname_to_id("refs/heads/main")
+                    .unwrap(),
+                before
+            );
+            assert_eq!(
+                store_b
+                    .get_device_sync_config()
+                    .unwrap()
+                    .unwrap()
+                    .last_synced_commit,
+                baseline
+            );
+            if !conflicting {
+                fs::remove_file(bare.join("refs/heads/main.lock")).unwrap();
+                assert_eq!(b.sync().unwrap().status, "success");
+                assert_eq!(
+                    fs::read_to_string(central_b.join("one/shared.md")).unwrap(),
+                    "A\nb\nc\nd\nB\n"
+                );
+                assert_eq!(a.sync().unwrap().status, "success");
+                assert_eq!(
+                    fs::read_to_string(central_a.join("one/shared.md")).unwrap(),
+                    "A\nb\nc\nd\nB\n"
+                );
+                assert_eq!(b.sync().unwrap().changes, SyncChangeSummary::default());
+            }
+        }
+    }
+
+    #[test]
+    fn text_merge_handles_git_eol_normalization_between_device_snapshots() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let (bare, config) = seed_remote(root.path());
+        let credentials = MemoryCredentialStore::default();
+        let central_a = root.path().join("central-a");
+        let central_b = root.path().join("central-b");
+        let store_a = make_store(root.path(), "eol-a", &config);
+        let store_b = make_store(root.path(), "eol-b", &config);
+        add_skill(
+            &store_a,
+            &central_a,
+            "one",
+            "# Skill\r\n\r\nfirst\r\n\r\nseparator\r\n\r\nlast\r\n",
+        );
+        fs::write(central_a.join("one/.gitattributes"), "*.md text eol=lf\n").unwrap();
+        let a = DeviceSyncService::new(
+            &store_a,
+            &credentials,
+            root.path().join("ws-a"),
+            central_a.clone(),
+        );
+        let b = DeviceSyncService::new(
+            &store_b,
+            &credentials,
+            root.path().join("ws-b"),
+            central_b.clone(),
+        );
+        a.sync().unwrap();
+        b.sync().unwrap();
+        fs::write(
+            central_a.join("one/SKILL.md"),
+            "# Skill\r\n\r\nfrom A\r\n\r\nseparator\r\n\r\nlast\r\n",
+        )
+        .unwrap();
+        a.sync().unwrap();
+        fs::write(
+            central_b.join("one/SKILL.md"),
+            "# Skill\n\nfirst\n\nseparator\n\nfrom B\n",
+        )
+        .unwrap();
+        assert_eq!(b.check().unwrap().conflicted, 0);
+        assert_eq!(b.sync().unwrap().status, "success");
+        assert_eq!(
+            fs::read_to_string(central_b.join("one/SKILL.md")).unwrap(),
+            "# Skill\n\nfrom A\n\nseparator\n\nfrom B\n"
+        );
+        let remote = Repository::open_bare(bare).unwrap();
+        let manifest =
+            git_repo::manifest_at(&remote, remote.refname_to_id("refs/heads/main").unwrap())
+                .unwrap();
+        assert_eq!(
+            manifest.skills["one"].files,
+            manifest::hash_files(&central_b.join("one")).unwrap()
+        );
+    }
+
+    #[test]
+    fn text_merge_snapshot_rejects_tampering_missing_files_and_unsafe_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let repo = Repository::init(root.path().join("repo")).unwrap();
+        let central = root.path().join("central");
+        let store = make_store(root.path(), "snapshot", &DeviceSyncConfig::default());
+        add_skill(&store, &central, "one", "# Original\n");
+        let repo_path = repo.workdir().unwrap();
+        let manifest = manifest::export_library(&store, repo_path).unwrap();
+        let oid = git_repo::commit_all(&repo, "snapshot", None)
+            .unwrap()
+            .unwrap();
+        let local = root.path().join("local");
+        manifest::export_library(&store, &local).unwrap();
+        let run = |base, id, path, manifests| {
+            merge_snapshot_file(&repo, base, Some(oid), &local, manifests, id, path)
+        };
+        assert!(run(Some(oid), "one", "SKILL.md", [&manifest; 3])
+            .unwrap()
+            .is_some());
+        assert!(run(None, "one", "SKILL.md", [&manifest; 3])
+            .unwrap()
+            .is_none());
+        for (id, path) in [
+            ("../one", "SKILL.md"),
+            ("one", "../SKILL.md"),
+            ("one", "/secret"),
+            ("one", "C:\\secret"),
+        ] {
+            assert!(run(Some(oid), id, path, [&manifest; 3]).is_err());
+        }
+        let mut invalid = manifest.clone();
+        invalid
+            .skills
+            .get_mut("one")
+            .unwrap()
+            .files
+            .insert("SKILL.md".into(), "wrong".into());
+        for index in 0..3 {
+            let mut manifests = [&manifest; 3];
+            manifests[index] = &invalid;
+            assert!(run(Some(oid), "one", "SKILL.md", manifests).is_err());
+        }
+        fs::write(skill_dir(&local, "one").join("SKILL.md"), "tampered").unwrap();
+        assert!(run(Some(oid), "one", "SKILL.md", [&manifest; 3]).is_err());
+        fs::remove_file(skill_dir(&local, "one").join("SKILL.md")).unwrap();
+        assert!(run(Some(oid), "one", "SKILL.md", [&manifest; 3]).is_err());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(
+                central.join("one/SKILL.md"),
+                skill_dir(&local, "one").join("SKILL.md"),
+            )
+            .unwrap();
+            assert!(run(Some(oid), "one", "SKILL.md", [&manifest; 3]).is_err());
+        }
+    }
+
+    #[test]
+    fn text_merge_revalidates_generated_content_before_it_can_be_published() {
+        let root = tempfile::tempdir().unwrap();
+        let central = root.path().join("central");
+        let store = make_store(root.path(), "generated", &DeviceSyncConfig::default());
+        add_skill(&store, &central, "one", "# Safe");
+        let local_root = root.path().join("local");
+        let remote_root = root.path().join("remote");
+        let local = manifest::export_library(&store, &local_root).unwrap();
+        let mut remote = manifest::export_library(&store, &remote_root).unwrap();
+        let mut plan = MergePlan::default();
+        plan.merge_files.insert("one".into(), BTreeSet::new());
+        plan.merged_text.insert(
+            "one".into(),
+            std::collections::BTreeMap::from([(
+                "SKILL.md".into(),
+                format!("{}\n-----BEGIN PRIVATE KEY-----", "safe text\n".repeat(600)).into_bytes(),
+            )]),
+        );
+        assert!(
+            apply_plan_to_repository(&plan, &local, &local_root, &mut remote, &remote_root)
+                .is_err()
+        );
+        assert_eq!(
+            fs::read_to_string(central.join("one/SKILL.md")).unwrap(),
+            "# Safe"
+        );
     }
 
     fn add_skill_in_directory(

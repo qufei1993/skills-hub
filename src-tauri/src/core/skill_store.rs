@@ -482,7 +482,7 @@ impl SkillStore {
                     deleted as i64,
                     conflicted as i64,
                     commit,
-                    error
+                    error.map(crate::core::device_sync::errors::safe_message)
                 ],
             )?;
             tx.commit()?;
@@ -508,7 +508,9 @@ impl SkillStore {
                     deleted: row.get::<_, i64>(6)? as usize,
                     conflicted: row.get::<_, i64>(7)? as usize,
                     commit: row.get(8)?,
-                    error: row.get(9)?,
+                    error: row
+                        .get::<_, Option<String>>(9)?
+                        .map(|error| crate::core::device_sync::errors::safe_message(&error)),
                 })
             })?;
             rows.collect::<std::result::Result<Vec<_>, _>>()

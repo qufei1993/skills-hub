@@ -99,7 +99,10 @@ pub fn run() {
             }
 
             if let Ok(Some(config)) = store.get_device_sync_config() {
-                if config.auto_check && !(config.auto_sync && config.auto_sync_schedule.is_some()) {
+                if config.auto_check
+                    && !config.needs_visibility_confirmation()
+                    && !(config.auto_sync && config.auto_sync_schedule.is_some())
+                {
                     let handle = app.handle().clone();
                     let store_for_device_sync = store.clone();
                     tauri::async_runtime::spawn(async move {

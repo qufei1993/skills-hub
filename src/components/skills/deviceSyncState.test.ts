@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   buildDeviceSyncForm,
+  selectSyncRepository,
+  changeSyncRepositoryUrl,
   isDeviceSyncScheduleValid,
   classifyRepositoryLoadFailure,
   getDeviceSyncExperience,
@@ -17,6 +19,19 @@ import {
 } from './deviceSyncState'
 
 describe('device sync UI state', () => {
+  it('binds provider visibility to the selected repository and forgets it after URL edits', () => {
+    const form = buildDeviceSyncForm();
+    const selected = selectSyncRepository(form, {
+      name: 'sync', clone_url: 'https://github.com/example/sync.git', web_url: '',
+      private: false, visibility: 'public',
+    })
+    expect(selected.visibility).toBe('public')
+    expect(selected.publicUploadConfirmed).toBe(false)
+    const changed = changeSyncRepositoryUrl({ ...selected, publicUploadConfirmed: true }, 'https://github.com/example/other.git')
+    expect(changed.visibility).toBe('unknown')
+    expect(changed.publicUploadConfirmed).toBe(false)
+    expect(selectSyncRepository(form, { name: 'sync', clone_url: 'https://example/sync.git', web_url: '', private: false, visibility: 'internal' }).visibility).toBe('internal')
+  })
   it('rejects invalid intervals and times before saving', () => {
     for (const minutes of [0, 4, 5.5, NaN, 43201]) {
       expect(isDeviceSyncScheduleValid({ mode: 'interval', minutes })).toBe(false)
@@ -29,6 +44,8 @@ describe('device sync UI state', () => {
   })
   it('defaults to GitHub with all startup credential access disabled', () => {
     expect(buildDeviceSyncForm()).toEqual({
+      visibility: 'unknown',
+      publicUploadConfirmed: false,
       provider: 'github',
       remoteUrl: '',
       branch: 'main',

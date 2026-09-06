@@ -50,7 +50,10 @@ import type {
 } from './types'
 import {
   REPOSITORY_LOAD_TIMEOUT_MS,
+  getSyncFailureKind,
   buildDeviceSyncForm,
+  selectSyncRepository,
+  changeSyncRepositoryUrl,
   isDeviceSyncScheduleValid,
   classifyRepositoryLoadFailure,
   getDeviceSyncControls,
@@ -338,13 +341,30 @@ const DeviceSyncPage = ({
     try {
       await action()
     } catch (error) {
-      toast.error(String(error))
+      const message = String(error)
+      const key = message.includes('DEVICE_SYNC_VISIBILITY_UNKNOWN') ? 'visibilityUnknownHelp'
+        : message.includes('DEVICE_SYNC_PUBLIC_UPLOAD_CONFIRMATION') ? 'publicUploadWarning'
+          : message.includes('DEVICE_SYNC_READ_CREDENTIAL_REQUIRED') ? 'readCredentialRequired'
+          : message.includes('DEVICE_SYNC_PUBLIC_READ_FAILED') ? 'publicReadFailed' : null
+      toast.error(key ? t(`deviceSync.${key}`) : ['sync', 'check'].includes(name) ? t(`deviceSync.failureReasons.${getSyncFailureKind(message)}`) : message)
+      if (name === 'sync') {
+        setPreview(null)
+        await refreshSyncActivity().catch(() => undefined)
+      }
     } finally {
       setBusy(null)
     }
   }
 
   const save = () => {
+    if (form.remoteUrl.startsWith('https://') && form.visibility === 'unknown') {
+      toast.error(t('deviceSync.visibilityUnknownHelp'))
+      return
+    }
+    if (form.visibility === 'public' && !form.publicUploadConfirmed) {
+      toast.error(t('deviceSync.publicUploadWarning'))
+      return
+    }
     if (form.autoSync && !isDeviceSyncScheduleValid(form.schedule)) {
       toast.error(t('deviceSync.invalidSchedule'))
       return
@@ -361,6 +381,8 @@ const DeviceSyncPage = ({
           credential_key: form.oauthCredentialKey || null,
           auto_check: form.autoCheck,
           auto_sync: form.autoSync,
+          visibility: form.visibility,
+          public_upload_confirmed: form.publicUploadConfirmed,
           auto_sync_schedule: isDeviceSyncScheduleValid(form.schedule) ? form.schedule : null,
         },
       })
@@ -393,7 +415,7 @@ const DeviceSyncPage = ({
           name: 'skills-hub-sync',
         },
       )
-      setForm((current) => ({ ...current, remoteUrl: repository.clone_url }))
+      setForm((current) => selectSyncRepository(current, repository))
       setRepositories((current) => [
         repository,
         ...current.filter((item) => item.clone_url !== repository.clone_url),
@@ -433,6 +455,8 @@ const DeviceSyncPage = ({
       ...current,
       provider,
       remoteUrl: '',
+      visibility: 'unknown',
+      publicUploadConfirmed: false,
       oauthCredentialKey: '',
       accountLogin: '',
     }))
@@ -558,7 +582,8 @@ const DeviceSyncPage = ({
     }
   }
   const selectRepository = (remoteUrl: string) => {
-    setForm((current) => ({ ...current, remoteUrl }))
+    const repository = repositories.find((item) => item.clone_url === remoteUrl)
+    setForm((current) => repository ? selectSyncRepository(current, repository) : changeSyncRepositoryUrl(current, remoteUrl))
     setRepositoryPickerOpen(reduceRepositoryPicker(true, 'select'))
     setRepositorySearch('')
   }
@@ -612,13 +637,24 @@ const DeviceSyncPage = ({
   }
 
   const savedSchedule = config?.auto_sync ? config.auto_sync_schedule : null
+  const visibilityNeedsConfirmation = Boolean(config?.remote_url.startsWith('https://') && (!config.visibility || config.visibility === 'unknown'))
   const scheduleState = !savedSchedule ? 'disabled'
+    : visibilityNeedsConfirmation || (config?.visibility === 'public' && !config.public_upload_confirmed) ? 'needs_confirmation'
     : synchronizationInProgress ? 'running'
       : conflicts.length ? 'paused'
         : status?.schedule_status?.state === 'disabled' ? 'initializing'
           : status?.schedule_status?.state ?? 'initializing'
   const nextScheduleAt = ['scheduled', 'backoff'].includes(scheduleState)
     ? status?.schedule_status?.next_at : null
+
+  const visibilitySettings = <div className="device-sync-visibility-settings">
+<div className="device-sync-visibility-result">{form.visibility === 'unknown' ? <CircleHelp size={14} aria-hidden="true" /> : <ShieldCheck size={14} aria-hidden="true" />}<output aria-label={t('deviceSync.repositoryVisibility')}>{t(`deviceSync.visibility.${form.visibility}`)}</output>{form.visibility !== 'unknown' ? <span>{t('deviceSync.visibilityIdentifiedBy', { platform: providerName })}</span> : null}</div>
+    {form.visibility === 'unknown' ? <small>{t('deviceSync.visibilityUnknownHelp')}</small> : null}
+    {form.visibility === 'public' ? <label className="device-sync-public-confirmation"><input type="checkbox" checked={form.publicUploadConfirmed} onChange={(event) => setForm({ ...form, publicUploadConfirmed: event.target.checked })} /><span>{t('deviceSync.publicUploadWarning')}</span></label> : null}
+  </div>
+  const readAccessHelp = !form.remoteUrl.startsWith('https://') ? 'readAccessSsh'
+    : form.visibility === 'public' ? 'readAccessPublic'
+      : form.visibility === 'unknown' ? 'visibilityUnknownHelp' : 'readAccessPrivate'
 
   return (
     <div className={`device-sync-page${settingsDrawerOpen ? ' drawer-open' : ''}`} hidden={!active}>
@@ -672,6 +708,7 @@ const DeviceSyncPage = ({
                   </span>
                 </span>
                 <small>{t('deviceSync.lastSyncValue', { value: status?.last_run_at ? new Date(status.last_run_at).toLocaleString() : t('deviceSync.never') })}</small>
+                {experience.syncState === 'failed' ? <p className="device-sync-failure-reason" role="status">{t(`deviceSync.failureReasons.${getSyncFailureKind(history[0]?.status === 'failed' && history[0]?.finished_at === status?.last_run_at ? history[0].error : null)}`)}</p> : null}
               </span>
             </div>
             <div className="device-sync-map">
@@ -688,7 +725,7 @@ const DeviceSyncPage = ({
                     <line className="device-sync-packet download" pathLength="100" x1="100%" y1="29" x2="0" y2="29" />
                   </svg>
                 </div>
-                <div className="device-sync-route-node"><span>{config?.provider === 'github' ? <SiGithub size={23} /> : config?.provider === 'gitlab' ? <SiGitlab size={23} /> : <SiGitee size={23} />}</span><strong>{getRepositoryDisplayName(config?.remote_url ?? '')}</strong><small><LockKeyhole size={11} />{t('deviceSync.privatePlatformRepository', { provider: config?.provider === 'github' ? 'GitHub' : config?.provider === 'gitlab' ? 'GitLab' : 'Gitee' })}</small></div>
+                <div className="device-sync-route-node"><span>{config?.provider === 'github' ? <SiGithub size={23} /> : config?.provider === 'gitlab' ? <SiGitlab size={23} /> : <SiGitee size={23} />}</span><strong>{getRepositoryDisplayName(config?.remote_url ?? '')}</strong><small><LockKeyhole size={11} />{t('deviceSync.platformRepository', { visibility: t(`deviceSync.visibility.${config?.visibility ?? 'unknown'}`), provider: config?.provider === 'github' ? 'GitHub' : config?.provider === 'gitlab' ? 'GitLab' : 'Gitee' })}</small></div>
               </div>
               <aside className="device-sync-other-summary">
                 <strong><Monitor size={18} />{otherDeviceSummary.count ? t('deviceSync.otherDeviceCount', { count: otherDeviceSummary.count }) : t('deviceSync.noOtherDevices')}</strong>
@@ -705,6 +742,7 @@ const DeviceSyncPage = ({
               <button type="button" onClick={() => openSettingsDrawer(true)}>{t('deviceSync.editSchedule')}<ChevronRight size={15} /></button>
             </section>
             <p className="device-sync-independent-note"><CircleHelp size={13} />{t('deviceSync.independentSyncNote')}</p>
+            {visibilityNeedsConfirmation ? <p className="device-sync-visibility-notice" role="status"><AlertTriangle size={16} />{t('deviceSync.visibilityUnknownHelp')}<button className="btn btn-secondary" type="button" onClick={() => openSettingsDrawer()}>{t('deviceSync.syncSettings')}</button></p> : null}
           </section>
         ) : (
           <section className="device-sync-setup-status">
@@ -738,7 +776,7 @@ const DeviceSyncPage = ({
                 {repositoryPickerOpen ? <div id="setup-device-sync-repositories" className="device-sync-repository-picker">{repositoryLoadState === 'loading' ? <div className="device-sync-repository-feedback loading" role="status" aria-live="polite"><LoaderCircle className="spin" size={16} /><span>{t('deviceSync.loadingRepositories')}</span></div> : null}{['error', 'timeout', 'credential-error'].includes(repositoryLoadState) ? <div className="device-sync-repository-feedback error" role="alert"><AlertTriangle size={16} /><span>{repositoryErrorMessage}</span><button type="button" onClick={retryRepositories}>{t('deviceSync.retry')}</button></div> : null}{repositoryLoadState === 'loaded' && repositories.length ? <>{repositories.length > 6 ? <label className="device-sync-repository-search"><Search size={15} /><input type="search" value={repositorySearch} aria-label={t('deviceSync.searchRepositories')} placeholder={t('deviceSync.searchRepositories')} onChange={(event) => setRepositorySearch(event.target.value)} /></label> : null}<div className="device-sync-repository-choices">{filteredRepositories.map((repository) => <label key={repository.clone_url} className={`device-sync-repository-choice${form.remoteUrl === repository.clone_url ? ' selected' : ''}`}><input type="radio" name="device-sync-repository" value={repository.clone_url} checked={form.remoteUrl === repository.clone_url} onChange={(event) => selectRepository(event.target.value)} /><span><strong>{repository.name}</strong>{repository.name === 'skills-hub-sync' ? <small>{t('deviceSync.recommended')}</small> : null}</span><LockKeyhole size={15} /></label>)}</div>{!filteredRepositories.length ? <p className="device-sync-repository-empty">{t('deviceSync.noMatchingRepositories')}</p> : null}</> : null}{repositoryLoadState === 'loaded' && !repositories.length ? <p className="device-sync-repository-empty">{t('deviceSync.noPrivateRepositories')}</p> : null}</div> : null}
               </div> : null}
 
-              <details className="device-sync-advanced"><summary>{t('deviceSync.otherConnectionMethods')}</summary><p>{t('deviceSync.advancedSettingsHelp')}</p><div className="device-sync-advanced-grid"><label className="device-sync-wide"><span>{t('deviceSync.remoteUrl')}</span><input value={form.remoteUrl} placeholder="https://github.com/you/skills-hub-sync.git" onChange={(event) => setForm({ ...form, remoteUrl: event.target.value })} /></label><label><span>{t('deviceSync.branch')}</span><input value={form.branch} onChange={(event) => setForm({ ...form, branch: event.target.value })} /></label><label><span>{t('deviceSync.username')}</span><input value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></label><label className="device-sync-wide"><span>{t('deviceSync.token')}</span><input type="password" value={form.token} placeholder={t('deviceSync.tokenPlaceholder')} onChange={(event) => setForm({ ...form, token: event.target.value })} /><small><ShieldCheck size={13} />{t('deviceSync.tokenHelp')}</small></label></div></details>
+              <details className="device-sync-advanced"><summary>{t('deviceSync.otherConnectionMethods')}</summary><p>{t('deviceSync.advancedSettingsHelp')}</p><div className="device-sync-advanced-grid"><label className="device-sync-wide"><span>{t('deviceSync.remoteUrl')}</span><input value={form.remoteUrl} placeholder="https://github.com/you/skills-hub-sync.git" onChange={(event) => setForm(changeSyncRepositoryUrl(form, event.target.value))} /></label><label><span>{t('deviceSync.branch')}</span><input value={form.branch} onChange={(event) => setForm({ ...form, branch: event.target.value })} /></label><label><span>{t('deviceSync.username')}</span><input value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></label><label className="device-sync-wide"><span>{t('deviceSync.token')}</span><input type="password" value={form.token} placeholder={t('deviceSync.tokenPlaceholder')} onChange={(event) => setForm({ ...form, token: event.target.value })} /><small><ShieldCheck size={13} />{t('deviceSync.tokenHelp')}</small></label></div>{visibilitySettings}</details>
 
               <div className="device-sync-scope"><strong>{t('deviceSync.whatSyncs')}</strong><div><span><Package size={16} /><b>{t('deviceSync.skillContent')}</b></span><span><RefreshCw size={16} /><b>{t('deviceSync.versionHistory')}</b></span><span><GitMerge size={16} /><b>{t('deviceSync.conflictHandling')}</b></span></div><p>{t('deviceSync.localOnlyNote')}</p></div>
             </div>
@@ -749,7 +787,7 @@ const DeviceSyncPage = ({
             {changes ? <section className="device-sync-preview"><strong>{t('deviceSync.previewTitle')}</strong><span>{t('deviceSync.previewSummary', changes)}</span></section> : null}
             <section className="device-sync-panel device-sync-activity-panel"><div className="device-sync-tabs" role="tablist" aria-label={t('deviceSync.activity')}><button className={activityTab === 'devices' ? 'active' : ''} type="button" role="tab" aria-selected={activityTab === 'devices'} onClick={() => setActivityTab('devices')}>{t('deviceSync.devices')}<b className="neutral">{devices.length}</b></button><button className={activityTab === 'history' ? 'active' : ''} type="button" role="tab" aria-selected={activityTab === 'history'} onClick={() => setActivityTab('history')}>{t('deviceSync.history')}</button><button className={activityTab === 'conflicts' ? 'active attention' : ''} type="button" role="tab" aria-selected={activityTab === 'conflicts'} onClick={() => setActivityTab('conflicts')}>{t('deviceSync.conflicts')}{conflicts.length ? <b>{conflicts.length}</b> : null}</button><button className={activityTab === 'trash' ? 'active' : ''} type="button" role="tab" aria-selected={activityTab === 'trash'} onClick={() => setActivityTab('trash')}>{t('deviceSync.trash')}</button><button className="device-sync-settings-trigger" type="button" onClick={() => openSettingsDrawer()}><Settings size={15} />{t('deviceSync.syncSettings')}</button></div>
               {activityTab === 'devices' ? <div className="device-sync-devices"><div className="device-sync-device-row header"><span>{t('deviceSync.device')}</span><span>{t('deviceSync.deviceStatus')}</span><span>{t('deviceSync.lastActive')}</span><span>{t('deviceSync.versionStatus')}</span></div>{deviceStates.length ? deviceStates.map(({ device, state }) => <article className="device-sync-device-row" key={device.id}>{editingDeviceId === device.id ? <form className="device-sync-device-alias-form" onSubmit={(event) => { event.preventDefault(); void saveDeviceAlias(device.id) }}><Monitor size={16} /><input autoFocus maxLength={80} value={deviceAliasDraft} placeholder={device.name} aria-label={t('deviceSync.deviceAlias')} onChange={(event) => setDeviceAliasDraft(event.target.value)} /><button type="submit" disabled={working} aria-label={t('deviceSync.saveDeviceAlias')} title={t('deviceSync.saveDeviceAlias')}>{busy === `device-alias:${device.id}` ? <LoaderCircle className="spin" size={14} /> : <Save size={14} />}</button><button type="button" disabled={working} aria-label={t('deviceSync.cancelDeviceAlias')} title={t('deviceSync.cancelDeviceAlias')} onClick={() => { setEditingDeviceId(null); setDeviceAliasDraft('') }}><X size={14} /></button></form> : <span className="device-sync-device-name"><Monitor size={16} /><span><strong>{device.alias || device.name}</strong>{device.alias ? <small>{device.name}</small> : null}</span>{device.is_current ? <b>{t('deviceSync.currentDevice')}</b> : null}<button type="button" disabled={working} aria-label={t('deviceSync.editDeviceAlias', { name: device.alias || device.name })} title={t('deviceSync.deviceAlias')} onClick={() => editDeviceAlias(device)}><Pencil size={13} /></button></span>}<em className={state}>{t(`deviceSync.deviceState.${state}`)}</em><time>{new Date(device.last_seen_at).toLocaleString()}</time><code className={state === 'pending' ? 'pending' : ''}>{state === 'pending' ? t('deviceSync.versionBehind') : device.last_commit?.slice(0, 8) ?? '—'}</code></article>) : <p className="device-sync-empty">{t('deviceSync.noDevices')}</p>}<p className="device-sync-devices-note"><LockKeyhole size={13} />{t('deviceSync.devicesRouteNote')}</p></div> : null}
-              {activityTab === 'history' ? <div className="device-sync-history-table">{history.length ? history.slice(0, 8).map((item) => <article key={item.id}><time>{new Date(item.started_at).toLocaleString()}</time><strong>{t(`deviceSync.status.${item.status}`, { defaultValue: item.status })}</strong><span>{t('deviceSync.previewSummary', item)}</span><em className={item.status}>{t(`deviceSync.status.${item.status}`, { defaultValue: item.status })}</em></article>) : <p className="device-sync-empty">{t('deviceSync.noHistory')}</p>}</div> : null}
+              {activityTab === 'history' ? <div className="device-sync-history-table">{history.length ? history.slice(0, 8).map((item) => <article key={item.id}><time>{new Date(item.started_at).toLocaleString()}</time><strong>{t(`deviceSync.status.${item.status}`, { defaultValue: item.status })}</strong>{item.status === 'failed' ? <details className="device-sync-failure-details"><summary>{t('deviceSync.failureDetails')}</summary><p>{t(`deviceSync.failureReasons.${getSyncFailureKind(item.error)}`)}</p></details> : <span>{t('deviceSync.previewSummary', item)}</span>}<em className={item.status}>{t(`deviceSync.status.${item.status}`, { defaultValue: item.status })}</em></article>) : <p className="device-sync-empty">{t('deviceSync.noHistory')}</p>}</div> : null}
               {activityTab === 'conflicts' ? <div className="device-sync-conflicts">{conflicts.length ? conflicts.map((conflict) => { const expanded = expandedConflictId === conflict.id; const selection = conflictSelections[conflict.id]; return <article key={conflict.id} className={expanded ? 'expanded' : ''}><button className="device-sync-conflict-summary" type="button" onClick={() => setExpandedConflictId(expanded ? null : conflict.id)}>{expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}<Package size={17} /><strong>{conflict.skill_name}</strong><span>{t(conflict.base_commit ? 'deviceSync.sameFilesChanged' : 'deviceSync.missingCommonBaseline')}</span><em>{t('deviceSync.conflictFiles', { count: conflict.files.length })}</em></button>{expanded ? <div className="device-sync-conflict-detail"><div className="device-sync-conflict-files">{conflict.files.map((file) => <code key={file}>{file}</code>)}</div><div className="device-sync-resolution-options">{(['keep_local', 'use_remote', 'keep_both'] as ConflictResolution[]).map((resolution) => <button key={resolution} className={selection === resolution ? 'selected' : ''} type="button" onClick={() => setConflictSelections((current) => ({ ...current, [conflict.id]: resolution }))}><span>{resolution === 'keep_both' ? <b>{t('deviceSync.recommended')}</b> : null}<strong>{t(`deviceSync.resolution.${resolution}.title`)}</strong></span><small>{t(`deviceSync.resolution.${resolution}.help`)}</small></button>)}</div><div className="device-sync-conflict-footer"><span><ShieldCheck size={14} />{t('deviceSync.conflictSafetyNote')}</span><button className="btn btn-primary" type="button" disabled={!selection || working} onClick={() => selection && resolve(conflict.id, selection)}>{busy === conflict.id ? <LoaderCircle className="spin" size={15} /> : null}{t('deviceSync.applyResolution')}</button></div></div> : null}</article> }) : <p className="device-sync-empty">{t('deviceSync.noConflicts')}</p>}</div> : null}
               {activityTab === 'trash' ? <div className="device-sync-trash-list">{trash.length ? trash.slice(0, 8).map((item) => <article key={item.id}><span><strong>{item.skill_name}</strong><small>{new Date(item.deleted_at).toLocaleString()}</small></span><button className="btn btn-secondary" type="button" disabled={working} onClick={() => restore(item.id)}>{busy === item.id ? <LoaderCircle className="spin" size={15} /> : null}{t('deviceSync.restore')}</button></article>) : <p className="device-sync-empty">{t('deviceSync.trashEmpty')}</p>}</div> : null}
             </section>
@@ -765,7 +803,7 @@ const DeviceSyncPage = ({
               <section><h3>{t('deviceSync.connection')}</h3><div className="device-sync-settings-rows"><div><span><FolderGit2 size={16} />{t('deviceSync.provider')}</span><strong>{providerName}</strong></div><div><span><LogIn size={16} />{t('deviceSync.authorizedAccount')}</span><strong>{form.accountLogin || config.username || '—'}</strong><button type="button" disabled={working || !oauthAvailable} onClick={startAuthorization}>{t('deviceSync.reauthorize')}</button></div><div><span><FolderGit2 size={16} />{t('deviceSync.repository')}</span><strong>{repositoryDisplayName}</strong><button type="button" aria-expanded={repositoryPickerOpen} aria-controls="connected-device-sync-repositories" disabled={working} onClick={toggleRepositoryPicker}>{t(repositoryPickerOpen ? 'deviceSync.collapseRepositories' : 'deviceSync.changeRepository')}{repositoryPickerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button></div></div>
                 {repositoryPickerOpen ? <div id="connected-device-sync-repositories" className="device-sync-repository-picker">{repositoryLoadState === 'loading' ? <div className="device-sync-repository-feedback loading"><LoaderCircle className="spin" size={16} />{t('deviceSync.loadingRepositories')}</div> : null}{repositoryLoadState === 'loaded' && repositories.length ? <>{repositories.length > 6 ? <label className="device-sync-repository-search"><Search size={15} /><input type="search" value={repositorySearch} aria-label={t('deviceSync.searchRepositories')} placeholder={t('deviceSync.searchRepositories')} onChange={(event) => setRepositorySearch(event.target.value)} /></label> : null}<div className="device-sync-inline-repositories">{filteredRepositories.map((repository) => <label key={repository.clone_url}><input type="radio" name="connected-device-sync-repository" value={repository.clone_url} checked={form.remoteUrl === repository.clone_url} onChange={(event) => selectRepository(event.target.value)} />{repository.name}</label>)}</div>{!filteredRepositories.length ? <p className="device-sync-repository-empty">{t('deviceSync.noMatchingRepositories')}</p> : null}</> : null}{repositoryLoadState === 'loaded' && !repositories.length ? <p className="device-sync-repository-empty">{t('deviceSync.noPrivateRepositories')}</p> : null}{['error', 'timeout', 'credential-error'].includes(repositoryLoadState) ? <div className="device-sync-repository-feedback error"><AlertTriangle size={16} />{repositoryErrorMessage}<button type="button" onClick={retryRepositories}>{t('deviceSync.retry')}</button></div> : null}</div> : null}
               </section>
-              <section ref={automationSectionRef} className="device-sync-automation-section" tabIndex={-1} aria-label={t('deviceSync.automation')}><h3>{t('deviceSync.automation')}</h3><div className="device-sync-drawer-options"><label><span><strong>{t('deviceSync.autoCheck')}</strong><small>{t('deviceSync.autoCheckHelp')}</small></span><input type="checkbox" checked={form.autoCheck} onChange={(event) => setForm({ ...form, autoCheck: event.target.checked })} /></label><label><span><strong>{t('deviceSync.autoSync')}</strong><small>{t('deviceSync.autoSyncHelp')}</small></span><input type="checkbox" checked={form.autoSync} onChange={(event) => setForm({ ...form, autoSync: event.target.checked })} /></label></div>
+              <section ref={automationSectionRef} className="device-sync-automation-section" tabIndex={-1} aria-label={t('deviceSync.automation')}><h3>{t('deviceSync.automation')}</h3><div className="device-sync-drawer-options"><label><span><strong>{t('deviceSync.autoCheck')}</strong><small>{t(`deviceSync.${readAccessHelp}`)}</small></span><input type="checkbox" checked={form.autoCheck} onChange={(event) => setForm({ ...form, autoCheck: event.target.checked })} /></label><label><span><strong>{t('deviceSync.autoSync')}</strong><small>{t('deviceSync.autoSyncHelp')}</small></span><input type="checkbox" checked={form.autoSync} onChange={(event) => setForm({ ...form, autoSync: event.target.checked })} /></label></div>
                 {form.autoSync ? <div className="device-sync-schedule">
                   <div className="settings-segmented" role="group" aria-label={t('autoUpdateScheduleMode')}>
                     <button type="button" className={form.schedule.mode === 'interval' ? 'active' : ''} aria-pressed={form.schedule.mode === 'interval'} onClick={() => setForm({ ...form, schedule: { mode: 'interval', minutes: 15 } })}>{t('autoUpdateScheduleInterval')}</button>
@@ -779,7 +817,7 @@ const DeviceSyncPage = ({
                   {!isDeviceSyncScheduleValid(form.schedule) ? <p className="device-sync-schedule-error" role="alert">{t('deviceSync.invalidSchedule')}</p> : null}
                 </div> : null}
               </section>
-              <section><details className="device-sync-advanced"><summary>{t('deviceSync.advancedSettings')}</summary><p>{t('deviceSync.advancedSettingsHelp')}</p><div className="device-sync-advanced-grid"><label className="device-sync-wide"><span>{t('deviceSync.remoteUrl')}</span><input value={form.remoteUrl} onChange={(event) => setForm({ ...form, remoteUrl: event.target.value })} /></label><label><span>{t('deviceSync.branch')}</span><input value={form.branch} onChange={(event) => setForm({ ...form, branch: event.target.value })} /></label><label><span>{t('deviceSync.token')}</span><input type="password" value={form.token} placeholder={config.has_credential ? t('deviceSync.tokenStored') : t('deviceSync.tokenPlaceholder')} onChange={(event) => setForm({ ...form, token: event.target.value })} /></label></div></details></section>
+              <section><details className="device-sync-advanced"><summary>{t('deviceSync.advancedSettings')}</summary><p>{t('deviceSync.advancedSettingsHelp')}</p><div className="device-sync-advanced-grid"><label className="device-sync-wide"><span>{t('deviceSync.remoteUrl')}</span><input value={form.remoteUrl} onChange={(event) => setForm(changeSyncRepositoryUrl(form, event.target.value))} /></label><label><span>{t('deviceSync.branch')}</span><input value={form.branch} onChange={(event) => setForm({ ...form, branch: event.target.value })} /></label><label><span>{t('deviceSync.token')}</span><input type="password" value={form.token} placeholder={config.has_credential ? t('deviceSync.tokenStored') : t('deviceSync.tokenPlaceholder')} onChange={(event) => setForm({ ...form, token: event.target.value })} /></label></div>{visibilitySettings}</details></section>
             </div>
             <footer><button className="btn btn-ghost device-sync-disconnect" type="button" disabled={working || synchronizationInProgress} onClick={disconnect}>{t('deviceSync.disconnect')}</button><span /><button className="btn btn-secondary" type="button" onClick={() => setSettingsDrawerOpen(false)}>{t('cancel')}</button><button className="btn btn-primary" type="button" disabled={!controls.canSave} onClick={save}>{busy === 'save' ? <LoaderCircle className="spin" size={15} /> : null}{t('deviceSync.saveChanges')}</button></footer>
           </aside>

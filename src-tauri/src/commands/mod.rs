@@ -2260,6 +2260,8 @@ pub fn cancel_current_operation(cancel: State<'_, Arc<CancelToken>>) -> Result<(
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DeviceSyncConfigDto {
+    pub visibility: crate::core::device_sync::types::RepositoryVisibility,
+    pub public_upload_confirmed: bool,
     pub provider: ProviderId,
     pub remote_url: String,
     pub branch: String,
@@ -2272,6 +2274,10 @@ pub struct DeviceSyncConfigDto {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct SaveDeviceSyncConfigInput {
+    #[serde(default)]
+    pub visibility: crate::core::device_sync::types::RepositoryVisibility,
+    #[serde(default)]
+    pub public_upload_confirmed: bool,
     pub provider: ProviderId,
     pub remote_url: String,
     pub branch: String,
@@ -2292,6 +2298,8 @@ pub fn get_device_sync_config(
         .get_device_sync_config()
         .map(|config| {
             config.map(|item| DeviceSyncConfigDto {
+                visibility: item.visibility,
+                public_upload_confirmed: item.public_upload_confirmed,
                 provider: item.provider,
                 remote_url: item.remote_url,
                 branch: item.branch,
@@ -2366,6 +2374,9 @@ pub fn save_device_sync_config(
         .filter(|token| !token.is_empty())
         .map(str::to_string);
     let saved = DeviceSyncConfig {
+        visibility: config.visibility,
+        public_upload_confirmed: config.public_upload_confirmed
+            && config.visibility == crate::core::device_sync::types::RepositoryVisibility::Public,
         provider: config.provider,
         remote_url: config.remote_url.trim().to_string(),
         branch: branch.to_string(),
@@ -2434,6 +2445,8 @@ pub fn save_device_sync_config(
         auto_sync: saved.auto_sync,
         auto_sync_schedule: saved.auto_sync_schedule,
         has_credential: saved.credential_key.is_some(),
+        visibility: saved.visibility,
+        public_upload_confirmed: saved.public_upload_confirmed,
     })
 }
 
@@ -2575,8 +2588,8 @@ pub async fn check_device_sync(
         DeviceSyncService::new(&store, &credentials, workspace, central).check()
     })
     .await
-    .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(|_| "DEVICE_SYNC_FAILURE_unknown".to_string())?
+    .map_err(crate::core::device_sync::errors::format_error)
 }
 
 #[tauri::command]
@@ -2591,8 +2604,8 @@ pub async fn run_device_sync(
         DeviceSyncService::new(&store, &credentials, workspace, central).sync()
     })
     .await
-    .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(|_| "DEVICE_SYNC_FAILURE_unknown".to_string())?
+    .map_err(crate::core::device_sync::errors::format_error)
 }
 
 #[tauri::command]

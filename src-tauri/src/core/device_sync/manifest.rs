@@ -145,7 +145,7 @@ pub fn copy_skill_files(source: &Path, destination: &Path) -> Result<()> {
     Ok(())
 }
 
-fn reject_private_keys(root: &Path) -> Result<()> {
+pub(super) fn reject_private_keys(root: &Path) -> Result<()> {
     for entry in WalkDir::new(root).follow_links(false) {
         let entry = entry?;
         if !entry.file_type().is_file() {
@@ -160,8 +160,18 @@ fn reject_private_keys(root: &Path) -> Result<()> {
             bail!("refusing to sync potential private key: {}", name);
         }
         let bytes = fs::read(entry.path())?;
-        let sample = String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]);
-        if sample.contains("BEGIN PRIVATE KEY") || sample.contains("BEGIN OPENSSH PRIVATE KEY") {
+        let contents = String::from_utf8_lossy(&bytes);
+        if [
+            "BEGIN PRIVATE KEY",
+            "BEGIN OPENSSH PRIVATE KEY",
+            "BEGIN RSA PRIVATE KEY",
+            "BEGIN EC PRIVATE KEY",
+            "BEGIN DSA PRIVATE KEY",
+            "BEGIN ENCRYPTED PRIVATE KEY",
+        ]
+        .iter()
+        .any(|marker| contents.contains(marker))
+        {
             bail!("refusing to sync file containing a private key: {}", name);
         }
     }
@@ -312,6 +322,29 @@ mod tests {
         assert!(target.path().join("SKILL.md").exists());
         assert!(!target.path().join(".env").exists());
         assert!(!target.path().join("node_modules").exists());
+    }
+
+    #[test]
+    fn copy_rejects_private_key_headers_beyond_prefix_without_copying_contents() {
+        for label in [
+            "PRIVATE KEY",
+            "OPENSSH PRIVATE KEY",
+            "RSA PRIVATE KEY",
+            "EC PRIVATE KEY",
+            "DSA PRIVATE KEY",
+            "ENCRYPTED PRIVATE KEY",
+        ] {
+            let source = tempfile::tempdir().unwrap();
+            let target = tempfile::tempdir().unwrap();
+            let content = format!(
+                "{}\n-----BEGIN {label}-----\nnot-a-real-secret\n",
+                "documentation\n".repeat(400)
+            );
+            fs::write(source.path().join("notes.md"), content).unwrap();
+            let error = copy_skill_files(source.path(), target.path()).unwrap_err();
+            assert!(!error.to_string().contains("not-a-real-secret"));
+            assert!(!target.path().join("notes.md").exists());
+        }
     }
 
     #[test]

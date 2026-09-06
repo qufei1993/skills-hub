@@ -33,6 +33,7 @@ dirs = "5.0"
 walkdir = "2.5"
 sha2 = "0.10"
 hex = "0.4"
+tempfile = "3"
 git2 = { version = "0.19", features = ["vendored-openssl"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "socks"] }
 dotenvy = "0.15"
@@ -53,5 +54,4 @@ keyring = { version = "3.6.3", default-features = false, features = ["windows-na
 keyring = { version = "3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
 
 [dev-dependencies]
-tempfile = "3"
 mockito = "1"

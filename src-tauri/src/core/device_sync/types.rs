@@ -27,6 +27,10 @@ pub struct CredentialUsage {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct DeviceSyncConfig {
+    #[serde(default)]
+    pub visibility: RepositoryVisibility,
+    #[serde(default)]
+    pub public_upload_confirmed: bool,
     pub provider: ProviderId,
     pub remote_url: String,
     pub branch: String,
@@ -42,6 +46,8 @@ pub struct DeviceSyncConfig {
 impl Default for DeviceSyncConfig {
     fn default() -> Self {
         Self {
+            visibility: RepositoryVisibility::Unknown,
+            public_upload_confirmed: false,
             provider: ProviderId::Github,
             remote_url: String::new(),
             branch: "main".to_string(),
@@ -63,11 +69,37 @@ pub struct ProviderAccount {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RemoteRepository {
+    #[serde(default)]
+    pub visibility: RepositoryVisibility,
     pub name: String,
     pub web_url: String,
     pub clone_url: String,
     pub ssh_url: Option<String>,
     pub private: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RepositoryVisibility {
+    Public,
+    Private,
+    Internal,
+    #[default]
+    Unknown,
+}
+
+impl DeviceSyncConfig {
+    pub fn uses_https(&self) -> bool {
+        reqwest::Url::parse(&self.remote_url).is_ok_and(|url| url.scheme() == "https")
+    }
+
+    pub fn needs_visibility_confirmation(&self) -> bool {
+        self.uses_https() && self.visibility == RepositoryVisibility::Unknown
+    }
+
+    pub fn needs_public_upload_confirmation(&self) -> bool {
+        self.visibility == RepositoryVisibility::Public && !self.public_upload_confirmed
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
