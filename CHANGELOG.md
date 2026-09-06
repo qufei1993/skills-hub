@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - **Compact My Skills header**: Replaced overview cards with scope filters and counts, removed the duplicate scope dropdown, and show a compact sync-issue shortcut only when attention is needed.
 
 ### Added
+- **Korean interface language**: Added Korean translations across the app, a three-language selector, and persistent Korean language preferences. Korean users receive English release notes when viewing app updates.
 - **Multi-device Skill library sync**: Added Git-based device sync with GitHub, GitLab, and Gitee support. Browser authorization is the primary setup path, with Token/SSH retained as advanced options. Users can choose an existing private repository or create one from the app, check changes without modifying files, and run manual sync with optional startup sync.
 - **Safe three-way reconciliation**: Skills are matched by stable identity, source, or identical content. Independent file changes merge automatically, while overlapping edits and delete-versus-edit cases stay isolated per Skill for explicit local, remote, or keep-both resolution.
 - **Local recovery and history**: Actual content changes create Git versions, remote deletions move local Skills to a 30-day recycle bin, and the app records sync runs, conflicts, and recovery actions.
