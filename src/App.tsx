@@ -502,6 +502,10 @@ function App() {
     }
   }, [invokeTauri])
 
+  const handleDeviceSyncSkillsChanged = useCallback(async () => {
+    await Promise.all([loadManagedSkills(), loadTags()])
+  }, [loadManagedSkills, loadTags])
+
   useEffect(() => {
     if (isTauri) {
       loadManagedSkills()
@@ -3611,7 +3615,7 @@ function App() {
         <DeviceSyncPage
           active={activeView === 'device-sync'}
           isTauri={isTauri}
-          onSkillsChanged={loadManagedSkills}
+          onSkillsChanged={handleDeviceSyncSkillsChanged}
               onOpenToolIssues={() => setActiveView('myskills')}
               toolLabels={Object.fromEntries(tools.map((tool) => [tool.id, tool.label]))}
           onConflictCountChange={setDeviceSyncConflictCount}

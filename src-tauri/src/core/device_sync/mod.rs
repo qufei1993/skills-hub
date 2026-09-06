@@ -403,30 +403,57 @@ impl<'a> DeviceSyncService<'a> {
         if !source.is_dir() {
             bail!("device sync trash content is missing");
         }
-        let destination = unique_skill_path(&self.central_root, &entry.skill_name, &entry.skill_id);
-        manifest::copy_local_files(&source, &destination)?;
-        let files = manifest::hash_files(&destination)?;
-        let now = now_ms();
-        self.store
-            .upsert_skill(&crate::core::skill_store::SkillRecord {
-                id: entry.skill_id,
-                name: entry.skill_name,
-                description: None,
-                source_type: "sync_restore".to_string(),
-                source_ref: None,
-                source_subpath: None,
-                source_revision: None,
-                central_path: destination.to_string_lossy().to_string(),
-                content_hash: Some(manifest::aggregate_hash(&files)),
-                created_at: now,
-                updated_at: now,
-                last_sync_at: None,
-                last_seen_at: now,
-                enabled: true,
-                status: "ok".to_string(),
-            })?;
+        anyhow::ensure!(
+            self.store.get_skill_by_id(&entry.skill_id)?.is_none(),
+            "Skill already exists; cannot overwrite it from the recycle bin"
+        );
+        let metadata = self.store.device_sync_trash_metadata(trash_id)?;
+        let description = match &metadata {
+            Some(metadata) => metadata.description.clone(),
+            None => crate::core::installer::parse_skill_md(&source.join("SKILL.md"))
+                .and_then(|(_, description)| description),
+        };
+        let tags = metadata.map(|metadata| metadata.tags).unwrap_or_default();
+        fs::create_dir_all(&self.central_root)?;
+        let directory_name: String = entry
+            .skill_name
+            .chars()
+            .filter(|c| c.is_alphanumeric() || matches!(c, '-' | '_'))
+            .take(64)
+            .collect();
+        let restored_directory = tempfile::Builder::new()
+            .prefix(&format!("{directory_name}-restored-"))
+            .tempdir_in(&self.central_root)?;
+        let destination = restored_directory.path().to_path_buf();
+        (|| -> Result<()> {
+            manifest::copy_local_files(&source, &destination)?;
+            let files = manifest::hash_files(&destination)?;
+            let now = now_ms();
+            self.store.restore_device_sync_trash_record(
+                trash_id,
+                &crate::core::skill_store::SkillRecord {
+                    id: entry.skill_id,
+                    name: entry.skill_name,
+                    description,
+                    source_type: "sync_restore".to_string(),
+                    source_ref: None,
+                    source_subpath: None,
+                    source_revision: None,
+                    central_path: destination.to_string_lossy().to_string(),
+                    content_hash: Some(manifest::aggregate_hash(&files)),
+                    created_at: now,
+                    updated_at: now,
+                    last_sync_at: None,
+                    last_seen_at: now,
+                    enabled: true,
+                    status: "ok".to_string(),
+                },
+                &tags,
+            )
+        })()?;
+        let _ = restored_directory.keep();
         let _ = fs::remove_dir_all(source);
-        self.store.remove_device_sync_trash(trash_id)
+        Ok(())
     }
 
     fn sync_inner(&self) -> Result<SyncRunResult> {
@@ -958,7 +985,6 @@ impl<'a> DeviceSyncService<'a> {
                     .with_context(|| format!("move deleted skill {:?} to trash", source))?;
             }
             let deleted_at = now_ms();
-            self.store.delete_skill(id)?;
             self.store.add_device_sync_trash(&TrashEntry {
                 id: trash_id,
                 skill_id: id.clone(),
@@ -967,6 +993,7 @@ impl<'a> DeviceSyncService<'a> {
                 deleted_at,
                 expires_at: deleted_at + 30 * 24 * 60 * 60 * 1000,
             })?;
+            self.store.delete_skill(id)?;
         }
         Ok(())
     }
@@ -1688,6 +1715,126 @@ mod tests {
             "# Local edit"
         );
         assert!(store.list_device_sync_conflicts().unwrap().is_empty());
+    }
+
+    #[test]
+    fn trash_restore_preserves_description_and_tags_after_restart() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let (_, config) = seed_remote(root.path());
+        let store = make_store(root.path(), "restore-meta", &config);
+        let central = root.path().join("central");
+        add_skill_in_directory(
+            &store,
+            &central,
+            "one",
+            "one",
+            "---\nname: one\ndescription: file description\n---\n# One",
+        );
+        let mut original = store.get_skill_by_id("one").unwrap().unwrap();
+        original.description = Some("Custom saved description".into());
+        store.upsert_skill(&original).unwrap();
+        store
+            .set_skill_tag_names("one", &["写作".into(), "Research".into()])
+            .unwrap();
+        let credentials = MemoryCredentialStore::default();
+        let workspace = root.path().join("workspace");
+        let service =
+            DeviceSyncService::new(&store, &credentials, workspace.clone(), central.clone());
+        service
+            .apply_remote_deletions(&MergePlan {
+                delete_local: BTreeSet::from(["one".into()]),
+                ..MergePlan::default()
+            })
+            .unwrap();
+        let trash = store.list_device_sync_trash().unwrap().remove(0);
+        let metadata_key = format!("device_sync.trash_metadata.{}", trash.id);
+        let saved = store.get_setting(&metadata_key).unwrap().unwrap();
+        store
+            .set_setting(&metadata_key, r#"{"description":"Saved","tags":[""]}"#)
+            .unwrap();
+        assert!(service.restore_trash(&trash.id).is_err());
+        assert!(store.get_skill_by_id("one").unwrap().is_none());
+        assert!(Path::new(&trash.trash_path).join("SKILL.md").is_file());
+        assert_eq!(store.list_device_sync_trash().unwrap().len(), 1);
+        assert_eq!(fs::read_dir(&central).unwrap().count(), 0);
+        store.set_setting(&metadata_key, &saved).unwrap();
+        for tag in store.list_tags_with_counts().unwrap() {
+            store.delete_tag(tag.id).unwrap();
+        }
+        let reopened = SkillStore::new(store.db_path().to_path_buf());
+        reopened.ensure_schema().unwrap();
+        DeviceSyncService::new(&reopened, &credentials, workspace, central)
+            .restore_trash(&trash.id)
+            .unwrap();
+        let restored = reopened.get_skill_by_id("one").unwrap().unwrap();
+        assert_eq!(restored.description, original.description);
+        assert_eq!(
+            reopened
+                .get_skill_tags("one")
+                .unwrap()
+                .into_iter()
+                .map(|t| t.name)
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["写作".into(), "Research".into()])
+        );
+        assert!(Path::new(&restored.central_path).join("SKILL.md").is_file());
+        assert!(reopened.list_device_sync_trash().unwrap().is_empty());
+    }
+
+    #[test]
+    fn legacy_trash_restore_reads_description_from_skill_md() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let (_, config) = seed_remote(root.path());
+        let store = make_store(root.path(), "legacy-restore", &config);
+        let source = root.path().join("old-trash");
+        fs::create_dir(&source).unwrap();
+        fs::write(
+            source.join("SKILL.md"),
+            "---\nname: one\ndescription: Legacy description\n---\n# One",
+        )
+        .unwrap();
+        store
+            .add_device_sync_trash(&TrashEntry {
+                id: "old".into(),
+                skill_id: "one".into(),
+                skill_name: "one".into(),
+                trash_path: source.to_string_lossy().into(),
+                deleted_at: 1,
+                expires_at: i64::MAX,
+            })
+            .unwrap();
+        let credentials = MemoryCredentialStore::default();
+        let service = DeviceSyncService::new(
+            &store,
+            &credentials,
+            root.path().join("workspace"),
+            root.path().join("central"),
+        );
+        let central = root.path().join("central");
+        fs::create_dir_all(central.join("one")).unwrap();
+        fs::create_dir_all(central.join("one-one/SKILL.md")).unwrap();
+        fs::write(central.join("one-one/keep.txt"), "existing skill").unwrap();
+        service.restore_trash("old").unwrap();
+        assert_eq!(
+            fs::read_to_string(central.join("one-one/keep.txt")).unwrap(),
+            "existing skill"
+        );
+        assert_eq!(
+            store
+                .get_skill_by_id("one")
+                .unwrap()
+                .unwrap()
+                .description
+                .as_deref(),
+            Some("Legacy description")
+        );
+        assert!(store.get_skill_tags("one").unwrap().is_empty());
     }
 
     #[test]

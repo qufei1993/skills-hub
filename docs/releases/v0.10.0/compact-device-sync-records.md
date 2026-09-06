@@ -72,3 +72,12 @@ History now displays all loaded records, with an option to load older records be
 下载的托管副本可正常重复分发、删除及迁移；真正的本地原始目录仍受保护。迁移同时重定向托管路径和自绑定来源。旧版导入推断只使用有结束时间的记录，避免崩溃留下的同步状态影响后来安装的 Skill。历史列表支持继续加载更早记录，不再隐藏第 9 条及第 51 条以后的内容。
 
 Validation: `npm run check` passed (160 frontend tests, 352 Rust tests, lint, build, formatting, and clippy). Regression failures were reproduced before their fixes for snapshot identity, resolution history, executable permissions, legacy status fallback, abandoned-run inference, self-bound source migration, existing symlink redistribution, and older history access. The working branch’s normal `tauri:dev` process rebuilt and started successfully.
+
+
+## Recycle-bin metadata / 回收站元数据
+
+Manual and remote deletions snapshot the saved description and tag names in local settings together with the recycle-bin entry, before deleting the Skill record. Restore atomically recreates the Skill and tags and consumes the entry, refreshes the Skill and tag lists, and preserves the backup on failure. An existing Skill ID is not overwritten. Legacy entries without snapshots can recover descriptions from SKILL.md; missing legacy tags are not guessed. No database schema or shared sync format changes are required.
+
+手动删除及远端同步删除均在删除 Skill 记录前，保存描述和标签名称到本机回收站元数据。恢复时原子还原 Skill、标签关联并移除回收站记录，同时刷新标签计数；恢复失败保留备份，不覆盖已有同 ID 的 Skill。旧条目从 SKILL.md 补充描述，无法凭空补回未保存的旧标签。不修改数据库结构及跨设备同步格式。
+
+Restore validation: `npm run check` passed with 160 frontend and 354 Rust tests. Tests cover restart, saved description precedence, tag recreation, invalid-tag rollback, legacy description fallback, and existing-directory collisions. The normal working-branch Tauri development app rebuilt and started.

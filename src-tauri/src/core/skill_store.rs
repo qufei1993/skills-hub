@@ -153,6 +153,12 @@ pub struct SkillStore {
     db_path: PathBuf,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) struct TrashMetadata {
+    pub description: Option<String>,
+    pub tags: Vec<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct SkillRecord {
     pub id: String,
@@ -803,7 +809,8 @@ impl SkillStore {
 
     pub fn add_device_sync_trash(&self, entry: &TrashEntry) -> Result<()> {
         self.with_conn(|conn| {
-            conn.execute(
+            let tx = conn.unchecked_transaction()?;
+            tx.execute(
                 "INSERT OR REPLACE INTO device_sync_tombstones
                  (id, skill_id, skill_name, trash_path, deleted_at, expires_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -816,6 +823,45 @@ impl SkillStore {
                     entry.expires_at
                 ],
             )?;
+            let description: Option<Option<String>> = tx.query_row("SELECT description FROM skills WHERE id=?1", params![entry.skill_id], |row| row.get(0)).optional()?;
+            if let Some(description) = description {
+                let mut statement = tx.prepare("SELECT t.name FROM skill_tags t JOIN skill_tag_links l ON t.id=l.tag_id WHERE l.skill_id=?1 ORDER BY t.name")?;
+                let tags = statement.query_map(params![entry.skill_id], |row| row.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
+                let metadata = TrashMetadata { description, tags };
+                tx.execute("INSERT INTO settings (key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![format!("device_sync.trash_metadata.{}", entry.id), serde_json::to_string(&metadata)?])?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    pub(crate) fn device_sync_trash_metadata(&self, id: &str) -> Result<Option<TrashMetadata>> {
+        self.get_setting(&format!("device_sync.trash_metadata.{id}"))?
+            .map(|value| serde_json::from_str(&value).context("decode recycle bin metadata"))
+            .transpose()
+    }
+
+    pub(crate) fn restore_device_sync_trash_record(
+        &self,
+        id: &str,
+        skill: &SkillRecord,
+        tags: &[String],
+    ) -> Result<()> {
+        self.with_conn(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM skills WHERE id=?1)", params![skill.id], |row| row.get(0))?;
+            anyhow::ensure!(!exists, "Skill already exists; cannot overwrite it from the recycle bin");
+            let pending: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM device_sync_tombstones WHERE id=?1 AND skill_id=?2)", params![id, skill.id], |row| row.get(0))?;
+            anyhow::ensure!(pending, "device sync trash entry not found");
+            upsert_skill_with_conn(&tx, skill)?;
+            for name in tags {
+                let normalized = normalize_tag_name(name)?;
+                tx.execute("INSERT INTO skill_tags (name,created_at,updated_at) VALUES (?1,?2,?2) ON CONFLICT(name) DO NOTHING", params![normalized, now_ms()])?;
+                tx.execute("INSERT OR IGNORE INTO skill_tag_links (skill_id,tag_id,created_at) SELECT ?1,id,?3 FROM skill_tags WHERE name=?2 COLLATE NOCASE", params![skill.id,normalized,now_ms()])?;
+            }
+            tx.execute("DELETE FROM device_sync_tombstones WHERE id=?1", params![id])?;
+            tx.execute("DELETE FROM settings WHERE key=?1", params![format!("device_sync.trash_metadata.{id}")])?;
+            tx.commit()?;
             Ok(())
         })
     }
@@ -838,16 +884,6 @@ impl SkillStore {
             })?;
             rows.collect::<std::result::Result<Vec<_>, _>>()
                 .map_err(Into::into)
-        })
-    }
-
-    pub fn remove_device_sync_trash(&self, id: &str) -> Result<()> {
-        self.with_conn(|conn| {
-            conn.execute(
-                "DELETE FROM device_sync_tombstones WHERE id = ?1",
-                params![id],
-            )?;
-            Ok(())
         })
     }
 

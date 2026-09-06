@@ -1784,7 +1784,7 @@ pub fn backfill_skill_descriptions(store: &SkillStore) {
     }
 }
 
-fn parse_skill_md(path: &Path) -> Option<(String, Option<String>)> {
+pub(crate) fn parse_skill_md(path: &Path) -> Option<(String, Option<String>)> {
     parse_skill_md_with_reason(path).ok()
 }
 
