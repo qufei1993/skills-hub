@@ -81,3 +81,24 @@ Manual and remote deletions snapshot the saved description and tag names in loca
 手动删除及远端同步删除均在删除 Skill 记录前，保存描述和标签名称到本机回收站元数据。恢复时原子还原 Skill、标签关联并移除回收站记录，同时刷新标签计数；恢复失败保留备份，不覆盖已有同 ID 的 Skill。旧条目从 SKILL.md 补充描述，无法凭空补回未保存的旧标签。不修改数据库结构及跨设备同步格式。
 
 Restore validation: `npm run check` passed with 160 frontend and 354 Rust tests. Tests cover restart, saved description precedence, tag recreation, invalid-tag rollback, legacy description fallback, and existing-directory collisions. The normal working-branch Tauri development app rebuilt and started.
+
+
+## Unbound local sources / 未绑定本机来源
+
+Supersedes the earlier self-bound managed-source behavior: first-time local imports retain a null local source path, whereas already-installed Skills keep their own original source. The portable representation remains local with no machine path, so device-only ownership does not create sync differences. Missing bindings are informational, not source errors; manual source updates are disabled and automatic source updates skip them. Device synchronization and tool distribution remain available. Legacy imported/self-bound paths are cleared by the next sync without removing genuine local installation sources. No schema change or release build is needed for these local tests.
+
+本规则替代此前将来源绑定到托管副本的实现：首次接收时本机来源为空；B 已有同一 Skill 时保留 B 的原始来源。来源缺省不计异常，禁用本机来源更新并从自动更新候选中排除，但仍支持正常使用、工具分发和设备同步。旧版自绑定和外来路径在下一次同步时修复。
+
+Local validation: 162 frontend and 356 Rust tests passed, including conservative legacy ownership detection and clearing obsolete permission failures after unbinding. Type checks, Rust formatting and clippy passed; ESLint reports no errors and one pre-existing main-branch hook-dependency warning. Per the user's request, no production build, installer packaging, or development-app rebuild was run for this change; only test compilation and static checking were performed. Changes remain local for review.
+
+## Source update precedence and same-name imports / 来源更新优先级与同名导入
+
+Each device keeps its own bound local-directory or Git source. The shared manifest retains the repository's portable source metadata separately, preventing a device-specific binding from producing repeated metadata changes. A per-source baseline records the content last imported from that source: if device sync has since delivered newer content while the source remains unchanged, scheduled source updates leave the synchronized content intact; a real source change still updates the managed Skill. An explicit user-requested source update remains authoritative. Legacy bound Skills acquire a conservative baseline from their managed content immediately before the first remote replacement.
+
+每台设备继续保留自己绑定的本地目录或 Git 来源，共享清单单独保留仓库中的可移植来源信息，避免本机绑定造成反复的元数据变化。系统记录“上次从来源导入的内容”基准：如果设备同步已带来较新内容，而来源本身没有变化，定时来源更新不会再把旧内容覆盖回来；来源确有变化时仍正常更新。用户主动执行的来源更新仍明确以本机来源为准。旧版已绑定 Skill 在首次远端替换前，以当时的托管内容补建保守基准。
+
+Incoming Skills reserve their managed paths for the complete batch. Same-name Skills, colliding short IDs, symlinks, and pre-existing unmanaged directories therefore receive incremented unique paths without overwriting or transaction failure.
+
+同一批下载会预留全部托管路径；同名 Skill、相同短 ID、符号链接及已有非托管目录发生冲突时，会继续选择带递增编号的唯一目录，避免覆盖或事务失败。
+
+Follow-up validation: 162 frontend and 361 Rust tests passed. Type checks, Rust formatting, and clippy passed; ESLint reports no errors and the existing main-branch hook-dependency warning. Regression tests cover local and Git source baselines, missing legacy baselines, explicit source updates, recovered source-error state, changed Git revisions, and same-name directory collisions. No production build, installer package, or development-app restart was run.

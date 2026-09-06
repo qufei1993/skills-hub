@@ -354,7 +354,7 @@ impl<'a> DeviceSyncService<'a> {
                 let new_id = Uuid::new_v4().to_string();
                 let source = PathBuf::from(&local.central_path);
                 let duplicate_name = format!("{} (Local)", local.name);
-                let destination = unique_skill_path(&self.central_root, &duplicate_name, &new_id);
+                let destination = unique_skill_path(&self.central_root, &duplicate_name, &new_id)?;
                 manifest::copy_local_files(&source, &destination)?;
                 let mut duplicate = local;
                 duplicate.id = new_id;
@@ -886,6 +886,12 @@ impl<'a> DeviceSyncService<'a> {
         let mut replacements = Vec::<PreparedDirReplacement>::new();
         let mut records = Vec::new();
         let mut distribution = Vec::new();
+        let mut reserved: BTreeSet<PathBuf> = self
+            .store
+            .list_skills()?
+            .into_iter()
+            .map(|skill| PathBuf::from(skill.central_path))
+            .collect();
         for (id, skill) in &manifest.skills {
             if conflicts.contains(id) {
                 continue;
@@ -895,10 +901,11 @@ impl<'a> DeviceSyncService<'a> {
                 continue;
             }
             let existing = self.store.get_skill_by_id(id)?;
-            let destination = existing
-                .as_ref()
-                .map(|record| PathBuf::from(&record.central_path))
-                .unwrap_or_else(|| unique_skill_path(&self.central_root, &skill.name, id));
+            let destination = match &existing {
+                Some(record) => PathBuf::from(&record.central_path),
+                None => unique_skill_path_reserved(&self.central_root, &skill.name, id, &reserved)?,
+            };
+            reserved.insert(destination.clone());
             let (staging, expected) = manifest::prepare_library_directory(&source, &destination)?;
             let new_hash = hash_dir_strict(staging.path())?;
             let previous_conflict_hash = if destination.exists() {
@@ -919,12 +926,16 @@ impl<'a> DeviceSyncService<'a> {
             }
             let mut record = manifest::record_from_portable(skill, &destination, now_ms());
             if let Some(existing) = existing {
-                if existing.source_type == "local"
-                    && record.source_type == "local"
-                    && !self
-                        .store
-                        .was_skill_imported_by_device_sync(id, existing.created_at)?
+                if existing
+                    .source_ref
+                    .as_deref()
+                    .is_some_and(|value| !value.trim().is_empty())
+                    && (existing.source_type != "local"
+                        || !self
+                            .store
+                            .was_skill_imported_by_device_sync(id, existing.created_at)?)
                 {
+                    record.source_type = existing.source_type.clone();
                     record.source_ref = existing.source_ref.clone();
                     record.source_subpath = existing.source_subpath.clone();
                     record.source_revision = existing.source_revision.clone();
@@ -945,7 +956,14 @@ impl<'a> DeviceSyncService<'a> {
         for replacement in &replacements {
             replacement.verify_backup_unchanged()?;
         }
-        self.store.commit_device_sync_library(&records, &[])?;
+        let sources = manifest
+            .skills
+            .iter()
+            .filter(|(id, _)| records.iter().any(|(record, _)| &record.id == *id))
+            .map(|(id, skill)| (id.clone(), manifest::SharedSource::from_skill(skill)))
+            .collect();
+        self.store
+            .commit_device_sync_library_with_sources(&records, &[], &sources)?;
         for replacement in &mut replacements {
             replacement.commit();
         }
@@ -1215,13 +1233,38 @@ fn summarize(plan: &MergePlan, local: &SyncManifest, remote: &SyncManifest) -> S
     summary
 }
 
-fn unique_skill_path(root: &Path, name: &str, id: &str) -> PathBuf {
+fn unique_skill_path(root: &Path, name: &str, id: &str) -> Result<PathBuf> {
+    unique_skill_path_reserved(root, name, id, &BTreeSet::new())
+}
+
+fn unique_skill_path_reserved(
+    root: &Path,
+    name: &str,
+    id: &str,
+    reserved: &BTreeSet<PathBuf>,
+) -> Result<PathBuf> {
+    let available = |path: &Path| -> Result<bool> {
+        match path.symlink_metadata() {
+            Ok(_) => Ok(false),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok(!reserved.contains(path))
+            }
+            Err(error) => Err(error).with_context(|| format!("inspect Skill path {:?}", path)),
+        }
+    };
     let candidate = root.join(name);
-    if !candidate.exists() {
-        return candidate;
+    if available(&candidate)? {
+        return Ok(candidate);
     }
     let short = id.chars().take(8).collect::<String>();
-    root.join(format!("{}-{}", name, short))
+    let stem = format!("{}-{}", name, short);
+    let mut candidate = root.join(&stem);
+    let mut suffix = 2;
+    while !available(&candidate)? {
+        candidate = root.join(format!("{stem}-{suffix}"));
+        suffix += 1;
+    }
+    Ok(candidate)
 }
 
 fn reconcile_identities(
@@ -2517,6 +2560,163 @@ mod tests {
     }
 
     #[test]
+    fn synced_content_survives_unchanged_local_source_updates() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let (_, config) = seed_remote(root.path());
+        let credentials = MemoryCredentialStore::default();
+        let store = make_store(root.path(), "source-guard", &config);
+        let central = root.path().join("central");
+        add_skill(&store, &central, "one", "old");
+        let source = root.path().join("source");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "old").unwrap();
+        let mut record = store.get_skill_by_id("one").unwrap().unwrap();
+        record.source_type = "local".into();
+        record.source_ref = Some(source.to_string_lossy().into());
+        store.upsert_skill(&record).unwrap();
+        let service = DeviceSyncService::new(
+            &store,
+            &credentials,
+            root.path().join("ws"),
+            central.clone(),
+        );
+        let repo = root.path().join("incoming");
+        let mut incoming = SyncManifest::default();
+        manifest::export_library(&store, &repo).unwrap();
+        fs::write(skill_dir(&repo, "one").join("SKILL.md"), "remote new").unwrap();
+        incoming.skills = SyncManifest::read(&repo).unwrap().skills;
+        service
+            .apply_repository_to_library(&incoming, &repo, &BTreeSet::new())
+            .unwrap();
+        store
+            .delete_setting("device_sync.source_baseline.one")
+            .unwrap();
+        let app = tauri::test::mock_app();
+        let result = crate::core::installer::update_managed_skill_from_source_with_lock_held(
+            app.handle(),
+            &store,
+            "one",
+            true,
+        )
+        .unwrap();
+        assert!(!result.changed);
+        assert_eq!(
+            fs::read_to_string(central.join("one/SKILL.md")).unwrap(),
+            "remote new"
+        );
+        fs::write(source.join("SKILL.md"), "local new").unwrap();
+        let result = crate::core::installer::update_managed_skill_from_source_with_lock_held(
+            app.handle(),
+            &store,
+            "one",
+            true,
+        )
+        .unwrap();
+        assert!(result.changed);
+        assert_eq!(
+            fs::read_to_string(central.join("one/SKILL.md")).unwrap(),
+            "local new"
+        );
+    }
+
+    #[test]
+    fn incoming_source_type_never_replaces_an_existing_device_binding() {
+        for (local_type, remote_type) in [("local", "git"), ("git", "local")] {
+            let root = tempfile::tempdir().unwrap();
+            let (_, config) = seed_remote(root.path());
+            let store = make_store(root.path(), "binding", &config);
+            let central = root.path().join("central");
+            add_skill(&store, &central, "one", "old");
+            let mut original = store.get_skill_by_id("one").unwrap().unwrap();
+            original.source_type = local_type.into();
+            original.source_ref = Some("device-owned-source".into());
+            store.upsert_skill(&original).unwrap();
+            let repo = root.path().join("incoming");
+            let mut manifest = manifest::export_library(&store, &repo).unwrap();
+            manifest.skills.get_mut("one").unwrap().source_type = remote_type.into();
+            if remote_type == "local" {
+                manifest.skills.get_mut("one").unwrap().source_ref = None;
+            }
+            let credentials = MemoryCredentialStore::default();
+            let service =
+                DeviceSyncService::new(&store, &credentials, root.path().join("ws"), central);
+            service
+                .apply_repository_to_library(&manifest, &repo, &BTreeSet::new())
+                .unwrap();
+            let actual = store.get_skill_by_id("one").unwrap().unwrap();
+            assert_eq!(actual.source_type, original.source_type);
+            assert_eq!(actual.source_ref, original.source_ref);
+            assert_eq!(actual.source_subpath, original.source_subpath);
+            let exported =
+                manifest::export_library(&store, &root.path().join("next-export")).unwrap();
+            assert_eq!(
+                manifest::metadata_hash(&exported.skills["one"]),
+                manifest::metadata_hash(&manifest.skills["one"]),
+                "device bindings must not create new shared metadata changes"
+            );
+        }
+    }
+
+    #[test]
+    fn same_name_downloads_preserve_both_skills_and_existing_directories() {
+        let root = tempfile::tempdir().unwrap();
+        let (_, config) = seed_remote(root.path());
+        let source = make_store(root.path(), "sender", &config);
+        let central_a = root.path().join("a");
+        add_skill_in_directory(
+            &source,
+            &central_a,
+            "aaaaaaaa-one",
+            "first",
+            "first content",
+        );
+        add_skill_in_directory(
+            &source,
+            &central_a,
+            "aaaaaaaa-two",
+            "second",
+            "second content",
+        );
+        for mut skill in source.list_skills().unwrap() {
+            skill.name = "shared".into();
+            source.upsert_skill(&skill).unwrap();
+        }
+        let repo = root.path().join("repo");
+        let manifest = manifest::export_library(&source, &repo).unwrap();
+        let destination = make_store(root.path(), "receiver", &config);
+        let central_b = root.path().join("b");
+        fs::create_dir_all(central_b.join("shared-aaaaaaaa")).unwrap();
+        fs::write(central_b.join("shared-aaaaaaaa/keep"), "untouched").unwrap();
+        let credentials = MemoryCredentialStore::default();
+        let service = DeviceSyncService::new(
+            &destination,
+            &credentials,
+            root.path().join("ws"),
+            central_b.clone(),
+        );
+        service
+            .apply_repository_to_library(&manifest, &repo, &BTreeSet::new())
+            .unwrap();
+        for (id, expected) in [
+            ("aaaaaaaa-one", "first content"),
+            ("aaaaaaaa-two", "second content"),
+        ] {
+            let record = destination.get_skill_by_id(id).unwrap().unwrap();
+            assert_eq!(
+                fs::read_to_string(Path::new(&record.central_path).join("SKILL.md")).unwrap(),
+                expected
+            );
+        }
+        assert_eq!(
+            fs::read_to_string(central_b.join("shared-aaaaaaaa/keep")).unwrap(),
+            "untouched"
+        );
+    }
+
+    #[test]
     fn local_source_paths_stay_on_their_device_and_legacy_imports_are_repaired() {
         let _guard = TEST_SYNC_LOCK
             .lock()
@@ -2553,10 +2753,16 @@ mod tests {
         let sb = DeviceSyncService::new(&b, &credentials, wb, root.path().join("central-b"));
         sb.sync().unwrap();
         let mut imported = b.get_skill_by_id("one").unwrap().unwrap();
-        assert_eq!(
-            imported.source_ref.as_deref(),
-            Some(imported.central_path.as_str())
-        );
+        assert_eq!(imported.source_ref.as_deref(), None);
+        imported.source_ref = Some(imported.central_path.clone());
+        b.upsert_skill(&imported).unwrap();
+        assert_eq!(sb.sync().unwrap().changes, SyncChangeSummary::default());
+        assert!(b
+            .get_skill_by_id("one")
+            .unwrap()
+            .unwrap()
+            .source_ref
+            .is_none());
         // Simulate the previous release's imported foreign path, even though it exists here.
         b.delete_setting("device_sync.source_origin.one").unwrap();
         imported.source_ref = owner.source_ref.clone();
@@ -2566,15 +2772,24 @@ mod tests {
             .unwrap();
         assert_eq!(sb.sync().unwrap().changes, SyncChangeSummary::default());
         let repaired = b.get_skill_by_id("one").unwrap().unwrap();
-        assert_eq!(
-            repaired.source_ref.as_deref(),
-            Some(repaired.central_path.as_str())
-        );
+        assert_eq!(repaired.source_ref.as_deref(), None);
         assert!(repaired.source_subpath.is_none());
         assert_eq!(repaired.status, "ok");
         assert!(b.source_checks().unwrap().get("one").unwrap().0.is_none());
+        let mut obsolete = repaired.clone();
+        obsolete.source_ref = owner.source_ref.clone();
+        b.upsert_skill(&obsolete).unwrap();
+        b.record_source_failure("one", "Permission denied").unwrap();
+        sb.sync().unwrap();
+        assert_eq!(b.get_skill_by_id("one").unwrap().unwrap().status, "ok");
+        assert!(b.source_checks().unwrap().get("one").unwrap().0.is_none());
         let app = tauri::test::mock_app();
-        crate::core::installer::update_managed_skill_from_source(app.handle(), &b, "one").unwrap();
+        let err = crate::core::installer::update_managed_skill_from_source(app.handle(), &b, "one")
+            .err()
+            .unwrap();
+        assert!(err.to_string().starts_with("SKILL_SOURCE_UNBOUND|"));
+        assert_eq!(b.get_skill_by_id("one").unwrap().unwrap().status, "ok");
+        assert!(b.source_checks().unwrap().get("one").unwrap().0.is_none());
         b.delete_skill("one").unwrap();
         assert!(b
             .get_setting("device_sync.source_origin.one")

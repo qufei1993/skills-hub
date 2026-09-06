@@ -594,3 +594,26 @@ fn unchanged_skill_is_checked_but_not_counted_as_updated() {
         result.unchanged + result.updated + result.failed
     );
 }
+
+#[test]
+fn unbound_local_skills_are_not_source_update_candidates() {
+    let (_dir, store) = make_store();
+    let mut unbound = make_skill("unbound", "local", "/central/unbound");
+    unbound.source_ref = None;
+    store.upsert_skill(&unbound).unwrap();
+    store
+        .upsert_skill(&make_skill("bound", "local", "/central/bound"))
+        .unwrap();
+    store
+        .upsert_skill(&make_skill("git", "git", "/central/git"))
+        .unwrap();
+    let entries = super::list_auto_update_skill_entries(&store).unwrap();
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry.skill_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["bound", "git"]
+    );
+    assert_eq!(super::count_local_auto_update_skills(&store).unwrap().0, 1);
+}

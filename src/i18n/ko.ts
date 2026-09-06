@@ -377,6 +377,8 @@ export const ko = {
       "lastVersion": "마지막 버전",
       "previewTitle": "변경사항 발견",
       "changeDetails": "변경 내역 보기",
+      "unboundSource": "기기 동기화 · 로컬 원본 미연결",
+      "unboundSourceHelp": "이 Skill은 기기 동기화로 업데이트됩니다. 로컬 원본이 연결되지 않아 로컬 원본에서 업데이트할 수 없습니다.",
       "loadMoreHistory": "이전 기록 불러오기",
       "historyLoadFailed": "기록을 불러오지 못했습니다. 다시 시도해 주세요.",
       "legacyHistoryNote": "이전 버전 집계 · 미보정",

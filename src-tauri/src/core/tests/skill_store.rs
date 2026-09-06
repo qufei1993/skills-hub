@@ -349,6 +349,9 @@ fn device_alias_is_local_and_preserves_the_discovered_name() {
 fn changing_sync_repository_clears_repository_scoped_state() {
     let (_dir, store) = make_store();
     store
+        .set_setting("device_sync.shared_source.one", "old repository")
+        .unwrap();
+    store
         .upsert_device_sync_device(&crate::core::device_sync::types::DeviceSyncDevice {
             id: "old-device".to_string(),
             name: "Old device".to_string(),
@@ -365,6 +368,10 @@ fn changing_sync_repository_clears_repository_scoped_state() {
         .list_device_sync_devices("current")
         .unwrap()
         .is_empty());
+    assert!(store
+        .get_setting("device_sync.shared_source.one")
+        .unwrap()
+        .is_none());
 }
 
 #[test]
@@ -1013,6 +1020,12 @@ fn migration_rebinds_imported_source_but_preserves_original_source() {
             "/new",
         )
         .unwrap();
+    assert!(store
+        .was_skill_imported_by_device_sync("imported", 1000)
+        .unwrap());
+    assert!(!store
+        .was_skill_imported_by_device_sync("local", 1000)
+        .unwrap());
     assert_eq!(
         store
             .get_skill_by_id("imported")
@@ -1059,4 +1072,16 @@ fn history_can_load_beyond_fifty_without_duplicates() {
             .len(),
         55
     );
+}
+
+#[test]
+fn a_finished_sync_window_does_not_prove_local_source_ownership() {
+    let (_dir, store) = make_store();
+    store.start_device_sync_run("unrelated", 10).unwrap();
+    store
+        .finish_device_sync_run("unrelated", 100, "success", 1, 0, 0, 0, None, None, None)
+        .unwrap();
+    assert!(!store
+        .was_skill_imported_by_device_sync("locally-installed", 50)
+        .unwrap());
 }

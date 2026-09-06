@@ -6144,3 +6144,5 @@
 .device-sync-history-more {
   margin: 12px 16px;
 }
+
+.skill-source-unbound { margin: 4px 0 0; color: var(--text-secondary); font-size: 11px; }

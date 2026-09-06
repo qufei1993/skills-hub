@@ -2083,7 +2083,7 @@ fn managed_skill_status(skill: &SkillRecord) -> String {
     if skill.status != "ok" {
         return skill.status.clone();
     }
-    if skill.source_type != "local" {
+    if skill.source_type != "local" || skill.has_unbound_local_source() {
         return skill.status.clone();
     }
     let source_exists = skill

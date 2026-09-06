@@ -253,7 +253,7 @@ pub fn run_auto_update_now<R: tauri::Runtime>(
             .retain(|pending| pending.skill_id != skill_id);
         record_auto_update_progress_snapshot(store, &progress)?;
 
-        match update_managed_skill_from_source_with_lock_held(app, store, &skill_id) {
+        match update_managed_skill_from_source_with_lock_held(app, store, &skill_id, true) {
             Ok(update) => {
                 if update.changed {
                     result.updated += 1;
@@ -393,7 +393,10 @@ fn list_auto_update_skill_entries(store: &SkillStore) -> Result<Vec<AutoUpdateSk
     let mut skills = store
         .list_skills()?
         .into_iter()
-        .filter(|skill| skill.source_type == "git" || skill.source_type == "local")
+        .filter(|skill| {
+            skill.source_type == "git"
+                || (skill.source_type == "local" && !skill.has_unbound_local_source())
+        })
         .map(|skill| AutoUpdateSkillProgress {
             skill_id: skill.id,
             name: skill.name,
@@ -408,7 +411,7 @@ fn count_local_auto_update_skills(store: &SkillStore) -> Result<(usize, usize)> 
     let mut local_count = 0;
     let mut protected_count = 0;
     for skill in store.list_skills()? {
-        if skill.source_type != "local" {
+        if skill.source_type != "local" || skill.has_unbound_local_source() {
             continue;
         }
         local_count += 1;

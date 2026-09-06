@@ -1392,6 +1392,11 @@ fn managed_skill_status_keeps_existing_local_sources_healthy() {
     };
 
     assert_eq!(managed_skill_status(&skill), "ok");
+    let mut unbound = skill;
+    unbound.source_ref = None;
+    assert_eq!(managed_skill_status(&unbound), "ok");
+    unbound.source_ref = Some("/definitely-missing-source".into());
+    assert_eq!(managed_skill_status(&unbound), "error");
 }
 
 #[test]

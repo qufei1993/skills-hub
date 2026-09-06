@@ -1,3 +1,4 @@
+import { hasUnboundLocalSource } from './skillSourceState'
 import { memo } from 'react'
 import { Copy, Folder, Github, RefreshCw, Tag, Trash2 } from 'lucide-react'
 import type { TFunction } from 'i18next'
@@ -52,10 +53,11 @@ const SkillCard = ({
   getSkillProjects,
   t,
 }: SkillCardProps) => {
+  const unboundSource = hasUnboundLocalSource(skill)
   const github = getGithubInfo(skill.source_ref)
   const isGit = skill.source_type.toLowerCase().includes('git')
   const sourceLabel = github?.label ?? getSkillSourceLabel(skill)
-  const copyValue = (github?.href ?? skill.source_ref ?? skill.central_path).trim()
+  const copyValue = unboundSource ? '' : (github?.href ?? skill.source_ref ?? skill.central_path).trim()
   const description = skill.description?.trim() || t('skillDescriptionEmpty')
   const scope = getSkillScope(skill)
   const projectCount = getSkillProjects(skill).length
@@ -110,6 +112,7 @@ const SkillCard = ({
             <div className={`skill-description${skill.description?.trim() ? '' : ' empty'}`} title={description}>
               {description}
             </div>
+            {unboundSource ? <p className="skill-source-unbound" title={t('deviceSync.unboundSourceHelp')}>{t('deviceSync.unboundSource')}</p> : null}
           </div>
         </div>
 
@@ -182,7 +185,7 @@ const SkillCard = ({
 
         <div className="skill-actions-col">
           <button type="button" onClick={() => onEditTags(skill)} disabled={loading} aria-label={t('editTags')}><Tag size={16} /></button>
-          <button type="button" onClick={() => onUpdate(skill)} disabled={loading || !enabled} aria-label={t('update')}><RefreshCw size={16} /></button>
+          <button type="button" onClick={() => onUpdate(skill)} disabled={loading || !enabled || unboundSource} title={unboundSource ? t('deviceSync.unboundSourceHelp') : t('update')} aria-label={t('update')}><RefreshCw size={16} /></button>
           <button type="button" onClick={() => onDelete(skill.id)} disabled={loading} aria-label={t('remove')}><Trash2 size={16} /></button>
         </div>
       </div>

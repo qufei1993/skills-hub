@@ -132,7 +132,7 @@ fn install_local_skill_with_existing_policy<R: tauri::Runtime>(
         status: "ok".to_string(),
     };
 
-    store.upsert_skill(&record)?;
+    store.commit_skill_update(&record, &[])?;
 
     Ok(InstallResult {
         skill_id: record.id,
@@ -349,7 +349,7 @@ pub fn install_git_skill<R: tauri::Runtime>(
         status: "ok".to_string(),
     };
 
-    store.upsert_skill(&record)?;
+    store.commit_skill_update(&record, &[])?;
 
     Ok(InstallResult {
         skill_id: record.id,
@@ -796,16 +796,29 @@ pub fn update_managed_skill_from_source<R: tauri::Runtime>(
     skill_id: &str,
 ) -> Result<UpdateResult> {
     let _update_lock = acquire_skill_update_lock(app, store)?;
-    update_managed_skill_from_source_with_lock_held(app, store, skill_id)
+    update_managed_skill_from_source_with_lock_held(app, store, skill_id, false)
 }
 
 pub(crate) fn update_managed_skill_from_source_with_lock_held<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     store: &SkillStore,
     skill_id: &str,
+    preserve_newer_managed_content: bool,
 ) -> Result<UpdateResult> {
+    if store
+        .get_skill_by_id(skill_id)?
+        .is_some_and(|skill| skill.has_unbound_local_source())
+    {
+        anyhow::bail!("SKILL_SOURCE_UNBOUND|This Skill receives device sync updates; no local source is bound");
+    }
     let mut source_updated = false;
-    let result = update_managed_skill_from_source_inner(app, store, skill_id, &mut source_updated);
+    let result = update_managed_skill_from_source_inner(
+        app,
+        store,
+        skill_id,
+        preserve_newer_managed_content,
+        &mut source_updated,
+    );
     let update_in_progress = result
         .as_ref()
         .err()
@@ -826,6 +839,7 @@ fn update_managed_skill_from_source_inner<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     store: &SkillStore,
     skill_id: &str,
+    preserve_newer_managed_content: bool,
     source_updated: &mut bool,
 ) -> Result<UpdateResult> {
     let record = store
@@ -959,6 +973,43 @@ fn update_managed_skill_from_source_inner<R: tauri::Runtime>(
             return Err(err);
         }
     };
+    let source_baseline = if preserve_newer_managed_content {
+        store.source_baseline(&record.id)?
+    } else {
+        None
+    };
+    let source_is_unchanged = source_baseline.as_ref().map_or_else(
+        || {
+            !(record.source_type == "git"
+                && record
+                    .source_revision
+                    .as_ref()
+                    .zip(new_revision.as_ref())
+                    .is_some_and(|(previous, next)| previous != next))
+        },
+        |baseline| baseline.matches(&record, &next_content_hash),
+    );
+    if preserve_newer_managed_content
+        && previous_content_hash != next_content_hash
+        && source_is_unchanged
+    {
+        let mut checked = record.clone();
+        checked.source_subpath = resolved_source_subpath;
+        checked.source_revision = new_revision.clone().or(record.source_revision.clone());
+        store.record_source_check_success(&checked, next_content_hash)?;
+        std::fs::remove_dir_all(&staging_dir)?;
+        *source_updated = true;
+        return Ok(UpdateResult {
+            skill_id: record.id,
+            name: record.name,
+            central_path,
+            content_hash: Some(previous_content_hash),
+            source_revision: checked.source_revision,
+            updated_targets: Vec::new(),
+            pending_targets: Vec::new(),
+            changed: false,
+        });
+    }
     let changed = previous_content_hash != next_content_hash;
     let description = parse_skill_md(&staging_dir.join("SKILL.md"))
         .and_then(|(_, desc)| desc)
@@ -1521,7 +1572,7 @@ pub fn install_git_skill_from_selection<R: tauri::Runtime>(
         enabled: true,
         status: "ok".to_string(),
     };
-    store.upsert_skill(&record)?;
+    store.commit_skill_update(&record, &[])?;
 
     Ok(InstallResult {
         skill_id: record.id,

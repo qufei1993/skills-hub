@@ -1560,6 +1560,123 @@ fn lists_and_installs_nested_git_skill() {
 }
 
 #[test]
+fn unchanged_git_source_does_not_overwrite_content_received_from_device_sync() {
+    let app = tauri::test::mock_app();
+    let (_dir, store) = make_store();
+    let central = tempfile::tempdir().unwrap();
+    set_central_path(&store, central.path());
+    let source = tempfile::tempdir().unwrap();
+    fs::write(
+        source.path().join("SKILL.md"),
+        "---\nname: shared-skill\n---\nsource version\n",
+    )
+    .unwrap();
+    let repo = init_git_repo(source.path());
+    commit_all(&repo, "add skill");
+    let installed = super::install_git_skill(
+        app.handle(),
+        &store,
+        source.path().to_string_lossy().as_ref(),
+        None,
+        None,
+    )
+    .unwrap();
+    fs::write(
+        installed.central_path.join("SKILL.md"),
+        "---\nname: shared-skill\n---\ndevice sync version\n",
+    )
+    .unwrap();
+    store
+        .record_source_failure(&installed.skill_id, "source path not found")
+        .unwrap();
+
+    let update = super::update_managed_skill_from_source_with_lock_held(
+        app.handle(),
+        &store,
+        &installed.skill_id,
+        true,
+    )
+    .unwrap();
+
+    assert!(!update.changed);
+    assert!(fs::read_to_string(installed.central_path.join("SKILL.md"))
+        .unwrap()
+        .contains("device sync version"));
+    assert_eq!(
+        store
+            .get_skill_by_id(&installed.skill_id)
+            .unwrap()
+            .unwrap()
+            .status,
+        "ok"
+    );
+    assert!(store
+        .source_checks()
+        .unwrap()
+        .get(&installed.skill_id)
+        .unwrap()
+        .0
+        .is_none());
+
+    let explicit =
+        super::update_managed_skill_from_source(app.handle(), &store, &installed.skill_id).unwrap();
+    assert!(explicit.changed);
+    assert!(fs::read_to_string(installed.central_path.join("SKILL.md"))
+        .unwrap()
+        .contains("source version"));
+}
+
+#[test]
+fn newer_git_revision_is_applied_when_a_synced_skill_has_no_source_baseline() {
+    let app = tauri::test::mock_app();
+    let (_dir, store) = make_store();
+    let central = tempfile::tempdir().unwrap();
+    set_central_path(&store, central.path());
+    let source = tempfile::tempdir().unwrap();
+    fs::write(
+        source.path().join("SKILL.md"),
+        "---\nname: shared-skill\n---\nrevision one\n",
+    )
+    .unwrap();
+    let repo = init_git_repo(source.path());
+    commit_all(&repo, "revision one");
+    let installed = super::install_git_skill(
+        app.handle(),
+        &store,
+        source.path().to_string_lossy().as_ref(),
+        None,
+        None,
+    )
+    .unwrap();
+    store
+        .delete_setting(&format!(
+            "device_sync.source_baseline.{}",
+            installed.skill_id
+        ))
+        .unwrap();
+    store.set_setting("git_cache_ttl_secs", "0").unwrap();
+    fs::write(
+        source.path().join("SKILL.md"),
+        "---\nname: shared-skill\n---\nrevision two\n",
+    )
+    .unwrap();
+    commit_all(&repo, "revision two");
+
+    let update = super::update_managed_skill_from_source_with_lock_held(
+        app.handle(),
+        &store,
+        &installed.skill_id,
+        true,
+    )
+    .unwrap();
+
+    assert!(update.changed);
+    assert!(fs::read_to_string(installed.central_path.join("SKILL.md"))
+        .unwrap()
+        .contains("revision two"));
+}
+
+#[test]
 fn issue_129_discovers_and_installs_skills_across_categories() {
     let app = tauri::test::mock_app();
     let (_dir, store) = make_store();

@@ -32,6 +32,27 @@ pub struct PortableSkill {
     pub files: BTreeMap<String, String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct SharedSource {
+    source_type: String,
+    source_ref: Option<String>,
+    source_subpath: Option<String>,
+    source_revision: Option<String>,
+}
+
+impl SharedSource {
+    pub(crate) fn from_skill(skill: &PortableSkill) -> Self {
+        let mut portable = skill.clone();
+        strip_local_source(&mut portable);
+        Self {
+            source_type: portable.source_type,
+            source_ref: portable.source_ref,
+            source_subpath: portable.source_subpath,
+            source_revision: portable.source_revision,
+        }
+    }
+}
+
 impl SyncManifest {
     pub fn empty() -> Self {
         Self {
@@ -153,6 +174,14 @@ pub(super) fn export_skill(
         content_hash: aggregate_hash(&files),
         files,
     };
+    if let Some(value) = store.get_setting(&format!("device_sync.shared_source.{}", portable.id))? {
+        let shared: SharedSource =
+            serde_json::from_str(&value).context("read shared Skill source")?;
+        portable.source_type = shared.source_type;
+        portable.source_ref = shared.source_ref;
+        portable.source_subpath = shared.source_subpath;
+        portable.source_revision = shared.source_revision;
+    }
     strip_local_source(&mut portable);
     portable.content_hash = portable_hash(&portable);
     Ok(portable)
@@ -390,7 +419,7 @@ pub fn record_from_portable(skill: &PortableSkill, central_path: &Path, now: i64
         description: skill.description.clone(),
         source_type: skill.source_type.clone(),
         source_ref: if skill.source_type == "local" {
-            Some(central_path.to_string_lossy().into_owned())
+            None
         } else {
             skill.source_ref.clone()
         },
@@ -467,10 +496,7 @@ mod tests {
         let serialized = serde_json::to_string(&normalized).unwrap();
         assert!(!serialized.contains("alice"));
         let imported = record_from_portable(skill, Path::new("/device-b/central/one"), 1);
-        assert_eq!(
-            imported.source_ref.as_deref(),
-            Some("/device-b/central/one")
-        );
+        assert_eq!(imported.source_ref.as_deref(), None);
     }
 
     #[test]
