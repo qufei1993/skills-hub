@@ -34,7 +34,7 @@ type SettingsPageProps = {
   discoveryScanEnabledCount: number
   discoveryScanSourceCount: number
   onPickStoragePath: () => void
-  onToggleLanguage: () => void
+  onLanguageChange: (nextLanguage: string) => void
   onThemeChange: (nextTheme: 'system' | 'light' | 'dark') => void
   onGitCacheCleanupDaysChange: (nextDays: number) => void
   onGitCacheTtlSecsChange: (nextSecs: number) => void
@@ -56,7 +56,7 @@ const SettingsPage = ({
   gitCacheTtlSecs,
   themePreference,
   onPickStoragePath,
-  onToggleLanguage,
+  onLanguageChange,
   onThemeChange,
   onGitCacheCleanupDaysChange,
   onGitCacheTtlSecsChange,
@@ -234,12 +234,13 @@ const SettingsPage = ({
                       value={language}
                       onChange={(event) => {
                         if (event.target.value !== language) {
-                          onToggleLanguage()
+                          onLanguageChange(event.target.value)
                         }
                       }}
                     >
                       <option value="en">{t('languageOptions.en')}</option>
                       <option value="zh">{t('languageOptions.zh')}</option>
+                      <option value="ko">{t('languageOptions.ko')}</option>
                     </select>
                     <svg
                       className="settings-select-caret"

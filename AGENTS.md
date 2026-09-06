@@ -13,7 +13,7 @@ Skills Hub is a cross-platform desktop app (Tauri 2 + React 19) for managing AI 
 - **Database**: SQLite (rusqlite, bundled)
 - **Git**: libgit2 (git2 crate, vendored-openssl)
 - **HTTP**: reqwest (rustls-tls, blocking)
-- **i18n**: i18next (English / Chinese bilingual)
+- **i18n**: i18next (English / Simplified Chinese / Korean)
 - **Notifications**: sonner (toast)
 - **Icons**: lucide-react
 
@@ -51,7 +51,8 @@ src/                          # React frontend
 │       └── modals/           # Modal components (8 total)
 └── i18n/
     ├── index.ts              # i18next initialization
-    └── resources.ts          # Translation resources (EN/ZH)
+    ├── resources.ts          # English/Chinese resources + locale registration
+    └── ko.ts                 # Korean translation resources
 
 src-tauri/src/                # Rust backend
 ├── main.rs                   # Entry point (calls app_lib::run)
@@ -108,7 +109,9 @@ src-tauri/src/                # Rust backend
 - Modal conditional rendering: `if (!open) return null` (full unmount, not display:none)
 - Wrap presentational components with `memo()`
 - All user-visible text must use i18n (`t('key')`), translation keys defined in `src/i18n/resources.ts`
-- When adding new text, always provide both English and Chinese translations
+- The app supports English (`en`), Simplified Chinese (`zh`), and Korean (`ko`)
+- When adding or changing user-visible text, always provide English, Simplified Chinese, and Korean translations
+- Korean users read the English release notes; release notes do not require Korean sections
 - DTO types are defined in `src/components/skills/types.ts` and must stay in sync with the Rust DTOs in `commands/mod.rs`
 
 ### Rust

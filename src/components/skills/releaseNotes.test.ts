@@ -20,9 +20,10 @@ describe('selectLocalizedReleaseNotes', () => {
     )
   })
 
-  it('selects English notes for English and unsupported locales', () => {
+  it('selects English notes for English, Korean, and unsupported locales', () => {
     const expected = ['### Changed', '- English content'].join('\n')
     expect(selectLocalizedReleaseNotes(bilingualNotes, 'en')).toBe(expected)
+    expect(selectLocalizedReleaseNotes(bilingualNotes, 'ko-KR')).toBe(expected)
     expect(selectLocalizedReleaseNotes(bilingualNotes, 'fr')).toBe(expected)
   })
 

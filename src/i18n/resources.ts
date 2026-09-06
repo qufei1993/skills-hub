@@ -1,3 +1,5 @@
+import { ko } from './ko'
+
 export const resources = {
   en: {
     translation: {
@@ -6,10 +8,12 @@ export const resources = {
       languageShort: {
         en: 'EN',
         zh: '中文',
+        ko: '한국어',
       },
       languageOptions: {
         en: 'English',
         zh: '中文',
+        ko: '한국어',
       },
       subtitle: 'Manage and sync your skills across tools',
       workspace: 'Workspace',
@@ -1023,10 +1027,12 @@ export const resources = {
       languageShort: {
         en: 'EN',
         zh: '中文',
+        ko: '한국어',
       },
       languageOptions: {
         en: 'English',
         zh: '中文',
+        ko: '한국어',
       },
       subtitle: '统一管理并同步你的技能到各工具',
       workspace: '工作区',
@@ -2009,4 +2015,5 @@ export const resources = {
       },
     },
   },
+  ko,
 } as const
