@@ -1,13 +1,27 @@
 import { describe, expect, it } from 'vitest'
 import {
   getAutoUpdateProgressCounts,
+  getAutoUpdateRunningReset,
   getAutoUpdateTaskStatusKey,
   getAutoUpdateToastKey,
   isAutoUpdatePossiblyStalled,
   parseAutoUpdateFailureItems,
+  parseToolSyncPathChangedError,
+  parseToolSyncTargetConflictError,
   shouldKeepWaitingForTriggeredAutoUpdate,
   summarizeAutoUpdateErrors,
 } from './autoUpdateSettings'
+
+describe('getAutoUpdateRunningReset', () => {
+  it('clears every outcome count before polling the new run', () => {
+    expect(getAutoUpdateRunningReset()).toEqual({
+      last_checked: 0,
+      last_unchanged: 0,
+      last_updated: 0,
+      last_failed: 0,
+    })
+  })
+})
 
 describe('getAutoUpdateToastKey', () => {
   it('uses enable and disable messages only when the toggle changes', () => {
@@ -38,6 +52,56 @@ describe('summarizeAutoUpdateErrors', () => {
 
   it('returns no summaries for empty errors', () => {
     expect(summarizeAutoUpdateErrors('').summaries).toEqual([])
+  })
+
+  it('classifies a stale tool sync path separately', () => {
+    const result = summarizeAutoUpdateErrors(
+      'skill-a: TOOL_SYNC_PATH_CHANGED|Kimi Code CLI|/Users/may/.kimi-code/skills/skill-a',
+    )
+
+    expect(result.summaries).toEqual([
+      { key: 'autoUpdateErrorToolPathChanged', count: 1 },
+    ])
+  })
+
+  it('classifies a conflicting current tool target separately', () => {
+    const result = summarizeAutoUpdateErrors(
+      'skill-a: TOOL_SYNC_TARGET_CONFLICT|Kimi Code CLI|/Users/may/.kimi-code/skills/skill-a',
+    )
+
+    expect(result.summaries).toEqual([
+      { key: 'autoUpdateErrorToolPathChanged', count: 1 },
+    ])
+  })
+})
+
+describe('parseToolSyncPathChangedError', () => {
+  it('extracts the tool and current target path for an actionable message', () => {
+    expect(
+      parseToolSyncPathChangedError(
+        'TOOL_SYNC_PATH_CHANGED|Kimi Code CLI|/Users/may/.kimi-code/skills/demo',
+      ),
+    ).toEqual({
+      tool: 'Kimi Code CLI',
+      expectedPath: '/Users/may/.kimi-code/skills/demo',
+    })
+  })
+
+  it('leaves unrelated failures untouched', () => {
+    expect(parseToolSyncPathChangedError('network timeout')).toBeNull()
+  })
+})
+
+describe('parseToolSyncTargetConflictError', () => {
+  it('extracts a conflicting target without exposing the protocol code', () => {
+    expect(
+      parseToolSyncTargetConflictError(
+        'TOOL_SYNC_TARGET_CONFLICT|Kimi Code CLI|/Users/may/.kimi-code/skills/demo',
+      ),
+    ).toEqual({
+      tool: 'Kimi Code CLI',
+      expectedPath: '/Users/may/.kimi-code/skills/demo',
+    })
   })
 })
 
@@ -155,6 +219,23 @@ describe('isAutoUpdatePossiblyStalled', () => {
         succeeded: [],
         failed: [],
         running: { skill_id: 'a', name: 'A' },
+        pending: [],
+      },
+    }, 1_000 + 11 * 60 * 1000)).toBe(false)
+  })
+
+  it('does not mark a run with an unchanged completed item as stalled', () => {
+    expect(isAutoUpdatePossiblyStalled({
+      last_status: 'running',
+      last_run_at: 1_000,
+      last_unchanged: 1,
+      last_updated: 0,
+      last_failed: 0,
+      progress: {
+        total: 60,
+        succeeded: [{ skill_id: 'a', name: 'A' }],
+        failed: [],
+        running: null,
         pending: [],
       },
     }, 1_000 + 11 * 60 * 1000)).toBe(false)

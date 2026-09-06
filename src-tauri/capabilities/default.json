@@ -10,12 +10,22 @@
     "core:window:allow-start-dragging",
     "core:window:allow-start-resize-dragging",
     "dialog:default",
+    "process:allow-restart",
     "dialog:allow-open",
     {
       "identifier": "opener:allow-open-url",
       "allow": [
         {
           "url": "https://github.com/qufei1993/skills-hub"
+        },
+        {
+          "url": "https://github.com/login/device*"
+        },
+        {
+          "url": "https://gitlab.com/oauth/*"
+        },
+        {
+          "url": "https://gitee.com/oauth/*"
         }
       ]
     },

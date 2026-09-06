@@ -13,7 +13,7 @@ type TagsPageProps = {
   onReviewUntagged: () => void
   onViewTag: (tagId: number) => void
   onCreateTag: (name: string) => void
-  onRenameTag: (tagId: number, name: string) => void
+  onRenameTag: (tag: TagWithCountDto) => void
   onDeleteTag: (tag: TagWithCountDto) => void
   t: TFunction
 }
@@ -93,10 +93,7 @@ const TagsPage = ({
                   <span>{tag.skill_count}</span>
                   <span>{formatRelative(tag.updated_at)}</span>
                   <span className="tags-table-actions">
-                    <button type="button" aria-label={t('rename')} title={t('rename')} onClick={() => {
-                      const nextName = window.prompt(t('renameTagPrompt'), tag.name)
-                      if (nextName?.trim()) onRenameTag(tag.id, nextName)
-                    }}><Pencil size={15} /></button>
+                    <button type="button" aria-label={t('rename')} title={t('rename')} onClick={() => onRenameTag(tag)}><Pencil size={15} /></button>
                     <button type="button" aria-label={t('deleteAction')} title={t('deleteAction')} onClick={() => onDeleteTag(tag)}><Trash2 size={15} /></button>
                   </span>
                 </div>

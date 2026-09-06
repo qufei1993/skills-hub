@@ -5,6 +5,7 @@ import type { TFunction } from 'i18next'
 import type { DownloadOptions, Update } from '@tauri-apps/plugin-updater'
 import { toast } from 'sonner'
 import type { GithubProxyConfigDto } from './types'
+import ConfirmActionModal from './modals/ConfirmActionModal'
 
 const PROJECT_REPOSITORY_URL = 'https://github.com/qufei1993/skills-hub'
 
@@ -27,17 +28,20 @@ type SettingsPageProps = {
   gitCacheCleanupDays: number
   gitCacheTtlSecs: number
   themePreference: 'system' | 'light' | 'dark'
-  githubToken: string
+  githubTokenDraft: string
+  githubTokenConfigured: boolean
   githubProxyConfig: GithubProxyConfigDto
   discoveryScanEnabledCount: number
   discoveryScanSourceCount: number
   onPickStoragePath: () => void
-  onToggleLanguage: () => void
+  onLanguageChange: (nextLanguage: string) => void
   onThemeChange: (nextTheme: 'system' | 'light' | 'dark') => void
   onGitCacheCleanupDaysChange: (nextDays: number) => void
   onGitCacheTtlSecsChange: (nextSecs: number) => void
-  onClearGitCacheNow: () => void
-  onGithubTokenChange: (token: string) => void
+  onClearGitCacheNow: () => Promise<boolean>
+  onGithubTokenDraftChange: (token: string) => void
+  onGithubTokenSave: () => void
+  onGithubTokenRemove: () => void
   onGithubProxyConfigChange: (enabled: boolean, port: number) => void
   onOpenDiscoveryScanSettings: () => void
   onBack: () => void
@@ -52,13 +56,16 @@ const SettingsPage = ({
   gitCacheTtlSecs,
   themePreference,
   onPickStoragePath,
-  onToggleLanguage,
+  onLanguageChange,
   onThemeChange,
   onGitCacheCleanupDaysChange,
   onGitCacheTtlSecsChange,
   onClearGitCacheNow,
-  githubToken,
-  onGithubTokenChange,
+  githubTokenDraft,
+  githubTokenConfigured,
+  onGithubTokenDraftChange,
+  onGithubTokenSave,
+  onGithubTokenRemove,
   githubProxyConfig,
   onGithubProxyConfigChange,
   discoveryScanEnabledCount,
@@ -67,10 +74,8 @@ const SettingsPage = ({
   onBack,
   t,
 }: SettingsPageProps) => {
-  const [localToken, setLocalToken] = useState(githubToken)
-  useEffect(() => {
-    setLocalToken(githubToken)
-  }, [githubToken])
+  const [confirmingClearGitCache, setConfirmingClearGitCache] = useState(false)
+  const [clearingGitCache, setClearingGitCache] = useState(false)
   const [localGithubProxyPort, setLocalGithubProxyPort] = useState(
     String(githubProxyConfig.port),
   )
@@ -86,6 +91,17 @@ const SettingsPage = ({
     () => buildUpdaterProxyOptions(githubProxyConfig.enabled, githubProxyConfig.url),
     [githubProxyConfig.enabled, githubProxyConfig.url],
   )
+
+  const handleConfirmClearGitCache = async () => {
+    if (clearingGitCache) return
+    setClearingGitCache(true)
+    try {
+      const cleared = await onClearGitCacheNow()
+      if (cleared) setConfirmingClearGitCache(false)
+    } finally {
+      setClearingGitCache(false)
+    }
+  }
 
   const handleCheckUpdate = useCallback(async () => {
     if (!isTauri) return
@@ -218,12 +234,13 @@ const SettingsPage = ({
                       value={language}
                       onChange={(event) => {
                         if (event.target.value !== language) {
-                          onToggleLanguage()
+                          onLanguageChange(event.target.value)
                         }
                       }}
                     >
                       <option value="en">{t('languageOptions.en')}</option>
                       <option value="zh">{t('languageOptions.zh')}</option>
+                      <option value="ko">{t('languageOptions.ko')}</option>
                     </select>
                     <svg
                       className="settings-select-caret"
@@ -366,7 +383,7 @@ const SettingsPage = ({
                   <button
                     className="btn btn-secondary settings-browse"
                     type="button"
-                    onClick={onClearGitCacheNow}
+                    onClick={() => setConfirmingClearGitCache(true)}
                   >
                     {t('cleanNow')}
                   </button>
@@ -437,15 +454,40 @@ const SettingsPage = ({
                     id="settings-github-token"
                     className="settings-input mono"
                     type="password"
-                    placeholder={t('githubTokenPlaceholder')}
-                    value={localToken}
-                    onChange={(e) => setLocalToken(e.target.value)}
-                    onBlur={() => {
-                      if (localToken !== githubToken) {
-                        onGithubTokenChange(localToken)
-                      }
-                    }}
+                    placeholder={
+                      githubTokenConfigured
+                        ? t('githubTokenReplacementPlaceholder')
+                        : t('githubTokenPlaceholder')
+                    }
+                    value={githubTokenDraft}
+                    onChange={(e) => onGithubTokenDraftChange(e.target.value)}
                   />
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    type="button"
+                    disabled={!githubTokenDraft.trim()}
+                    onClick={onGithubTokenSave}
+                  >
+                    {t('githubTokenSave')}
+                  </button>
+                  {githubTokenConfigured ? (
+                    <button
+                      className="btn btn-danger btn-sm"
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm(t('githubTokenRemoveConfirm'))) {
+                          onGithubTokenRemove()
+                        }
+                      }}
+                    >
+                      {t('githubTokenRemove')}
+                    </button>
+                  ) : null}
+                </div>
+                <div className="settings-helper" role="status">
+                  {githubTokenConfigured
+                    ? t('githubTokenConfigured')
+                    : t('githubTokenNotConfigured')}
                 </div>
                 <div className="settings-helper">{t('githubTokenHint')}</div>
               </div>
@@ -573,6 +615,16 @@ const SettingsPage = ({
           </div>
         </div>
       </div>
+      <ConfirmActionModal
+        open={confirmingClearGitCache}
+        loading={clearingGitCache}
+        title={t('gitCacheConfirm.title')}
+        body={t('gitCacheConfirm.body')}
+        cancelLabel={t('cancel')}
+        confirmLabel={t('gitCacheConfirm.confirm')}
+        onRequestClose={() => setConfirmingClearGitCache(false)}
+        onConfirm={() => void handleConfirmClearGitCache()}
+      />
     </div>
   )
 }

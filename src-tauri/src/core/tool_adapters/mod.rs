@@ -4,7 +4,10 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use super::skill_store::{SkillStore, SkillTargetRecord};
-use super::sync_engine::{remove_path_any, sync_dir_with_mode_with_overwrite, SyncMode};
+use super::sync_engine::{
+    path_is_protected_real_content, paths_overlap, remove_path_any,
+    sync_dir_with_mode_with_overwrite, SyncMode,
+};
 
 pub const TOOL_CONFIG_SETTING: &str = "tool_config_v1";
 
@@ -237,6 +240,24 @@ fn migrate_custom_tool_target(
     };
     let next_target = root.join(target_name);
     let previous_target = PathBuf::from(&target.target_path);
+    let local_source = (skill.source_type == "local")
+        .then_some(skill.source_ref.as_deref())
+        .flatten()
+        .filter(|path| !path.trim().is_empty())
+        .map(PathBuf::from);
+    if let Some(local_source) = local_source.as_ref() {
+        if paths_overlap(&next_target, local_source)? {
+            anyhow::bail!(
+                "SKILL_TARGET_OVERLAPS_SOURCE|{}|custom tool target overlaps original local source",
+                local_source.to_string_lossy()
+            );
+        }
+    }
+    let mut protected_paths = vec![source.clone()];
+    if let Some(local_source) = local_source {
+        protected_paths.push(local_source);
+    }
+    let previous_is_protected = path_is_protected_real_content(&previous_target, &protected_paths)?;
     let same_path = next_target == previous_target;
     let shared_target =
         store.is_skill_target_path_used_by_another_record(&target.target_path, &target.id)?;
@@ -255,6 +276,12 @@ fn migrate_custom_tool_target(
     let force_mode_recreate =
         same_path && tool.sync_mode != SyncMode::Auto && target.mode != requested_mode;
     if force_mode_recreate {
+        if previous_is_protected {
+            anyhow::bail!(
+                "refusing to replace protected Skill source: {:?}",
+                previous_target
+            );
+        }
         remove_path_any(&previous_target)
             .with_context(|| format!("remove old target {:?}", previous_target))?;
     }
@@ -287,7 +314,7 @@ fn migrate_custom_tool_target(
         }
     };
 
-    if !same_path && !shared_target {
+    if !same_path && !shared_target && !previous_is_protected {
         if let Err(err) = remove_path_any(&previous_target) {
             let _ = remove_path_any(&next_target);
             return Err(err).with_context(|| format!("remove old target {:?}", previous_target));
@@ -488,10 +515,10 @@ pub fn default_tool_adapters() -> Vec<ToolAdapter> {
         ToolAdapter {
             id: ToolId::KimiCli,
             display_name: "Kimi Code CLI",
-            // add-skill global path: ~/.config/agents/skills/
-            // NOTE: Shares the same skills directory with Amp.
-            relative_skills_dir: ".config/agents/skills",
-            relative_detect_dir: ".config/agents",
+            // Kimi Code stores user-level skills under KIMI_CODE_HOME/skills.
+            // The default KIMI_CODE_HOME is ~/.kimi-code.
+            relative_skills_dir: ".kimi-code/skills",
+            relative_detect_dir: ".kimi-code",
         },
         ToolAdapter {
             id: ToolId::Augment,
@@ -769,7 +796,7 @@ pub fn default_tool_adapters() -> Vec<ToolAdapter> {
     ]
 }
 
-/// Tools can share the same global skills directory (e.g. Amp and Kimi Code CLI).
+/// Tools can share the same global skills directory.
 /// Use this to coordinate UI warnings and avoid duplicate filesystem operations.
 pub fn adapters_sharing_skills_dir(adapter: &ToolAdapter) -> Vec<ToolAdapter> {
     default_tool_adapters()
@@ -794,7 +821,12 @@ pub fn adapter_by_key(key: &str) -> Option<ToolAdapter> {
 
 pub fn resolve_default_path(adapter: &ToolAdapter) -> Result<PathBuf> {
     let home = dirs::home_dir().context("failed to resolve home directory")?;
-    Ok(home.join(adapter.relative_skills_dir))
+    Ok(resolve_adapter_path_in_home(
+        adapter,
+        &home,
+        adapter.relative_skills_dir,
+        "skills",
+    ))
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -808,7 +840,8 @@ pub fn supports_project_scope(adapter: &ToolAdapter) -> bool {
 
 pub fn project_relative_skills_dir(adapter: &ToolAdapter) -> &'static str {
     match adapter.id {
-        ToolId::Amp | ToolId::KimiCli => ".agents/skills",
+        ToolId::KimiCli => ".kimi-code/skills",
+        ToolId::Amp => ".agents/skills",
         ToolId::Antigravity => ".agents/skills",
         ToolId::Augment => ".augment/skills",
         ToolId::ClaudeCode => ".claude/skills",
@@ -858,7 +891,45 @@ pub fn project_relative_skills_dir(adapter: &ToolAdapter) -> &'static str {
 
 pub fn resolve_detect_path(adapter: &ToolAdapter) -> Result<PathBuf> {
     let home = dirs::home_dir().context("failed to resolve home directory")?;
-    Ok(home.join(adapter.relative_detect_dir))
+    Ok(resolve_adapter_path_in_home(
+        adapter,
+        &home,
+        adapter.relative_detect_dir,
+        "",
+    ))
+}
+
+pub(crate) fn resolve_adapter_path_in_home(
+    adapter: &ToolAdapter,
+    home: &Path,
+    relative_path: &str,
+    kimi_suffix: &str,
+) -> PathBuf {
+    let kimi_home = std::env::var_os("KIMI_CODE_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    resolve_adapter_path_in_home_with_kimi_home(
+        adapter,
+        home,
+        relative_path,
+        kimi_suffix,
+        kimi_home.as_deref(),
+    )
+}
+
+pub(crate) fn resolve_adapter_path_in_home_with_kimi_home(
+    adapter: &ToolAdapter,
+    home: &Path,
+    relative_path: &str,
+    kimi_suffix: &str,
+    kimi_home: Option<&Path>,
+) -> PathBuf {
+    if adapter.id == ToolId::KimiCli {
+        if let Some(kimi_home) = kimi_home {
+            return kimi_home.join(kimi_suffix);
+        }
+    }
+    home.join(relative_path)
 }
 
 pub fn is_tool_installed(adapter: &ToolAdapter) -> Result<bool> {

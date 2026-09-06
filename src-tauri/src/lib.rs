@@ -13,14 +13,18 @@ fn init_store<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> anyhow::Result<Sk
     migrate_legacy_db_if_needed(&db_path)?;
     let store = SkillStore::new(db_path);
     store.ensure_schema()?;
+    store.migrate_device_sync_startup_credential_consent()?;
     Ok(store)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(debug_assertions)]
+    let _ = dotenvy::dotenv();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             app.handle().plugin(
@@ -76,6 +80,57 @@ pub fn run() {
             app.manage(store.clone());
             app.manage(Arc::new(CancelToken::new()));
 
+            let sync_workspace = app.handle().path().app_data_dir()?.join("device-sync");
+            let sync_central = core::central_repo::resolve_central_repo_path(app.handle(), &store)?;
+            let sync_credentials = core::device_sync::credentials::SystemCredentialStore;
+            match core::device_sync::DeviceSyncService::new(
+                &store,
+                &sync_credentials,
+                sync_workspace,
+                sync_central,
+            )
+            .repair_legacy_same_device_conflicts()
+            {
+                Ok(true) => {
+                    log::info!("recovered same-device sync baseline from repository history")
+                }
+                Ok(false) => {}
+                Err(err) => log::warn!("same-device sync baseline recovery skipped: {err:#}"),
+            }
+
+            if let Ok(Some(config)) = store.get_device_sync_config() {
+                if config.auto_check
+                    && !config.needs_visibility_confirmation()
+                    && !(config.auto_sync && config.auto_sync_schedule.is_some())
+                {
+                    let handle = app.handle().clone();
+                    let store_for_device_sync = store.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let result = tauri::async_runtime::spawn_blocking(move || {
+                            let workspace = handle.path().app_data_dir()?.join("device-sync");
+                            let central = core::central_repo::resolve_central_repo_path(
+                                &handle,
+                                &store_for_device_sync,
+                            )?;
+                            let credentials = core::device_sync::credentials::SystemCredentialStore;
+                            let service = core::device_sync::DeviceSyncService::new(
+                                &store_for_device_sync,
+                                &credentials,
+                                workspace,
+                                central,
+                            );
+                            service.check().map(|_| ())
+                        })
+                        .await;
+                        if let Err(err) = result.and_then(|inner| inner.map_err(Into::into)) {
+                            log::warn!("automatic device sync check failed: {err:#}");
+                        }
+                    });
+                }
+            }
+
+            core::device_sync::scheduler::start(app.handle().clone(), store.clone());
+
             // Backfill description for skills that were installed before V2 schema.
             core::installer::backfill_skill_descriptions(&store);
 
@@ -113,6 +168,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_central_repo_path,
+            commands::preview_central_repo_path_change,
             commands::set_central_repo_path,
             commands::get_recent_projects,
             commands::save_recent_project,
@@ -144,7 +200,7 @@ pub fn run() {
             commands::update_managed_skill,
             commands::search_github,
             commands::get_github_release_notes,
-            commands::get_github_token,
+            commands::get_github_token_status,
             commands::set_github_token,
             commands::get_github_proxy_config,
             commands::set_github_proxy_config,
@@ -164,6 +220,28 @@ pub fn run() {
             commands::search_skills_online,
             commands::list_skill_files,
             commands::read_skill_file,
+            commands::get_device_sync_config,
+            commands::save_device_sync_config,
+            commands::get_device_sync_oauth_availability,
+            commands::get_device_sync_pending_oauth,
+            commands::start_device_sync_oauth,
+            commands::poll_device_sync_oauth,
+            commands::cancel_device_sync_oauth,
+            commands::clear_device_sync_pending_oauth,
+            commands::validate_device_sync_account,
+            commands::create_device_sync_repository,
+            commands::list_device_sync_repositories,
+            commands::get_device_sync_status,
+            commands::check_device_sync,
+            commands::run_device_sync,
+            commands::get_device_sync_history,
+            commands::get_device_sync_devices,
+            commands::set_device_sync_device_alias,
+            commands::get_device_sync_conflicts,
+            commands::get_device_sync_trash,
+            commands::resolve_device_sync_conflict,
+            commands::restore_device_sync_trash,
+            commands::disconnect_device_sync,
             commands::cancel_current_operation
         ])
         .on_window_event(|window, event| {

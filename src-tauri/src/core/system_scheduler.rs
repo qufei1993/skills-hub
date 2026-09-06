@@ -176,7 +176,7 @@ pub fn launchctl_kickstart_args(uid: u32) -> Vec<String> {
 }
 
 #[cfg_attr(not(any(test, target_os = "windows")), allow(dead_code))]
-pub fn windows_schtasks_args(config: &SchedulerConfig) -> Vec<String> {
+pub fn windows_schtasks_args(config: &SchedulerConfig) -> Result<Vec<String>> {
     let mut args = vec![
         "/Create".to_string(),
         "/F".to_string(),
@@ -187,16 +187,35 @@ pub fn windows_schtasks_args(config: &SchedulerConfig) -> Vec<String> {
         AutoUpdateScheduleType::Interval => {
             args.push("/SC".to_string());
             match config.schedule.interval_unit {
-                AutoUpdateIntervalUnit::Minutes => {
+                AutoUpdateIntervalUnit::Minutes
+                    if config.schedule.interval_value <= 1_439 =>
+                {
                     args.push("MINUTE".to_string());
                     args.push("/MO".to_string());
                     args.push(config.schedule.interval_value.to_string());
                 }
-                AutoUpdateIntervalUnit::Hours => {
+                AutoUpdateIntervalUnit::Hours if config.schedule.interval_value <= 23 => {
                     args.push("HOURLY".to_string());
                     args.push("/MO".to_string());
                     args.push(config.schedule.interval_value.to_string());
                 }
+                AutoUpdateIntervalUnit::Minutes
+                    if config.schedule.interval_value % (24 * 60) == 0 =>
+                {
+                    args.push("DAILY".to_string());
+                    args.push("/MO".to_string());
+                    args.push((config.schedule.interval_value / (24 * 60)).to_string());
+                }
+                AutoUpdateIntervalUnit::Hours
+                    if config.schedule.interval_value % 24 == 0 =>
+                {
+                    args.push("DAILY".to_string());
+                    args.push("/MO".to_string());
+                    args.push((config.schedule.interval_value / 24).to_string());
+                }
+                _ => anyhow::bail!(
+                    "Windows scheduled tasks support intervals up to 1439 minutes or 23 hours; longer intervals must be whole days"
+                ),
             }
         }
         AutoUpdateScheduleType::Daily => {
@@ -214,7 +233,7 @@ pub fn windows_schtasks_args(config: &SchedulerConfig) -> Vec<String> {
         BACKGROUND_TASK_ARGS[1],
         BACKGROUND_TASK_ARGS[2]
     ));
-    args
+    Ok(args)
 }
 
 #[cfg_attr(not(any(test, target_os = "windows")), allow(dead_code))]
@@ -391,7 +410,7 @@ fn current_uid() -> Result<u32> {
 #[cfg(target_os = "windows")]
 fn install_windows_task(config: &SchedulerConfig) -> Result<()> {
     let out = Command::new("schtasks")
-        .args(windows_schtasks_args(config))
+        .args(windows_schtasks_args(config)?)
         .output()
         .context("schtasks create")?;
     if !out.status.success() {

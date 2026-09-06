@@ -2,11 +2,13 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type MutableRefObject,
   type SetStateAction,
 } from 'react'
+import { AlertTriangle, ArrowRight } from 'lucide-react'
 import type { DownloadOptions, Update } from '@tauri-apps/plugin-updater'
 import './App.css'
 import './figma.css'
@@ -15,7 +17,9 @@ import { Toaster, toast } from 'sonner'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import ExplorePage from './components/skills/ExplorePage'
+import DeviceSyncPage from './components/skills/DeviceSyncPage'
 import FilterBar from './components/skills/FilterBar'
+import { getSkillsView } from './components/skills/skillsView'
 import SkillDetailView from './components/skills/SkillDetailView'
 import Header from './components/skills/Header'
 import LoadingOverlay from './components/skills/LoadingOverlay'
@@ -32,16 +36,35 @@ import GitPickModal from './components/skills/modals/GitPickModal'
 import LocalPickModal from './components/skills/modals/LocalPickModal'
 import ImportModal from './components/skills/modals/ImportModal'
 import NewToolsModal from './components/skills/modals/NewToolsModal'
+import RenameTagModal from './components/skills/modals/RenameTagModal'
 import ScopeSyncModal from './components/skills/modals/ScopeSyncModal'
 import SharedDirModal from './components/skills/modals/SharedDirModal'
+import StoragePathMigrationModal from './components/skills/modals/StoragePathMigrationModal'
 import SettingsPage from './components/skills/SettingsPage'
 import ToolsPage from './components/skills/ToolsPage'
 import UpdatesPage from './components/skills/UpdatesPage'
+import { useSkillStatusRefresh } from './components/skills/useSkillStatusRefresh'
 import WindowResizeHandles from './components/WindowResizeHandles'
 import {
+  getAutoUpdateRunningReset,
   getAutoUpdateToastKey,
   shouldKeepWaitingForTriggeredAutoUpdate,
 } from './components/skills/autoUpdateSettings'
+import { selectLocalizedReleaseNotes } from './components/skills/releaseNotes'
+import {
+  requiresStorageMigrationConfirmation,
+} from './components/skills/storagePathChange'
+import {
+  buildGithubTokenSaveRequest,
+  githubTokenSettingsReducer,
+  githubTokenStatusErrorMessage,
+  initialGithubTokenSettingsState,
+} from './components/skills/githubTokenSettings'
+import {
+  getSkillSyncState,
+  getToolSyncState,
+  isActiveSkillTarget,
+} from './components/skills/skillSyncStatus'
 import {
   buildInstallSyncJobs,
   filterTargetsForScope,
@@ -59,11 +82,13 @@ import type {
   FeaturedSkillDto,
   GitSkillCandidate,
   GithubProxyConfigDto,
+  GithubTokenStatusDto,
   InstallResultDto,
   LocalSkillCandidate,
   ManagedSkill,
   OnboardingPlan,
   OnlineSkillDto,
+  StoragePathChangePreview,
   TagWithCountDto,
   ToolConfigDto,
   ToolOption,
@@ -79,7 +104,13 @@ type SkillScopeState = Record<
   }
 >
 
-type ActiveView = 'myskills' | 'explore' | 'detail' | 'settings' | 'manage'
+type ActiveView =
+  | 'myskills'
+  | 'explore'
+  | 'detail'
+  | 'settings'
+  | 'manage'
+  | 'device-sync'
 type ManagementTab = 'tags' | 'tools' | 'updates'
 type UpdaterProxyOptions = { proxy?: string }
 type UpdaterDownloadOptions = DownloadOptions & UpdaterProxyOptions
@@ -100,12 +131,16 @@ function App() {
   const skillScopeStorageKey = 'skills-project-scope-state-v1'
   const skillViewModeStorageKey = 'skills-view-mode'
   const sidebarCollapsedStorageKey = 'skills-sidebar-collapsed'
-  const toggleLanguage = useCallback(() => {
-    void i18n.changeLanguage(language === 'en' ? 'zh' : 'en')
-  }, [i18n, language])
+  const changeLanguage = useCallback((nextLanguage: string) => {
+    void i18n.changeLanguage(nextLanguage)
+  }, [i18n])
 
   useEffect(() => {
-    document.documentElement.lang = language.startsWith('zh') ? 'zh-CN' : 'en'
+    document.documentElement.lang = language.startsWith('zh')
+      ? 'zh-CN'
+      : language.startsWith('ko')
+        ? 'ko-KR'
+        : 'en'
   }, [language])
   const [themePreference, setThemePreference] = useState<'system' | 'light' | 'dark'>(
     'system',
@@ -162,7 +197,12 @@ function App() {
   const [updateDone, setUpdateDone] = useState(false)
   const [showAppUpdateModal, setShowAppUpdateModal] = useState(false)
   const updateObjRef = useRef<Update | null>(null) as MutableRefObject<Update | null>
+  const localizedUpdateBody = useMemo(
+    () => selectLocalizedReleaseNotes(updateBody, language),
+    [language, updateBody],
+  )
   const [searchQuery, setSearchQuery] = useState('')
+  const [issuesOnly, setIssuesOnly] = useState(false)
   const [sortBy, setSortBy] = useState<'updated' | 'name'>('updated')
   const [scopeFilter, setScopeFilter] = useState<'all' | 'global' | 'project'>('all')
   const [skillViewMode, setSkillViewMode] = useState<'list' | 'cards'>(() =>
@@ -175,12 +215,20 @@ function App() {
   )
   const [activeView, setActiveView] = useState<ActiveView>('myskills')
   const [managementTab, setManagementTab] = useState<ManagementTab>('tags')
+  const [deviceSyncConflictCount, setDeviceSyncConflictCount] = useState(0)
   const [detailSkill, setDetailSkill] = useState<ManagedSkill | null>(null)
   const [tags, setTags] = useState<TagWithCountDto[]>([])
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([])
   const [includeUntagged, setIncludeUntagged] = useState(false)
   const [tagEditorSkill, setTagEditorSkill] = useState<ManagedSkill | null>(null)
+  const [pendingRenameTag, setPendingRenameTag] = useState<TagWithCountDto | null>(null)
   const [pendingDeleteTag, setPendingDeleteTag] = useState<TagWithCountDto | null>(null)
+  const [pendingSyncTargetChange, setPendingSyncTargetChange] = useState<{
+    toolId: string
+    checked: boolean
+    affected: string[]
+    shared: string[]
+  } | null>(null)
   const [addModalTab, setAddModalTab] = useState<'local' | 'git'>('git')
   const [addModalTagIds, setAddModalTagIds] = useState<number[]>([])
   const [featuredSkills, setFeaturedSkills] = useState<FeaturedSkillDto[]>([])
@@ -276,6 +324,35 @@ function App() {
       if (raw.startsWith('TOOL_NOT_WRITABLE|')) {
         const parts = raw.split('|')
         return t('errors.toolNotWritable', { tool: parts[1] ?? '', path: parts[2] ?? '' })
+      }
+      if (raw.startsWith('SKILL_TARGET_OVERLAPS_SOURCE|')) {
+        const path = raw.split('|')[1] ?? ''
+        return t('errors.targetOverlapsSource', { path })
+      }
+      if (raw.startsWith('TARGET_MODIFIED|')) {
+        const path = raw.slice('TARGET_MODIFIED|'.length)
+        return t('errors.targetModified', { path })
+      }
+      if (raw.startsWith('UPDATE_IN_PROGRESS|')) {
+        return t('errors.updateInProgress')
+      }
+      if (raw.startsWith('CENTRAL_MODIFIED|')) {
+        const path = raw.slice('CENTRAL_MODIFIED|'.length)
+        return t('errors.centralModified', { path })
+      }
+      if (raw.startsWith('ROLLBACK_CONFLICT|')) {
+        try {
+          const detail = JSON.parse(raw.slice('ROLLBACK_CONFLICT|'.length)) as {
+            target?: string
+            recovery?: string
+          }
+          return t('errors.rollbackConflict', {
+            target: detail.target ?? '',
+            recovery: detail.recovery ?? '',
+          })
+        } catch {
+          return t('errors.rollbackConflictUnknown')
+        }
       }
       if (raw.startsWith('PROJECT_SCOPE_UNSUPPORTED|')) {
         const tool = raw.split('|')[1] ?? ''
@@ -410,6 +487,7 @@ function App() {
     try {
       const result = await invokeTauri<ManagedSkill[]>('get_managed_skills')
       setManagedSkills(result)
+      setDetailSkill(current => current ? result.find(skill => skill.id === current.id) ?? null : null)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -472,7 +550,7 @@ function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    if (language !== 'en' && language !== 'zh') return
+    if (language !== 'en' && language !== 'zh' && language !== 'ko') return
     try {
       window.localStorage.setItem(languageStorageKey, language)
     } catch {
@@ -543,9 +621,13 @@ function App() {
 
   useEffect(() => {
     if (!isTauri) return
-    invokeTauri<string>('get_github_token')
-      .then((token) => setGithubToken(token))
-      .catch(() => {})
+    invokeTauri<GithubTokenStatusDto>('get_github_token_status')
+      .then((status) => {
+        dispatchGithubToken({ type: 'status_loaded', hasToken: status.has_token })
+      })
+      .catch((err) => {
+        setError(githubTokenStatusErrorMessage(err))
+      })
   }, [isTauri, invokeTauri])
 
   useEffect(() => {
@@ -593,6 +675,15 @@ function App() {
   const handleOpenUpdate = useCallback(() => {
     if (updateAvailableVersion) setShowAppUpdateModal(true)
   }, [updateAvailableVersion])
+
+  const handleRestartApp = useCallback(async () => {
+    try {
+      const { relaunch } = await import('@tauri-apps/plugin-process')
+      await relaunch()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err), { duration: 3200 })
+    }
+  }, [])
 
   const handleDismissUpdateForever = useCallback(() => {
     if (updateAvailableVersion) {
@@ -846,49 +937,20 @@ function App() {
     [skillScopeState],
   )
 
-  const visibleSkills = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase()
-    const selectedTagSet = new Set(selectedTagIds)
-    const hasTagFilter = selectedTagIds.length > 0 || includeUntagged
-    const filtered = managedSkills.filter((skill) => {
-      if (scopeFilter !== 'all' && getSkillScope(skill) !== scopeFilter) return false
-      if (hasTagFilter) {
-        const matchesSelectedTag = skill.tags.some((tag) => selectedTagSet.has(tag.id))
-        const matchesUntagged = includeUntagged && skill.tags.length === 0
-        if (!matchesSelectedTag && !matchesUntagged) return false
-      }
-      if (!query) return true
-      return (
-        skill.name.toLowerCase().includes(query) ||
-        skill.central_path.toLowerCase().includes(query) ||
-        skill.source_type.toLowerCase().includes(query) ||
-        skill.tags.some((tag) => tag.name.toLowerCase().includes(query))
-      )
-    })
-    const sorted = [...filtered].sort((a, b) => {
-      if (sortBy === 'name') {
-        return a.name.localeCompare(b.name)
-      }
-      return (b.updated_at ?? 0) - (a.updated_at ?? 0)
-    })
-    return sorted
-  }, [
-    getSkillScope,
-    includeUntagged,
-    managedSkills,
-    scopeFilter,
-    searchQuery,
-    selectedTagIds,
-    sortBy,
-  ])
+  const { visibleSkills, filterTags, filterUntaggedCount, bulkSelectedSkills } = useMemo(
+    () => getSkillsView({
+      managedSkills, tags, scopeFilter, searchQuery, selectedTagIds,
+      includeUntagged, sortBy, bulkSelectedIds, getSkillScope, issuesOnly,
+    }),
+    [managedSkills, tags, scopeFilter, searchQuery, selectedTagIds,
+      includeUntagged, sortBy, bulkSelectedIds, getSkillScope, issuesOnly],
+  )
+  const hasListFilters = issuesOnly || scopeFilter !== 'all' || searchQuery.trim() !== '' ||
+    selectedTagIds.length > 0 || includeUntagged
   const untaggedCount = useMemo(
     () => managedSkills.filter((skill) => skill.tags.length === 0).length,
     [managedSkills],
   )
-  const bulkSelectedSkills = useMemo(() => {
-    const selectedSet = new Set(bulkSelectedIds)
-    return managedSkills.filter((skill) => selectedSet.has(skill.id))
-  }, [bulkSelectedIds, managedSkills])
 
   const bulkSelectedNames = useMemo(
     () => bulkSelectedSkills.map((skill) => skill.name),
@@ -916,9 +978,16 @@ function App() {
   }, [managedSkills])
 
   const [storagePath, setStoragePath] = useState<string>(t('notAvailable'))
+  const [pendingStoragePathChange, setPendingStoragePathChange] =
+    useState<StoragePathChangePreview | null>(null)
+  const [storagePathChanging, setStoragePathChanging] = useState(false)
   const [gitCacheCleanupDays, setGitCacheCleanupDays] = useState<number>(30)
   const [gitCacheTtlSecs, setGitCacheTtlSecs] = useState<number>(60)
-  const [githubToken, setGithubToken] = useState<string>('')
+  const [githubToken, dispatchGithubToken] = useReducer(
+    githubTokenSettingsReducer,
+    false,
+    initialGithubTokenSettingsState,
+  )
   const [githubProxyConfig, setGithubProxyConfig] =
     useState<GithubProxyConfigDto>({
       enabled: false,
@@ -930,7 +999,6 @@ function App() {
   const [autoUpdateConfig, setAutoUpdateConfig] =
     useState<AutoUpdateConfigDto | null>(null)
   const [autoUpdateTriggering, setAutoUpdateTriggering] = useState(false)
-  const autoUpdateLastRunRef = useRef<number | null>(null)
   const updaterProxyOptions = useMemo(
     () => buildUpdaterProxyOptions(githubProxyConfig.enabled, githubProxyConfig.url),
     [githubProxyConfig.enabled, githubProxyConfig.url],
@@ -987,47 +1055,8 @@ function App() {
     }
   }, [updaterProxyOptions])
 
-  useEffect(() => {
-    if (!isTauri) return
-    if (activeView !== 'manage' || managementTab !== 'updates') return
-
-    let cancelled = false
-    const refreshAutoUpdateConfig = async () => {
-      const config = await invokeTauri<AutoUpdateConfigDto>('get_auto_update_config')
-      if (cancelled) return
-
-      const previousLastRun = autoUpdateLastRunRef.current
-      const nextLastRun = config.last_run_at ?? null
-      autoUpdateLastRunRef.current = nextLastRun
-      setAutoUpdateConfig(config)
-
-      if (
-        previousLastRun !== null &&
-        nextLastRun !== null &&
-        nextLastRun !== previousLastRun &&
-        config.last_status !== 'running'
-      ) {
-        await loadManagedSkills()
-      }
-    }
-
-    void refreshAutoUpdateConfig().catch(() => {})
-    const timer = window.setInterval(() => {
-      void refreshAutoUpdateConfig().catch(() => {})
-    }, autoUpdateConfig?.last_status === 'running' ? 2000 : 10000)
-
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
-  }, [
-    activeView,
-    managementTab,
-    autoUpdateConfig?.last_status,
-    invokeTauri,
-    isTauri,
-    loadManagedSkills,
-  ])
+  const readAutoUpdateStatus = useCallback(() => invokeTauri<AutoUpdateConfigDto>('get_auto_update_config'), [invokeTauri])
+  useSkillStatusRefresh(isTauri, readAutoUpdateStatus, setAutoUpdateConfig, loadManagedSkills)
 
   const handlePickStoragePath = useCallback(async () => {
     try {
@@ -1041,15 +1070,58 @@ function App() {
         title: t('selectStoragePath'),
       })
       if (!selected || Array.isArray(selected)) return
+      const preview = await invokeTauri<StoragePathChangePreview>(
+        'preview_central_repo_path_change',
+        { path: selected },
+      )
+      if (requiresStorageMigrationConfirmation(preview)) {
+        setPendingStoragePathChange(preview)
+        return
+      }
       const newPath = await invokeTauri<string>('set_central_repo_path', {
         path: selected,
+        confirmed: true,
       })
       setStoragePath(newPath)
       await loadManagedSkills()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      const raw = err instanceof Error ? err.message : String(err)
+      const parts = raw.split('|')
+      setError(
+        raw.startsWith('UNSAFE_STORAGE_PATH|')
+          ? t(`storageMigration.errors.${parts[1] ?? 'unknown'}`, {
+              path: parts[2] ?? '',
+            })
+          : raw,
+      )
     }
   }, [invokeTauri, isTauri, loadManagedSkills, t])
+
+  const handleConfirmStoragePathChange = useCallback(async () => {
+    if (!pendingStoragePathChange || storagePathChanging) return
+    setStoragePathChanging(true)
+    setError(null)
+    try {
+      const newPath = await invokeTauri<string>('set_central_repo_path', {
+        path: pendingStoragePathChange.new_path,
+        confirmed: true,
+      })
+      setStoragePath(newPath)
+      setPendingStoragePathChange(null)
+      await loadManagedSkills()
+      setSuccessToastMessage(t('storageMigration.success'))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setStoragePathChanging(false)
+    }
+  }, [
+    invokeTauri,
+    loadManagedSkills,
+    pendingStoragePathChange,
+    storagePathChanging,
+    t,
+  ])
   const handleGitCacheCleanupDaysChange = useCallback(
     async (nextDays: number) => {
       const normalized = Math.max(0, Math.min(nextDays, 3650))
@@ -1082,18 +1154,35 @@ function App() {
     },
     [invokeTauri, isTauri],
   )
-  const handleGithubTokenChange = useCallback(
-    async (nextToken: string) => {
-      setGithubToken(nextToken)
-      if (!isTauri) return
-      try {
-        await invokeTauri('set_github_token', { token: nextToken })
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-      }
-    },
-    [invokeTauri, isTauri],
-  )
+  const handleGithubTokenDraftChange = useCallback((draft: string) => {
+    dispatchGithubToken({ type: 'draft_changed', draft })
+  }, [])
+  const handleGithubTokenSave = useCallback(async () => {
+    const request = buildGithubTokenSaveRequest(githubToken.draft)
+    if (!request) return
+    if (!isTauri) {
+      dispatchGithubToken({ type: 'save_succeeded' })
+      return
+    }
+    try {
+      await invokeTauri('set_github_token', request)
+      dispatchGithubToken({ type: 'save_succeeded' })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }, [githubToken.draft, invokeTauri, isTauri])
+  const handleGithubTokenRemove = useCallback(async () => {
+    if (!isTauri) {
+      dispatchGithubToken({ type: 'remove_succeeded' })
+      return
+    }
+    try {
+      await invokeTauri('set_github_token', { token: '' })
+      dispatchGithubToken({ type: 'remove_succeeded' })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }, [invokeTauri, isTauri])
   const handleGithubProxyConfigChange = useCallback(
     async (enabled: boolean, port: number) => {
       const normalizedPort = Math.max(1, Math.min(Math.round(port), 65535))
@@ -1200,6 +1289,7 @@ function App() {
         last_status: prev?.last_status ?? null,
         last_error: prev?.last_error ?? null,
         last_checked: prev?.last_checked ?? 0,
+        last_unchanged: prev?.last_unchanged ?? 0,
         last_updated: prev?.last_updated ?? 0,
         last_failed: prev?.last_failed ?? 0,
         progress: prev?.progress ?? {
@@ -1246,9 +1336,7 @@ function App() {
       last_finished_at: null,
       last_status: 'running',
       last_error: null,
-      last_checked: 0,
-      last_updated: 0,
-      last_failed: 0,
+      ...getAutoUpdateRunningReset(),
       progress: {
         total: 0,
         succeeded: [],
@@ -1289,16 +1377,18 @@ function App() {
       setAutoUpdateTriggering(false)
     }
   }, [autoUpdateTriggering, invokeTauri, isTauri, loadManagedSkills, t])
-  const handleClearGitCacheNow = useCallback(async () => {
+  const handleClearGitCacheNow = useCallback(async (): Promise<boolean> => {
     if (!isTauri) {
       setError(t('errors.notTauri'))
-      return
+      return false
     }
     try {
       const removed = await invokeTauri<number>('clear_git_cache_now')
       setSuccessToastMessage(t('status.gitCacheCleared', { count: removed }))
+      return true
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+      return false
     }
   }, [invokeTauri, isTauri, t])
   const handlePickLocalPath = useCallback(async () => {
@@ -1381,7 +1471,7 @@ function App() {
   }, [featuredSkills.length, invokeTauri])
 
   const handleViewChange = useCallback(
-    (view: 'myskills' | 'explore' | 'manage') => {
+    (view: 'myskills' | 'explore' | 'manage' | 'device-sync') => {
       setShowAddModal(false)
       setActiveView(view)
       if (view !== 'myskills') {
@@ -1579,13 +1669,25 @@ function App() {
     setActiveView('manage')
   }, [])
 
+  const handleClearListFilters = useCallback(() => {
+    setIssuesOnly(false)
+    setScopeFilter('all')
+    setSearchQuery('')
+    setSelectedTagIds([])
+    setIncludeUntagged(false)
+  }, [])
+
   const handleReviewUntagged = useCallback(() => {
+    setScopeFilter('all')
+    setSearchQuery('')
     setSelectedTagIds([])
     setIncludeUntagged(true)
     setActiveView('myskills')
   }, [])
 
   const handleViewTag = useCallback((tagId: number) => {
+    setScopeFilter('all')
+    setSearchQuery('')
     setSelectedTagIds([tagId])
     setIncludeUntagged(false)
     setActiveView('myskills')
@@ -1627,7 +1729,7 @@ function App() {
   }, [visibleSkills])
 
   const handleOpenBulkSync = useCallback(() => {
-    if (bulkSelectedIds.length === 0) return
+    if (bulkSelectedSkills.length === 0) return
     if (bulkSelectedSkills.some((skill) => skill.enabled === false)) {
       toast.error(t('bulk.enableBeforeSync'))
       return
@@ -1649,7 +1751,7 @@ function App() {
     )
     setShowBulkSyncModal(true)
   }, [
-    bulkSelectedIds.length,
+    bulkSelectedSkills.length,
     bulkSelectedSkills,
     getSkillScope,
     installedToolIds,
@@ -1670,18 +1772,18 @@ function App() {
   }, [loading])
 
   const handleOpenBulkDelete = useCallback(() => {
-    if (bulkSelectedIds.length === 0) return
+    if (bulkSelectedSkills.length === 0) return
     setShowBulkDeleteModal(true)
-  }, [bulkSelectedIds.length])
+  }, [bulkSelectedSkills.length])
 
   const handleCloseBulkDelete = useCallback(() => {
     if (!loading) setShowBulkDeleteModal(false)
   }, [loading])
 
   const handleOpenBulkTags = useCallback(() => {
-    if (bulkSelectedIds.length === 0) return
+    if (bulkSelectedSkills.length === 0) return
     setShowBulkTagsModal(true)
-  }, [bulkSelectedIds.length])
+  }, [bulkSelectedSkills.length])
 
   const handleCloseBulkTags = useCallback(() => {
     if (!loading) setShowBulkTagsModal(false)
@@ -2131,6 +2233,7 @@ function App() {
         )
         await loadManagedSkills()
         await loadTags()
+        setPendingRenameTag(null)
         setSuccessToastMessage(t('tagRenamed'))
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
@@ -2138,6 +2241,10 @@ function App() {
     },
     [invokeTauri, loadManagedSkills, loadTags, t],
   )
+
+  const handleCloseRenameTag = useCallback(() => {
+    if (!loading) setPendingRenameTag(null)
+  }, [loading])
 
   const handleDeleteTag = useCallback((tag: TagWithCountDto) => {
     setPendingDeleteTag(tag)
@@ -2198,6 +2305,22 @@ function App() {
     [invokeTauri, loadManagedSkills, loadTags, t],
   )
 
+  const applySyncTargetChange = useCallback(
+    (checked: boolean, affected: string[], shared: string[]) => {
+      setSyncTargets((prev) => {
+        const next = { ...prev }
+        for (const id of affected) next[id] = checked
+        if (installScope === 'project') {
+          for (const id of shared) {
+            if (!toolSupportsProjectScope(id)) next[id] = false
+          }
+        }
+        return next
+      })
+    },
+    [installScope, toolSupportsProjectScope],
+  )
+
   const handleSyncTargetChange = useCallback(
     (toolId: string, checked: boolean) => {
       const sharedByToolId =
@@ -2212,37 +2335,44 @@ function App() {
             )
           : shared
       if (affected.length > 1) {
-        const others = affected.filter((id) => id !== toolId)
-        const otherLabels = others.map((id) => toolLabelById[id] ?? id).join(', ')
-        const ok = window.confirm(
-          t('sharedDirConfirm', {
-            tool: toolLabelById[toolId] ?? toolId,
-            others: otherLabels,
-          }),
-        )
-        if (!ok) return
+        setPendingSyncTargetChange({ toolId, checked, affected, shared })
+        return
       }
-      setSyncTargets((prev) => {
-        const next = { ...prev }
-        for (const id of affected) next[id] = checked
-        if (installScope === 'project') {
-          for (const id of shared) {
-            if (!toolSupportsProjectScope(id)) next[id] = false
-          }
-        }
-        return next
-      })
+      applySyncTargetChange(checked, affected, shared)
     },
     [
+      applySyncTargetChange,
       installScope,
       isInstalled,
       sharedProjectToolIdsByToolId,
       sharedToolIdsByToolId,
-      t,
-      toolLabelById,
       toolSupportsProjectScope,
     ],
   )
+
+  const handleSyncTargetChangeCancel = useCallback(() => {
+    if (!loading) setPendingSyncTargetChange(null)
+  }, [loading])
+
+  const handleSyncTargetChangeConfirm = useCallback(() => {
+    if (!pendingSyncTargetChange) return
+    const { checked, affected, shared } = pendingSyncTargetChange
+    setPendingSyncTargetChange(null)
+    applySyncTargetChange(checked, affected, shared)
+  }, [applySyncTargetChange, pendingSyncTargetChange])
+
+  const pendingSyncTargetLabels = useMemo(() => {
+    if (!pendingSyncTargetChange) return null
+    const others = pendingSyncTargetChange.affected.filter(
+      (id) => id !== pendingSyncTargetChange.toolId,
+    )
+    return {
+      toolLabel:
+        toolLabelById[pendingSyncTargetChange.toolId] ??
+        pendingSyncTargetChange.toolId,
+      otherLabels: others.map((id) => toolLabelById[id] ?? id).join(', '),
+    }
+  }, [pendingSyncTargetChange, toolLabelById])
 
   const handleInstallScopeChange = useCallback(
     (nextScope: InstallScope) => {
@@ -2748,9 +2878,10 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exploreInstallTrigger])
 
-  const handleInstallSelectedLocalCandidates = async () => {
+  const handleInstallSelectedLocalCandidates = async (subpaths: string[]) => {
+    const requestedSubpaths = new Set(subpaths)
     const selected = localCandidates.filter(
-      (c) => c.valid && localCandidateSelected[c.subpath],
+      (c) => c.valid && localCandidateSelected[c.subpath] && requestedSubpaths.has(c.subpath),
     )
     if (selected.length === 0) {
       setError(t('errors.selectAtLeastOneSkill'))
@@ -2841,8 +2972,11 @@ function App() {
     }
   }
 
-  const handleInstallSelectedCandidates = async () => {
-    const selected = gitCandidates.filter((c) => gitCandidateSelected[c.subpath])
+  const handleInstallSelectedCandidates = async (subpaths: string[]) => {
+    const requestedSubpaths = new Set(subpaths)
+    const selected = gitCandidates.filter(
+      (c) => gitCandidateSelected[c.subpath] && requestedSubpaths.has(c.subpath),
+    )
     if (selected.length === 0) {
       setError(t('errors.selectAtLeastOneSkill'))
       return
@@ -2999,24 +3133,30 @@ function App() {
               }
             } catch (err) {
               const raw = err instanceof Error ? err.message : String(err)
-              if (raw.startsWith('TOOL_NOT_INSTALLED|') || raw.startsWith('TOOL_NOT_WRITABLE|')) {
-                continue
-              }
               collectedErrors.push({
                 title: t('errors.syncFailedTitle', {
                   name: skill.name,
                   tool: toolLabel,
                 }),
-                message: raw,
+                message: raw.startsWith('TOOL_NOT_INSTALLED|')
+                  ? t('errors.toolNotInstalled')
+                  : raw.startsWith('TOOL_NOT_WRITABLE|')
+                    ? t('errors.toolNotWritable', {
+                        tool: raw.split('|')[1] ?? toolLabel,
+                        path: raw.split('|')[2] ?? '',
+                      })
+                    : raw,
               })
             }
           }
         }
-        setActionMessage(t('status.syncCompleted'))
-        setSuccessToastMessage(t('status.syncCompleted'))
-        setActionMessage(null)
         await loadManagedSkills()
-        if (collectedErrors.length > 0) showActionErrors(collectedErrors)
+        if (collectedErrors.length > 0) {
+          showActionErrors(collectedErrors)
+        } else {
+          setSuccessToastMessage(t('status.syncCompleted'))
+        }
+        setActionMessage(null)
       } finally {
         setLoading(false)
         setLoadingStartAt(null)
@@ -3133,20 +3273,14 @@ function App() {
           }
         } else if (nextScope === 'global') {
           for (const toolId of installedToolIds) {
-            try {
-                await invokeTauri('sync_skill_to_tool', {
-                  sourcePath: skill.central_path,
-                  skillId: skill.id,
-                  tool: toolId,
-                  name: skill.name,
-                  overwriteIfSameContent: true,
-                  scope: 'global',
-                })
-            } catch (err) {
-              const raw = err instanceof Error ? err.message : String(err)
-              if (raw.startsWith('TOOL_NOT_INSTALLED|')) continue
-              throw err
-            }
+            await invokeTauri('sync_skill_to_tool', {
+              sourcePath: skill.central_path,
+              skillId: skill.id,
+              tool: toolId,
+              name: skill.name,
+              overwriteIfSameContent: true,
+              scope: 'global',
+            })
           }
         }
         await loadManagedSkills()
@@ -3160,6 +3294,7 @@ function App() {
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
+        await loadManagedSkills()
         return
       } finally {
         setLoading(false)
@@ -3228,9 +3363,9 @@ function App() {
         (target) =>
           target.tool === toolId &&
           (target.scope ?? 'global') === skillScope &&
-          target.status !== 'disabled',
+          isActiveSkillTarget(target),
       )
-      const synced = matchingTargets.length > 0
+      const synced = getToolSyncState(skill, toolId, skillScope) === 'synced'
 
       setLoading(true)
       setLoadingStartAt(Date.now())
@@ -3310,6 +3445,7 @@ function App() {
         } else {
           setError(raw)
         }
+        await loadManagedSkills()
       } finally {
         setLoading(false)
         setLoadingStartAt(null)
@@ -3359,15 +3495,20 @@ function App() {
     setError(null)
     try {
       setActionMessage(t('actions.updating', { name: skill.name }))
-      await invokeTauri<UpdateResultDto>('update_managed_skill', { skillId: skill.id })
-      const updatedText = t('status.updated', { name: skill.name })
+      const result = await invokeTauri<UpdateResultDto>('update_managed_skill', { skillId: skill.id })
+      const updatedText = t(result.changed ? 'status.updated' : 'status.unchanged', { name: skill.name })
       setActionMessage(updatedText)
-      setSuccessToastMessage(updatedText)
+      if (result.pending_targets?.length) {
+        toast.warning(t('deviceSync.skillUpdatedToolsPending', { name: skill.name, count: result.pending_targets.length }))
+      } else {
+        setSuccessToastMessage(updatedText)
+      }
       setActionMessage(null)
       await loadManagedSkills()
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err)
       setError(raw)
+      await loadManagedSkills()
     } finally {
       setLoading(false)
       setLoadingStartAt(null)
@@ -3415,7 +3556,10 @@ function App() {
     (skill) => getSkillScope(skill) === 'global',
   ).length
   const projectSkillCount = managedSkills.length - globalSkillCount
-  const enabledSkillCount = managedSkills.filter((skill) => skill.enabled !== false).length
+  const syncIssueCount = managedSkills.filter((skill) => {
+    const state = getSkillSyncState(skill)
+    return state === 'source-error' || state === 'partial' || state === 'failed'
+  }).length
   const pendingUpdateCount = autoUpdateConfig?.last_failed ?? 0
 
   const handleManagementTabChange = (tab: ManagementTab) => {
@@ -3446,6 +3590,7 @@ function App() {
         tagCount={tags.length}
         toolCount={toolStatus?.tools.length ?? 0}
         updateCount={pendingUpdateCount}
+        syncConflictCount={deviceSyncConflictCount}
         appVersion={appVersion}
         updateAvailableVersion={updateAvailableVersion}
         updateChecking={updateChecking}
@@ -3455,6 +3600,7 @@ function App() {
         onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)}
         onOpenSettings={handleOpenSettings}
         onOpenUpdate={handleOpenUpdate}
+        onRestart={handleRestartApp}
         onViewChange={handleViewChange}
         onManagementTabChange={handleManagementTabChange}
         t={t}
@@ -3462,51 +3608,71 @@ function App() {
       <WindowResizeHandles enabled={isTauri} />
 
       <main className="skills-main">
-        {activeView === 'detail' && detailSkill ? (
+        <DeviceSyncPage
+          active={activeView === 'device-sync'}
+          isTauri={isTauri}
+          onSkillsChanged={loadManagedSkills}
+              onOpenToolIssues={() => setActiveView('myskills')}
+              toolLabels={Object.fromEntries(tools.map((tool) => [tool.id, tool.label]))}
+          onConflictCountChange={setDeviceSyncConflictCount}
+          t={t}
+        />
+        {activeView === 'device-sync' ? null : activeView === 'detail' && detailSkill ? (
           <SkillDetailView
             skill={detailSkill}
             onBack={handleBackToList}
             invokeTauri={invokeTauri}
             formatRelative={formatRelative}
+            tools={installedTools}
+            scope={getSkillScope(detailSkill)}
+            projects={getSkillProjects(detailSkill)}
             t={t}
           />
         ) : activeView === 'myskills' ? (
           <div className="dashboard-stack">
-            <section className="dashboard-stats" aria-label={t('navMySkills')}>
-              <article>
-                <span>{t('stats.managed')}</span>
-                <strong>{managedSkills.length}</strong>
-              </article>
-              <article>
-                <span>{t('stats.global')}</span>
-                <strong>{globalSkillCount}</strong>
-              </article>
-              <article>
-                <span>{t('stats.project')}</span>
-                <strong>{projectSkillCount}</strong>
-              </article>
-              <article>
-                <span>{t('stats.syncStatus')}</span>
-                <strong className="status-summary">
-                  <i />{enabledSkillCount === managedSkills.length ? t('stats.allNormal') : t('stats.enabledCount', { count: enabledSkillCount })}
-                </strong>
-              </article>
+            <section className="skills-overview" aria-label={t('navMySkills')}>
+              <div className="skills-scope-tabs" role="group" aria-label={t('scope.filterLabel')}>
+                {(['all', 'global', 'project'] as const).map((scope) => (
+                  <button
+                    key={scope}
+                    type="button"
+                    className={`skills-scope-tab${scopeFilter === scope ? ' active' : ''}`}
+                    aria-pressed={scopeFilter === scope}
+                    onClick={() => handleScopeFilterChange(scope)}
+                  >
+                    {t(`scope.${scope}`)}
+                    <span>{scope === 'all' ? managedSkills.length : scope === 'global' ? globalSkillCount : projectSkillCount}</span>
+                  </button>
+                ))}
+              </div>
+              {syncIssueCount > 0 ? (
+                <button
+                  className="skills-sync-issue"
+                  type="button"
+                  aria-pressed={issuesOnly}
+                  onClick={() => { handleClearListFilters(); setIssuesOnly(!issuesOnly) }}
+                >
+                  <AlertTriangle size={16} aria-hidden="true" />
+                  <span>{t('stats.syncIssues', { count: syncIssueCount })}</span>
+                  <span className="skills-sync-issue-action">
+                    {t('stats.viewIssues')}
+                    <ArrowRight size={15} aria-hidden="true" />
+                  </span>
+                </button>
+              ) : null}
             </section>
             <FilterBar
               sortBy={sortBy}
               searchQuery={searchQuery}
-              scopeFilter={scopeFilter}
-              tags={tags}
+              tags={filterTags}
               selectedTagIds={selectedTagIds}
               includeUntagged={includeUntagged}
-              untaggedCount={untaggedCount}
-              totalCount={visibleSkills.length}
+              untaggedCount={filterUntaggedCount}
               bulkMode={bulkMode}
-              bulkSelectedCount={bulkSelectedIds.length}
+              bulkSelectedCount={bulkSelectedSkills.length}
               viewMode={skillViewMode}
               onSortChange={handleSortChange}
               onSearchChange={handleSearchChange}
-              onScopeFilterChange={handleScopeFilterChange}
               onToggleTag={handleToggleTagFilter}
               onToggleUntagged={handleToggleUntaggedFilter}
               onClearTags={handleClearTagFilters}
@@ -3515,7 +3681,16 @@ function App() {
               onViewModeChange={setSkillViewMode}
               t={t}
             />
+            {hasListFilters ? (
+              <div className="skills-filter-summary" role="status">
+                <span>{issuesOnly ? t('deviceSync.currentIssuesFilter') + ' · ' : ''}{t('filters.resultCount', { count: visibleSkills.length })}</span>
+                <button type="button" onClick={handleClearListFilters}>{t('filters.clear')}</button>
+              </div>
+            ) : null}
             <SkillsList
+              hasManagedSkills={managedSkills.length > 0}
+              hasFilters={hasListFilters}
+              onClearFilters={handleClearListFilters}
               plan={plan}
               visibleSkills={visibleSkills}
               installedTools={installedTools}
@@ -3543,7 +3718,7 @@ function App() {
             {bulkMode ? (
               <div className="bulk-action-bar">
                 <div className="bulk-action-copy">
-                  <strong>{t('bulk.selected', { count: bulkSelectedIds.length })}</strong>
+                  <strong>{t('bulk.selected', { count: bulkSelectedSkills.length })}</strong>
                   <span>{t('bulk.helper')}</span>
                 </div>
                 <div className="bulk-action-buttons">
@@ -3561,7 +3736,7 @@ function App() {
                     className="btn btn-secondary"
                     type="button"
                     onClick={handleOpenBulkTags}
-                    disabled={loading || bulkSelectedIds.length === 0}
+                    disabled={loading || bulkSelectedSkills.length === 0}
                   >
                     {t('bulk.tags')}
                   </button>
@@ -3571,7 +3746,7 @@ function App() {
                     onClick={handleOpenBulkSync}
                     disabled={
                       loading ||
-                      bulkSelectedIds.length === 0 ||
+                      bulkSelectedSkills.length === 0 ||
                       bulkHasDisabledSelected
                     }
                   >
@@ -3581,7 +3756,7 @@ function App() {
                     className="btn btn-secondary"
                     type="button"
                     onClick={() => void handleToggleBulkEnabled()}
-                    disabled={loading || bulkSelectedIds.length === 0}
+                    disabled={loading || bulkSelectedSkills.length === 0}
                   >
                     {bulkShouldEnable ? t('bulk.enable') : t('bulk.disable')}
                   </button>
@@ -3589,7 +3764,7 @@ function App() {
                     className="btn btn-danger"
                     type="button"
                     onClick={handleOpenBulkDelete}
-                    disabled={loading || bulkSelectedIds.length === 0}
+                    disabled={loading || bulkSelectedSkills.length === 0}
                   >
                     {t('bulk.delete')}
                   </button>
@@ -3645,7 +3820,7 @@ function App() {
                   onReviewUntagged={handleReviewUntagged}
                   onViewTag={handleViewTag}
                   onCreateTag={handleCreateTag}
-                  onRenameTag={handleRenameTag}
+                  onRenameTag={setPendingRenameTag}
                   onDeleteTag={handleDeleteTag}
                   t={t}
                 />
@@ -3659,6 +3834,7 @@ function App() {
                 />
               ) : (
                 <UpdatesPage
+                  skills={managedSkills}
                   autoUpdateConfig={autoUpdateConfig}
                   onAutoUpdateConfigChange={handleAutoUpdateConfigChange}
                   onRunAutoUpdateNow={handleTriggerAutoUpdateTaskNow}
@@ -3677,13 +3853,16 @@ function App() {
             gitCacheTtlSecs={gitCacheTtlSecs}
             themePreference={themePreference}
             onPickStoragePath={handlePickStoragePath}
-            onToggleLanguage={toggleLanguage}
+            onLanguageChange={changeLanguage}
             onThemeChange={handleThemeChange}
             onGitCacheCleanupDaysChange={handleGitCacheCleanupDaysChange}
             onGitCacheTtlSecsChange={handleGitCacheTtlSecsChange}
             onClearGitCacheNow={handleClearGitCacheNow}
-            githubToken={githubToken}
-            onGithubTokenChange={handleGithubTokenChange}
+            githubTokenDraft={githubToken.draft}
+            githubTokenConfigured={githubToken.hasToken}
+            onGithubTokenDraftChange={handleGithubTokenDraftChange}
+            onGithubTokenSave={handleGithubTokenSave}
+            onGithubTokenRemove={handleGithubTokenRemove}
             githubProxyConfig={githubProxyConfig}
             onGithubProxyConfigChange={handleGithubProxyConfigChange}
             discoveryScanEnabledCount={
@@ -3762,7 +3941,7 @@ function App() {
       <BulkSyncModal
         open={showBulkSyncModal}
         loading={loading}
-        selectedCount={bulkSelectedIds.length}
+        selectedCount={bulkSelectedSkills.length}
         installedTools={installedTools}
         selectedToolIds={bulkSyncToolIds}
         onToggleTool={handleToggleBulkSyncTool}
@@ -3824,6 +4003,26 @@ function App() {
         t={t}
       />
 
+      <SharedDirModal
+        open={Boolean(pendingSyncTargetChange)}
+        loading={loading}
+        toolLabel={pendingSyncTargetLabels?.toolLabel ?? ''}
+        otherLabels={pendingSyncTargetLabels?.otherLabels ?? ''}
+        onRequestClose={handleSyncTargetChangeCancel}
+        onConfirm={handleSyncTargetChangeConfirm}
+        t={t}
+      />
+
+      <RenameTagModal
+        key={pendingRenameTag?.id ?? 'rename-tag-modal'}
+        open={Boolean(pendingRenameTag)}
+        loading={loading}
+        tag={pendingRenameTag}
+        onRequestClose={handleCloseRenameTag}
+        onSave={(tagId, name) => void handleRenameTag(tagId, name)}
+        t={t}
+      />
+
       <ScopeSyncModal
         key={
           currentScopeModalSkill
@@ -3863,6 +4062,14 @@ function App() {
         onConfirm={() => {
           if (pendingDeleteSkill) void handleDeleteManaged(pendingDeleteSkill)
         }}
+        t={t}
+      />
+
+      <StoragePathMigrationModal
+        preview={pendingStoragePathChange}
+        loading={storagePathChanging}
+        onRequestClose={() => setPendingStoragePathChange(null)}
+        onConfirm={() => void handleConfirmStoragePathChange()}
         t={t}
       />
 
@@ -3947,7 +4154,7 @@ function App() {
             aria-modal="true"
             onClick={(e) => e.stopPropagation()}
           >
-            {!updateInstalling && !updateDone && (
+            {!updateInstalling && (
               <button
                 className="modal-close update-modal-close"
                 type="button"
@@ -3966,9 +4173,9 @@ function App() {
                   {t('updateBannerText', { version: updateAvailableVersion })}
                 </div>
               )}
-              {!updateDone && updateBody && (
+              {!updateDone && localizedUpdateBody && (
                 <div className="update-modal-notes">
-                  <Markdown remarkPlugins={[remarkGfm]}>{updateBody}</Markdown>
+                  <Markdown remarkPlugins={[remarkGfm]}>{localizedUpdateBody}</Markdown>
                 </div>
               )}
             </div>
@@ -3977,9 +4184,9 @@ function App() {
                 <button
                   className="btn btn-primary"
                   type="button"
-                  onClick={handleDismissUpdate}
+                  onClick={handleRestartApp}
                 >
-                  {t('done')}
+                  {t('restartNow')}
                 </button>
               ) : (
                 <>

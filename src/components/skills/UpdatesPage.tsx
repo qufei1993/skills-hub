@@ -5,11 +5,14 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import type { TFunction } from 'i18next'
-import type { AutoUpdateConfigDto } from './types'
+import type { AutoUpdateConfigDto, ManagedSkill } from './types'
+import { historicalIssueState } from './skillIssueState'
 import {
   getAutoUpdateTaskStatusKey,
   isAutoUpdatePossiblyStalled,
   parseAutoUpdateFailureItems,
+  parseToolSyncPathChangedError,
+  parseToolSyncTargetConflictError,
 } from './autoUpdateSettings'
 
 type AutoUpdateScheduleType = 'interval' | 'daily'
@@ -23,6 +26,7 @@ type AutoUpdateScheduleInput = {
 }
 
 type UpdatesPageProps = {
+  skills?: ManagedSkill[]
   autoUpdateConfig: AutoUpdateConfigDto | null
   onAutoUpdateConfigChange: (
     enabled: boolean,
@@ -33,7 +37,39 @@ type UpdatesPageProps = {
   t: TFunction
 }
 
+function formatUpdateFailure(reason: string, t: TFunction): string {
+  if (reason.startsWith('TARGET_MODIFIED|')) {
+    return t('errors.targetModified', {
+      path: reason.slice('TARGET_MODIFIED|'.length),
+    })
+  }
+  if (reason.startsWith('UPDATE_IN_PROGRESS|')) {
+    return t('errors.updateInProgress')
+  }
+  if (reason.startsWith('CENTRAL_MODIFIED|')) {
+    return t('errors.centralModified', {
+      path: reason.slice('CENTRAL_MODIFIED|'.length),
+    })
+  }
+  if (reason.startsWith('ROLLBACK_CONFLICT|')) {
+    try {
+      const detail = JSON.parse(reason.slice('ROLLBACK_CONFLICT|'.length)) as {
+        target?: string
+        recovery?: string
+      }
+      return t('errors.rollbackConflict', {
+        target: detail.target ?? '',
+        recovery: detail.recovery ?? '',
+      })
+    } catch {
+      return t('errors.rollbackConflictUnknown')
+    }
+  }
+  return reason
+}
+
 const UpdatesPage = ({
+  skills = [],
   autoUpdateConfig,
   onAutoUpdateConfigChange,
   onRunAutoUpdateNow,
@@ -120,7 +156,7 @@ const UpdatesPage = ({
           pending: [],
         }
   const autoUpdateStatusClass =
-    autoUpdateConfig?.last_status === 'error'
+    autoUpdateConfig?.last_status === 'error' || autoUpdateConfig?.last_status === 'partial'
       ? 'error'
       : autoUpdateConfig?.last_status === 'ok'
         ? 'success'
@@ -297,6 +333,7 @@ const UpdatesPage = ({
         </section>
 
         <aside className={`updates-summary-card ${autoUpdateStatusClass}`}>
+          <p className="device-sync-no-change-note">{t('deviceSync.historicalRunNote')}</p>
           <div className="updates-summary-head">
             <span>{t('autoUpdateRunResultTitle')}</span>
             <strong>{autoUpdateStatus}</strong>
@@ -309,14 +346,22 @@ const UpdatesPage = ({
             <div>
               <span>{t('autoUpdateCheckedShort')}</span>
               <strong>{autoUpdateConfig?.last_checked ?? 0}</strong>
+              <small>{t('autoUpdateCheckedDescription')}</small>
+            </div>
+            <div>
+              <span>{t('autoUpdateUnchangedShort')}</span>
+              <strong>{autoUpdateConfig?.last_unchanged ?? 0}</strong>
+              <small>{t('autoUpdateUnchangedDescription')}</small>
             </div>
             <div>
               <span>{t('autoUpdateUpdatedShort')}</span>
               <strong>{autoUpdateConfig?.last_updated ?? 0}</strong>
+              <small>{t('autoUpdateUpdatedDescription')}</small>
             </div>
             <div className={(autoUpdateConfig?.last_failed ?? 0) > 0 ? 'danger' : ''}>
               <span>{t('autoUpdateFailedShort')}</span>
               <strong>{autoUpdateConfig?.last_failed ?? 0}</strong>
+              <small>{t('autoUpdateFailedDescription')}</small>
             </div>
           </div>
           {autoUpdateHasRuntime ? (
@@ -354,6 +399,7 @@ const UpdatesPage = ({
             </strong>
           </div>
         ) : null}
+        {autoUpdateProgressForDisplay.succeeded.filter(item => item.reason?.startsWith('TOOLS_PENDING|')).map(item => <div className="updates-issue-item" key={`pending-${item.skill_id}`}><strong>{item.name || item.skill_id}</strong><p>{t('deviceSync.runToolsPending', { count: Number(item.reason?.split('|')[1]) || 0 })}</p></div>)}
         {autoUpdateProgressForDisplay.failed.length > 0 ? (
           <div className="updates-issue-block">
             <div className="updates-section-label">
@@ -361,12 +407,30 @@ const UpdatesPage = ({
               {t('autoUpdateIssuesTitle')}
             </div>
             <div className="updates-issue-list">
-              {autoUpdateProgressForDisplay.failed.map((item) => (
-                <div className="updates-issue-item" key={item.skill_id}>
-                  <strong>{item.name || item.skill_id}</strong>
-                  {item.reason ? <code>{item.reason}</code> : null}
-                </div>
-              ))}
+              {autoUpdateProgressForDisplay.failed.map((item) => {
+                const pathChanged = parseToolSyncPathChangedError(item.reason)
+                const targetConflict = parseToolSyncTargetConflictError(item.reason)
+                const reason = targetConflict
+                  ? t('autoUpdateFailureToolTargetConflict', {
+                      tool: targetConflict.tool,
+                      path: targetConflict.expectedPath,
+                    })
+                  : pathChanged
+                    ? t('autoUpdateFailureToolPathChanged', {
+                        tool: pathChanged.tool,
+                        path: pathChanged.expectedPath,
+                      })
+                    : item.reason
+                      ? formatUpdateFailure(item.reason, t)
+                      : null
+                return (
+                  <div className="updates-issue-item" key={item.skill_id}>
+                    <strong>{item.name || item.skill_id}</strong>
+                    <span>{t(`deviceSync.issueHistory.${historicalIssueState(skills.find(skill => skill.id === item.skill_id), autoUpdateConfig?.last_finished_at ?? autoUpdateConfig?.last_run_at ?? 0)}`)}</span>
+                    {reason ? <code>{reason}</code> : null}
+                  </div>
+                )
+              })}
             </div>
             {autoUpdateConfig?.last_error ? (
               <button

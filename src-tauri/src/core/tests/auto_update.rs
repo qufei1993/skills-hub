@@ -6,7 +6,8 @@ use super::{
 use crate::core::auto_update::{
     get_auto_update_config, is_auto_update_due, set_auto_update_config, AutoUpdateConfig,
     AutoUpdateIntervalUnit, AutoUpdateSchedule, AutoUpdateScheduleType,
-    AUTO_UPDATE_LAST_CHECKED_KEY, AUTO_UPDATE_LAST_ERROR_KEY, DEFAULT_AUTO_UPDATE_INTERVAL_HOURS,
+    AUTO_UPDATE_LAST_CHECKED_KEY, AUTO_UPDATE_LAST_ERROR_KEY, AUTO_UPDATE_LAST_FAILED_KEY,
+    AUTO_UPDATE_LAST_STATUS_KEY, AUTO_UPDATE_LAST_UPDATED_KEY, DEFAULT_AUTO_UPDATE_INTERVAL_HOURS,
 };
 use crate::core::skill_store::{SkillRecord, SkillStore};
 
@@ -16,6 +17,35 @@ fn make_store() -> (tempfile::TempDir, SkillStore) {
     let store = SkillStore::new(db);
     store.ensure_schema().expect("ensure_schema");
     (dir, store)
+}
+
+#[test]
+fn updated_library_with_pending_tools_is_partial_not_ok() {
+    let (_dir, store) = make_store();
+    record_auto_update_result(
+        &store,
+        &AutoUpdateRunResult {
+            checked: 1,
+            unchanged: 0,
+            updated: 1,
+            failed: 0,
+            errors: vec![],
+            progress: AutoUpdateProgressSnapshot {
+                total: 1,
+                succeeded: vec![AutoUpdateSkillProgress {
+                    skill_id: "one".into(),
+                    name: "one".into(),
+                    reason: Some("TOOLS_PENDING|1".into()),
+                }],
+                ..Default::default()
+            },
+        },
+    )
+    .unwrap();
+    let config = get_auto_update_config(&store).unwrap();
+    assert_eq!(config.last_status.as_deref(), Some("partial"));
+    assert_eq!(config.last_failed, 0);
+    assert_eq!(config.last_updated, 1);
 }
 
 fn make_skill(id: &str, source_type: &str, central_path: &str) -> SkillRecord {
@@ -95,6 +125,7 @@ fn config_roundtrips_and_rejects_invalid_interval() {
             last_status: None,
             last_error: None,
             last_checked: 0,
+            last_unchanged: 0,
             last_updated: 0,
             last_failed: 0,
             progress: AutoUpdateProgressSnapshot::default(),
@@ -121,6 +152,7 @@ fn config_roundtrips_and_rejects_invalid_interval() {
             last_status: None,
             last_error: None,
             last_checked: 0,
+            last_unchanged: 0,
             last_updated: 0,
             last_failed: 0,
             progress: AutoUpdateProgressSnapshot::default(),
@@ -148,6 +180,7 @@ fn schedule_supports_minutes_and_daily_time() {
             last_status: None,
             last_error: None,
             last_checked: 0,
+            last_unchanged: 0,
             last_updated: 0,
             last_failed: 0,
             progress: AutoUpdateProgressSnapshot::default(),
@@ -183,6 +216,7 @@ fn due_check_respects_enabled_state_and_interval() {
         last_status: None,
         last_error: None,
         last_checked: 0,
+        last_unchanged: 0,
         last_updated: 0,
         last_failed: 0,
         progress: AutoUpdateProgressSnapshot::default(),
@@ -265,6 +299,7 @@ fn progress_snapshot_is_persisted_while_update_is_running() {
         &store,
         &AutoUpdateRunResult {
             checked: 60,
+            unchanged: 45,
             updated: 12,
             failed: 3,
             errors: vec!["skill-a: network timeout".to_string()],
@@ -277,6 +312,7 @@ fn progress_snapshot_is_persisted_while_update_is_running() {
 
     assert_eq!(config.last_status.as_deref(), Some("running"));
     assert_eq!(config.last_checked, 60);
+    assert_eq!(config.last_unchanged, 45);
     assert_eq!(config.last_updated, 12);
     assert_eq!(config.last_failed, 3);
     assert_eq!(
@@ -286,12 +322,70 @@ fn progress_snapshot_is_persisted_while_update_is_running() {
 }
 
 #[test]
+fn completed_legacy_result_derives_unchanged_count() {
+    let (_dir, store) = make_store();
+    store
+        .set_setting(AUTO_UPDATE_LAST_STATUS_KEY, "error")
+        .unwrap();
+    store
+        .set_setting(AUTO_UPDATE_LAST_CHECKED_KEY, "43")
+        .unwrap();
+    store
+        .set_setting(AUTO_UPDATE_LAST_UPDATED_KEY, "1")
+        .unwrap();
+    store.set_setting(AUTO_UPDATE_LAST_FAILED_KEY, "2").unwrap();
+
+    let config = get_auto_update_config(&store).unwrap();
+
+    assert_eq!(config.last_unchanged, 40);
+}
+
+#[test]
+fn running_legacy_result_does_not_treat_pending_items_as_unchanged() {
+    let (_dir, store) = make_store();
+    store
+        .set_setting(AUTO_UPDATE_LAST_STATUS_KEY, "running")
+        .unwrap();
+    store
+        .set_setting(AUTO_UPDATE_LAST_CHECKED_KEY, "43")
+        .unwrap();
+    store
+        .set_setting(AUTO_UPDATE_LAST_UPDATED_KEY, "1")
+        .unwrap();
+    store.set_setting(AUTO_UPDATE_LAST_FAILED_KEY, "2").unwrap();
+
+    let config = get_auto_update_config(&store).unwrap();
+
+    assert_eq!(config.last_unchanged, 0);
+}
+
+#[test]
+fn corrupt_legacy_counts_do_not_overflow_unchanged_fallback() {
+    let (_dir, store) = make_store();
+    store
+        .set_setting(AUTO_UPDATE_LAST_STATUS_KEY, "ok")
+        .unwrap();
+    store
+        .set_setting(AUTO_UPDATE_LAST_CHECKED_KEY, "5")
+        .unwrap();
+    store
+        .set_setting(AUTO_UPDATE_LAST_UPDATED_KEY, &usize::MAX.to_string())
+        .unwrap();
+    store.set_setting(AUTO_UPDATE_LAST_FAILED_KEY, "1").unwrap();
+
+    let config = get_auto_update_config(&store).unwrap();
+
+    assert_eq!(config.last_unchanged, 0);
+}
+
+#[test]
 fn starting_update_clears_previous_result_and_progress() {
     let (_dir, store) = make_store();
     record_auto_update_progress(
         &store,
         &AutoUpdateRunResult {
             checked: 2,
+            unchanged: 0,
             updated: 1,
             failed: 1,
             errors: vec!["old-skill: old error".to_string()],
@@ -322,6 +416,7 @@ fn starting_update_clears_previous_result_and_progress() {
     assert!(config.last_started_at.is_some());
     assert_eq!(config.last_finished_at, None);
     assert_eq!(config.last_checked, 3);
+    assert_eq!(config.last_unchanged, 0);
     assert_eq!(config.last_updated, 0);
     assert_eq!(config.last_failed, 0);
     assert_eq!(config.last_error.as_deref(), Some(""));
@@ -345,6 +440,7 @@ fn started_and_finished_times_are_recorded_separately() {
         &store,
         &AutoUpdateRunResult {
             checked: 1,
+            unchanged: 0,
             updated: 1,
             failed: 0,
             errors: vec![],
@@ -462,5 +558,39 @@ fn legacy_error_progress_uses_skill_name_when_available() {
     assert_eq!(
         config.progress.failed[0].reason.as_deref(),
         Some("source path not found: \"/Users/may/Downloads/youdaonote\"")
+    );
+}
+
+#[test]
+fn unchanged_skill_is_checked_but_not_counted_as_updated() {
+    let app = tauri::test::mock_app();
+    let (_dir, store) = make_store();
+    let source = tempfile::tempdir().unwrap();
+    let central_root = tempfile::tempdir().unwrap();
+    std::fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
+    std::fs::write(source.path().join("a.txt"), b"same").unwrap();
+    store
+        .set_setting(
+            "central_repo_path",
+            central_root.path().to_string_lossy().as_ref(),
+        )
+        .unwrap();
+    crate::core::installer::install_local_skill(
+        app.handle(),
+        &store,
+        source.path(),
+        Some("unchanged".to_string()),
+    )
+    .unwrap();
+
+    let result = super::run_auto_update_now(app.handle(), &store).unwrap();
+
+    assert_eq!(result.checked, 1);
+    assert_eq!(result.unchanged, 1);
+    assert_eq!(result.updated, 0);
+    assert_eq!(result.failed, 0);
+    assert_eq!(
+        result.checked,
+        result.unchanged + result.updated + result.failed
     );
 }

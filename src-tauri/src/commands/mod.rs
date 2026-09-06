@@ -1,6 +1,6 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Manager, State};
 
 use std::sync::Arc;
 
@@ -18,13 +18,32 @@ use crate::core::cache_cleanup::{
     set_git_cache_ttl_secs as set_git_cache_ttl_secs_core,
 };
 use crate::core::cancel_token::CancelToken;
-use crate::core::central_repo::{ensure_central_repo, resolve_central_repo_path};
+use crate::core::central_repo::{
+    ensure_central_repo, plan_central_repo_migration, resolve_central_repo_path,
+    validate_central_repo_path_change, CentralRepoMigrationItem,
+};
 use crate::core::content_hash::hash_dir;
+use crate::core::device_sync::credentials::{
+    resolve_access_token, save_personal_access_token, CredentialStore, SystemCredentialStore,
+};
+use crate::core::device_sync::oauth;
+use crate::core::device_sync::providers::provider;
+use crate::core::device_sync::types::{
+    ConflictResolution, CredentialUsage, DeviceSyncConfig, DeviceSyncDevice, OAuthPollResult,
+    OAuthProviderAvailability, OAuthStartResult, PendingOAuthAuthorization, ProviderAccount,
+    ProviderId, RemoteRepository, SyncChangeSummary, SyncConflict, SyncHistoryEntry, SyncRunResult,
+    SyncStatus, TrashEntry,
+};
+use crate::core::device_sync::DeviceSyncService;
 use crate::core::featured_skills::{fetch_featured_skills, FeaturedSkill};
 use crate::core::github_search::{search_github_repos, RepoSummary};
+use crate::core::github_token::{
+    has_github_token, resolve_github_token, set_github_token as set_github_token_core,
+    SystemGithubTokenStore,
+};
 use crate::core::installer::{
-    install_git_skill, install_git_skill_from_selection, install_local_skill,
-    install_local_skill_from_selection, list_git_skills, list_local_skills,
+    import_existing_local_skill, install_git_skill, install_git_skill_from_selection,
+    install_local_skill, install_local_skill_from_selection, list_git_skills, list_local_skills,
     update_managed_skill_from_source, GitSkillCandidate, InstallResult, LocalSkillCandidate,
 };
 use crate::core::network_proxy::{
@@ -37,12 +56,13 @@ use crate::core::onboarding::{
     build_onboarding_plan, get_discovery_scan_settings as get_discovery_scan_settings_core,
     save_discovery_scan_config, DiscoveryScanConfig, DiscoveryScanSettings, OnboardingPlan,
 };
-use crate::core::skill_store::{SkillStore, SkillTargetRecord};
+use crate::core::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
 use crate::core::skills_search::{
     search_skills_online as search_skills_online_core, OnlineSkillResult,
 };
 use crate::core::sync_engine::{
-    copy_dir_recursive, sync_dir_for_tool_with_overwrite, sync_dir_hybrid,
+    copy_dir_recursive, path_is_protected_real_content, paths_overlap,
+    remove_path_any as remove_path_any_core, sync_dir_for_tool_with_overwrite, sync_dir_hybrid,
     sync_dir_with_mode_with_overwrite, SyncMode,
 };
 use crate::core::system_scheduler::{
@@ -57,6 +77,9 @@ use crate::core::tool_adapters::{
 use uuid::Uuid;
 
 const RECENT_PROJECTS_SETTING: &str = "recent_projects_v1";
+const DEVICE_SYNC_PENDING_OAUTH_SETTING: &str = "device_sync_pending_oauth_v1";
+const DEVICE_SYNC_CREDENTIAL_CLEANUP_QUEUE_SETTING: &str =
+    "device_sync_credential_cleanup_queue_v1";
 
 fn format_anyhow_error(err: anyhow::Error) -> String {
     let first = err.to_string();
@@ -64,6 +87,14 @@ fn format_anyhow_error(err: anyhow::Error) -> String {
     if first.starts_with("MULTI_SKILLS|")
         || first.starts_with("TARGET_EXISTS|")
         || first.starts_with("TOOL_NOT_INSTALLED|")
+        || first.starts_with("TOOL_NOT_WRITABLE|")
+        || first.starts_with("UNSAFE_STORAGE_PATH|")
+        || first.starts_with("STORAGE_MIGRATION_CONFIRMATION_REQUIRED|")
+        || first.starts_with("SKILL_TARGET_OVERLAPS_SOURCE|")
+        || first.starts_with("TARGET_MODIFIED|")
+        || first.starts_with("UPDATE_IN_PROGRESS|")
+        || first.starts_with("CENTRAL_MODIFIED|")
+        || first.starts_with("ROLLBACK_CONFLICT|")
     {
         return first;
     }
@@ -500,6 +531,7 @@ pub struct AutoUpdateConfigDto {
     pub last_status: Option<String>,
     pub last_error: Option<String>,
     pub last_checked: usize,
+    pub last_unchanged: usize,
     pub last_updated: usize,
     pub last_failed: usize,
     pub progress: AutoUpdateProgressSnapshot,
@@ -508,6 +540,7 @@ pub struct AutoUpdateConfigDto {
 #[derive(Debug, Serialize)]
 pub struct AutoUpdateRunResultDto {
     pub checked: usize,
+    pub unchanged: usize,
     pub updated: usize,
     pub failed: usize,
     pub errors: Vec<String>,
@@ -577,6 +610,7 @@ pub async fn set_auto_update_config(
                 last_status: existing.last_status,
                 last_error: existing.last_error,
                 last_checked: existing.last_checked,
+                last_unchanged: existing.last_unchanged,
                 last_updated: existing.last_updated,
                 last_failed: existing.last_failed,
                 progress: existing.progress,
@@ -765,11 +799,115 @@ pub async fn get_central_repo_path(
     .map_err(format_anyhow_error)
 }
 
+#[derive(Debug, Serialize)]
+pub struct StoragePathChangePreviewDto {
+    pub current_path: String,
+    pub new_path: String,
+    pub skill_count: usize,
+}
+
+#[derive(Clone, Debug)]
+struct StorageLinkMigration {
+    mode: SyncMode,
+    old_source: std::path::PathBuf,
+    new_source: std::path::PathBuf,
+    target: std::path::PathBuf,
+}
+
+fn recycle_new_storage_copies(plan: &[CentralRepoMigrationItem]) {
+    for item in plan {
+        if std::fs::symlink_metadata(&item.new_path).is_ok() {
+            if let Err(err) = remove_path_any_core(&item.new_path) {
+                eprintln!(
+                    "failed to recycle incomplete storage copy {:?}: {err:#}",
+                    item.new_path
+                );
+            }
+        }
+    }
+}
+
+fn rollback_central_repo_migration(
+    plan: &[CentralRepoMigrationItem],
+    links: &[StorageLinkMigration],
+    attempted_link_count: usize,
+) {
+    let mut links_restored = true;
+    for link in links[..attempted_link_count].iter().rev() {
+        if let Err(err) =
+            sync_dir_with_mode_with_overwrite(link.mode, &link.old_source, &link.target, true)
+        {
+            links_restored = false;
+            eprintln!("failed to restore Skill link {:?}: {err:#}", link.target);
+        }
+    }
+    if links_restored {
+        recycle_new_storage_copies(plan);
+    } else {
+        eprintln!("keeping new storage copies because one or more links could not be restored");
+    }
+}
+
+fn storage_path_change_plan(
+    store: &SkillStore,
+    current_base: &std::path::Path,
+    new_base: &std::path::Path,
+) -> anyhow::Result<Vec<CentralRepoMigrationItem>> {
+    let skills = store.list_skills()?;
+    let mut tool_roots = runtime_tools(store, true)?
+        .into_iter()
+        .map(|tool| tool.skills_dir)
+        .collect::<Vec<_>>();
+    for (_, target_path) in store.list_all_skill_target_paths()? {
+        if let Some(parent) = std::path::Path::new(&target_path).parent() {
+            tool_roots.push(parent.to_path_buf());
+        }
+    }
+    let local_sources = skills
+        .iter()
+        .filter(|skill| skill.source_type == "local")
+        .filter_map(|skill| skill.source_ref.as_deref())
+        .map(std::path::PathBuf::from)
+        .collect::<Vec<_>>();
+    validate_central_repo_path_change(current_base, new_base, &tool_roots, &local_sources)?;
+    plan_central_repo_migration(&skills, new_base)
+}
+
+#[tauri::command]
+pub async fn preview_central_repo_path_change(
+    app: tauri::AppHandle,
+    store: State<'_, SkillStore>,
+    path: String,
+) -> Result<StoragePathChangePreviewDto, String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let new_base = expand_home_path(&path)?;
+        if !new_base.is_absolute() {
+            anyhow::bail!("storage path must be absolute");
+        }
+        let current_base = resolve_central_repo_path(&app, &store)?;
+        let skill_count = if current_base == new_base {
+            0
+        } else {
+            storage_path_change_plan(&store, &current_base, &new_base)?.len()
+        };
+        Ok::<_, anyhow::Error>(StoragePathChangePreviewDto {
+            current_path: current_base.to_string_lossy().to_string(),
+            new_path: new_base.to_string_lossy().to_string(),
+            skill_count,
+        })
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_anyhow_error)
+}
+
 #[tauri::command]
 pub async fn set_central_repo_path(
     app: tauri::AppHandle,
     store: State<'_, SkillStore>,
     path: String,
+    confirmed: Option<bool>,
 ) -> Result<String, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -777,46 +915,103 @@ pub async fn set_central_repo_path(
         if !new_base.is_absolute() {
             anyhow::bail!("storage path must be absolute");
         }
-        ensure_central_repo(&new_base)?;
-
         let current_base = resolve_central_repo_path(&app, &store)?;
-        let skills = store.list_skills()?;
         if current_base == new_base {
             store.set_setting("central_repo_path", new_base.to_string_lossy().as_ref())?;
             return Ok::<_, anyhow::Error>(new_base.to_string_lossy().to_string());
         }
 
-        if !skills.is_empty() {
-            for skill in skills {
-                let old_path = std::path::PathBuf::from(&skill.central_path);
-                if !old_path.exists() {
-                    anyhow::bail!("central path not found: {:?}", old_path);
-                }
-                let file_name = old_path
-                    .file_name()
-                    .ok_or_else(|| anyhow::anyhow!("invalid central path: {:?}", old_path))?;
-                let new_path = new_base.join(file_name);
-                if new_path.exists() {
-                    anyhow::bail!("target path already exists: {:?}", new_path);
-                }
+        let plan = storage_path_change_plan(&store, &current_base, &new_base)?;
+        if !plan.is_empty() && confirmed != Some(true) {
+            anyhow::bail!("STORAGE_MIGRATION_CONFIRMATION_REQUIRED|{}", plan.len());
+        }
+        ensure_central_repo(&new_base)?;
 
-                if let Err(err) = std::fs::rename(&old_path, &new_path) {
-                    copy_dir_recursive(&old_path, &new_path)
-                        .with_context(|| format!("copy {:?} -> {:?}", old_path, new_path))?;
-                    std::fs::remove_dir_all(&old_path)
-                        .with_context(|| format!("cleanup {:?}", old_path))?;
-                    // Surface rename error in logs for troubleshooting.
-                    eprintln!("rename failed, fallback used: {}", err);
+        let mut links = Vec::new();
+        for item in &plan {
+            let protected_paths = skill_protected_paths(&store, &item.skill.id)?;
+            for target in store.list_skill_targets(&item.skill.id)? {
+                if target.status == "disabled" {
+                    continue;
                 }
-
-                let mut updated = skill.clone();
-                updated.central_path = new_path.to_string_lossy().to_string();
-                updated.updated_at = now_ms();
-                store.upsert_skill(&updated)?;
+                let mode = match target.mode.as_str() {
+                    "symlink" => Some(SyncMode::Symlink),
+                    "junction" => Some(SyncMode::Junction),
+                    _ => None,
+                };
+                if let Some(mode) = mode {
+                    let target_path = std::path::PathBuf::from(&target.target_path);
+                    ensure_target_does_not_overlap_local_source(
+                        &store,
+                        &item.skill.id,
+                        &target_path,
+                    )?;
+                    if path_is_protected_real_content(&target_path, &protected_paths)? {
+                        anyhow::bail!(
+                            "refusing to replace protected Skill path during storage migration: {:?}",
+                            target_path
+                        );
+                    }
+                    links.push(StorageLinkMigration {
+                        mode,
+                        old_source: item.old_path.clone(),
+                        new_source: item.new_path.clone(),
+                        target: target_path,
+                    });
+                }
             }
         }
 
-        store.set_setting("central_repo_path", new_base.to_string_lossy().as_ref())?;
+        for item in &plan {
+            if let Err(err) = copy_dir_recursive(&item.old_path, &item.new_path)
+                .with_context(|| format!("copy {:?} -> {:?}", item.old_path, item.new_path))
+            {
+                recycle_new_storage_copies(&plan);
+                return Err(err);
+            }
+        }
+
+        for (index, link) in links.iter().enumerate() {
+            if let Err(err) = sync_dir_with_mode_with_overwrite(
+                link.mode,
+                &link.new_source,
+                &link.target,
+                true,
+            )
+            .with_context(|| format!("refresh moved Skill target {:?}", link.target))
+            {
+                rollback_central_repo_migration(&plan, &links, index + 1);
+                return Err(err);
+            }
+        }
+
+        let updated_at = now_ms();
+        let updates = plan
+            .iter()
+            .map(|item| {
+                (
+                    item.skill.id.clone(),
+                    item.new_path.to_string_lossy().to_string(),
+                    updated_at,
+                )
+            })
+            .collect::<Vec<_>>();
+        if let Err(err) = store.commit_central_repo_migration(
+            &updates,
+            new_base.to_string_lossy().as_ref(),
+        ) {
+            rollback_central_repo_migration(&plan, &links, links.len());
+            return Err(err);
+        }
+
+        for item in &plan {
+            if let Err(err) = remove_path_any_core(&item.old_path) {
+                eprintln!(
+                    "storage migration succeeded but old path could not be recycled {:?}: {err:#}",
+                    item.old_path
+                );
+            }
+        }
         Ok::<_, anyhow::Error>(new_base.to_string_lossy().to_string())
     })
     .await
@@ -935,6 +1130,48 @@ pub struct SyncResultDto {
     pub target_path: String,
 }
 
+fn sync_mode_name(mode: SyncMode) -> &'static str {
+    match mode {
+        SyncMode::Auto => "auto",
+        SyncMode::Symlink => "symlink",
+        SyncMode::Junction => "junction",
+        SyncMode::Copy => "copy",
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_skill_target_failure(
+    store: &SkillStore,
+    skill_id: &str,
+    tool: &str,
+    scope: &str,
+    project_path: Option<&str>,
+    target_path: &std::path::Path,
+    requested_mode: SyncMode,
+    error: &str,
+) -> anyhow::Result<()> {
+    let existing = store.get_skill_target(skill_id, tool, scope, project_path)?;
+    let record = SkillTargetRecord {
+        id: existing
+            .as_ref()
+            .map(|target| target.id.clone())
+            .unwrap_or_else(|| Uuid::new_v4().to_string()),
+        skill_id: skill_id.to_string(),
+        tool: tool.to_string(),
+        scope: scope.to_string(),
+        project_path: project_path.map(str::to_string),
+        target_path: target_path.to_string_lossy().to_string(),
+        mode: existing
+            .as_ref()
+            .map(|target| target.mode.clone())
+            .unwrap_or_else(|| sync_mode_name(requested_mode).to_string()),
+        status: "error".to_string(),
+        last_error: Some(error.to_string()),
+        synced_at: existing.and_then(|target| target.synced_at),
+    };
+    store.upsert_skill_target(&record)
+}
+
 #[tauri::command]
 pub async fn sync_skill_dir(
     source_path: String,
@@ -992,29 +1229,72 @@ pub async fn sync_skill_to_tool(
             None
         };
 
-        if scope == "global" && !runtime_tool.installed {
-            anyhow::bail!("TOOL_NOT_INSTALLED|{}", runtime_tool.key);
-        }
         let tool_root = resolve_runtime_tool_root(&runtime_tool, project_root.as_deref())?;
-        // Pre-check: ensure the skills directory is writable (fixes #20 — Windows OS error 5).
-        if let Err(err) = std::fs::create_dir_all(&tool_root) {
-            if err.kind() == std::io::ErrorKind::PermissionDenied {
-                anyhow::bail!(
-                    "TOOL_NOT_WRITABLE|{}|{}",
-                    runtime_tool.label,
-                    tool_root.to_string_lossy()
-                );
-            }
-            anyhow::bail!("failed to create skills dir {:?}: {}", tool_root, err);
-        }
         let target = tool_root.join(&name);
+        ensure_target_does_not_overlap_local_source(&store, &skillId, &target)?;
         let project_path_for_record = project_root
             .as_ref()
             .map(|path| path.to_string_lossy().to_string());
+        if scope == "global" && !runtime_tool.installed {
+            let error = format!("TOOL_NOT_INSTALLED|{}", runtime_tool.key);
+            record_skill_target_failure(
+                &store,
+                &skillId,
+                &tool,
+                scope,
+                project_path_for_record.as_deref(),
+                &target,
+                runtime_tool.sync_mode,
+                &error,
+            )?;
+            anyhow::bail!(error);
+        }
+        // Pre-check: ensure the skills directory is writable (fixes #20 — Windows OS error 5).
+        if let Err(err) = std::fs::create_dir_all(&tool_root) {
+            let error = if err.kind() == std::io::ErrorKind::PermissionDenied {
+                format!(
+                    "TOOL_NOT_WRITABLE|{}|{}",
+                    runtime_tool.label,
+                    tool_root.to_string_lossy()
+                )
+            } else {
+                format!("failed to create skills dir {:?}: {}", tool_root, err)
+            };
+            record_skill_target_failure(
+                &store,
+                &skillId,
+                &tool,
+                scope,
+                project_path_for_record.as_deref(),
+                &target,
+                runtime_tool.sync_mode,
+                &error,
+            )?;
+            anyhow::bail!(error);
+        }
         if let Some(existing) =
             store.get_skill_target(&skillId, &tool, scope, project_path_for_record.as_deref())?
         {
-            if existing.status != "disabled"
+            if existing.mode == "copy"
+                && existing.target_path == target.to_string_lossy()
+                && overwrite != Some(true)
+            {
+                let previous =
+                    crate::core::content_hash::hash_dir_for_sync_conflict(sourcePath.as_ref())?;
+                crate::core::tool_distribution::refresh_copy(
+                    &store,
+                    &skillId,
+                    sourcePath.as_ref(),
+                    &target,
+                    Some(&previous),
+                )?;
+                return Ok(SyncResultDto {
+                    mode_used: "copy".into(),
+                    target_path: existing.target_path,
+                });
+            }
+            if existing.status == "ok"
+                && overwrite != Some(true)
                 && existing.target_path == target.to_string_lossy()
                 && target.exists()
             {
@@ -1027,7 +1307,7 @@ pub async fn sync_skill_to_tool(
         let overwrite = overwrite.unwrap_or(false)
             || (overwriteIfSameContent.unwrap_or(false)
                 && target_has_same_content(sourcePath.as_ref(), &target));
-        let result = (if runtime_tool.is_custom {
+        let result = if runtime_tool.is_custom {
             sync_dir_with_mode_with_overwrite(
                 runtime_tool.sync_mode,
                 sourcePath.as_ref(),
@@ -1036,24 +1316,38 @@ pub async fn sync_skill_to_tool(
             )
         } else {
             sync_dir_for_tool_with_overwrite(&tool, sourcePath.as_ref(), &target, overwrite)
-        })
-        .map_err(|err| {
-            let msg = err.to_string();
-            if msg.contains("target already exists") {
-                anyhow::anyhow!("TARGET_EXISTS|{}", target.to_string_lossy())
-            } else if msg.contains("os error 5")
-                || msg.contains("Access is denied")
-                || msg.contains("Permission denied")
-            {
-                anyhow::anyhow!(
-                    "TOOL_NOT_WRITABLE|{}|{}",
-                    runtime_tool.label,
-                    tool_root.to_string_lossy()
-                )
-            } else {
-                anyhow::anyhow!(msg)
+        };
+        let result = match result {
+            Ok(result) => result,
+            Err(err) => {
+                let msg = err.to_string();
+                let error = if msg.contains("target already exists") {
+                    format!("TARGET_EXISTS|{}", target.to_string_lossy())
+                } else if msg.contains("os error 5")
+                    || msg.contains("Access is denied")
+                    || msg.contains("Permission denied")
+                {
+                    format!(
+                        "TOOL_NOT_WRITABLE|{}|{}",
+                        runtime_tool.label,
+                        tool_root.to_string_lossy()
+                    )
+                } else {
+                    msg
+                };
+                record_skill_target_failure(
+                    &store,
+                    &skillId,
+                    &tool,
+                    scope,
+                    project_path_for_record.as_deref(),
+                    &target,
+                    runtime_tool.sync_mode,
+                    &error,
+                )?;
+                anyhow::bail!(error);
             }
-        })?;
+        };
 
         // Some tools share the same skills directory; keep DB records consistent across them.
         let group = runtime_tools_sharing_dir(&store, &runtime_tool, scope)?;
@@ -1103,6 +1397,58 @@ fn target_has_same_content(source: &std::path::Path, target: &std::path::Path) -
         (Ok(source_hash), Ok(target_hash)) => source_hash == target_hash,
         _ => false,
     }
+}
+
+fn skill_protected_paths(
+    store: &SkillStore,
+    skill_id: &str,
+) -> anyhow::Result<Vec<std::path::PathBuf>> {
+    let Some(skill) = store.get_skill_by_id(skill_id)? else {
+        return Ok(Vec::new());
+    };
+    let mut paths = vec![std::path::PathBuf::from(skill.central_path)];
+    if skill.source_type == "local" {
+        if let Some(source) = skill.source_ref.filter(|source| !source.trim().is_empty()) {
+            paths.push(std::path::PathBuf::from(source));
+        }
+    }
+    Ok(paths)
+}
+
+fn ensure_target_does_not_overlap_local_source(
+    store: &SkillStore,
+    skill_id: &str,
+    target: &std::path::Path,
+) -> anyhow::Result<()> {
+    let Some(skill) = store.get_skill_by_id(skill_id)? else {
+        return Ok(());
+    };
+    if skill.source_type != "local" {
+        return Ok(());
+    }
+    if let Some(source) = skill.source_ref.filter(|source| !source.trim().is_empty()) {
+        let source = std::path::PathBuf::from(source);
+        if paths_overlap(target, &source)? {
+            anyhow::bail!(
+                "SKILL_TARGET_OVERLAPS_SOURCE|{}|sync target overlaps original local source",
+                source.to_string_lossy()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn remove_skill_target_safely(
+    store: &SkillStore,
+    skill_id: &str,
+    target: &str,
+) -> anyhow::Result<()> {
+    let path = std::path::Path::new(target);
+    let protected_paths = skill_protected_paths(store, skill_id)?;
+    if path_is_protected_real_content(path, &protected_paths)? {
+        return Ok(());
+    }
+    remove_path_any_core(path)
 }
 
 #[tauri::command]
@@ -1167,7 +1513,7 @@ pub async fn unsync_skill_from_tool(
                 store.get_skill_target(&skillId, k, scope, project_path.as_deref())?
             {
                 if !removed {
-                    remove_path_any(&target.target_path).map_err(anyhow::Error::msg)?;
+                    remove_skill_target_safely(&store, &skillId, &target.target_path)?;
                     removed = true;
                 }
                 store.delete_skill_target(&skillId, k, scope, project_path.as_deref())?;
@@ -1195,7 +1541,9 @@ pub async fn set_skill_enabled(
             let mut remove_failures: Vec<String> = Vec::new();
             for target in targets {
                 if target.status != "disabled" {
-                    if let Err(err) = remove_path_any(&target.target_path) {
+                    if let Err(err) =
+                        remove_skill_target_safely(&store, &skillId, &target.target_path)
+                    {
                         remove_failures.push(format!("{}: {}", target.target_path, err));
                     }
                 }
@@ -1232,6 +1580,8 @@ pub struct UpdateResultDto {
     pub content_hash: Option<String>,
     pub source_revision: Option<String>,
     pub updated_targets: Vec<String>,
+    pub pending_targets: Vec<String>,
+    pub changed: bool,
 }
 
 #[tauri::command]
@@ -1250,6 +1600,8 @@ pub async fn update_managed_skill(
             content_hash: res.content_hash,
             source_revision: res.source_revision,
             updated_targets: res.updated_targets,
+            pending_targets: res.pending_targets,
+            changed: res.changed,
         })
     })
     .await
@@ -1266,14 +1618,10 @@ pub async fn search_github(
     let store = store.inner().clone();
     let limit = limit.unwrap_or(10) as usize;
     tauri::async_runtime::spawn_blocking(move || {
-        let token = store.get_setting("github_token")?.unwrap_or_default();
         let proxy_url = get_github_proxy_url_core(&store)?;
-        let token_opt = if token.is_empty() {
-            None
-        } else {
-            Some(token.as_str())
-        };
-        search_github_repos(&query, limit, token_opt, &proxy_url)
+        let credentials = SystemGithubTokenStore;
+        let token = resolve_github_token(&store, &credentials)?;
+        search_github_repos(&query, limit, token.as_deref(), &proxy_url)
     })
     .await
     .map_err(|err| err.to_string())?
@@ -1321,11 +1669,27 @@ pub async fn get_github_release_notes(
     .map_err(format_anyhow_error)
 }
 
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct GithubTokenStatusDto {
+    pub has_token: bool,
+}
+
+fn get_github_token_status_impl(
+    store: &SkillStore,
+    credentials: &dyn CredentialStore,
+) -> anyhow::Result<GithubTokenStatusDto> {
+    Ok(GithubTokenStatusDto {
+        has_token: has_github_token(store, credentials)?,
+    })
+}
+
 #[tauri::command]
-pub async fn get_github_token(store: State<'_, SkillStore>) -> Result<String, String> {
+pub async fn get_github_token_status(
+    store: State<'_, SkillStore>,
+) -> Result<GithubTokenStatusDto, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        Ok::<_, anyhow::Error>(store.get_setting("github_token")?.unwrap_or_default())
+        get_github_token_status_impl(&store, &SystemGithubTokenStore)
     })
     .await
     .map_err(|err| err.to_string())?
@@ -1336,13 +1700,7 @@ pub async fn get_github_token(store: State<'_, SkillStore>) -> Result<String, St
 pub async fn set_github_token(store: State<'_, SkillStore>, token: String) -> Result<(), String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let trimmed = token.trim();
-        if trimmed.is_empty() {
-            store.set_setting("github_token", "")?;
-        } else {
-            store.set_setting("github_token", trimmed)?;
-        }
-        Ok::<_, anyhow::Error>(())
+        set_github_token_core(&store, &SystemGithubTokenStore, &token)
     })
     .await
     .map_err(|err| err.to_string())?
@@ -1416,7 +1774,7 @@ pub async fn import_existing_skill(
         if !source.join("SKILL.md").exists() {
             anyhow::bail!("SKILL_INVALID|missing_skill_md");
         }
-        let result = install_local_skill(&app, &store, source, name)?;
+        let result = import_existing_local_skill(&app, &store, source, name)?;
         Ok::<_, anyhow::Error>(to_install_dto(result))
     })
     .await
@@ -1437,6 +1795,8 @@ pub struct ManagedSkillDto {
     pub last_sync_at: Option<i64>,
     pub enabled: bool,
     pub status: String,
+    pub source_error: Option<String>,
+    pub source_checked_at: Option<i64>,
     pub tags: Vec<TagDto>,
     pub targets: Vec<SkillTargetDto>,
 }
@@ -1462,6 +1822,7 @@ pub struct SkillTargetDto {
     pub project_path: Option<String>,
     pub mode: String,
     pub status: String,
+    pub last_error: Option<String>,
     pub target_path: String,
     pub synced_at: Option<i64>,
 }
@@ -1561,11 +1922,17 @@ pub fn get_untagged_skill_ids(store: State<'_, SkillStore>) -> Result<Vec<String
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn delete_managed_skill(
+    app: tauri::AppHandle,
     store: State<'_, SkillStore>,
     skillId: String,
 ) -> Result<(), String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _device_sync_guard = if store.get_device_sync_config()?.is_some() {
+            Some(crate::core::device_sync::try_lock_device_sync()?)
+        } else {
+            None
+        };
         // 便于排查“按钮点了没反应”：确认前端确实触发了命令
         println!("[delete_managed_skill] skillId={}", skillId);
 
@@ -1575,7 +1942,7 @@ pub async fn delete_managed_skill(
 
         let mut remove_failures: Vec<String> = Vec::new();
         for target in targets {
-            if let Err(err) = remove_path_any(&target.target_path) {
+            if let Err(err) = remove_skill_target_safely(&store, &skillId, &target.target_path) {
                 remove_failures.push(format!("{}: {}", target.target_path, err));
             }
         }
@@ -1583,8 +1950,53 @@ pub async fn delete_managed_skill(
         let record = store.get_skill_by_id(&skillId)?;
         if let Some(skill) = record {
             let path = std::path::PathBuf::from(skill.central_path);
-            if path.exists() {
-                std::fs::remove_dir_all(&path)?;
+            let overlaps_local_source = if skill.source_type == "local" {
+                match skill
+                    .source_ref
+                    .as_deref()
+                    .filter(|source| !source.trim().is_empty())
+                {
+                    Some(source) => paths_overlap(&path, std::path::Path::new(source))?,
+                    None => false,
+                }
+            } else {
+                false
+            };
+            if path.exists() && !overlaps_local_source {
+                if store.get_device_sync_config()?.is_some() {
+                    let trash_id = Uuid::new_v4().to_string();
+                    let trash_path = app
+                        .path()
+                        .app_data_dir()?
+                        .join("device-sync")
+                        .join("trash")
+                        .join(&trash_id);
+                    std::fs::create_dir_all(
+                        trash_path.parent().context("trash path has no parent")?,
+                    )?;
+                    copy_dir_recursive(&path, &trash_path)
+                        .context("copy deleted Skill to the recoverable app recycle bin")?;
+                    if let Err(err) = remove_path_any_core(&path)
+                        .context("move deleted Skill to the system recycle bin")
+                    {
+                        let _ = remove_path_any_core(&trash_path);
+                        return Err(err);
+                    }
+                    let deleted_at = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as i64;
+                    store.add_device_sync_trash(&TrashEntry {
+                        id: trash_id,
+                        skill_id: skill.id.clone(),
+                        skill_name: skill.name.clone(),
+                        trash_path: trash_path.to_string_lossy().to_string(),
+                        deleted_at,
+                        expires_at: deleted_at + 30 * 24 * 60 * 60 * 1000,
+                    })?;
+                } else {
+                    remove_path_any_core(&path)?;
+                }
             }
             store.delete_skill(&skillId)?;
         }
@@ -1603,28 +2015,9 @@ pub async fn delete_managed_skill(
     .map_err(format_anyhow_error)
 }
 
+#[cfg(test)]
 fn remove_path_any(path: &str) -> Result<(), String> {
-    let p = std::path::Path::new(path);
-    if !p.exists() {
-        return Ok(());
-    }
-
-    let meta = std::fs::symlink_metadata(p).map_err(|err| err.to_string())?;
-    let ft = meta.file_type();
-
-    // 软链接（即使指向目录）也应该用 remove_file 删除链接本身
-    if ft.is_symlink() {
-        std::fs::remove_file(p).map_err(|err| err.to_string())?;
-        return Ok(());
-    }
-
-    if ft.is_dir() {
-        std::fs::remove_dir_all(p).map_err(|err| err.to_string())?;
-        return Ok(());
-    }
-
-    std::fs::remove_file(p).map_err(|err| err.to_string())?;
-    Ok(())
+    remove_path_any_core(std::path::Path::new(path)).map_err(|err| format!("{path}: {err:#}"))
 }
 
 fn to_install_dto(result: InstallResult) -> InstallResultDto {
@@ -1666,6 +2059,7 @@ fn to_auto_update_config_dto(mut config: AutoUpdateConfig) -> AutoUpdateConfigDt
         last_status: config.last_status,
         last_error: config.last_error,
         last_checked: config.last_checked,
+        last_unchanged: config.last_unchanged,
         last_updated: config.last_updated,
         last_failed: config.last_failed,
         progress: config.progress,
@@ -1675,6 +2069,7 @@ fn to_auto_update_config_dto(mut config: AutoUpdateConfig) -> AutoUpdateConfigDt
 fn to_auto_update_run_result_dto(result: AutoUpdateRunResult) -> AutoUpdateRunResultDto {
     AutoUpdateRunResultDto {
         checked: result.checked,
+        unchanged: result.unchanged,
         updated: result.updated,
         failed: result.failed,
         errors: result.errors,
@@ -1698,11 +2093,39 @@ fn now_ms() -> i64 {
     now.as_millis() as i64
 }
 
+fn managed_skill_status(skill: &SkillRecord) -> String {
+    if skill.status != "ok" {
+        return skill.status.clone();
+    }
+    if skill.source_type != "local" {
+        return skill.status.clone();
+    }
+    let source_exists = skill
+        .source_ref
+        .as_deref()
+        .and_then(|source| expand_home_path(source).ok())
+        .map(|source| source.exists())
+        .unwrap_or(false);
+    if source_exists {
+        skill.status.clone()
+    } else {
+        "error".to_string()
+    }
+}
+
 fn get_managed_skills_impl(store: &SkillStore) -> Result<Vec<ManagedSkillDto>, String> {
     let skills = store.list_skills().map_err(|err| err.to_string())?;
+    let checks = store.source_checks().map_err(format_anyhow_error)?;
     Ok(skills
         .into_iter()
         .map(|skill| {
+            let source_check = checks.get(&skill.id);
+            let source_error = source_check.and_then(|check| check.0.clone());
+            let status = if source_error.is_some() {
+                "error".into()
+            } else {
+                managed_skill_status(&skill)
+            };
             let targets = store
                 .list_skill_targets(&skill.id)
                 .unwrap_or_default()
@@ -1713,6 +2136,7 @@ fn get_managed_skills_impl(store: &SkillStore) -> Result<Vec<ManagedSkillDto>, S
                     project_path: target.project_path,
                     mode: target.mode,
                     status: target.status,
+                    last_error: target.last_error,
                     target_path: target.target_path,
                     synced_at: target.synced_at,
                 })
@@ -1728,6 +2152,8 @@ fn get_managed_skills_impl(store: &SkillStore) -> Result<Vec<ManagedSkillDto>, S
                 .collect();
 
             ManagedSkillDto {
+                source_error,
+                source_checked_at: source_check.map(|check| check.1),
                 id: skill.id,
                 name: skill.name,
                 description: skill.description,
@@ -1738,7 +2164,7 @@ fn get_managed_skills_impl(store: &SkillStore) -> Result<Vec<ManagedSkillDto>, S
                 updated_at: skill.updated_at,
                 last_sync_at: skill.last_sync_at,
                 enabled: skill.enabled,
-                status: skill.status,
+                status,
                 tags,
                 targets,
             }
@@ -1862,6 +2288,816 @@ pub async fn read_skill_file(central_path: String, file_path: String) -> Result<
 pub fn cancel_current_operation(cancel: State<'_, Arc<CancelToken>>) -> Result<(), String> {
     cancel.cancel();
     Ok(())
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DeviceSyncConfigDto {
+    pub visibility: crate::core::device_sync::types::RepositoryVisibility,
+    pub public_upload_confirmed: bool,
+    pub provider: ProviderId,
+    pub remote_url: String,
+    pub branch: String,
+    pub username: Option<String>,
+    pub auto_check: bool,
+    pub auto_sync: bool,
+    pub auto_sync_schedule: Option<crate::core::device_sync::scheduler::SyncSchedule>,
+    pub has_credential: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct SaveDeviceSyncConfigInput {
+    #[serde(default)]
+    pub visibility: crate::core::device_sync::types::RepositoryVisibility,
+    #[serde(default)]
+    pub public_upload_confirmed: bool,
+    pub provider: ProviderId,
+    pub remote_url: String,
+    pub branch: String,
+    pub username: Option<String>,
+    pub token: Option<String>,
+    pub credential_key: Option<String>,
+    pub auto_check: bool,
+    pub auto_sync: bool,
+    #[serde(default)]
+    pub auto_sync_schedule: Option<crate::core::device_sync::scheduler::SyncSchedule>,
+}
+
+#[tauri::command]
+pub fn get_device_sync_config(
+    store: State<'_, SkillStore>,
+) -> Result<Option<DeviceSyncConfigDto>, String> {
+    store
+        .get_device_sync_config()
+        .map(|config| {
+            config.map(|item| DeviceSyncConfigDto {
+                visibility: item.visibility,
+                public_upload_confirmed: item.public_upload_confirmed,
+                provider: item.provider,
+                remote_url: item.remote_url,
+                branch: item.branch,
+                username: item.username,
+                auto_check: item.auto_check,
+                auto_sync: item.auto_sync && item.auto_sync_schedule.is_some(),
+                auto_sync_schedule: item.auto_sync_schedule,
+                has_credential: item.credential_key.is_some(),
+            })
+        })
+        .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+pub fn save_device_sync_config(
+    store: State<'_, SkillStore>,
+    config: SaveDeviceSyncConfigInput,
+) -> Result<DeviceSyncConfigDto, String> {
+    let _sync_guard =
+        crate::core::device_sync::try_lock_device_sync().map_err(format_anyhow_error)?;
+    if config.auto_sync && config.auto_sync_schedule.is_none() {
+        return Err("choose an automatic sync schedule".to_string());
+    }
+    if let Some(schedule) = &config.auto_sync_schedule {
+        schedule.validate().map_err(format_anyhow_error)?;
+    }
+    if config.remote_url.trim().is_empty() {
+        return Err("device sync repository URL is empty".to_string());
+    }
+    validate_device_sync_remote(&config.remote_url)?;
+    let branch = if config.branch.trim().is_empty() {
+        "main"
+    } else {
+        config.branch.trim()
+    };
+    if !git2::Reference::is_valid_name(&format!("refs/heads/{branch}")) {
+        return Err("invalid device sync branch name".to_string());
+    }
+    let credentials = SystemCredentialStore;
+    let previous = store
+        .get_device_sync_config()
+        .map_err(format_anyhow_error)?;
+    let same_repository = previous.as_ref().is_some_and(|item| {
+        item.provider == config.provider
+            && item.remote_url == config.remote_url.trim()
+            && item.branch == branch
+    });
+    let requested_credential_key = config
+        .credential_key
+        .filter(|value| !value.trim().is_empty());
+    let remote_usage = CredentialUsage::from_https_remote(config.provider, &config.remote_url).ok();
+    if let Some(key) = requested_credential_key.as_deref() {
+        let usage = remote_usage
+            .as_ref()
+            .ok_or_else(|| "token authentication requires an HTTPS repository URL".to_string())?;
+        if resolve_access_token(&credentials, key, usage)
+            .map_err(format_anyhow_error)?
+            .is_none()
+        {
+            return Err("OAuth authorization is no longer available; sign in again".to_string());
+        }
+    }
+    let credential_key = requested_credential_key.or_else(|| {
+        remote_usage
+            .as_ref()
+            .and_then(|usage| inherited_device_sync_credential(previous.as_ref(), usage))
+    });
+    let manual_token = config
+        .token
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(str::to_string);
+    let saved = DeviceSyncConfig {
+        visibility: config.visibility,
+        public_upload_confirmed: config.public_upload_confirmed
+            && config.visibility == crate::core::device_sync::types::RepositoryVisibility::Public,
+        provider: config.provider,
+        remote_url: config.remote_url.trim().to_string(),
+        branch: branch.to_string(),
+        username: config.username.filter(|value| !value.trim().is_empty()),
+        credential_key,
+        auto_check: config.auto_check,
+        auto_sync: config.auto_sync,
+        auto_sync_schedule: config.auto_sync_schedule,
+        last_synced_commit: if same_repository {
+            previous
+                .as_ref()
+                .and_then(|item| item.last_synced_commit.clone())
+        } else {
+            None
+        },
+    };
+    let persist_config = |candidate: &DeviceSyncConfig| -> anyhow::Result<()> {
+        if previous.is_some() && !same_repository {
+            store.clear_device_sync_repository_state()?;
+        }
+        store.save_device_sync_config(candidate)
+    };
+    let replaced_credential_key = previous
+        .as_ref()
+        .and_then(|item| item.credential_key.as_deref())
+        .filter(|old_key| {
+            manual_token.is_some() || Some(*old_key) != saved.credential_key.as_deref()
+        });
+    let saved = persist_device_sync_credential_replacement_with(
+        &store,
+        &credentials,
+        replaced_credential_key,
+        || {
+            if let Some(token) = manual_token.as_deref() {
+                let usage = remote_usage
+                    .as_ref()
+                    .context("token authentication requires an HTTPS repository URL")?;
+                persist_config_with_staged_personal_access_token(
+                    &store,
+                    &credentials,
+                    usage,
+                    token,
+                    saved,
+                    persist_config,
+                )
+            } else {
+                persist_config(&saved)?;
+                Ok(saved)
+            }
+        },
+    )
+    .map_err(format_anyhow_error)?;
+    if load_pending_oauth(&store)
+        .map_err(format_anyhow_error)?
+        .is_some()
+    {
+        clear_pending_oauth_with_credentials(&store, &credentials, true)
+            .map_err(format_anyhow_error)?;
+    }
+    Ok(DeviceSyncConfigDto {
+        provider: saved.provider,
+        remote_url: saved.remote_url,
+        branch: saved.branch,
+        username: saved.username,
+        auto_check: saved.auto_check,
+        auto_sync: saved.auto_sync,
+        auto_sync_schedule: saved.auto_sync_schedule,
+        has_credential: saved.credential_key.is_some(),
+        visibility: saved.visibility,
+        public_upload_confirmed: saved.public_upload_confirmed,
+    })
+}
+
+#[tauri::command]
+pub fn get_device_sync_oauth_availability() -> Vec<OAuthProviderAvailability> {
+    oauth::availability()
+}
+
+#[tauri::command]
+pub fn get_device_sync_pending_oauth(
+    store: State<'_, SkillStore>,
+) -> Result<Option<PendingOAuthAuthorization>, String> {
+    load_pending_oauth(&store).map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn start_device_sync_oauth(providerId: ProviderId) -> Result<OAuthStartResult, String> {
+    tauri::async_runtime::spawn_blocking(move || oauth::start(providerId))
+        .await
+        .map_err(|err| err.to_string())?
+        .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn poll_device_sync_oauth(
+    store: State<'_, SkillStore>,
+    flowId: String,
+) -> Result<OAuthPollResult, String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let credentials = SystemCredentialStore;
+        poll_device_sync_oauth_with(
+            &store,
+            &credentials,
+            || oauth::poll(&flowId, &credentials),
+            |pending| save_pending_oauth(&store, pending),
+        )
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+pub fn clear_device_sync_pending_oauth(store: State<'_, SkillStore>) -> Result<(), String> {
+    let _sync_guard =
+        crate::core::device_sync::try_lock_device_sync().map_err(format_anyhow_error)?;
+    clear_pending_oauth(&store, true).map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn cancel_device_sync_oauth(flowId: String) {
+    oauth::cancel(&flowId);
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn validate_device_sync_account(
+    providerId: ProviderId,
+    token: String,
+) -> Result<ProviderAccount, String> {
+    tauri::async_runtime::spawn_blocking(move || provider(providerId).validate_token(token.trim()))
+        .await
+        .map_err(|err| err.to_string())?
+        .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn create_device_sync_repository(
+    store: State<'_, SkillStore>,
+    providerId: ProviderId,
+    token: Option<String>,
+    credentialKey: Option<String>,
+    name: String,
+) -> Result<RemoteRepository, String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let token = resolve_device_sync_token(&store, providerId, token, credentialKey)?;
+        let provider = provider(providerId);
+        provider.validate_token(token.trim())?;
+        provider.create_private_repository(token.trim(), &name)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn list_device_sync_repositories(
+    store: State<'_, SkillStore>,
+    providerId: ProviderId,
+    credentialKey: Option<String>,
+) -> Result<Vec<RemoteRepository>, String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let token = resolve_device_sync_token(&store, providerId, None, credentialKey)?;
+        provider(providerId).list_repositories(&token)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+pub fn get_device_sync_status(
+    app: tauri::AppHandle,
+    store: State<'_, SkillStore>,
+) -> Result<SyncStatus, String> {
+    let (workspace, central) = device_sync_paths(&app, &store).map_err(format_anyhow_error)?;
+    let credentials = SystemCredentialStore;
+    let service = DeviceSyncService::new(&store, &credentials, workspace, central);
+    let mut status = service.status().map_err(format_anyhow_error)?;
+    let runtime = app
+        .try_state::<crate::core::device_sync::scheduler::SchedulerRuntime>()
+        .map(|state| state.inner().clone())
+        .unwrap_or_default();
+    status.schedule_status = Some(
+        runtime
+            .status(&store, status.conflict_count > 0, status.is_running)
+            .map_err(format_anyhow_error)?,
+    );
+    Ok(status)
+}
+
+#[tauri::command]
+pub async fn check_device_sync(
+    app: tauri::AppHandle,
+    store: State<'_, SkillStore>,
+) -> Result<SyncChangeSummary, String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (workspace, central) = device_sync_paths(&app, &store)?;
+        let credentials = SystemCredentialStore;
+        DeviceSyncService::new(&store, &credentials, workspace, central).check()
+    })
+    .await
+    .map_err(|_| "DEVICE_SYNC_FAILURE_unknown".to_string())?
+    .map_err(crate::core::device_sync::errors::format_error)
+}
+
+#[tauri::command]
+pub async fn run_device_sync(
+    app: tauri::AppHandle,
+    store: State<'_, SkillStore>,
+) -> Result<SyncRunResult, String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (workspace, central) = device_sync_paths(&app, &store)?;
+        let credentials = SystemCredentialStore;
+        DeviceSyncService::new(&store, &credentials, workspace, central).sync()
+    })
+    .await
+    .map_err(|_| "DEVICE_SYNC_FAILURE_unknown".to_string())?
+    .map_err(crate::core::device_sync::errors::format_error)
+}
+
+#[tauri::command]
+pub fn get_device_sync_history(
+    store: State<'_, SkillStore>,
+) -> Result<Vec<SyncHistoryEntry>, String> {
+    store
+        .list_device_sync_history(50)
+        .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+pub fn get_device_sync_devices(
+    app: tauri::AppHandle,
+    store: State<'_, SkillStore>,
+) -> Result<Vec<DeviceSyncDevice>, String> {
+    let (workspace, central) = device_sync_paths(&app, &store).map_err(format_anyhow_error)?;
+    let credentials = SystemCredentialStore;
+    DeviceSyncService::new(&store, &credentials, workspace, central)
+        .devices()
+        .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn set_device_sync_device_alias(
+    store: State<'_, SkillStore>,
+    deviceId: String,
+    alias: Option<String>,
+) -> Result<(), String> {
+    store
+        .set_device_sync_device_alias(&deviceId, alias.as_deref())
+        .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+pub fn get_device_sync_conflicts(
+    store: State<'_, SkillStore>,
+) -> Result<Vec<SyncConflict>, String> {
+    store
+        .list_device_sync_conflicts()
+        .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+pub fn get_device_sync_trash(store: State<'_, SkillStore>) -> Result<Vec<TrashEntry>, String> {
+    store.list_device_sync_trash().map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn resolve_device_sync_conflict(
+    app: tauri::AppHandle,
+    store: State<'_, SkillStore>,
+    conflictId: String,
+    resolution: ConflictResolution,
+) -> Result<(), String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (workspace, central) = device_sync_paths(&app, &store)?;
+        let credentials = SystemCredentialStore;
+        DeviceSyncService::new(&store, &credentials, workspace, central)
+            .resolve_conflict(&conflictId, resolution)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn restore_device_sync_trash(
+    app: tauri::AppHandle,
+    store: State<'_, SkillStore>,
+    trashId: String,
+) -> Result<(), String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (workspace, central) = device_sync_paths(&app, &store)?;
+        let credentials = SystemCredentialStore;
+        DeviceSyncService::new(&store, &credentials, workspace, central).restore_trash(&trashId)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+pub fn disconnect_device_sync(store: State<'_, SkillStore>) -> Result<(), String> {
+    let _sync_guard =
+        crate::core::device_sync::try_lock_device_sync().map_err(format_anyhow_error)?;
+    disconnect_device_sync_with_credentials(&store, &SystemCredentialStore)
+        .map_err(format_anyhow_error)
+}
+
+fn disconnect_device_sync_with_credentials(
+    store: &SkillStore,
+    credentials: &dyn CredentialStore,
+) -> anyhow::Result<()> {
+    retry_queued_credential_cleanup(store, credentials)?;
+    if let Some(key) = store
+        .get_device_sync_config()?
+        .and_then(|config| config.credential_key)
+    {
+        enqueue_credential_cleanup(store, &key)?;
+    }
+    clear_pending_oauth_with_credentials(store, credentials, true)?;
+    store.clear_device_sync_repository_state()?;
+    store.clear_device_sync_config()?;
+    retry_queued_credential_cleanup(store, credentials)
+}
+
+fn load_pending_oauth(store: &SkillStore) -> anyhow::Result<Option<PendingOAuthAuthorization>> {
+    store
+        .get_setting(DEVICE_SYNC_PENDING_OAUTH_SETTING)?
+        .map(|value| serde_json::from_str(&value).context("decode pending OAuth authorization"))
+        .transpose()
+}
+
+fn save_pending_oauth(
+    store: &SkillStore,
+    pending: &PendingOAuthAuthorization,
+) -> anyhow::Result<()> {
+    store.set_setting(
+        DEVICE_SYNC_PENDING_OAUTH_SETTING,
+        &serde_json::to_string(pending)?,
+    )
+}
+
+pub(crate) fn poll_device_sync_oauth_with<P, S>(
+    store: &SkillStore,
+    credentials: &dyn CredentialStore,
+    poll: P,
+    save: S,
+) -> anyhow::Result<OAuthPollResult>
+where
+    P: FnOnce() -> anyhow::Result<OAuthPollResult>,
+    S: FnOnce(&PendingOAuthAuthorization) -> anyhow::Result<()>,
+{
+    let _sync_guard = crate::core::device_sync::try_lock_device_sync()?;
+    retry_queued_credential_cleanup(store, credentials)?;
+    let result = poll()?;
+    persist_pending_oauth_result_with(store, credentials, &result, save)?;
+    Ok(result)
+}
+
+fn clear_pending_oauth(store: &SkillStore, delete_credential: bool) -> anyhow::Result<()> {
+    clear_pending_oauth_with_credentials(store, &SystemCredentialStore, delete_credential)
+}
+
+fn clear_pending_oauth_with_credentials(
+    store: &SkillStore,
+    credentials: &dyn CredentialStore,
+    delete_credential: bool,
+) -> anyhow::Result<()> {
+    let pending = load_pending_oauth(store)?;
+    let delete_key = if delete_credential {
+        pending
+            .as_ref()
+            .map(|pending| {
+                credential_key_is_active(store, &pending.credential_key)
+                    .map(|active| (!active).then(|| pending.credential_key.clone()))
+            })
+            .transpose()?
+            .flatten()
+    } else {
+        None
+    };
+    if let Some(key) = delete_key.as_deref() {
+        enqueue_credential_cleanup(store, key)?;
+    }
+    store.delete_setting(DEVICE_SYNC_PENDING_OAUTH_SETTING)?;
+    retry_queued_credential_cleanup(store, credentials)?;
+    Ok(())
+}
+
+fn load_credential_cleanup_queue(store: &SkillStore) -> anyhow::Result<Vec<String>> {
+    let mut keys = store
+        .get_setting(DEVICE_SYNC_CREDENTIAL_CLEANUP_QUEUE_SETTING)?
+        .map(|value| {
+            serde_json::from_str::<Vec<String>>(&value).context("decode credential cleanup queue")
+        })
+        .transpose()?
+        .unwrap_or_default();
+    keys.retain(|key| !key.trim().is_empty());
+    keys.sort();
+    keys.dedup();
+    Ok(keys)
+}
+
+fn save_credential_cleanup_queue(store: &SkillStore, keys: &[String]) -> anyhow::Result<()> {
+    if keys.is_empty() {
+        store.delete_setting(DEVICE_SYNC_CREDENTIAL_CLEANUP_QUEUE_SETTING)
+    } else {
+        store.set_setting(
+            DEVICE_SYNC_CREDENTIAL_CLEANUP_QUEUE_SETTING,
+            &serde_json::to_string(keys)?,
+        )
+    }
+}
+
+fn enqueue_credential_cleanup(store: &SkillStore, key: &str) -> anyhow::Result<()> {
+    let mut keys = load_credential_cleanup_queue(store)?;
+    if !keys.iter().any(|queued| queued == key) {
+        keys.push(key.to_string());
+        keys.sort();
+        save_credential_cleanup_queue(store, &keys)?;
+    }
+    Ok(())
+}
+
+fn dequeue_credential_cleanup(store: &SkillStore, key: &str) -> anyhow::Result<()> {
+    let mut keys = load_credential_cleanup_queue(store)?;
+    keys.retain(|queued| queued != key);
+    save_credential_cleanup_queue(store, &keys)
+}
+
+fn persist_device_sync_credential_replacement_with<T, F>(
+    store: &SkillStore,
+    credentials: &dyn CredentialStore,
+    replaced_credential_key: Option<&str>,
+    persist: F,
+) -> anyhow::Result<T>
+where
+    F: FnOnce() -> anyhow::Result<T>,
+{
+    retry_queued_credential_cleanup(store, credentials)?;
+    if let Some(key) = replaced_credential_key {
+        enqueue_credential_cleanup(store, key)?;
+    }
+    let value = persist()?;
+    retry_queued_credential_cleanup(store, credentials)?;
+    Ok(value)
+}
+
+pub(crate) fn retry_queued_credential_cleanup(
+    store: &SkillStore,
+    credentials: &dyn CredentialStore,
+) -> anyhow::Result<()> {
+    let keys = load_credential_cleanup_queue(store)?;
+    let ownership = keys
+        .iter()
+        .map(|key| credential_key_is_owned(store, key).map(|owned| (key, owned)))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let mut remaining = Vec::new();
+    let mut first_error = None;
+    for (key, owned) in ownership {
+        if owned {
+            remaining.push(key.clone());
+            continue;
+        }
+        if let Err(err) = credentials.delete(key) {
+            remaining.push(key.clone());
+            if first_error.is_none() {
+                first_error = Some(err);
+            }
+        }
+    }
+    save_credential_cleanup_queue(store, &remaining)?;
+    if let Some(err) = first_error {
+        return Err(err).context("delete queued device sync credential");
+    }
+    Ok(())
+}
+
+fn persist_pending_oauth_result_with<F>(
+    store: &SkillStore,
+    credentials: &dyn CredentialStore,
+    result: &OAuthPollResult,
+    save: F,
+) -> anyhow::Result<()>
+where
+    F: FnOnce(&PendingOAuthAuthorization) -> anyhow::Result<()>,
+{
+    let (Some(credential_key), Some(account)) =
+        (result.credential_key.as_ref(), result.account.as_ref())
+    else {
+        return retry_queued_credential_cleanup(store, credentials);
+    };
+    let previous = match load_pending_oauth(store) {
+        Ok(previous) => previous,
+        Err(err) => {
+            return defer_credential_cleanup_after_failure(store, credentials, credential_key, err);
+        }
+    };
+    let previous_key = previous
+        .as_ref()
+        .map(|pending| pending.credential_key.as_str())
+        .filter(|previous_key| *previous_key != credential_key);
+    if let Some(previous_key) = previous_key {
+        let previous_is_active = match credential_key_is_active(store, previous_key) {
+            Ok(active) => active,
+            Err(err) => {
+                return defer_credential_cleanup_after_failure(
+                    store,
+                    credentials,
+                    credential_key,
+                    err,
+                );
+            }
+        };
+        if !previous_is_active {
+            if let Err(err) = enqueue_credential_cleanup(store, previous_key) {
+                return defer_credential_cleanup_after_failure(
+                    store,
+                    credentials,
+                    credential_key,
+                    err,
+                );
+            }
+        }
+    }
+    let pending = PendingOAuthAuthorization {
+        provider: result.provider,
+        credential_key: credential_key.clone(),
+        account: account.clone(),
+    };
+    if let Err(err) = save(&pending) {
+        return defer_credential_cleanup_after_failure(store, credentials, credential_key, err);
+    }
+    retry_queued_credential_cleanup(store, credentials)
+}
+
+fn defer_credential_cleanup_after_failure<T>(
+    store: &SkillStore,
+    credentials: &dyn CredentialStore,
+    key: &str,
+    primary_error: anyhow::Error,
+) -> anyhow::Result<T> {
+    let cleanup_result = match enqueue_credential_cleanup(store, key) {
+        Ok(()) => retry_queued_credential_cleanup(store, credentials),
+        Err(queue_error) => match credentials.delete(key) {
+            Ok(()) => Ok(()),
+            Err(delete_error) => Err(delete_error).with_context(|| {
+                format!(
+                    "persist cleanup intent after {queue_error:#} and delete uncommitted credential"
+                )
+            }),
+        },
+    };
+    match cleanup_result {
+        Ok(()) => Err(primary_error),
+        Err(cleanup_error) => Err(cleanup_error).with_context(|| {
+            format!("operation failed and credential cleanup was deferred: {primary_error:#}")
+        }),
+    }
+}
+
+fn credential_key_is_active(store: &SkillStore, key: &str) -> anyhow::Result<bool> {
+    Ok(store
+        .get_device_sync_config()?
+        .and_then(|config| config.credential_key)
+        .as_deref()
+        == Some(key))
+}
+
+fn credential_key_is_owned(store: &SkillStore, key: &str) -> anyhow::Result<bool> {
+    if credential_key_is_active(store, key)? {
+        return Ok(true);
+    }
+    Ok(load_pending_oauth(store)?
+        .map(|pending| pending.credential_key == key)
+        .unwrap_or(false))
+}
+
+fn persist_config_with_staged_personal_access_token<F>(
+    store: &SkillStore,
+    credentials: &dyn CredentialStore,
+    usage: &CredentialUsage,
+    token: &str,
+    mut config: DeviceSyncConfig,
+    save: F,
+) -> anyhow::Result<DeviceSyncConfig>
+where
+    F: FnOnce(&DeviceSyncConfig) -> anyhow::Result<()>,
+{
+    let staged_key = Uuid::new_v4().to_string();
+    enqueue_credential_cleanup(store, &staged_key)?;
+    if let Err(err) = save_personal_access_token(credentials, &staged_key, usage, token) {
+        return defer_credential_cleanup_after_failure(store, credentials, &staged_key, err);
+    }
+    config.credential_key = Some(staged_key.clone());
+    if let Err(err) = save(&config) {
+        return defer_credential_cleanup_after_failure(store, credentials, &staged_key, err);
+    }
+    dequeue_credential_cleanup(store, &staged_key)?;
+    retry_queued_credential_cleanup(store, credentials)?;
+    Ok(config)
+}
+
+fn device_sync_paths(
+    app: &tauri::AppHandle,
+    store: &SkillStore,
+) -> anyhow::Result<(std::path::PathBuf, std::path::PathBuf)> {
+    let workspace = app
+        .path()
+        .app_data_dir()
+        .context("resolve device sync data directory")?
+        .join("device-sync");
+    let central = resolve_central_repo_path(app, store)?;
+    Ok((workspace, central))
+}
+
+fn resolve_device_sync_token(
+    store: &SkillStore,
+    provider: ProviderId,
+    token: Option<String>,
+    credential_key: Option<String>,
+) -> anyhow::Result<String> {
+    if let Some(token) = token.filter(|value| !value.trim().is_empty()) {
+        return Ok(token.trim().to_string());
+    }
+    let key = credential_key
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            store
+                .get_device_sync_config()
+                .ok()
+                .flatten()
+                .filter(|config| config.provider == provider)
+                .and_then(|config| config.credential_key)
+        })
+        .context("sign in or provide an access token first")?;
+    resolve_access_token(
+        &SystemCredentialStore,
+        &key,
+        &CredentialUsage::official(provider),
+    )
+    .context("read saved device sync authorization")?
+    .context("saved authorization is unavailable; sign in again")
+}
+
+fn inherited_device_sync_credential(
+    previous: Option<&DeviceSyncConfig>,
+    expected_usage: &CredentialUsage,
+) -> Option<String> {
+    let previous = previous?;
+    let previous_usage =
+        CredentialUsage::from_https_remote(previous.provider, &previous.remote_url).ok()?;
+    (previous_usage == *expected_usage)
+        .then(|| previous.credential_key.clone())
+        .flatten()
+}
+
+fn validate_device_sync_remote(value: &str) -> Result<(), String> {
+    let value = value.trim();
+    if value.contains(['\n', '\r']) || value.contains('?') || value.contains('#') {
+        return Err("device sync repository URL contains unsupported characters".to_string());
+    }
+    if let Some(rest) = value.strip_prefix("https://") {
+        let authority = rest.split('/').next().unwrap_or_default();
+        if authority.contains('@') {
+            return Err("do not include credentials in the repository URL".to_string());
+        }
+        return Ok(());
+    }
+    if value.starts_with("ssh://") || value.starts_with("git@") {
+        return Ok(());
+    }
+    Err("use an HTTPS or SSH repository URL".to_string())
 }
 
 #[cfg(test)]

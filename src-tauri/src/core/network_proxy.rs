@@ -76,6 +76,22 @@ pub fn auto_detect_github_proxy_url() -> String {
 }
 
 pub fn app_http_client(proxy_url: &str, timeout_secs: Option<u64>) -> Result<Client> {
+    http_client_builder(proxy_url, timeout_secs)?
+        .build()
+        .context("build HTTP client")
+}
+
+pub fn github_http_client_no_redirects(
+    proxy_url: &str,
+    timeout_secs: Option<u64>,
+) -> Result<Client> {
+    http_client_builder(proxy_url, timeout_secs)?
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .context("build HTTP client")
+}
+
+fn http_client_builder(proxy_url: &str, timeout_secs: Option<u64>) -> Result<ClientBuilder> {
     let mut builder = ClientBuilder::new();
     if let Some(secs) = timeout_secs {
         builder = builder.timeout(std::time::Duration::from_secs(secs));
@@ -87,7 +103,7 @@ pub fn app_http_client(proxy_url: &str, timeout_secs: Option<u64>) -> Result<Cli
                 .with_context(|| format!("invalid proxy URL: {}", proxy_url))?,
         );
     }
-    builder.build().context("build HTTP client")
+    Ok(builder)
 }
 
 pub fn github_http_client(proxy_url: &str, timeout_secs: Option<u64>) -> Result<Client> {

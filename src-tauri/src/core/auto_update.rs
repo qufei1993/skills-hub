@@ -1,7 +1,9 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use super::installer::update_managed_skill_from_source;
+use super::installer::{
+    acquire_skill_update_lock, update_managed_skill_from_source_with_lock_held,
+};
 use super::skill_store::SkillStore;
 
 pub const AUTO_UPDATE_ENABLED_KEY: &str = "skill_auto_update_enabled";
@@ -16,6 +18,7 @@ pub const AUTO_UPDATE_LAST_FINISHED_AT_KEY: &str = "skill_auto_update_last_finis
 pub const AUTO_UPDATE_LAST_STATUS_KEY: &str = "skill_auto_update_last_status";
 pub const AUTO_UPDATE_LAST_ERROR_KEY: &str = "skill_auto_update_last_error";
 pub const AUTO_UPDATE_LAST_CHECKED_KEY: &str = "skill_auto_update_last_checked";
+pub const AUTO_UPDATE_LAST_UNCHANGED_KEY: &str = "skill_auto_update_last_unchanged";
 pub const AUTO_UPDATE_LAST_UPDATED_KEY: &str = "skill_auto_update_last_updated";
 pub const AUTO_UPDATE_LAST_FAILED_KEY: &str = "skill_auto_update_last_failed";
 pub const AUTO_UPDATE_PROGRESS_KEY: &str = "skill_auto_update_progress";
@@ -71,6 +74,7 @@ pub struct AutoUpdateConfig {
     pub last_status: Option<String>,
     pub last_error: Option<String>,
     pub last_checked: usize,
+    pub last_unchanged: usize,
     pub last_updated: usize,
     pub last_failed: usize,
     pub progress: AutoUpdateProgressSnapshot,
@@ -79,6 +83,7 @@ pub struct AutoUpdateConfig {
 #[derive(Clone, Debug, Serialize)]
 pub struct AutoUpdateRunResult {
     pub checked: usize,
+    pub unchanged: usize,
     pub updated: usize,
     pub failed: usize,
     pub errors: Vec<String>,
@@ -130,6 +135,13 @@ pub fn get_auto_update_config(store: &SkillStore) -> Result<AutoUpdateConfig> {
     let last_checked = parse_usize_setting(store, AUTO_UPDATE_LAST_CHECKED_KEY)?;
     let last_updated = parse_usize_setting(store, AUTO_UPDATE_LAST_UPDATED_KEY)?;
     let last_failed = parse_usize_setting(store, AUTO_UPDATE_LAST_FAILED_KEY)?;
+    let last_unchanged = match store.get_setting(AUTO_UPDATE_LAST_UNCHANGED_KEY)? {
+        Some(value) => value.parse::<usize>().unwrap_or(0),
+        None if last_status.as_deref() != Some("running") => {
+            last_checked.saturating_sub(last_updated.saturating_add(last_failed))
+        }
+        None => 0,
+    };
     let mut progress = parse_progress_setting(store)?;
     if progress_is_empty(&progress) {
         progress = legacy_error_progress(store, last_checked, last_error.as_deref())?;
@@ -148,6 +160,7 @@ pub fn get_auto_update_config(store: &SkillStore) -> Result<AutoUpdateConfig> {
         last_status,
         last_error,
         last_checked,
+        last_unchanged,
         last_updated,
         last_failed,
         progress,
@@ -214,6 +227,7 @@ pub fn run_auto_update_now<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     store: &SkillStore,
 ) -> Result<AutoUpdateRunResult> {
+    let _update_lock = acquire_skill_update_lock(app, store)?;
     let entries = list_auto_update_skill_entries(store)?;
     let mut progress = AutoUpdateProgressSnapshot {
         total: entries.len(),
@@ -224,6 +238,7 @@ pub fn run_auto_update_now<R: tauri::Runtime>(
     record_auto_update_progress_snapshot(store, &progress)?;
     let mut result = AutoUpdateRunResult {
         checked: entries.len(),
+        unchanged: 0,
         updated: 0,
         failed: 0,
         errors: Vec::new(),
@@ -238,13 +253,21 @@ pub fn run_auto_update_now<R: tauri::Runtime>(
             .retain(|pending| pending.skill_id != skill_id);
         record_auto_update_progress_snapshot(store, &progress)?;
 
-        match update_managed_skill_from_source(app, store, &skill_id) {
+        match update_managed_skill_from_source_with_lock_held(app, store, &skill_id) {
             Ok(update) => {
-                result.updated += 1;
+                if update.changed {
+                    result.updated += 1;
+                } else {
+                    result.unchanged += 1;
+                }
                 progress.succeeded.push(AutoUpdateSkillProgress {
                     skill_id,
                     name: update.name,
-                    reason: None,
+                    reason: if update.pending_targets.is_empty() {
+                        None
+                    } else {
+                        Some(format!("TOOLS_PENDING|{}", update.pending_targets.len()))
+                    },
                 });
             }
             Err(err) => {
@@ -287,6 +310,7 @@ fn record_auto_update_started(store: &SkillStore, checked: usize) -> Result<()> 
     store.set_setting(AUTO_UPDATE_LAST_FINISHED_AT_KEY, "")?;
     store.set_setting(AUTO_UPDATE_LAST_STATUS_KEY, "running")?;
     store.set_setting(AUTO_UPDATE_LAST_CHECKED_KEY, &checked.to_string())?;
+    store.set_setting(AUTO_UPDATE_LAST_UNCHANGED_KEY, "0")?;
     store.set_setting(AUTO_UPDATE_LAST_UPDATED_KEY, "0")?;
     store.set_setting(AUTO_UPDATE_LAST_FAILED_KEY, "0")?;
     store.set_setting(AUTO_UPDATE_LAST_ERROR_KEY, "")?;
@@ -303,6 +327,10 @@ fn record_auto_update_started(store: &SkillStore, checked: usize) -> Result<()> 
 fn record_auto_update_progress(store: &SkillStore, result: &AutoUpdateRunResult) -> Result<()> {
     store.set_setting(AUTO_UPDATE_LAST_STATUS_KEY, "running")?;
     store.set_setting(AUTO_UPDATE_LAST_CHECKED_KEY, &result.checked.to_string())?;
+    store.set_setting(
+        AUTO_UPDATE_LAST_UNCHANGED_KEY,
+        &result.unchanged.to_string(),
+    )?;
     store.set_setting(AUTO_UPDATE_LAST_UPDATED_KEY, &result.updated.to_string())?;
     store.set_setting(AUTO_UPDATE_LAST_FAILED_KEY, &result.failed.to_string())?;
     store.set_setting(AUTO_UPDATE_LAST_ERROR_KEY, &result.errors.join("\n"))?;
@@ -333,12 +361,27 @@ pub fn run_due_auto_update<R: tauri::Runtime>(
 }
 
 fn record_auto_update_result(store: &SkillStore, result: &AutoUpdateRunResult) -> Result<()> {
-    let status = if result.failed == 0 { "ok" } else { "error" };
+    let pending = result.progress.succeeded.iter().any(|item| {
+        item.reason
+            .as_deref()
+            .is_some_and(|reason| reason.starts_with("TOOLS_PENDING|"))
+    });
+    let status = if result.failed > 0 {
+        "error"
+    } else if pending {
+        "partial"
+    } else {
+        "ok"
+    };
     let finished_at = now_ms();
     store.set_setting(AUTO_UPDATE_LAST_RUN_AT_KEY, &finished_at.to_string())?;
     store.set_setting(AUTO_UPDATE_LAST_FINISHED_AT_KEY, &finished_at.to_string())?;
     store.set_setting(AUTO_UPDATE_LAST_STATUS_KEY, status)?;
     store.set_setting(AUTO_UPDATE_LAST_CHECKED_KEY, &result.checked.to_string())?;
+    store.set_setting(
+        AUTO_UPDATE_LAST_UNCHANGED_KEY,
+        &result.unchanged.to_string(),
+    )?;
     store.set_setting(AUTO_UPDATE_LAST_UPDATED_KEY, &result.updated.to_string())?;
     store.set_setting(AUTO_UPDATE_LAST_FAILED_KEY, &result.failed.to_string())?;
     store.set_setting(AUTO_UPDATE_LAST_ERROR_KEY, &result.errors.join("\n"))?;

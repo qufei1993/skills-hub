@@ -1,5 +1,7 @@
 # Skills Hub - Project Rules
 
+Reply in Chinese; write PR titles and descriptions in English.
+
 ## Overview
 
 Skills Hub is a cross-platform desktop app (Tauri 2 + React 19) for managing AI Agent Skills and syncing them to 47+ AI coding tools. Core concept: "Install once, sync everywhere."
@@ -11,7 +13,7 @@ Skills Hub is a cross-platform desktop app (Tauri 2 + React 19) for managing AI 
 - **Database**: SQLite (rusqlite, bundled)
 - **Git**: libgit2 (git2 crate, vendored-openssl)
 - **HTTP**: reqwest (rustls-tls, blocking)
-- **i18n**: i18next (English / Chinese bilingual)
+- **i18n**: i18next (English / Simplified Chinese / Korean)
 - **Notifications**: sonner (toast)
 - **Icons**: lucide-react
 
@@ -21,15 +23,14 @@ Skills Hub is a cross-platform desktop app (Tauri 2 + React 19) for managing AI 
 npm run dev              # Vite dev server (port 5173)
 npm run tauri:dev        # Tauri dev window (frontend + backend)
 npm run build            # tsc + vite build
-npm run check            # Full check: lint + build + rust:fmt:check + rust:clippy + rust:test
+npm run check            # Full check: lint + test + build + rust:fmt:check + rust:clippy + rust:test
+npm test                 # Frontend regression tests
 npm run lint             # ESLint (flat config v9)
 npm run rust:test        # cargo test
 npm run rust:clippy      # Rust lint
 npm run rust:fmt         # Rust format
 npm run rust:fmt:check   # Rust format check
 ```
-
-Always run `npm run check` before committing to ensure all checks pass.
 
 ## Directory Structure
 
@@ -50,7 +51,8 @@ src/                          # React frontend
 │       └── modals/           # Modal components (8 total)
 └── i18n/
     ├── index.ts              # i18next initialization
-    └── resources.ts          # Translation resources (EN/ZH)
+    ├── resources.ts          # English/Chinese resources + locale registration
+    └── ko.ts                 # Korean translation resources
 
 src-tauri/src/                # Rust backend
 ├── main.rs                   # Entry point (calls app_lib::run)
@@ -107,7 +109,9 @@ src-tauri/src/                # Rust backend
 - Modal conditional rendering: `if (!open) return null` (full unmount, not display:none)
 - Wrap presentational components with `memo()`
 - All user-visible text must use i18n (`t('key')`), translation keys defined in `src/i18n/resources.ts`
-- When adding new text, always provide both English and Chinese translations
+- The app supports English (`en`), Simplified Chinese (`zh`), and Korean (`ko`)
+- When adding or changing user-visible text, always provide English, Simplified Chinese, and Korean translations
+- Korean users read the English release notes; release notes do not require Korean sections
 - DTO types are defined in `src/components/skills/types.ts` and must stay in sync with the Rust DTOs in `commands/mod.rs`
 
 ### Rust
@@ -129,10 +133,20 @@ src-tauri/src/                # Rust backend
 
 ## Development Workflow
 
-1. **Before implementing**: Briefly describe the approach and list the files to be modified. Wait for confirmation before writing code.
-2. **Implement completely**: For features involving both frontend and backend, modify both sides in one pass — including Tauri command registration, DTO types, i18n translations (both EN and ZH), and UI.
-3. **Verify after changes**: Always run `npm run check` after implementation to ensure lint, build, and all Rust checks pass. Fix any errors before presenting the result.
+1. **Branch baseline**: Unless specified otherwise, fetch `origin/main` and create a `codex/` branch from it, preserving existing work. Verify the base commit; after changing the baseline, sync dependencies with the lockfile.
+2. **Before implementing**: Briefly describe the approach and list the files to be modified. Wait for confirmation before writing code.
+3. **Implement completely**: For features involving both frontend and backend, modify both sides in one pass — including Tauri command registration, DTO types, i18n translations (both EN and ZH), and UI.
 4. **Keep changes minimal**: Only modify what is necessary for the requirement. Do not refactor, add comments, or "improve" unrelated code.
+5. **Verify**: Bug fixes must include regression tests that fail before the fix and pass afterward. Run `npm run check` on the final changes before committing; resolve all failures.
+6. **Manual review**: After user-facing bug fixes, run `npm run tauri:dev` from the working branch and confirm startup, unless requested otherwise. Reuse or restart only this checkout's development processes.
+7. **Release records**: Record user-visible fixes under the current project version in `CHANGELOG.md`, `docs/CHANGELOG.zh.md`, and `docs/releases/v<version>/`; do not bump the version unless requested.
+8. **Pull requests**: When requested, submit code, tests, and release records against `main`, updating an existing branch PR when available. Describe the problem, fix, and validation; verify the PR and return its link. Do not merge without authorization.
+
+## Security Red Lines
+
+- Token、密码和私钥只能存入系统安全凭据存储，禁止进入数据库、配置文件、日志、URL 或同步仓库。
+- 只有用户主动操作或明确开启的后台功能才能读取凭据；页面加载、Tab 切换、状态展示和普通启动不得读取。
+- 开发版必须使用独立的凭据命名空间；授权、凭据、同步相关改动必须通过防泄漏与访问边界测试。
 
 ## Important Notes
 
@@ -142,4 +156,6 @@ src-tauri/src/                # Rust backend
 - Version numbers must stay in sync between `package.json` and `src-tauri/tauri.conf.json` (validate with `npm run version:check`)
 - Rust crate is named `app_lib` (not the default package name) — use `app_lib::...` for imports
 - Database has a schema migration mechanism (`migrate_legacy_db_if_needed`) — consider migrations when modifying table structures
+- Additive, feature-only database tables must use a feature-specific schema marker in `settings`; do not raise the shared `PRAGMA user_version` when the previous stable release can safely ignore the change
+- Every database migration must include both an upgrade test and a previous-stable-version compatibility test; incompatible shared-schema changes require an explicit compatibility design before implementation
 - Tool adapter list is in `tool_adapters/mod.rs` — adding a new AI tool requires both a `ToolId` enum variant and an adapter instance

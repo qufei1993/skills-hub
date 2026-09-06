@@ -11,7 +11,7 @@ type GitPickModalProps = {
   onRequestClose: () => void
   onCancel: () => void
   onToggleCandidate: (subpath: string, checked: boolean) => void
-  onInstall: () => void
+  onInstall: (subpaths: string[]) => void
   t: TFunction
 }
 
@@ -36,9 +36,10 @@ const GitPickModal = ({
       ),
     )
   }, [gitCandidates, normalizedQuery])
-  const selectedCount = filteredCandidates.filter(
+  const selectedCandidates = filteredCandidates.filter(
     (c) => gitCandidateSelected[c.subpath],
-  ).length
+  )
+  const selectedCount = selectedCandidates.length
   const allVisibleSelected =
     filteredCandidates.length > 0 &&
     filteredCandidates.every((c) => gitCandidateSelected[c.subpath])
@@ -119,7 +120,11 @@ const GitPickModal = ({
           <button className="btn btn-secondary" onClick={onCancel} disabled={loading}>
             {t('cancel')}
           </button>
-          <button className="btn btn-primary" onClick={onInstall} disabled={loading}>
+          <button
+            className="btn btn-primary"
+            onClick={() => onInstall(selectedCandidates.map((c) => c.subpath))}
+            disabled={loading || selectedCount === 0}
+          >
             {t('installSelected')}
           </button>
         </div>

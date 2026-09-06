@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.9.1"
+version = "0.10.0"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -25,6 +25,7 @@ tauri = { version = "2.9.5", features = ["test"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 anyhow = "1.0"
 rusqlite = { version = "0.31", features = ["bundled"] }
@@ -32,12 +33,25 @@ dirs = "5.0"
 walkdir = "2.5"
 sha2 = "0.10"
 hex = "0.4"
+tempfile = "3"
 git2 = { version = "0.19", features = ["vendored-openssl"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "socks"] }
+dotenvy = "0.15"
 junction = "1.1"
 uuid = { version = "1", features = ["v4"] }
 urlencoding = "2.1"
+trash = "=3.3.1"
+fs2 = "0.4"
+chrono = { version = "0.4.43", default-features = false, features = ["clock"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
 
 [dev-dependencies]
-tempfile = "3"
 mockito = "1"

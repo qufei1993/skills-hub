@@ -14,6 +14,15 @@ export type AutoUpdateTaskStatusKey =
   | 'autoUpdateTaskReady'
   | 'autoUpdateTaskNeedsAttention'
 
+export function getAutoUpdateRunningReset() {
+  return {
+    last_checked: 0,
+    last_unchanged: 0,
+    last_updated: 0,
+    last_failed: 0,
+  }
+}
+
 export function getAutoUpdateToastKey(
   previousEnabled: boolean | null | undefined,
   nextEnabled: boolean,
@@ -43,6 +52,41 @@ export function getAutoUpdateTaskStatusKey(
 export type AutoUpdateErrorSummary = {
   key: string
   count: number
+}
+
+export type ToolSyncPathChangedError = {
+  tool: string
+  expectedPath: string
+}
+
+export function parseToolSyncPathChangedError(
+  reason: string | null | undefined,
+): ToolSyncPathChangedError | null {
+  return parseToolSyncError(reason, 'TOOL_SYNC_PATH_CHANGED|')
+}
+
+export function parseToolSyncTargetConflictError(
+  reason: string | null | undefined,
+): ToolSyncPathChangedError | null {
+  return parseToolSyncError(reason, 'TOOL_SYNC_TARGET_CONFLICT|')
+}
+
+function parseToolSyncError(
+  reason: string | null | undefined,
+  prefix: string,
+): ToolSyncPathChangedError | null {
+  if (!reason?.startsWith(prefix)) {
+    return null
+  }
+  const payload = reason.slice(prefix.length)
+  const separatorIndex = payload.indexOf('|')
+  if (separatorIndex <= 0 || separatorIndex === payload.length - 1) {
+    return null
+  }
+  return {
+    tool: payload.slice(0, separatorIndex),
+    expectedPath: payload.slice(separatorIndex + 1),
+  }
 }
 
 export function summarizeAutoUpdateErrors(rawError: string | null | undefined) {
@@ -128,17 +172,18 @@ export function shouldKeepWaitingForTriggeredAutoUpdate(
 }
 
 export function isAutoUpdatePossiblyStalled(
-  config: Pick<
+  config: (Pick<
     AutoUpdateConfigDto,
     'last_run_at' | 'last_status' | 'last_updated' | 'last_failed' | 'progress'
-  > | null | undefined,
+  > & { last_unchanged?: number }) | null | undefined,
   nowMs: number,
   staleAfterMs = 10 * 60 * 1000,
 ) {
   if (!config?.last_run_at || config.last_status !== 'running') {
     return false
   }
-  const completed = config.last_updated + config.last_failed
+  const completed =
+    (config.last_unchanged ?? 0) + config.last_updated + config.last_failed
   return (
     nowMs - config.last_run_at > staleAfterMs &&
     completed === 0 &&
@@ -148,6 +193,12 @@ export function isAutoUpdatePossiblyStalled(
 
 function classifyAutoUpdateError(line: string) {
   const lower = line.toLowerCase()
+  if (
+    line.includes('TOOL_SYNC_PATH_CHANGED|') ||
+    line.includes('TOOL_SYNC_TARGET_CONFLICT|')
+  ) {
+    return 'autoUpdateErrorToolPathChanged'
+  }
   if (
     lower.includes('source path not found') ||
     lower.includes('central path not found')

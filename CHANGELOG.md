@@ -4,10 +4,52 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [0.9.1] - 2026-08-28
+## [0.10.0]
+
+### Changed
+- **Compact Skill warnings**: Moved card warnings beside the copy icon; click to inspect reasons and recovery guidance without expanding the card.
+- **Compact My Skills header**: Replaced overview cards with scope filters and counts, removed the duplicate scope dropdown, and show a compact sync-issue shortcut only when attention is needed.
+
+### Added
+- **Korean interface language**: Added Korean translations across the app, a three-language selector, and persistent Korean language preferences. Korean users receive English release notes when viewing app updates.
+- **Multi-device Skill library sync**: Added Git-based device sync with GitHub, GitLab, and Gitee support. Browser authorization is the primary setup path, with Token/SSH retained as advanced options. Users can choose an existing private repository or create one from the app, check changes without modifying files, and run manual sync with optional startup sync.
+- **Safe three-way reconciliation**: Skills are matched by stable identity, source, or identical content. Independent file changes merge automatically, while overlapping edits and delete-versus-edit cases stay isolated per Skill for explicit local, remote, or keep-both resolution.
+- **Local recovery and history**: Actual content changes create Git versions, remote deletions move local Skills to a 30-day recycle bin, and the app records sync runs, conflicts, and recovery actions.
+
+### Fixed
+- **Consistent Skill issue status**: Preserve source-update errors across device sync, refresh current issues across pages, and distinguish pending tool distribution from complete success.
+- **Separate cloud sync from tool distribution**: Tool-copy failures no longer fail central-library synchronization. Existing tool sync and device sync share guarded copy refresh; pending tools remain visible with a My Skills entry point. Conflict choices now show local/remote without a recommendation.
+- **Shared sync targets and device-code feedback**: Refresh a same-Skill shared tool directory once while updating every copy record; keep cross-Skill overwrite protection. Device-code copying now confirms success and reports failures with retry support.
+- **Desktop OAuth packaging**: Require an explicit GitHub public Client ID before packaged builds. Local builds may read only this key from an explicitly selected env file; missing or malformed configuration now stops the build instead of shipping a disabled authorization button.
+- **Device-sync file retention and tool copies**: Preserve device-local excluded files and links during library updates, sync legitimate `dist`/`build` documents, migrate legacy ignore rules, refresh protected tool copies, and accept remote-deletion conflicts with recoverable local content. Library metadata and copy baselines are committed atomically; Python bytecode caches no longer count as user edits during copy conflict checks.
+- **Persistent device sync failure reasons**: The dashboard shows the latest failure reason and history entries expose expandable recovery guidance instead of zero-count summaries. Manual failures refresh immediately. New history stores allowlisted diagnostic codes; legacy errors and IPC responses are sanitized before display.
+- **Automatic text reconciliation**: Device sync now uses libgit2 to merge non-overlapping edits within the same UTF-8 file. Unresolved, binary, oversized, deletion and metadata conflicts remain explicit. Remote push rejections stop synchronization before local application.
+- **Scope-aware filtering and bulk actions**: Tag and untagged counts now follow scope and search without being narrowed by selected tags. Bulk actions and confirmation counts exclude hidden selections. Filtered empty states offer a reset, and opening a tag from management clears stale scope/search filters.
+- **Filtered Skill installation**: Git and local import dialogs now install only checked Skills in the current search results, matching the displayed selection count. Hidden selections are preserved when clearing the search but are not installed while filtered out. Installation is disabled when no visible, valid Skill is selected.
+- **Nested Git Skill discovery**: Repositories such as `mattpocock/skills` now support `skills/<category>/<skill>/SKILL.md` when added through the repository root or the standard `skills/` folder URL. Scanning is limited to four directory levels within `skills/`, stops at each Skill, and skips directory symlinks and common dependency/build directories ([#129](https://github.com/qufei1993/skills-hub/issues/129), [PR #131](https://github.com/qufei1993/skills-hub/pull/131)).
+- **Destructive action confirmations**: Removing a custom tool or manually clearing the Git cache now requires an in-app confirmation that states exactly what is removed and what remains untouched. Custom tool removal preserves all Skill files in the configured tool directory, while Git cache cleanup does not affect installed Skills or local source folders.
+- **Safe Skills storage migration, removal, and automatic replacement**: Changing the central Skills storage now rejects paths that overlap tool sync directories, original local sources, or the current storage tree; existing Skills require explicit migration confirmation, and sync operations independently reject overlapping source and target paths. Changing a custom tool directory also blocks targets that overlap an original local Skill, keeps the previous configuration and files unchanged, and shows an actionable localized message. User-initiated removal of real managed content uses the system recycle bin; automatic updates do not. Automatic updates skip unchanged Skills, report checked, up-to-date, updated, and failed outcomes separately, use canonical content-and-permission fingerprints, serialize a whole update run, deduplicate shared physical targets, and replace the central copy and only those copy targets proven unchanged. While the process remains running, any validation or metadata failure rolls the whole update back; unexpected target content and writes racing with rollback are preserved for manual review. Original local sources are always preserved ([#123](https://github.com/qufei1993/skills-hub/issues/123), [PR #125](https://github.com/qufei1993/skills-hub/pull/125)).
+- **Kimi Code CLI sync paths and identity**: Corrected global, project, and detection directories to use Kimi Code's `.kimi-code` layout (including `KIMI_CODE_HOME`) and replaced the generic Kimi mark with the official Kimi Code product icon. Automatic updates safely create targets in the current Kimi directory and update legacy records without deleting or moving anything at the old path; conflicting content at the new path is preserved and reported for manual resolution ([#122](https://github.com/qufei1993/skills-hub/issues/122)).
+
+### Security
+- **Private-key content validation**: Device sync scans complete file contents, including generated merge results, for common private-key headers instead of inspecting only the first 4 KB. Errors never include the detected key contents.
+- **Visibility-aware repository reads**: Public HTTPS repository checks do not read stored credentials; private/internal reads and writes authenticate separately. Unknown visibility pauses background checks, and public uploads require confirmation.
+- **Platform credential storage**: HTTPS access tokens are stored in macOS Keychain, Windows Credential Manager, or Linux Secret Service and are never written to the sync repository or SQLite. SSH remotes use the system SSH agent.
+- **Portable sync boundary**: Sync includes Skill content and portable metadata only. Tool targets, project paths, app settings, caches, and credentials remain device-local; private-key files are rejected and common secret/build files are excluded.
+
+## [0.9.1] - 2026-08-29
+
+### Changed
+- **Bilingual GitHub release notes**: The release workflow now extracts both Chinese and English changelog entries, including localized platform installation notes in GitHub Releases and app updater metadata. In-app update dialogs display only the section matching the current interface language, while legacy and incomplete release-note formats continue to display in full.
+- **App update completion flow**: Available updates now use a prominent title-bar action that expands from an icon to a localized label on hover or keyboard focus. After installation, users can restart immediately from the completion dialog or close it and restart later from the persistent title-bar action.
 
 ### Fixed
 - **Skill detail compatibility on older macOS versions**: Opening a Skill Markdown file no longer blanks the entire app in WKWebView versions that do not support regular-expression lookbehind. The detail renderer now detects this capability and falls back to standard Markdown while preserving full GFM rendering on supported systems ([#108](https://github.com/qufei1993/skills-hub/issues/108)).
+- **Tag rename dialogs in Tauri WebView**: Tag rename now uses an in-app input dialog instead of the unsupported browser `window.prompt`, restoring tag renaming on macOS. The remaining shared-directory confirmation also uses the existing in-app dialog instead of `window.confirm` ([#109](https://github.com/qufei1993/skills-hub/issues/109)).
+- **Responsive Skill detail workspace**: Replaced the fixed-width detail drawer with a full workspace view that adapts to the main window, keeps the file tree and Markdown content readable, and presents scope, synced tools, tags, source, update time, and file count in a compact responsive header. Source paths can be copied directly, while duplicated `name` and `description` frontmatter fields are omitted from the Markdown metadata table ([#111](https://github.com/qufei1993/skills-hub/issues/111)).
+- **Accurate Skill status**: Skill details, cards, and dashboard summaries now distinguish source errors, healthy syncs, partial failures, failed syncs, and not-yet-synced states. Source update and target sync failures are persisted, the dashboard links active issues to their update details, and clicking a failed tool retries the sync instead of attempting to disable it. Skill cards and details now use the same currently detected tool set, with cards showing the synchronized count explicitly.
+- **Windows junction cleanup and existing Skill imports**: Disabling, unsyncing, or deleting a Skill now removes Windows directory junctions without touching their targets. Discovery can also import byte-identical copies that already exist in central storage by reusing the managed record, while normal duplicate local installs and conflicting content remain rejected ([#110](https://github.com/qufei1993/skills-hub/pull/110)).
+- **Windows automatic update schedules**: The default 24-hour interval and other whole-day intervals now register with `schtasks` as daily schedules instead of invalid hourly modifiers above 23. Supported minute and hourly intervals retain their native schedule types, while unsupported long non-whole-day intervals are rejected before task creation ([#102](https://github.com/qufei1993/skills-hub/issues/102)).
 
 ## [0.9.0] - 2026-08-23
 
@@ -230,7 +272,8 @@ All notable changes to this project will be documented in this file.
 ### Performance
 - Git import and batch install optimizations: cached clones reduce repeated fetches; timeouts and non‑interactive git improve stability.
 
-[Unreleased]: https://github.com/qufei1993/skills-hub/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/qufei1993/skills-hub/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/qufei1993/skills-hub/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/qufei1993/skills-hub/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/qufei1993/skills-hub/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/qufei1993/skills-hub/compare/v0.8.0...v0.8.1
