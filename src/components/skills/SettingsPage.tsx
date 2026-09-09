@@ -5,6 +5,12 @@ import type { TFunction } from 'i18next'
 import type { DownloadOptions, Update } from '@tauri-apps/plugin-updater'
 import { toast } from 'sonner'
 import type { GithubProxyConfigDto } from './types'
+import type {
+  ProfileDraftConfig,
+  ProfileDraftModelItem,
+  ProfileDraftStatus,
+} from './profileDraftSettings'
+import { applyPresetToConfig } from './profileDraftSettings'
 import ConfirmActionModal from './modals/ConfirmActionModal'
 
 const PROJECT_REPOSITORY_URL = 'https://github.com/qufei1993/skills-hub'
@@ -44,6 +50,17 @@ type SettingsPageProps = {
   onGithubTokenRemove: () => void
   onGithubProxyConfigChange: (enabled: boolean, port: number) => void
   onOpenDiscoveryScanSettings: () => void
+  profileDraftStatus: ProfileDraftStatus
+  profileDraftKeyDraft: string
+  profileDraftModels: ProfileDraftModelItem[]
+  profileDraftBusy: boolean
+  onProfileDraftKeyDraftChange: (key: string) => void
+  onProfileDraftConfigChange: (config: ProfileDraftConfig) => void
+  onProfileDraftSaveConfig: () => void
+  onProfileDraftSaveKey: () => void
+  onProfileDraftRemoveKey: () => void
+  onProfileDraftFetchModels: () => void
+  onProfileDraftTest: () => void
   onBack: () => void
   t: TFunction
 }
@@ -71,6 +88,17 @@ const SettingsPage = ({
   discoveryScanEnabledCount,
   discoveryScanSourceCount,
   onOpenDiscoveryScanSettings,
+  profileDraftStatus,
+  profileDraftKeyDraft,
+  profileDraftModels,
+  profileDraftBusy,
+  onProfileDraftKeyDraftChange,
+  onProfileDraftConfigChange,
+  onProfileDraftSaveConfig,
+  onProfileDraftSaveKey,
+  onProfileDraftRemoveKey,
+  onProfileDraftFetchModels,
+  onProfileDraftTest,
   onBack,
   t,
 }: SettingsPageProps) => {
@@ -545,6 +573,153 @@ const SettingsPage = ({
                 </div>
               </div>
             </div>
+            </section>
+
+            <section className="settings-card">
+              <div className="settings-card-head">
+                <span className="settings-card-icon">
+                  <Radar size={18} />
+                </span>
+                <div>
+                  <h2>{t('profileDraft.title')}</h2>
+                  <p>{t('profileDraft.desc')}</p>
+                </div>
+              </div>
+              <div className="settings-card-body">
+                <label className="settings-label" htmlFor="profile-draft-provider">
+                  {t('profileDraft.provider')}
+                </label>
+                <select
+                  id="profile-draft-provider"
+                  className="settings-input"
+                  value={profileDraftStatus.config.provider}
+                  disabled={profileDraftBusy}
+                  onChange={(e) =>
+                    onProfileDraftConfigChange(
+                      applyPresetToConfig(
+                        profileDraftStatus.config,
+                        e.target.value,
+                        profileDraftStatus.presets,
+                      ),
+                    )
+                  }
+                >
+                  {profileDraftStatus.presets.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.label}
+                    </option>
+                  ))}
+                </select>
+                <label className="settings-label" htmlFor="profile-draft-base-url">
+                  {t('profileDraft.baseUrl')}
+                </label>
+                <input
+                  id="profile-draft-base-url"
+                  className="settings-input mono"
+                  value={profileDraftStatus.config.base_url}
+                  disabled={profileDraftBusy}
+                  placeholder="https://api.deepseek.com/v1"
+                  onChange={(e) =>
+                    onProfileDraftConfigChange({
+                      ...profileDraftStatus.config,
+                      base_url: e.target.value,
+                    })
+                  }
+                />
+                <label className="settings-label" htmlFor="profile-draft-api-key">
+                  {t('profileDraft.apiKey')}
+                </label>
+                <div className="settings-input-row">
+                  <input
+                    id="profile-draft-api-key"
+                    className="settings-input mono"
+                    type="password"
+                    autoComplete="off"
+                    value={profileDraftKeyDraft}
+                    disabled={profileDraftBusy}
+                    placeholder={
+                      profileDraftStatus.has_key
+                        ? t('profileDraft.apiKeyReplacement')
+                        : t('profileDraft.apiKeyPlaceholder')
+                    }
+                    onChange={(e) => onProfileDraftKeyDraftChange(e.target.value)}
+                  />
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    type="button"
+                    disabled={profileDraftBusy || !profileDraftKeyDraft.trim()}
+                    onClick={onProfileDraftSaveKey}
+                  >
+                    {t('profileDraft.saveKey')}
+                  </button>
+                  {profileDraftStatus.has_key ? (
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      type="button"
+                      disabled={profileDraftBusy}
+                      onClick={onProfileDraftRemoveKey}
+                    >
+                      {t('profileDraft.removeKey')}
+                    </button>
+                  ) : null}
+                </div>
+                <div className="settings-helper">
+                  {profileDraftStatus.has_key
+                    ? t('profileDraft.keyConfigured')
+                    : t('profileDraft.keyMissing')}
+                </div>
+                <label className="settings-label" htmlFor="profile-draft-model">
+                  {t('profileDraft.model')}
+                </label>
+                <div className="settings-input-row">
+                  <input
+                    id="profile-draft-model"
+                    className="settings-input mono"
+                    list="profile-draft-model-options"
+                    value={profileDraftStatus.config.model}
+                    disabled={profileDraftBusy}
+                    placeholder={t('profileDraft.modelPlaceholder')}
+                    onChange={(e) =>
+                      onProfileDraftConfigChange({
+                        ...profileDraftStatus.config,
+                        model: e.target.value,
+                      })
+                    }
+                  />
+                  <datalist id="profile-draft-model-options">
+                    {profileDraftModels.map((model) => (
+                      <option key={model.id} value={model.id} />
+                    ))}
+                  </datalist>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    type="button"
+                    disabled={profileDraftBusy}
+                    onClick={onProfileDraftFetchModels}
+                  >
+                    {t('profileDraft.fetchModels')}
+                  </button>
+                </div>
+                <div className="settings-input-row" style={{ marginTop: 10 }}>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    type="button"
+                    disabled={profileDraftBusy}
+                    onClick={onProfileDraftSaveConfig}
+                  >
+                    {t('profileDraft.saveConfig')}
+                  </button>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    type="button"
+                    disabled={profileDraftBusy}
+                    onClick={onProfileDraftTest}
+                  >
+                    {t('profileDraft.test')}
+                  </button>
+                </div>
+                <div className="settings-helper">{t('profileDraft.hint')}</div>
+              </div>
             </section>
 
             <section className="settings-card">

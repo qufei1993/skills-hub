@@ -2,6 +2,8 @@ import { memo } from 'react'
 import { Check, RefreshCw } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import type { ToolOption } from '../types'
+import type { PresentationElements } from '../skillProfile'
+import PresentationElementsPicker from '../PresentationElementsPicker'
 
 type BulkSyncModalProps = {
   open: boolean
@@ -9,7 +11,12 @@ type BulkSyncModalProps = {
   selectedCount: number
   installedTools: ToolOption[]
   selectedToolIds: string[]
+  presentation: PresentationElements
+  title?: string
+  subtitle?: string
+  confirmLabel?: string
   onToggleTool: (toolId: string) => void
+  onPresentationChange: (next: PresentationElements) => void
   onRequestClose: () => void
   onConfirm: () => void
   t: TFunction
@@ -21,7 +28,12 @@ const BulkSyncModal = ({
   selectedCount,
   installedTools,
   selectedToolIds,
+  presentation,
+  title,
+  subtitle,
+  confirmLabel,
   onToggleTool,
+  onPresentationChange,
   onRequestClose,
   onConfirm,
   t,
@@ -40,9 +52,9 @@ const BulkSyncModal = ({
       >
         <div className="modal-header">
           <div>
-            <div className="modal-title">{t('bulk.syncTitle')}</div>
+            <div className="modal-title">{title ?? t('bulk.syncTitle')}</div>
             <div className="bulk-modal-subtitle">
-              {t('bulk.syncSubtitle', { count: selectedCount })}
+              {subtitle ?? t('bulk.syncSubtitle', { count: selectedCount })}
             </div>
           </div>
         </div>
@@ -76,6 +88,12 @@ const BulkSyncModal = ({
             )}
           </div>
         </div>
+        <PresentationElementsPicker
+          value={presentation}
+          onChange={onPresentationChange}
+          disabled={loading}
+          title="同步到其他 App 时要露出的元素"
+        />
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onRequestClose} disabled={loading}>
             {t('cancel')}
@@ -86,7 +104,7 @@ const BulkSyncModal = ({
             disabled={loading || installedTools.length === 0}
           >
             <RefreshCw size={14} />
-            {t('bulk.syncConfirm')}
+            {confirmLabel ?? t('bulk.syncConfirm')}
           </button>
         </div>
       </div>

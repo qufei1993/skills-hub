@@ -9,7 +9,7 @@ use super::central_repo::resolve_central_repo_path;
 use super::content_hash::hash_dir;
 use super::skill_store::SkillStore;
 use super::tool_adapters::{
-    default_tool_adapters, resolve_adapter_path_in_home, scan_tool_dir, DetectedSkill,
+    default_tool_adapters, resolve_adapter_path_in_home, scan_tool_dir, DetectedSkill, ToolId,
 };
 
 const DISCOVERY_SCAN_CONFIG_SETTING: &str = "discovery_scan_config_v1";
@@ -19,6 +19,8 @@ const CLAUDE_PLUGIN_SOURCE_KEY: &str = "claude_plugins";
 pub struct DiscoveryScanConfig {
     #[serde(default)]
     pub disabled_source_keys: Vec<String>,
+    #[serde(default)]
+    pub extra_source_paths: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -33,6 +35,8 @@ pub struct DiscoveryScanSource {
 pub struct DiscoveryScanSettings {
     pub sources: Vec<DiscoveryScanSource>,
     pub disabled_source_keys: Vec<String>,
+    #[serde(default)]
+    pub extra_source_paths: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -84,9 +88,11 @@ pub fn build_onboarding_plan<R: tauri::Runtime>(
         }
     }
     let claude_config_dir = resolve_claude_config_dir(&home);
-    let disabled_source_keys = load_discovery_scan_config(store)?
+    let scan_config = load_discovery_scan_config(store)?;
+    let disabled_source_keys = scan_config
         .disabled_source_keys
-        .into_iter()
+        .iter()
+        .cloned()
         .collect::<HashSet<_>>();
     build_onboarding_plan_with_claude_dir(
         &home,
@@ -94,6 +100,7 @@ pub fn build_onboarding_plan<R: tauri::Runtime>(
         Some(&central),
         Some(&managed_targets),
         &disabled_source_keys,
+        &scan_config.extra_source_paths,
     )
 }
 
@@ -135,10 +142,17 @@ fn get_discovery_scan_settings_in_home(
             continue;
         }
         source_indexes.insert(key.clone(), sources.len());
+        let mut label = adapter.display_name.to_string();
+        if adapter.relative_skills_dir == ".agents/skills" && adapter.display_name == "Cline" {
+            label = "Goose / Cline".to_string();
+        }
+        if adapter.relative_skills_dir == ".agents/skills" && adapter.display_name == "Goose" {
+            label = "Goose（兼 Cline 同路径）".to_string();
+        }
         sources.push(DiscoveryScanSource {
             enabled: !disabled.contains(&key),
             key,
-            label: adapter.display_name.to_string(),
+            label,
             path: skills_dir,
         });
     }
@@ -153,9 +167,25 @@ fn get_discovery_scan_settings_in_home(
         });
     }
 
+    let extra_source_paths = config.extra_source_paths.clone();
+    for (index, raw) in extra_source_paths.iter().enumerate() {
+        let path = PathBuf::from(raw);
+        if !path.is_dir() {
+            continue;
+        }
+        let key = format!("extra_dir:{index}");
+        sources.push(DiscoveryScanSource {
+            key,
+            label: "自选目录".to_string(),
+            path,
+            enabled: !disabled.contains(&format!("extra_dir:{index}")),
+        });
+    }
+
     DiscoveryScanSettings {
         sources,
         disabled_source_keys,
+        extra_source_paths,
     }
 }
 
@@ -170,8 +200,18 @@ pub fn save_discovery_scan_config(
             disabled_source_keys.push(key);
         }
     }
+    let mut extra_source_paths = Vec::new();
+    let mut seen_paths = HashSet::new();
+    for raw in config.extra_source_paths {
+        let trimmed = raw.trim().to_string();
+        if trimmed.is_empty() || !seen_paths.insert(trimmed.clone()) {
+            continue;
+        }
+        extra_source_paths.push(trimmed);
+    }
     let config = DiscoveryScanConfig {
         disabled_source_keys,
+        extra_source_paths,
     };
     store.set_setting(
         DISCOVERY_SCAN_CONFIG_SETTING,
@@ -197,6 +237,7 @@ fn tool_scan_source_key(relative_skills_dir: &str) -> String {
 
 fn is_valid_scan_source_key(key: &str) -> bool {
     key == CLAUDE_PLUGIN_SOURCE_KEY
+        || key.starts_with("extra_dir:")
         || default_tool_adapters()
             .iter()
             .any(|adapter| tool_scan_source_key(adapter.relative_skills_dir) == key)
@@ -214,6 +255,7 @@ fn build_onboarding_plan_in_home(
         exclude_root,
         exclude_managed_targets,
         &HashSet::new(),
+        &[],
     )
 }
 
@@ -223,6 +265,7 @@ fn build_onboarding_plan_with_claude_dir(
     exclude_root: Option<&Path>,
     exclude_managed_targets: Option<&std::collections::HashSet<String>>,
     disabled_source_keys: &HashSet<String>,
+    extra_source_paths: &[String],
 ) -> Result<OnboardingPlan> {
     let adapters = default_tool_adapters();
     let mut all_detected: Vec<DetectedSkill> = Vec::new();
@@ -251,6 +294,26 @@ fn build_onboarding_plan_with_claude_dir(
             exclude_root,
             exclude_managed_targets,
         ));
+    }
+
+    if let Some(goose) = adapters.iter().find(|adapter| adapter.id == ToolId::Goose) {
+        for (index, raw) in extra_source_paths.iter().enumerate() {
+            let key = format!("extra_dir:{index}");
+            if disabled_source_keys.contains(&key) {
+                continue;
+            }
+            let dir = PathBuf::from(raw);
+            if !dir.is_dir() {
+                continue;
+            }
+            scanned += 1;
+            let detected = scan_tool_dir(goose, &dir)?;
+            all_detected.extend(filter_detected(
+                detected,
+                exclude_root,
+                exclude_managed_targets,
+            ));
+        }
     }
 
     let mut grouped: HashMap<String, Vec<OnboardingVariant>> = HashMap::new();

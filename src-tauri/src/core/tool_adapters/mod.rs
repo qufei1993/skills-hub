@@ -160,11 +160,52 @@ pub struct DetectedSkill {
 
 pub fn load_tool_config(store: &SkillStore) -> Result<ToolConfig> {
     let raw = store.get_setting(TOOL_CONFIG_SETTING)?;
-    let config = raw
+    let mut config = raw
         .as_deref()
         .and_then(|value| serde_json::from_str::<ToolConfig>(value).ok())
         .unwrap_or_default();
+    ensure_managed_companion_tools(&mut config);
     sanitize_tool_config(config)
+}
+
+fn ensure_managed_companion_tools(config: &mut ToolConfig) {
+    let has_goose_backup = config
+        .custom_tools
+        .iter()
+        .any(|tool| tool.key == "goose_backup");
+    let has_yan_agent = config
+        .custom_tools
+        .iter()
+        .any(|tool| tool.key == "yan_agent");
+    if !has_goose_backup {
+        config.custom_tools.push(CustomToolConfig {
+            key: "goose_backup".into(),
+            label: "Goose Backup".into(),
+            avatar: None,
+            skills_dir: "~/.config/goose/skills".into(),
+            project_skills_dir: Some(".goose/skills".into()),
+            sync_mode: SyncMode::Auto,
+            enabled: true,
+        });
+    }
+    if !has_yan_agent {
+        let yan_dir = dirs::home_dir()
+            .map(|home| {
+                home.join("Library/Application Support/yan-agent/YanData/skills")
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .unwrap_or_else(|| "~/Library/Application Support/yan-agent/YanData/skills".into());
+        config.custom_tools.push(CustomToolConfig {
+            key: "yan_agent".into(),
+            label: "Yan Agent".into(),
+            avatar: None,
+            skills_dir: yan_dir,
+            project_skills_dir: None,
+            sync_mode: SyncMode::Copy,
+            enabled: true,
+        });
+    }
 }
 
 pub fn save_tool_config(store: &SkillStore, config: ToolConfig) -> Result<ToolConfig> {
@@ -749,8 +790,9 @@ pub fn default_tool_adapters() -> Vec<ToolAdapter> {
         ToolAdapter {
             id: ToolId::Goose,
             display_name: "Goose",
-            // add-skill global path: ~/.config/goose/skills/
-            relative_skills_dir: ".config/goose/skills",
+            // Official global path: ~/.agents/skills/
+            // Backup/compat mirror handled separately to ~/.config/goose/skills
+            relative_skills_dir: ".agents/skills",
             relative_detect_dir: ".config/goose",
         },
         ToolAdapter {

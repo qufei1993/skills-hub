@@ -1,10 +1,14 @@
 import { hasUnboundLocalSource } from './skillSourceState'
 import { memo } from 'react'
-import { Copy, Folder, Github, RefreshCw, Tag, Trash2 } from 'lucide-react'
+import { Copy, Folder, Github, RefreshCw, Sparkles, StickyNote, Tag, Trash2 } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { toast } from 'sonner'
 import { getFullySyncedTools, getToolSyncState } from './skillSyncStatus'
 import type { ManagedSkill, ToolOption } from './types'
+import {
+  formatHubCardSummary,
+  formatSkillTitleLine,
+} from './skillProfile'
 import ToolIcon from './ToolIcon'
 import SkillIssueNotice from './SkillIssueNotice'
 
@@ -26,6 +30,8 @@ type SkillCardProps = {
   onOpenScope: (skill: ManagedSkill) => void
   onOpenDetail: (skill: ManagedSkill) => void
   onEditTags: (skill: ManagedSkill) => void
+  onEditProfile?: (skill: ManagedSkill) => void
+  onAutofillProfile?: (skill: ManagedSkill) => void
   onToggleBulkSelection: (skillId: string) => void
   getSkillScope: (skill: ManagedSkill) => 'global' | 'project'
   getSkillProjects: (skill: ManagedSkill) => string[]
@@ -39,7 +45,7 @@ const SkillCard = ({
   bulkMode,
   bulkSelected,
   getGithubInfo,
-  getSkillSourceLabel,
+  getSkillSourceLabel: _getSkillSourceLabel,
   formatRelative,
   onUpdate,
   onDelete,
@@ -48,17 +54,25 @@ const SkillCard = ({
   onOpenScope,
   onOpenDetail,
   onEditTags,
+  onEditProfile,
+  onAutofillProfile,
   onToggleBulkSelection,
   getSkillScope,
   getSkillProjects,
   t,
 }: SkillCardProps) => {
   const unboundSource = hasUnboundLocalSource(skill)
-  const github = getGithubInfo(skill.source_ref)
+  const github = getGithubInfo(skill.profile?.source_url) ?? getGithubInfo(skill.source_ref)
   const isGit = skill.source_type.toLowerCase().includes('git')
-  const sourceLabel = github?.label ?? getSkillSourceLabel(skill)
-  const copyValue = unboundSource ? '' : (github?.href ?? skill.source_ref ?? skill.central_path).trim()
-  const description = skill.description?.trim() || t('skillDescriptionEmpty')
+  const copyValue = skill.name.trim()
+  const titleLine = formatSkillTitleLine({ name: skill.name, profile: skill.profile })
+  const zhName = skill.profile?.zh_name?.trim() || ''
+  const hubSummary = formatHubCardSummary({
+    profile: skill.profile,
+    pendingLabel: t('hubCard.pendingSummary'),
+  })
+  const openProfile = () => (onEditProfile ? onEditProfile(skill) : onOpenDetail(skill))
+  const color = skill.profile?.color?.trim() || ''
   const scope = getSkillScope(skill)
   const projectCount = getSkillProjects(skill).length
   const enabled = skill.enabled !== false
@@ -94,14 +108,15 @@ const SkillCard = ({
           <div className="skill-icon">{isGit ? <Github size={16} /> : <Folder size={16} />}</div>
           <div className="skill-identity-copy">
             <div className="skill-title-line">
+              {color ? <span className="skill-color-dot" style={{ background: color }} aria-hidden="true" /> : null}
               <button className="skill-name clickable" type="button" onClick={() => onOpenDetail(skill)}>
-                {skill.name}
+                {titleLine}
               </button>
               <button
                 className="skill-source-copy"
                 type="button"
-                title={`${t('copy')}：${sourceLabel}`}
-                aria-label={`${t('copy')}：${sourceLabel}`}
+                title={`${t('copy')}：${skill.name}`}
+                aria-label={`${t('copy')}：${skill.name}`}
                 onClick={() => void handleCopySource()}
                 disabled={!copyValue}
               >
@@ -109,9 +124,19 @@ const SkillCard = ({
               </button>
               <SkillIssueNotice compact skill={skill} tools={installedTools} t={t} />
             </div>
-            <div className={`skill-description${skill.description?.trim() ? '' : ' empty'}`} title={description}>
-              {description}
-            </div>
+            {!zhName ? (
+              <button className="hub-zh-pending" type="button" onClick={openProfile}>
+                {t('hubCard.pendingZhName')}
+              </button>
+            ) : null}
+            <button
+              className={`hub-card-summary${hubSummary.pending ? ' pending' : ''}`}
+              type="button"
+              title={hubSummary.text}
+              onClick={openProfile}
+            >
+              {hubSummary.text}
+            </button>
             {unboundSource ? <p className="skill-source-unbound" title={t('deviceSync.unboundSourceHelp')}>{t('deviceSync.unboundSource')}</p> : null}
           </div>
         </div>
@@ -184,6 +209,30 @@ const SkillCard = ({
         </div>
 
         <div className="skill-actions-col">
+          {onAutofillProfile ? (
+            <button
+              type="button"
+              onClick={() => onAutofillProfile(skill)}
+              disabled={loading}
+              aria-label={t('profileDraft.autofill')}
+              title={t('profileDraft.autofillHint')}
+            ><Sparkles size={16} /></button>
+          ) : null}
+          <button
+            type="button"
+            className={skill.profile?.note?.trim() ? 'has-note' : ''}
+            onClick={openProfile}
+            disabled={loading}
+            aria-label={t('hubCard.note')}
+            title={skill.profile?.note?.trim() || t('hubCard.note')}
+          ><StickyNote size={16} /></button>
+          {github ? (
+            <a className="skill-github-link" href={github.href} target="_blank" rel="noreferrer" title={github.label} aria-label={github.label}>
+              <Github size={16} />
+            </a>
+          ) : (
+            <button type="button" onClick={openProfile} disabled={loading} aria-label={t('hubCard.github')} title={t('hubCard.github')}><Github size={16} /></button>
+          )}
           <button type="button" onClick={() => onEditTags(skill)} disabled={loading} aria-label={t('editTags')}><Tag size={16} /></button>
           <button type="button" onClick={() => onUpdate(skill)} disabled={loading || !enabled || unboundSource} title={unboundSource ? t('deviceSync.unboundSourceHelp') : t('update')} aria-label={t('update')}><RefreshCw size={16} /></button>
           <button type="button" onClick={() => onDelete(skill.id)} disabled={loading} aria-label={t('remove')}><Trash2 size={16} /></button>

@@ -45,6 +45,37 @@ describe('scope-aware Skills view', () => {
     expect(restored.bulkSelectedSkills.map((item) => item.id)).toEqual(['global-write', 'project-both', 'project-write'])
   })
 
+  it('matches English name and Hub five-element profile fields', () => {
+    const named = {
+      ...skill('nature-polishing', [1]),
+      profile: {
+        skill_id: 'nature-polishing',
+        zh_name: '自然润色',
+        category: '科研',
+        color: '#92400E',
+        summary: '润色学术英文段落与结构。',
+        note: '需要 API Key',
+        source_url: 'https://github.com/Yuan1z0825/nature-skills',
+        summary_source: 'manual',
+        sort_order: 0,
+        created_at: 0,
+        updated_at: 0,
+      },
+    }
+    const view = getSkillsView({
+      ...defaults,
+      managedSkills: [named, skill('other', [])],
+      searchQuery: '自然润色',
+    })
+    expect(view.visibleSkills.map((item) => item.id)).toEqual(['nature-polishing'])
+    const bySummary = getSkillsView({
+      ...defaults,
+      managedSkills: [named, skill('other', [])],
+      searchQuery: '学术英文',
+    })
+    expect(bySummary.visibleSkills.map((item) => item.id)).toEqual(['nature-polishing'])
+  })
+
   it('keeps any-match tag filtering, untagged selection, and scope constraints together', () => {
     const view = getSkillsView({ ...defaults, scopeFilter: 'global', selectedTagIds: [2], includeUntagged: true })
     expect(view.visibleSkills.map((item) => item.id)).toEqual(['global-none'])

@@ -12,7 +12,8 @@ type DiscoveryScanModalProps = {
   saving: boolean
   settings: DiscoveryScanSettingsDto | null
   onRequestClose: () => void
-  onSave: (disabledSourceKeys: string[]) => void
+  onSave: (disabledSourceKeys: string[], extraSourcePaths: string[]) => void
+  onAddExtraPath?: () => Promise<string | null>
   t: TFunction
 }
 
@@ -21,11 +22,13 @@ const DiscoveryScanModalContent = ({
   settings,
   onRequestClose,
   onSave,
+  onAddExtraPath,
   t,
 }: Omit<DiscoveryScanModalProps, 'open'>) => {
   const [enabledByKey, setEnabledByKey] = useState<Record<string, boolean>>(() =>
     buildDiscoverySourceEnabledMap(settings),
   )
+  const [extraPaths, setExtraPaths] = useState<string[]>(() => settings?.extra_source_paths ?? [])
 
   const enabledCount = settings?.sources.filter((source) => enabledByKey[source.key]).length ?? 0
   const totalCount = settings?.sources.length ?? 0
@@ -103,6 +106,40 @@ const DiscoveryScanModalContent = ({
             )}
           </div>
           <div className="discovery-scan-helper">{t('discoveryScan.validOnly')}</div>
+          <div className="discovery-scan-helper">{t('discoveryScan.extraHint')}</div>
+          <div className="discovery-scan-extra">
+            <button
+              className="btn btn-secondary"
+              type="button"
+              disabled={saving || !onAddExtraPath}
+              onClick={async () => {
+                if (!onAddExtraPath) return
+                const picked = await onAddExtraPath()
+                if (picked && !extraPaths.includes(picked)) {
+                  setExtraPaths((current) => [...current, picked])
+                }
+              }}
+            >
+              {t('discoveryScan.addFolder')}
+            </button>
+            {extraPaths.length ? (
+              <ul className="discovery-scan-extra-list">
+                {extraPaths.map((path) => (
+                  <li key={path}>
+                    <span className="mono" title={path}>{path}</span>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      disabled={saving}
+                      onClick={() => setExtraPaths((current) => current.filter((item) => item !== path))}
+                    >
+                      {t('remove')}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
         </div>
         <div className="modal-footer">
           <button className="btn btn-secondary" type="button" onClick={onRequestClose} disabled={saving}>
@@ -114,7 +151,7 @@ const DiscoveryScanModalContent = ({
             disabled={saving || !settings}
             onClick={() => {
               if (settings) {
-                onSave(collectDisabledDiscoverySourceKeys(settings, enabledByKey))
+                onSave(collectDisabledDiscoverySourceKeys(settings, enabledByKey), extraPaths)
               }
             }}
           >

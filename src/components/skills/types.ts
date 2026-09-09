@@ -41,6 +41,20 @@ export type TagWithCountDto = TagDto & {
   updated_at: number
 }
 
+export type SkillProfile = {
+  skill_id: string
+  zh_name?: string | null
+  category?: string | null
+  color?: string | null
+  summary?: string | null
+  note?: string | null
+  source_url?: string | null
+  summary_source: 'auto' | 'manual' | string
+  sort_order?: number
+  created_at?: number
+  updated_at?: number
+}
+
 export type ManagedSkill = {
   source_error?: string | null
   source_checked_at?: number | null
@@ -66,6 +80,7 @@ export type ManagedSkill = {
     target_path: string
     synced_at?: number | null
   }[]
+  profile?: SkillProfile | null
 }
 
 export type GitSkillCandidate = {
@@ -139,6 +154,7 @@ export type DiscoveryScanSourceDto = {
 export type DiscoveryScanSettingsDto = {
   sources: DiscoveryScanSourceDto[]
   disabled_source_keys: string[]
+  extra_source_paths?: string[]
 }
 
 export type UpdateResultDto = {
