@@ -28,6 +28,18 @@ pub struct PortableSkill {
     pub source_subpath: Option<String>,
     pub source_revision: Option<String>,
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zh_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
     pub content_hash: String,
     pub files: BTreeMap<String, String>,
 }
@@ -56,7 +68,7 @@ impl SharedSource {
 impl SyncManifest {
     pub fn empty() -> Self {
         Self {
-            format_version: 1,
+            format_version: 2,
             skills: BTreeMap::new(),
         }
     }
@@ -93,7 +105,7 @@ impl SyncManifest {
         }
         let bytes = serde_json::to_vec_pretty(self)?;
         fs::write(&path, bytes).with_context(|| format!("write {:?}", path))?;
-        fs::write(root.join(FORMAT_PATH), b"{\n  \"formatVersion\": 1\n}\n")?;
+        fs::write(root.join(FORMAT_PATH), b"{\n  \"formatVersion\": 2\n}\n")?;
         for skill in self.skills.values() {
             let metadata_path = root.join("skills").join(&skill.id).join("skill.json");
             if let Some(parent) = metadata_path.parent() {
@@ -171,9 +183,23 @@ pub(super) fn export_skill(
         source_subpath: skill.source_subpath,
         source_revision: skill.source_revision,
         tags,
+        zh_name: None,
+        category: None,
+        color: None,
+        summary: None,
+        note: None,
+        source_url: None,
         content_hash: aggregate_hash(&files),
         files,
     };
+    if let Ok(Some(profile)) = store.get_skill_profile(&portable.id) {
+        portable.zh_name = profile.zh_name;
+        portable.category = profile.category;
+        portable.color = profile.color;
+        portable.summary = profile.summary;
+        portable.note = profile.note;
+        portable.source_url = profile.source_url;
+    }
     if let Some(value) = store.get_setting(&format!("device_sync.shared_source.{}", portable.id))? {
         let shared: SharedSource =
             serde_json::from_str(&value).context("read shared Skill source")?;
@@ -407,6 +433,17 @@ pub fn metadata_hash(skill: &PortableSkill) -> String {
     hasher.update([0]);
     for tag in &skill.tags {
         hasher.update(tag.as_bytes());
+        hasher.update([0]);
+    }
+    for part in [
+        skill.zh_name.as_deref().unwrap_or_default(),
+        skill.category.as_deref().unwrap_or_default(),
+        skill.color.as_deref().unwrap_or_default(),
+        skill.summary.as_deref().unwrap_or_default(),
+        skill.note.as_deref().unwrap_or_default(),
+        skill.source_url.as_deref().unwrap_or_default(),
+    ] {
+        hasher.update(part.as_bytes());
         hasher.update([0]);
     }
     hex::encode(hasher.finalize())

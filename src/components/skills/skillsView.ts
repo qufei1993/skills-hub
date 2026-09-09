@@ -22,10 +22,22 @@ export function getSkillsView({
   const scopedSkills = managedSkills.filter((skill) => {
     if (issuesOnly && !['source-error', 'partial', 'failed'].includes(getSkillSyncState(skill))) return false
     if (scopeFilter !== 'all' && getSkillScope(skill) !== scopeFilter) return false
-    return !query || skill.name.toLowerCase().includes(query) ||
-      skill.central_path.toLowerCase().includes(query) ||
-      skill.source_type.toLowerCase().includes(query) ||
-      skill.tags.some((tag) => tag.name.toLowerCase().includes(query))
+    const profile = skill.profile
+    const haystack = [
+      skill.name,
+      skill.description ?? '',
+      skill.central_path,
+      skill.source_type,
+      profile?.zh_name ?? '',
+      profile?.category ?? '',
+      profile?.summary ?? '',
+      profile?.note ?? '',
+      profile?.source_url ?? '',
+      ...skill.tags.map((tag) => tag.name),
+    ]
+      .join('\n')
+      .toLowerCase()
+    return !query || haystack.includes(query)
   })
   const counts = new Map<number, number>()
   let filterUntaggedCount = 0

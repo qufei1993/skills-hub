@@ -587,7 +587,7 @@ where
     recycle(path).with_context(|| format!("move path to system recycle bin {:?}", path))
 }
 
-fn is_same_link(link_path: &Path, target: &Path) -> bool {
+pub(crate) fn is_same_link(link_path: &Path, target: &Path) -> bool {
     if let Ok(existing) = std::fs::read_link(link_path) {
         return existing == target;
     }

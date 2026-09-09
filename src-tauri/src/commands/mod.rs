@@ -56,15 +56,18 @@ use crate::core::onboarding::{
     build_onboarding_plan, get_discovery_scan_settings as get_discovery_scan_settings_core,
     save_discovery_scan_config, DiscoveryScanConfig, DiscoveryScanSettings, OnboardingPlan,
 };
+use crate::core::profile_draft::{
+    self, ProfileDraftConfig, ProfileDraftModelItem, ProfileDraftStatus, SystemProfileDraftKeyStore,
+};
 use crate::core::recycle_bin::{DeletionSource, RecycleBinItem, RecycleBinService};
 use crate::core::skill_store::{
-    SkillRecord, SkillStore, SkillTargetRecord, DEVICE_SYNC_HISTORY_LIMIT,
+    SkillProfileRecord, SkillRecord, SkillStore, SkillTargetRecord, DEVICE_SYNC_HISTORY_LIMIT,
 };
 use crate::core::skills_search::{
     search_skills_online as search_skills_online_core, OnlineSkillResult,
 };
 use crate::core::sync_engine::{
-    copy_dir_recursive, path_is_protected_real_content, paths_overlap,
+    copy_dir_recursive, is_same_link, path_is_protected_real_content, paths_overlap,
     remove_path_any as remove_path_any_core, sync_dir_for_tool_with_overwrite, sync_dir_hybrid,
     sync_dir_with_mode_with_overwrite, SyncMode,
 };
@@ -1197,6 +1200,22 @@ pub async fn sync_skill_dir(
     .map_err(format_anyhow_error)
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillExportItemDto {
+    pub skill_id: String,
+    pub external_description: Option<String>,
+    pub include_color: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportSkillsResultDto {
+    pub destination_dir: String,
+    pub exported_count: usize,
+    pub skill_dirs: Vec<String>,
+}
+
 #[tauri::command]
 #[allow(non_snake_case)]
 #[allow(clippy::too_many_arguments)]
@@ -1210,6 +1229,8 @@ pub async fn sync_skill_to_tool(
     overwriteIfSameContent: Option<bool>,
     scope: Option<String>,
     projectPath: Option<String>,
+    externalDescription: Option<String>,
+    metadataColor: Option<String>,
 ) -> Result<SyncResultDto, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -1274,12 +1295,38 @@ pub async fn sync_skill_to_tool(
             )?;
             anyhow::bail!(error);
         }
+
+        let wants_presentation = externalDescription
+            .as_ref()
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+            || metadataColor
+                .as_ref()
+                .map(|value| !value.trim().is_empty())
+                .unwrap_or(false);
+        let presentation_staging = if wants_presentation {
+            Some(prepare_presentation_skill_dir(
+                std::path::Path::new(&sourcePath),
+                externalDescription.as_deref(),
+                metadataColor.as_deref(),
+            )?)
+        } else {
+            None
+        };
+        let effective_source = presentation_staging
+            .as_ref()
+            .map(|staging| staging.path().to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from(&sourcePath));
+        // Rewritten SKILL.md must be materialized as copy; symlink would still point at Hub original.
+        let force_copy = presentation_staging.is_some();
+
         if let Some(existing) =
             store.get_skill_target(&skillId, &tool, scope, project_path_for_record.as_deref())?
         {
             if existing.mode == "copy"
                 && existing.target_path == target.to_string_lossy()
                 && overwrite != Some(true)
+                && !force_copy
             {
                 let previous =
                     crate::core::content_hash::hash_dir_for_sync_conflict(sourcePath.as_ref())?;
@@ -1299,6 +1346,7 @@ pub async fn sync_skill_to_tool(
                 && overwrite != Some(true)
                 && existing.target_path == target.to_string_lossy()
                 && target.exists()
+                && !force_copy
             {
                 return Ok::<_, anyhow::Error>(SyncResultDto {
                     mode_used: existing.mode,
@@ -1306,18 +1354,69 @@ pub async fn sync_skill_to_tool(
                 });
             }
         }
+        if !force_copy
+            && (is_same_link(&target, std::path::Path::new(&sourcePath))
+                || is_same_link(&target, effective_source.as_path())
+                || target_has_same_content(std::path::Path::new(&sourcePath), &target)
+                || target_has_same_content(effective_source.as_path(), &target))
+        {
+            if tool == "yan_agent" {
+                let _ = write_yan_skill_sidecar(
+                    &store,
+                    &skillId,
+                    &name,
+                    &target,
+                    externalDescription.as_deref(),
+                );
+            }
+            let adopted_mode = if is_same_link(&target, std::path::Path::new(&sourcePath))
+                || is_same_link(&target, effective_source.as_path())
+            {
+                "symlink"
+            } else {
+                "copy"
+            };
+            let group = runtime_tools_sharing_dir(&store, &runtime_tool, scope)?;
+            for a in group {
+                let record = SkillTargetRecord {
+                    id: Uuid::new_v4().to_string(),
+                    skill_id: skillId.clone(),
+                    tool: a.key,
+                    scope: scope.to_string(),
+                    project_path: project_path_for_record.clone(),
+                    target_path: target.to_string_lossy().to_string(),
+                    mode: adopted_mode.to_string(),
+                    status: "ok".to_string(),
+                    last_error: None,
+                    synced_at: Some(now_ms()),
+                };
+                store.upsert_skill_target(&record)?;
+            }
+            return Ok::<_, anyhow::Error>(SyncResultDto {
+                mode_used: adopted_mode.into(),
+                target_path: target.to_string_lossy().to_string(),
+            });
+        }
         let overwrite = overwrite.unwrap_or(false)
+            || force_copy
             || (overwriteIfSameContent.unwrap_or(false)
-                && target_has_same_content(sourcePath.as_ref(), &target));
-        let result = if runtime_tool.is_custom {
+                && target_has_same_content(effective_source.as_path(), &target));
+        let result = if force_copy {
+            sync_dir_with_mode_with_overwrite(
+                SyncMode::Copy,
+                effective_source.as_path(),
+                &target,
+                overwrite,
+            )
+        } else if runtime_tool.is_custom {
             sync_dir_with_mode_with_overwrite(
                 runtime_tool.sync_mode,
-                sourcePath.as_ref(),
+                effective_source.as_path(),
                 &target,
                 overwrite,
             )
         } else {
-            sync_dir_for_tool_with_overwrite(&tool, sourcePath.as_ref(), &target, overwrite)
+            sync_dir_for_tool_with_overwrite(&tool, effective_source.as_path(), &target, overwrite)
         };
         let result = match result {
             Ok(result) => result,
@@ -1344,13 +1443,66 @@ pub async fn sync_skill_to_tool(
                     scope,
                     project_path_for_record.as_deref(),
                     &target,
-                    runtime_tool.sync_mode,
+                    if force_copy {
+                        SyncMode::Copy
+                    } else {
+                        runtime_tool.sync_mode
+                    },
                     &error,
                 )?;
                 anyhow::bail!(error);
             }
         };
 
+        if tool == "yan_agent" {
+            let _ = write_yan_skill_sidecar(
+                &store,
+                &skillId,
+                &name,
+                &result.target_path,
+                externalDescription.as_deref(),
+            );
+        }
+
+        // Goose dual-write backup: when syncing builtin goose, also mirror to goose_backup.
+        if tool == "goose" && scope == "global" {
+            if let Ok(backup) = runtime_tool_by_key(&store, "goose_backup") {
+                let backup_root = resolve_runtime_tool_root(&backup, None)?;
+                let backup_target = backup_root.join(&name);
+                let _ = std::fs::create_dir_all(&backup_root);
+                let backup_mode = if force_copy {
+                    SyncMode::Copy
+                } else {
+                    backup.sync_mode
+                };
+                if let Ok(backup_result) = sync_dir_with_mode_with_overwrite(
+                    backup_mode,
+                    effective_source.as_path(),
+                    &backup_target,
+                    true,
+                ) {
+                    let record = SkillTargetRecord {
+                        id: Uuid::new_v4().to_string(),
+                        skill_id: skillId.clone(),
+                        tool: backup.key,
+                        scope: scope.to_string(),
+                        project_path: None,
+                        target_path: backup_result.target_path.to_string_lossy().to_string(),
+                        mode: match backup_result.mode_used {
+                            SyncMode::Auto => "auto",
+                            SyncMode::Symlink => "symlink",
+                            SyncMode::Junction => "junction",
+                            SyncMode::Copy => "copy",
+                        }
+                        .to_string(),
+                        status: "ok".to_string(),
+                        last_error: None,
+                        synced_at: Some(now_ms()),
+                    };
+                    let _ = store.upsert_skill_target(&record);
+                }
+            }
+        }
         // Some tools share the same skills directory; keep DB records consistent across them.
         let group = runtime_tools_sharing_dir(&store, &runtime_tool, scope)?;
         for a in group {
@@ -1384,6 +1536,302 @@ pub async fn sync_skill_to_tool(
             }
             .to_string(),
             target_path: result.target_path.to_string_lossy().to_string(),
+        })
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_anyhow_error)
+}
+
+
+fn write_yan_skill_sidecar(
+    store: &SkillStore,
+    skill_id: &str,
+    english_name: &str,
+    target_path: &std::path::Path,
+    external_description: Option<&str>,
+) -> anyhow::Result<()> {
+    let profile = store.get_skill_profile(skill_id)?;
+    let skill = store.get_skill_by_id(skill_id)?;
+    let zh = profile
+        .as_ref()
+        .and_then(|p| p.zh_name.clone())
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| english_name.to_string());
+    let desc = external_description
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(|v| v.to_string())
+        .or_else(|| {
+            profile
+                .as_ref()
+                .and_then(|p| p.summary.clone())
+                .filter(|v| !v.trim().is_empty())
+        })
+        .or_else(|| skill.as_ref().and_then(|s| s.description.clone()))
+        .unwrap_or_else(|| english_name.to_string());
+    let category = profile.as_ref().and_then(|p| p.category.clone()).unwrap_or_default();
+    let now = now_ms();
+    let mut tags = Vec::new();
+    if !category.trim().is_empty() {
+        tags.push(category);
+    }
+    for tag in store.get_skill_tags(skill_id).unwrap_or_default() {
+        if !tags.iter().any(|existing| existing == &tag.name) {
+            tags.push(tag.name);
+        }
+    }
+    let manifest = serde_json::json!({
+        "schema": 1,
+        "id": english_name.to_lowercase(),
+        "name": zh,
+        "desc": desc,
+        "version": 1,
+        "source": "skills-hub",
+        "aliases": [english_name],
+        "tags": tags,
+        "installedAt": now,
+        "updatedAt": now
+    });
+    std::fs::write(
+        target_path.join(".yan-skill.json"),
+        format!("{}\n", serde_json::to_string_pretty(&manifest)?),
+    )?;
+    Ok(())
+}
+
+struct PresentationStagingDir {
+    path: std::path::PathBuf,
+}
+
+impl PresentationStagingDir {
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+impl Drop for PresentationStagingDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+fn prepare_presentation_skill_dir(
+    source: &std::path::Path,
+    external_description: Option<&str>,
+    metadata_color: Option<&str>,
+) -> anyhow::Result<PresentationStagingDir> {
+    let staging_root = std::env::temp_dir().join(format!(
+        "skills-hub-presentation-{}-{}",
+        std::process::id(),
+        Uuid::new_v4()
+    ));
+    if staging_root.exists() {
+        std::fs::remove_dir_all(&staging_root)?;
+    }
+    copy_dir_recursive(source, &staging_root)?;
+    let skill_md = staging_root.join("SKILL.md");
+    if skill_md.exists() {
+        let original = std::fs::read_to_string(&skill_md)?;
+        let rewritten = rewrite_skill_md_presentation(
+            &original,
+            external_description,
+            metadata_color,
+        );
+        std::fs::write(&skill_md, rewritten)?;
+    }
+    Ok(PresentationStagingDir { path: staging_root })
+}
+
+fn yaml_quote(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+fn rewrite_skill_md_presentation(
+    original: &str,
+    external_description: Option<&str>,
+    metadata_color: Option<&str>,
+) -> String {
+    let lines: Vec<&str> = original.lines().collect();
+    if lines.first().map(|line| line.trim()) != Some("---") {
+        return original.to_string();
+    }
+    let mut end = None;
+    for (idx, line) in lines.iter().enumerate().skip(1) {
+        if line.trim() == "---" {
+            end = Some(idx);
+            break;
+        }
+    }
+    let Some(end) = end else {
+        return original.to_string();
+    };
+
+    let mut front: Vec<String> = Vec::new();
+    let mut i = 1usize;
+    while i < end {
+        let raw = lines[i];
+        let trimmed = raw.trim();
+        if trimmed.starts_with("description:") {
+            let value = trimmed["description:".len()..].trim();
+            if crate::core::installer::frontmatter_block_style_public(value).is_some() {
+                while i + 1 < end {
+                    let next = lines[i + 1];
+                    if next.trim() == "---" {
+                        break;
+                    }
+                    if !next.trim().is_empty() && !next.starts_with(char::is_whitespace) {
+                        break;
+                    }
+                    i += 1;
+                }
+            }
+            if let Some(description) = external_description
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                front.push(format!("description: {}", yaml_quote(description)));
+            } else {
+                front.push(raw.to_string());
+            }
+        } else if trimmed.starts_with("metadata:") {
+            // Keep existing metadata unless we need to inject/replace color.
+            let mut meta_lines: Vec<String> = vec![raw.to_string()];
+            while i + 1 < end {
+                let next = lines[i + 1];
+                if next.trim() == "---" {
+                    break;
+                }
+                if !next.trim().is_empty() && !next.starts_with(char::is_whitespace) {
+                    break;
+                }
+                meta_lines.push(next.to_string());
+                i += 1;
+            }
+            if let Some(color) = metadata_color.map(str::trim).filter(|value| !value.is_empty()) {
+                let mut kept = vec!["metadata:".to_string()];
+                for line in meta_lines.into_iter().skip(1) {
+                    let trimmed_line = line.trim();
+                    if trimmed_line.starts_with("color:") {
+                        continue;
+                    }
+                    kept.push(line);
+                }
+                kept.push(format!("  color: {}", yaml_quote(color)));
+                front.extend(kept);
+            } else {
+                front.extend(meta_lines);
+            }
+        } else {
+            front.push(raw.to_string());
+        }
+        i += 1;
+    }
+
+    if let Some(description) = external_description
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if !front.iter().any(|line| line.trim().starts_with("description:")) {
+            front.push(format!("description: {}", yaml_quote(description)));
+        }
+    }
+    if let Some(color) = metadata_color.map(str::trim).filter(|value| !value.is_empty()) {
+        if !front.iter().any(|line| line.trim().starts_with("metadata:")) {
+            front.push("metadata:".to_string());
+            front.push(format!("  color: {}", yaml_quote(color)));
+        }
+    }
+
+    let mut out = String::from("---\n");
+    for line in front {
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out.push_str("---");
+    if end + 1 < lines.len() {
+        out.push('\n');
+        out.push_str(&lines[end + 1..].join("\n"));
+        if original.ends_with('\n') {
+            out.push('\n');
+        }
+    } else if original.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn export_skills_with_presentation(
+    store: State<'_, SkillStore>,
+    items: Vec<SkillExportItemDto>,
+    destinationDir: String,
+) -> Result<ExportSkillsResultDto, String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if items.is_empty() {
+            anyhow::bail!("no skills selected for export");
+        }
+        let destination = expand_home_path(&destinationDir)?;
+        std::fs::create_dir_all(&destination)
+            .with_context(|| format!("create export dir {:?}", destination))?;
+
+        let mut skill_dirs = Vec::new();
+        for item in &items {
+            let skill = store
+                .get_skill_by_id(&item.skill_id)?
+                .ok_or_else(|| anyhow::anyhow!("skill not found: {}", item.skill_id))?;
+            let source = std::path::PathBuf::from(&skill.central_path);
+            if !source.is_dir() {
+                anyhow::bail!("skill central path missing: {:?}", source);
+            }
+            let color = if item.include_color.unwrap_or(false) {
+                store
+                    .get_skill_profile(&skill.id)?
+                    .and_then(|profile| profile.color)
+            } else {
+                None
+            };
+            let staging = prepare_presentation_skill_dir(
+                &source,
+                item.external_description.as_deref(),
+                color.as_deref(),
+            )?;
+            let target = destination.join(&skill.name);
+            if target.exists() {
+                std::fs::remove_dir_all(&target)?;
+            }
+            copy_dir_recursive(staging.path(), &target)?;
+            // Keep a small sidecar for Hub re-import / audit.
+            let profile = store.get_skill_profile(&skill.id)?;
+            let sidecar = serde_json::json!({
+                "schema": 1,
+                "source": "skills-hub-export",
+                "id": skill.name,
+                "english_name": skill.name,
+                "name": profile.as_ref().and_then(|p| p.zh_name.clone()).unwrap_or_else(|| skill.name.clone()),
+                "desc": item.external_description.clone().unwrap_or_else(|| skill.description.clone().unwrap_or_default()),
+                "profile": {
+                    "zh_name": profile.as_ref().and_then(|p| p.zh_name.clone()),
+                    "category": profile.as_ref().and_then(|p| p.category.clone()),
+                    "color": profile.as_ref().and_then(|p| p.color.clone()),
+                    "summary": profile.as_ref().and_then(|p| p.summary.clone()),
+                    "note": profile.as_ref().and_then(|p| p.note.clone()),
+                    "source_url": profile.as_ref().and_then(|p| p.source_url.clone()),
+                }
+            });
+            std::fs::write(
+                target.join(".skills-hub-export.json"),
+                format!("{}\n", serde_json::to_string_pretty(&sidecar)?),
+            )?;
+            skill_dirs.push(target.to_string_lossy().to_string());
+        }
+
+        Ok(ExportSkillsResultDto {
+            destination_dir: destination.to_string_lossy().to_string(),
+            exported_count: skill_dirs.len(),
+            skill_dirs,
         })
     })
     .await
@@ -1425,6 +1873,9 @@ fn ensure_target_does_not_overlap_local_source(
     };
     if let Some(source) = skill.external_local_source() {
         let source = std::path::PathBuf::from(source);
+        if is_same_link(target, &source) || is_same_link(target, std::path::Path::new(&skill.central_path)) {
+            return Ok(());
+        }
         if paths_overlap(target, &source)? {
             anyhow::bail!(
                 "SKILL_TARGET_OVERLAPS_SOURCE|{}|sync target overlaps original local source",
@@ -1780,6 +2231,39 @@ pub async fn import_existing_skill(
 }
 
 #[derive(Debug, Serialize)]
+pub struct SkillProfileDto {
+    pub skill_id: String,
+    pub zh_name: Option<String>,
+    pub category: Option<String>,
+    pub color: Option<String>,
+    pub summary: Option<String>,
+    pub note: Option<String>,
+    pub source_url: Option<String>,
+    pub summary_source: String,
+    pub sort_order: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl From<SkillProfileRecord> for SkillProfileDto {
+    fn from(value: SkillProfileRecord) -> Self {
+        Self {
+            skill_id: value.skill_id,
+            zh_name: value.zh_name,
+            category: value.category,
+            color: value.color,
+            summary: value.summary,
+            note: value.note,
+            source_url: value.source_url,
+            summary_source: value.summary_source,
+            sort_order: value.sort_order,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
 pub struct ManagedSkillDto {
     pub id: String,
     pub name: String,
@@ -1796,6 +2280,7 @@ pub struct ManagedSkillDto {
     pub source_checked_at: Option<i64>,
     pub tags: Vec<TagDto>,
     pub targets: Vec<SkillTargetDto>,
+    pub profile: Option<SkillProfileDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1914,6 +2399,139 @@ pub fn set_skill_tags(
 #[tauri::command]
 pub fn get_untagged_skill_ids(store: State<'_, SkillStore>) -> Result<Vec<String>, String> {
     store.list_untagged_skill_ids().map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+pub fn get_skill_profiles(store: State<'_, SkillStore>) -> Result<Vec<SkillProfileDto>, String> {
+    store
+        .list_skill_profiles()
+        .map(|profiles| profiles.into_iter().map(SkillProfileDto::from).collect())
+        .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn upsert_skill_profile(
+    store: State<'_, SkillStore>,
+    skillId: String,
+    zhName: Option<String>,
+    category: Option<String>,
+    color: Option<String>,
+    summary: Option<String>,
+    note: Option<String>,
+    sourceUrl: Option<String>,
+    summarySource: Option<String>,
+    sortOrder: Option<i64>,
+) -> Result<SkillProfileDto, String> {
+    let record = SkillProfileRecord {
+        skill_id: skillId,
+        zh_name: zhName,
+        category,
+        color,
+        summary,
+        note,
+        source_url: sourceUrl,
+        summary_source: summarySource.unwrap_or_else(|| "auto".into()),
+        sort_order: sortOrder.unwrap_or(0),
+        created_at: 0,
+        updated_at: 0,
+    };
+    store
+        .upsert_skill_profile(&record)
+        .map(SkillProfileDto::from)
+        .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn delete_skill_profile(store: State<'_, SkillStore>, skillId: String) -> Result<(), String> {
+    store
+        .delete_skill_profile(&skillId)
+        .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+pub async fn get_profile_draft_status(
+    store: State<'_, SkillStore>,
+) -> Result<ProfileDraftStatus, String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        profile_draft::status(&store, &SystemProfileDraftKeyStore)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+pub async fn save_profile_draft_config(
+    store: State<'_, SkillStore>,
+    config: ProfileDraftConfig,
+) -> Result<ProfileDraftConfig, String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || profile_draft::save_config(&store, config))
+        .await
+        .map_err(|err| err.to_string())?
+        .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn set_profile_draft_api_key(
+    store: State<'_, SkillStore>,
+    apiKey: String,
+) -> Result<(), String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        profile_draft::set_api_key(&store, &SystemProfileDraftKeyStore, &apiKey)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+pub async fn list_profile_draft_models(
+    store: State<'_, SkillStore>,
+) -> Result<Vec<ProfileDraftModelItem>, String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        profile_draft::list_models(&store, &SystemProfileDraftKeyStore)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+pub async fn test_profile_draft_connection(
+    store: State<'_, SkillStore>,
+) -> Result<String, String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        profile_draft::test_connection(&store, &SystemProfileDraftKeyStore)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn autofill_skill_profile(
+    store: State<'_, SkillStore>,
+    skillId: String,
+) -> Result<SkillProfileDto, String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let suggestion =
+            profile_draft::draft_for_skill(&store, &SystemProfileDraftKeyStore, &skillId)?;
+        profile_draft::apply_suggestion_fill_empty(&store, &skillId, &suggestion)
+            .map(SkillProfileDto::from)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_anyhow_error)
 }
 
 #[tauri::command]
@@ -2042,6 +2660,9 @@ fn managed_skill_status(skill: &SkillRecord) -> String {
         .unwrap_or(false);
     if source_exists {
         skill.status.clone()
+    } else if std::path::Path::new(&skill.central_path).exists() {
+        // Hub still has the managed copy; missing original local source is not a blocking error.
+        skill.status.clone()
     } else {
         "error".to_string()
     }
@@ -2084,6 +2705,11 @@ fn get_managed_skills_impl(store: &SkillStore) -> Result<Vec<ManagedSkillDto>, S
                     name: tag.name,
                 })
                 .collect();
+            let profile = store
+                .get_skill_profile(&skill.id)
+                .ok()
+                .flatten()
+                .map(SkillProfileDto::from);
 
             ManagedSkillDto {
                 source_error,
@@ -2101,6 +2727,7 @@ fn get_managed_skills_impl(store: &SkillStore) -> Result<Vec<ManagedSkillDto>, S
                 status,
                 tags,
                 targets,
+                profile,
             }
         })
         .collect())

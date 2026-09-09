@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUpDown, Check, CheckSquare, ChevronDown, LayoutGrid, List, Search, Tags } from 'lucide-react'
+import { ArrowUpDown, Check, CheckSquare, ChevronDown, Layers3, LayoutGrid, List, Search, Tags } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import type { TagWithCountDto } from './types'
 
@@ -19,6 +19,8 @@ type FilterBarProps = {
   onToggleUntagged: () => void
   onClearTags: () => void
   onManageTags: () => void
+  onTemporaryActivation: () => void
+  temporaryActivationCount: number
   onToggleBulkMode: () => void
   onViewModeChange: (value: 'list' | 'cards') => void
   t: TFunction
@@ -40,6 +42,8 @@ const FilterBar = ({
   onToggleUntagged,
   onClearTags,
   onManageTags,
+  onTemporaryActivation,
+  temporaryActivationCount,
   onToggleBulkMode,
   onViewModeChange,
   t,
@@ -80,6 +84,17 @@ const FilterBar = ({
             <option value="updated">{t('sortUpdated')}</option>
             <option value="name">{t('sortName')}</option>
           </select>
+        </button>
+        <button
+          className={`btn btn-secondary bulk-mode-btn${temporaryActivationCount > 0 ? ' active' : ''}`}
+          type="button"
+          onClick={onTemporaryActivation}
+          title={t('temporaryActivation.open')}
+        >
+          <Layers3 size={14} />
+          {temporaryActivationCount > 0
+            ? t('temporaryActivation.activeCount', { count: temporaryActivationCount })
+            : t('temporaryActivation.open')}
         </button>
         <button
           className={`btn btn-secondary bulk-mode-btn${bulkMode ? ' active' : ''}`}

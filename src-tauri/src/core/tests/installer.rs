@@ -1738,3 +1738,58 @@ fn issue_129_discovers_and_installs_skills_across_categories() {
         assert_eq!(record.description, candidate.description);
     }
 }
+
+#[test]
+fn export_sidecar_roundtrip_upserts_profile_fields() {
+    let (dir, store) = make_store();
+    let skill = SkillRecord {
+        id: "s-export".to_string(),
+        name: "demo".to_string(),
+        description: Some("old".into()),
+        source_type: "local".to_string(),
+        source_ref: Some("/tmp/src".to_string()),
+        source_subpath: None,
+        source_revision: None,
+        central_path: "/tmp/central".to_string(),
+        content_hash: None,
+        created_at: 1,
+        updated_at: 1,
+        last_sync_at: None,
+        last_seen_at: 1,
+        enabled: true,
+        status: "ok".to_string(),
+    };
+    store.upsert_skill(&skill).unwrap();
+
+    let sidecar_dir = dir.path().join("exported/demo");
+    fs::create_dir_all(&sidecar_dir).unwrap();
+    fs::write(
+        sidecar_dir.join(".skills-hub-export.json"),
+        r##"{
+          "schema": 1,
+          "source": "skills-hub-export",
+          "id": "demo",
+          "profile": {
+            "zh_name": "演示技能",
+            "category": "研发",
+            "color": "#112233",
+            "summary": "这是一条中文功能简介够十二",
+            "note": "备注可空",
+            "source_url": "https://github.com/example/demo"
+          }
+        }"##,
+    )
+    .unwrap();
+
+    super::apply_skills_hub_export_sidecar(&store, &skill.id, &sidecar_dir).unwrap();
+    let profile = store.get_skill_profile(&skill.id).unwrap().unwrap();
+    assert_eq!(profile.zh_name.as_deref(), Some("演示技能"));
+    assert_eq!(profile.category.as_deref(), Some("研发"));
+    assert_eq!(profile.color.as_deref(), Some("#112233"));
+    assert_eq!(profile.summary.as_deref(), Some("这是一条中文功能简介够十二"));
+    assert_eq!(profile.note.as_deref(), Some("备注可空"));
+    assert_eq!(
+        profile.source_url.as_deref(),
+        Some("https://github.com/example/demo")
+    );
+}

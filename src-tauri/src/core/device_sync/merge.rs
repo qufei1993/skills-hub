@@ -277,6 +277,12 @@ mod tests {
             source_subpath: None,
             source_revision: None,
             tags: vec![],
+            zh_name: None,
+            category: None,
+            color: None,
+            summary: None,
+            note: None,
+            source_url: None,
             content_hash: super::super::manifest::aggregate_hash(&files),
             files,
         }
