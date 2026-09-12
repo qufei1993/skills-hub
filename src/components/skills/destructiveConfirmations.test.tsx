@@ -6,6 +6,7 @@ import type { TFunction } from 'i18next'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import SettingsPage from './SettingsPage'
 import ToolsPage from './ToolsPage'
+import { emptyProfileDraftStatus } from './profileDraftSettings'
 import type { ToolConfigDto, ToolStatusDto } from './types'
 
 const messages: Record<string, string> = {
@@ -119,6 +120,17 @@ const settingsProps = (
   onGithubTokenRemove: vi.fn(),
   onGithubProxyConfigChange: vi.fn(),
   onOpenDiscoveryScanSettings: vi.fn(),
+  profileDraftStatus: emptyProfileDraftStatus(),
+  profileDraftKeyDraft: '',
+  profileDraftModels: [],
+  profileDraftBusy: false,
+  onProfileDraftKeyDraftChange: vi.fn(),
+  onProfileDraftConfigChange: vi.fn(),
+  onProfileDraftSaveConfig: vi.fn(),
+  onProfileDraftSaveKey: vi.fn(),
+  onProfileDraftRemoveKey: vi.fn(),
+  onProfileDraftFetchModels: vi.fn(),
+  onProfileDraftTest: vi.fn(),
   onBack: vi.fn(),
   t,
 })

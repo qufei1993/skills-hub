@@ -990,6 +990,34 @@ impl<'a> DeviceSyncService<'a> {
             .collect();
         self.store
             .commit_device_sync_library_with_sources(&records, &[], &sources)?;
+        for skill in manifest.skills.values() {
+            let has_profile = skill.zh_name.as_deref().is_some_and(|s| !s.trim().is_empty())
+                || skill.category.as_deref().is_some_and(|s| !s.trim().is_empty())
+                || skill.color.as_deref().is_some_and(|s| !s.trim().is_empty())
+                || skill.summary.as_deref().is_some_and(|s| !s.trim().is_empty())
+                || skill.note.as_deref().is_some_and(|s| !s.trim().is_empty())
+                || skill.source_url.as_deref().is_some_and(|s| !s.trim().is_empty());
+            if !has_profile {
+                continue;
+            }
+            let _ = self.store.upsert_skill_profile(&crate::core::skill_store::SkillProfileRecord {
+                skill_id: skill.id.clone(),
+                zh_name: skill.zh_name.clone(),
+                category: skill.category.clone(),
+                color: skill.color.clone(),
+                summary: skill.summary.clone(),
+                note: skill.note.clone(),
+                source_url: skill.source_url.clone(),
+                summary_source: if skill.summary.as_deref().is_some_and(|s| !s.trim().is_empty()) {
+                    "manual".into()
+                } else {
+                    "auto".into()
+                },
+                sort_order: 0,
+                created_at: 0,
+                updated_at: 0,
+            });
+        }
         for replacement in &mut replacements {
             replacement.commit();
         }
