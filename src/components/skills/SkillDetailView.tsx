@@ -712,6 +712,7 @@ const SkillDetailView = ({
         </div>
       </div>
 
+      <div className="detail-scroll">
       <section className="detail-profile-card" aria-label="管理资料">
         <div className="detail-profile-head">
           <strong>管理资料</strong>
@@ -784,6 +785,7 @@ const SkillDetailView = ({
             </div>
           )}
         </div>
+      </div>
       </div>
     </div>
   )

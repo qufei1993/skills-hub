@@ -2582,9 +2582,11 @@ function App() {
         }
         const nextEntries = projectCapableIds.map((id) => {
           const previous = temporaryActivationEntries.find(
-            (entry) => temporaryActivationKey(entry.toolId, entry.scope, entry.projectPath)
-              === temporaryActivationKey(id, scope, projectPath),
+            (entry) =>
+              temporaryActivationKey(entry.toolId, entry.scope, entry.projectPath) ===
+              temporaryActivationKey(id, scope, projectPath),
           )
+          const currentSnapshot = buildTemporarySnapshot(managedSkills, id, scope, projectPath)
           return {
             toolId: id,
             scope,
@@ -2592,7 +2594,8 @@ function App() {
             tagId: selectedTagIds[0] ?? null,
             tagIds: selectedTagIds,
             toolIds: projectCapableIds,
-            snapshot: previous?.snapshot ?? buildTemporarySnapshot(managedSkills, id, scope, projectPath),
+            snapshot: currentSnapshot,
+            baselineSnapshot: previous?.baselineSnapshot ?? previous?.snapshot ?? currentSnapshot,
             updatedAt: Date.now(),
           } satisfies TemporaryActivationEntry
         })
@@ -2722,6 +2725,39 @@ function App() {
       uniqueToolIdsByProjectSkillsDir,
       uniqueToolIdsBySkillsDir,
     ],
+  )
+
+  const handleResetTemporaryActivation = useCallback(
+    async (input: {
+      toolIds: string[]
+      scope: TemporaryActivationScope
+      projectPath?: string
+    }) => {
+      if (loading) return
+      const selectedToolIds = input.toolIds.filter(Boolean)
+      if (selectedToolIds.length === 0) return
+      if (input.scope === 'project' && !input.projectPath) {
+        setError(t('temporaryActivation.noProjects'))
+        return
+      }
+      const restoreKeys = new Set(
+        selectedToolIds.map((id) => temporaryActivationKey(id, input.scope, input.projectPath)),
+      )
+      const matching = temporaryActivationEntries.filter((entry) =>
+        restoreKeys.has(temporaryActivationKey(entry.toolId, entry.scope, entry.projectPath)),
+      )
+      if (matching.length === 0) {
+        setError(t('temporaryActivation.noActive'))
+        return
+      }
+      for (const entry of matching) {
+        await handleRestoreTemporaryActivation({
+          ...entry,
+          snapshot: entry.baselineSnapshot ?? entry.snapshot,
+        })
+      }
+    },
+    [handleRestoreTemporaryActivation, loading, t, temporaryActivationEntries],
   )
 
   const handleToggleBulkEnabled = useCallback(async () => {
@@ -4914,6 +4950,7 @@ function App() {
           loading={loading}
           onApply={handleApplyTemporaryActivation}
           onRestore={handleRestoreTemporaryActivation}
+          onReset={handleResetTemporaryActivation}
           onRequestClose={() => { if (!loading) setShowTemporaryActivationModal(false) }}
           t={t}
         />

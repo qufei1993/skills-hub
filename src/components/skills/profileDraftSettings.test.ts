@@ -26,4 +26,16 @@ describe('profileDraftSettings', () => {
     expect(next.provider).toBe('custom')
     expect(next.base_url).toBe(customUrl)
   })
+
+  it('snaps to the native vendor URL instead of keeping a relay', () => {
+    const status = emptyProfileDraftStatus()
+    const next = applyPresetToConfig(
+      { ...status.config, provider: 'custom', base_url: 'https://api.tyas.cc/v1', model: 'gpt-4o' },
+      'deepseek',
+      status.presets,
+    )
+    expect(next.provider).toBe('deepseek')
+    expect(next.base_url).toBe('https://api.deepseek.com/v1')
+    expect(next.model).toBe('')
+  })
 })

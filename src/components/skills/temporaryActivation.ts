@@ -7,7 +7,10 @@ export type TemporaryActivationEntry = {
   tagId: number | null
   tagIds?: Array<number | null>
   toolIds?: string[]
+  /** Skill sync state before the latest temporary apply (undo last). */
   snapshot: Record<string, boolean>
+  /** Skill sync state before the first temporary apply on this target (reset default). */
+  baselineSnapshot?: Record<string, boolean>
   updatedAt: number
 }
 

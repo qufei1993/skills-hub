@@ -19,6 +19,11 @@ type TemporaryActivationModalProps = {
     tagIds: Array<number | null>
   }) => void
   onRestore: (entry: TemporaryActivationEntry) => void
+  onReset?: (input: {
+    toolIds: string[]
+    scope: TemporaryActivationScope
+    projectPath?: string
+  }) => void
   onRequestClose: () => void
   t: TFunction
 }
@@ -33,6 +38,7 @@ const TemporaryActivationModal = ({
   loading,
   onApply,
   onRestore,
+  onReset,
   onRequestClose,
   t,
 }: TemporaryActivationModalProps) => {
@@ -120,12 +126,37 @@ const TemporaryActivationModal = ({
             </div>
           </fieldset>
           <div className="temporary-activation-hint">{t('temporaryActivation.hint')}</div>
-          {selectedEntry ? (
+          {activeEntries.length > 0 ? (
             <div className="temporary-activation-current">
-              <span>{t('temporaryActivation.active')}</span>
-              <button className="btn btn-secondary" type="button" disabled={loading} onClick={() => onRestore(selectedEntry)}>
-                <RotateCcw size={14} />{t('temporaryActivation.restore')}
-              </button>
+              <span>
+                {selectedEntry
+                  ? t('temporaryActivation.active')
+                  : t('temporaryActivation.activeCount', { count: activeEntries.length })}
+              </span>
+              <div className="temporary-activation-actions">
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  disabled={loading || !selectedEntry}
+                  onClick={() => selectedEntry && onRestore(selectedEntry)}
+                >
+                  <RotateCcw size={14} />{t('temporaryActivation.restore')}
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  disabled={loading || toolIds.length === 0}
+                  onClick={() =>
+                    onReset?.({
+                      toolIds,
+                      scope,
+                      projectPath: scope === 'project' ? projectPath : undefined,
+                    })
+                  }
+                >
+                  {t('temporaryActivation.reset')}
+                </button>
+              </div>
             </div>
           ) : null}
         </div>

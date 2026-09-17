@@ -5314,6 +5314,14 @@
   min-height: 0;
 }
 
+.detail-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
 .detail-header {
   padding: 14px 28px 12px;
   border-bottom: 1px solid var(--border-subtle);
@@ -5669,10 +5677,9 @@
 }
 
 .detail-body {
-  flex: 1;
+  flex: 1 0 auto;
   display: flex;
-  overflow: hidden;
-  min-height: 0;
+  min-height: min(52vh, 420px);
 }
 
 /* ── File tree sidebar ── */
@@ -6600,7 +6607,10 @@
 
 .hub-card-summary,
 .hub-zh-pending {
-  display: block;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   width: 100%;
   margin: 4px 0 0;
   padding: 0;
@@ -6612,7 +6622,9 @@
   cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  line-height: 1.45;
+  max-height: calc(1.45em * 2);
 }
 
 .hub-card-summary.pending,
@@ -6751,6 +6763,11 @@
   gap: 12px;
   padding-top: 4px;
   color: var(--text-secondary);
+}
+.temporary-activation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 

@@ -403,6 +403,44 @@ fn sanitize_suggestion(
     })
 }
 
+fn map_request_error(err: reqwest::Error, url: &str) -> anyhow::Error {
+    if err.is_connect() {
+        anyhow!("连不上起草 API（{url}）。请改选 GPT / Grok / DeepSeek / 硅基流动官方地址，或确认自定义中转已启动。")
+    } else if err.is_timeout() {
+        anyhow!("起草 API 超时（{url}）")
+    } else {
+        anyhow!("起草请求失败（{url}）：{err}")
+    }
+}
+
+fn collect_sse_text(raw: &str) -> Result<String> {
+    let mut out = String::new();
+    for line in raw.lines() {
+        let line = line.trim();
+        let Some(payload) = line.strip_prefix("data:") else {
+            continue;
+        };
+        let payload = payload.trim();
+        if payload.is_empty() || payload == "[DONE]" {
+            continue;
+        }
+        let value: Value = serde_json::from_str(payload).unwrap_or(Value::Null);
+        if let Some(content) = value.pointer("/choices/0/delta/content") {
+            if let Ok(text) = parse_model_message_content(content) {
+                out.push_str(&text);
+            }
+        } else if let Some(content) = value.pointer("/choices/0/message/content") {
+            if let Ok(text) = parse_model_message_content(content) {
+                out.push_str(&text);
+            }
+        }
+    }
+    if out.trim().is_empty() {
+        bail!("流式响应里没有模型正文");
+    }
+    Ok(out)
+}
+
 fn chat_completions(
     store: &SkillStore,
     credentials: &dyn CredentialStore,
@@ -413,28 +451,61 @@ fn chat_completions(
         bail!("请先在设置里填写 API Base URL");
     }
     if cfg.model.trim().is_empty() {
-        bail!("请先选择或填写模型");
+        bail!("请先从模型列表选择一个模型");
     }
     let api_key = resolve_api_key(store, credentials)?.ok_or_else(|| anyhow!("请先保存 API Key"))?;
     let proxy_url = get_github_proxy_url(store).unwrap_or_default();
     let client = app_http_client(&proxy_url, Some(90))?;
     let url = format!("{}/chat/completions", normalize_base_url(&cfg.base_url));
+    let messages = json!([
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]);
+
+    let stream_body = json!({
+        "model": cfg.model,
+        "temperature": 0.2,
+        "stream": true,
+        "messages": messages,
+    });
+    let stream_response = client
+        .post(&url)
+        .bearer_auth(&api_key)
+        .json(&stream_body)
+        .send()
+        .map_err(|err| map_request_error(err, &url))?;
+    if stream_response.status().is_success() {
+        let raw = stream_response.text().context("read streaming chat/completions")?;
+        if let Ok(text) = collect_sse_text(&raw) {
+            return Ok(text);
+        }
+        if let Ok(payload) = serde_json::from_str::<Value>(&raw) {
+            if let Some(content) = payload.pointer("/choices/0/message/content") {
+                return parse_model_message_content(content);
+            }
+        }
+    }
+
     let body = json!({
         "model": cfg.model,
         "temperature": 0.2,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ],
+        "messages": messages,
     });
     let response = client
-        .post(url)
-        .bearer_auth(api_key)
+        .post(&url)
+        .bearer_auth(&api_key)
         .json(&body)
         .send()
-        .context("call chat/completions")?
-        .error_for_status()
-        .context("chat/completions HTTP error")?;
+        .map_err(|err| map_request_error(err, &url))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let detail = response.text().unwrap_or_default();
+        let detail = detail.chars().take(180).collect::<String>();
+        if detail.is_empty() {
+            bail!("起草 API 返回 {status}（{url}）");
+        }
+        bail!("起草 API 返回 {status}（{url}）：{detail}");
+    }
     let payload: Value = response.json().context("parse chat/completions JSON")?;
     let content = payload
         .pointer("/choices/0/message/content")
@@ -455,12 +526,14 @@ pub fn list_models(
     let client = app_http_client(&proxy_url, Some(45))?;
     let url = format!("{}/models", normalize_base_url(&cfg.base_url));
     let response = client
-        .get(url)
+        .get(&url)
         .bearer_auth(api_key)
         .send()
-        .context("call /models")?
-        .error_for_status()
-        .context("/models HTTP error")?;
+        .map_err(|err| map_request_error(err, &url))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        bail!("拉取模型列表失败 {status}（{url}）");
+    }
     let payload: Value = response.json().context("parse /models JSON")?;
     let mut models = Vec::new();
     if let Some(arr) = payload.get("data").and_then(|v| v.as_array()) {

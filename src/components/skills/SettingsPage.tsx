@@ -672,25 +672,31 @@ const SettingsPage = ({
                   {t('profileDraft.model')}
                 </label>
                 <div className="settings-input-row">
-                  <input
+                  <select
                     id="profile-draft-model"
                     className="settings-input mono"
-                    list="profile-draft-model-options"
                     value={profileDraftStatus.config.model}
                     disabled={profileDraftBusy}
-                    placeholder={t('profileDraft.modelPlaceholder')}
                     onChange={(e) =>
                       onProfileDraftConfigChange({
                         ...profileDraftStatus.config,
                         model: e.target.value,
                       })
                     }
-                  />
-                  <datalist id="profile-draft-model-options">
+                  >
+                    <option value="">{t('profileDraft.modelPlaceholder')}</option>
+                    {profileDraftStatus.config.model &&
+                    !profileDraftModels.some((model) => model.id === profileDraftStatus.config.model) ? (
+                      <option value={profileDraftStatus.config.model}>
+                        {profileDraftStatus.config.model}
+                      </option>
+                    ) : null}
                     {profileDraftModels.map((model) => (
-                      <option key={model.id} value={model.id} />
+                      <option key={model.id} value={model.id}>
+                        {model.id}
+                      </option>
                     ))}
-                  </datalist>
+                  </select>
                   <button
                     className="btn btn-secondary btn-sm"
                     type="button"

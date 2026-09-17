@@ -47,14 +47,14 @@ export const applyPresetToConfig = (
 ): ProfileDraftConfig => {
   const preset = presets.find((item) => item.id === presetId)
   if (!preset) return { ...config, provider: presetId }
-  const previous = presets.find((item) => item.id === config.provider)
   const currentUrl = config.base_url.trim()
-  const keepCurrent =
-    preset.id === 'custom' ||
-    (currentUrl.length > 0 && (!previous || currentUrl !== previous.base_url))
+  // Official presets always snap to that vendor's native URL.
+  // Only "自定义中转" keeps a typed relay such as tyas.
+  const base_url = preset.id === 'custom' ? currentUrl : preset.base_url
   return {
     ...config,
     provider: preset.id,
-    base_url: keepCurrent ? currentUrl : preset.base_url,
+    base_url,
+    model: preset.id === config.provider ? config.model : '',
   }
 }

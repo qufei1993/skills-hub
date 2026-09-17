@@ -589,21 +589,27 @@
 }
 .skill-tool-avatars::-webkit-scrollbar { display: none; }
 .skill-tool-avatars button {
-  width: 26px;
-  height: 26px;
-  flex: 0 0 26px;
-  margin-left: -3px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  margin-left: -2px;
   border-radius: 50%;
-  border: 1px solid var(--bg-panel);
-  padding: 3px;
-  background: #e5f7ed;
+  border: 2px solid transparent;
+  padding: 2px;
+  background: var(--bg-element);
   display: grid;
   place-items: center;
   cursor: pointer;
-  transition: opacity .15s ease, filter .15s ease, transform .15s ease, background .15s ease;
+  box-shadow: none;
+  transition: opacity .15s ease, filter .15s ease, transform .15s ease, background .15s ease, box-shadow .15s ease, border-color .15s ease;
 }
 .skill-tool-avatars button:first-child { margin-left: 0; }
 .skill-tool-avatars button:hover:not(:disabled) { z-index: 1; transform: translateY(-1px); }
+.skill-tool-avatars button.synced {
+  background: #fff;
+  border-color: #16a34a;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #16a34a 38%, transparent);
+}
 .skill-tool-avatars button.not-synced {
   background: var(--bg-element);
   opacity: .42;
@@ -1388,7 +1394,11 @@
   border-color: color-mix(in srgb, var(--accent-primary) 38%, transparent);
 }
 
-:root[data-theme='dark'] .skill-tool-avatars button.synced { background: #173927; border-color: var(--bg-panel); }
+:root[data-theme='dark'] .skill-tool-avatars button.synced {
+  background: color-mix(in srgb, #16a34a 18%, var(--bg-panel));
+  border-color: #4ade80;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #4ade80 45%, transparent);
+}
 
 @media (max-width: 1240px) {
   .updates-dashboard { grid-template-columns: 1fr; }
