@@ -79,7 +79,8 @@ fn install_local_skill_with_existing_policy<R: tauri::Runtime>(
             .unwrap_or_else(|| "unnamed-skill".to_string())
     });
 
-    let central_dir = resolve_central_repo_path(app, store)?;
+    let paths = crate::runtime_paths_for_tauri(app)?;
+    let central_dir = resolve_central_repo_path(&paths, store)?;
     ensure_central_repo(&central_dir)?;
     let central_path = central_dir.join(&name);
 
@@ -167,7 +168,8 @@ pub fn install_git_skill<R: tauri::Runtime>(
         }
     });
 
-    let central_dir = resolve_central_repo_path(app, store)?;
+    let paths = crate::runtime_paths_for_tauri(app)?;
+    let central_dir = resolve_central_repo_path(&paths, store)?;
     ensure_central_repo(&central_dir)?;
     let mut central_path = central_dir.join(&name);
 
@@ -778,7 +780,8 @@ pub(crate) fn acquire_skill_update_lock<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     store: &SkillStore,
 ) -> Result<UpdateFileLock> {
-    let central_root = resolve_central_repo_path(app, store)?;
+    let paths = crate::runtime_paths_for_tauri(app)?;
+    let central_root = resolve_central_repo_path(&paths, store)?;
     UpdateFileLock::acquire(&central_root)
 }
 
@@ -1498,7 +1501,8 @@ pub fn install_git_skill_from_selection<R: tauri::Runtime>(
         }
     });
 
-    let central_dir = resolve_central_repo_path(app, store)?;
+    let paths = crate::runtime_paths_for_tauri(app)?;
+    let central_dir = resolve_central_repo_path(&paths, store)?;
     ensure_central_repo(&central_dir)?;
     let mut central_path = central_dir.join(&display_name);
     if central_path.exists() {

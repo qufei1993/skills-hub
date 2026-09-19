@@ -68,7 +68,8 @@ pub fn build_onboarding_plan<R: tauri::Runtime>(
 ) -> Result<OnboardingPlan> {
     let home =
         dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to resolve home directory"))?;
-    let central = resolve_central_repo_path(app, store)?;
+    let paths = crate::runtime_paths_for_tauri(app)?;
+    let central = resolve_central_repo_path(&paths, store)?;
     let mut managed_targets = store
         .list_all_skill_target_paths()
         .unwrap_or_default()

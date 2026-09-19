@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
-use tauri::Manager;
 use uuid::Uuid;
 
 use super::device_sync::types::{
@@ -2078,16 +2077,7 @@ fn now_ms() -> i64 {
     now.as_millis() as i64
 }
 
-pub fn default_db_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf> {
-    let app_dir = app
-        .path()
-        .app_data_dir()
-        .context("failed to resolve app data dir")?;
-    std::fs::create_dir_all(&app_dir)
-        .with_context(|| format!("failed to create app data dir {:?}", app_dir))?;
-    Ok(app_dir.join(DB_FILE_NAME))
-}
-
+#[allow(dead_code)]
 pub fn migrate_legacy_db_if_needed(target_db_path: &Path) -> Result<()> {
     let Some(data_dir) = dirs::data_dir() else {
         return Ok(());
@@ -2096,7 +2086,10 @@ pub fn migrate_legacy_db_if_needed(target_db_path: &Path) -> Result<()> {
     migrate_legacy_db_if_needed_in_data_dir(target_db_path, &data_dir)
 }
 
-fn migrate_legacy_db_if_needed_in_data_dir(target_db_path: &Path, data_dir: &Path) -> Result<()> {
+pub(crate) fn migrate_legacy_db_if_needed_in_data_dir(
+    target_db_path: &Path,
+    data_dir: &Path,
+) -> Result<()> {
     let legacy_db_paths = LEGACY_APP_IDENTIFIERS
         .iter()
         .map(|id| data_dir.join(id).join(DB_FILE_NAME))

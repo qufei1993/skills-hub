@@ -4,7 +4,7 @@ mod core;
 use std::sync::Arc;
 
 use core::cancel_token::CancelToken;
-use core::skill_store::{default_db_path, migrate_legacy_db_if_needed, SkillStore};
+use core::runtime_paths::{open_store, RuntimePaths, RuntimeProfile};
 use tauri::Manager;
 use tauri_plugin_log::{Target, TargetKind};
 
@@ -21,13 +21,24 @@ fn runtime_context() -> tauri::Context<tauri::Wry> {
     context
 }
 
-fn init_store<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> anyhow::Result<SkillStore> {
-    let db_path = default_db_path(app)?;
-    migrate_legacy_db_if_needed(&db_path)?;
-    let store = SkillStore::new(db_path);
-    store.ensure_schema()?;
-    store.migrate_device_sync_startup_credential_consent()?;
-    Ok(store)
+fn runtime_paths<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> anyhow::Result<RuntimePaths> {
+    let app_data_dir = app.path().app_data_dir()?;
+    let home_root = dirs::home_dir().unwrap_or_else(|| app_data_dir.clone());
+    Ok(RuntimePaths::from_tauri(
+        RuntimeProfile::current(),
+        home_root,
+        app_data_dir,
+        app.path().app_cache_dir()?,
+    ))
+}
+
+pub(crate) fn runtime_paths_for_tauri<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> anyhow::Result<RuntimePaths> {
+    if let Some(paths) = app.try_state::<RuntimePaths>() {
+        return Ok(paths.inner().clone());
+    }
+    runtime_paths(app)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -57,7 +68,10 @@ pub fn run() {
                 .any(|pair| pair[0] == "--background-task" && pair[1] == "update-skills");
             let force_background_update = std::env::args().any(|arg| arg == "--force");
 
-            let store = init_store(app.handle()).map_err(tauri::Error::from)?;
+            let paths = runtime_paths(app.handle()).map_err(tauri::Error::from)?;
+            let store = open_store(&paths).map_err(tauri::Error::from)?;
+            app.manage(paths.clone());
+            app.manage(store.clone());
 
             if is_background_update {
                 #[cfg(target_os = "macos")]
@@ -90,11 +104,10 @@ pub fn run() {
                 return Ok(());
             }
 
-            app.manage(store.clone());
             app.manage(Arc::new(CancelToken::new()));
 
-            let sync_workspace = app.handle().path().app_data_dir()?.join("device-sync");
-            let sync_central = core::central_repo::resolve_central_repo_path(app.handle(), &store)?;
+            let sync_workspace = paths.app_data_dir.join("device-sync");
+            let sync_central = core::central_repo::resolve_central_repo_path(&paths, &store)?;
             let sync_credentials = core::device_sync::credentials::SystemCredentialStore;
             match core::device_sync::DeviceSyncService::new(
                 &store,
@@ -120,9 +133,10 @@ pub fn run() {
                     let store_for_device_sync = store.clone();
                     tauri::async_runtime::spawn(async move {
                         let result = tauri::async_runtime::spawn_blocking(move || {
-                            let workspace = handle.path().app_data_dir()?.join("device-sync");
+                            let paths = handle.state::<RuntimePaths>();
+                            let workspace = paths.app_data_dir.join("device-sync");
                             let central = core::central_repo::resolve_central_repo_path(
-                                &handle,
+                                paths.inner(),
                                 &store_for_device_sync,
                             )?;
                             let credentials = core::device_sync::credentials::SystemCredentialStore;
@@ -180,14 +194,10 @@ pub fn run() {
             let recycle_handle = app.handle().clone();
             let recycle_store = store.clone();
             std::thread::spawn(move || loop {
-                let root = match recycle_handle.path().app_data_dir() {
-                    Ok(path) => path.join("recycle-bin"),
-                    Err(error) => {
-                        log::warn!("resolve recycle bin directory failed: {error:#}");
-                        std::thread::sleep(std::time::Duration::from_secs(24 * 60 * 60));
-                        continue;
-                    }
-                };
+                let root = recycle_handle
+                    .state::<RuntimePaths>()
+                    .recycle_bin_dir
+                    .clone();
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()

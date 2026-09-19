@@ -269,9 +269,10 @@ pub fn start(app: tauri::AppHandle, store: crate::core::skill_store::SkillStore)
                 runtime.publish(config, clock, observed_completion.clone());
                 if clock.due(now) {
                     let result = (|| -> anyhow::Result<Option<super::types::SyncRunResult>> {
-                        let workspace = app.path().app_data_dir()?.join("device-sync");
+                        let paths = crate::runtime_paths_for_tauri(&app)?;
+                        let workspace = paths.app_data_dir.join("device-sync");
                         let central =
-                            crate::core::central_repo::resolve_central_repo_path(&app, &store)?;
+                            crate::core::central_repo::resolve_central_repo_path(&paths, &store)?;
                         let credentials = super::credentials::SystemCredentialStore;
                         super::DeviceSyncService::new(&store, &credentials, workspace, central)
                             .sync_scheduled(config)

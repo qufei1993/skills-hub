@@ -829,7 +829,8 @@ pub async fn get_central_repo_path(
 ) -> Result<String, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let path = resolve_central_repo_path(&app, &store)?;
+        let paths = crate::runtime_paths_for_tauri(&app)?;
+        let path = resolve_central_repo_path(&paths, &store)?;
         ensure_central_repo(&path)?;
         Ok::<_, anyhow::Error>(path.to_string_lossy().to_string())
     })
@@ -923,7 +924,8 @@ pub async fn preview_central_repo_path_change(
         if !new_base.is_absolute() {
             anyhow::bail!("storage path must be absolute");
         }
-        let current_base = resolve_central_repo_path(&app, &store)?;
+        let paths = crate::runtime_paths_for_tauri(&app)?;
+        let current_base = resolve_central_repo_path(&paths, &store)?;
         let skill_count = if current_base == new_base {
             0
         } else {
@@ -953,7 +955,8 @@ pub async fn set_central_repo_path(
         if !new_base.is_absolute() {
             anyhow::bail!("storage path must be absolute");
         }
-        let current_base = resolve_central_repo_path(&app, &store)?;
+        let paths = crate::runtime_paths_for_tauri(&app)?;
+        let current_base = resolve_central_repo_path(&paths, &store)?;
         if current_base == new_base {
             store.set_setting("central_repo_path", new_base.to_string_lossy().as_ref())?;
             return Ok::<_, anyhow::Error>(new_base.to_string_lossy().to_string());
@@ -3138,12 +3141,9 @@ fn device_sync_paths(
     app: &tauri::AppHandle,
     store: &SkillStore,
 ) -> anyhow::Result<(std::path::PathBuf, std::path::PathBuf)> {
-    let workspace = app
-        .path()
-        .app_data_dir()
-        .context("resolve device sync data directory")?
-        .join("device-sync");
-    let central = resolve_central_repo_path(app, store)?;
+    let paths = crate::runtime_paths_for_tauri(app)?;
+    let workspace = paths.app_data_dir.join("device-sync");
+    let central = resolve_central_repo_path(&paths, store)?;
     Ok((workspace, central))
 }
 
