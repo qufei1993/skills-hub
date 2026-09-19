@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 use self::credentials::CredentialStore;
 use self::manifest::{portable_hash, skill_dir, SyncManifest};
-use self::merge::{plan_merge_with_text, MergePlan};
+use self::merge::{plan_merge_with_text_and_unreadable, MergePlan};
 use self::types::{
     ConflictResolution, DeviceSyncConfig, DeviceSyncDevice, SyncChangeItem, SyncChangeSummary,
     SyncConflict, SyncRunResult, SyncStatus,
@@ -200,18 +200,25 @@ impl<'a> DeviceSyncService<'a> {
         let export = self.fresh_export()?;
         let mut local = SyncManifest::read(&export)?;
         reconcile_identities(&mut local, &remote, &export)?;
+        let unreadable_local = manifest::unreadable_local_skill_ids(self.store)?;
         let resolved_bases = self.apply_resolved_bases(&repo, &config, base_commit, &mut base)?;
-        let plan = plan_merge_with_text(&base, &local, &remote, |id, path| {
-            merge_snapshot_file(
-                &repo,
-                resolved_bases.get(id).copied().or(base_commit),
-                remote_oid,
-                &export,
-                [&base, &local, &remote],
-                id,
-                path,
-            )
-        })?;
+        let plan = plan_merge_with_text_and_unreadable(
+            &base,
+            &local,
+            &remote,
+            &unreadable_local,
+            |id, path| {
+                merge_snapshot_file(
+                    &repo,
+                    resolved_bases.get(id).copied().or(base_commit),
+                    remote_oid,
+                    &export,
+                    [&base, &local, &remote],
+                    id,
+                    path,
+                )
+            },
+        )?;
         let summary = summarize(&plan, &local, &remote);
         let _ = fs::remove_dir_all(export);
         if remote_oid.is_none() && local.skills.is_empty() {
@@ -291,6 +298,156 @@ impl<'a> DeviceSyncService<'a> {
             )?,
         }
         result.map_err(|err| anyhow::anyhow!(errors::format_error(err)))
+    }
+
+    /// Copies every Skill the repository holds into the local library.
+    ///
+    /// Additions and updates only: a Skill that exists locally but not in the repository is
+    /// left untouched, so pulling can never delete content. The automatic merge stays the
+    /// only path that resolves deletions.
+    pub fn pull_from_repository(&self) -> Result<SyncRunResult> {
+        let _guard = try_lock_device_sync()?;
+        let mut config = self.require_config()?;
+        let proxy_url = get_github_proxy_url(self.store)?;
+        let token = self.read_token(&config, &proxy_url)?;
+        let repo_path = self.workspace_root.join("repository");
+        let repo = git_repo::open_or_clone(&repo_path, &config, token.as_deref(), &proxy_url)
+            .context(read_failure_context(&config))?;
+        let parent = git_repo::fetch_and_checkout(&repo, &config, token.as_deref(), &proxy_url)
+            .context(read_failure_context(&config))?;
+        let remote = SyncManifest::read(&repo_path)?;
+        let known = self
+            .store
+            .list_skills()?
+            .into_iter()
+            .map(|skill| skill.id)
+            .collect::<BTreeSet<_>>();
+        let added = remote
+            .skills
+            .keys()
+            .filter(|id| !known.contains(*id))
+            .count();
+        let updated = remote.skills.len().saturating_sub(added);
+        let items = remote
+            .skills
+            .iter()
+            .map(|(id, skill)| SyncChangeItem {
+                skill_id: id.clone(),
+                name: skill.name.clone(),
+                kind: if known.contains(id) {
+                    "updated".into()
+                } else {
+                    "added".into()
+                },
+                direction: "download".into(),
+            })
+            .collect();
+        self.apply_repository_to_library(&remote, &repo_path, &BTreeSet::new())?;
+        config.last_synced_commit = parent.map(|oid| oid.to_string());
+        self.store.save_device_sync_config(&config)?;
+        Ok(SyncRunResult {
+            status: "ok".to_string(),
+            commit: config.last_synced_commit,
+            changes: SyncChangeSummary {
+                added,
+                updated,
+                items,
+                ..SyncChangeSummary::default()
+            },
+            message: "pulled from repository".to_string(),
+        })
+    }
+
+    /// Writes the local library into the repository.
+    ///
+    /// Additions and updates only: a Skill that exists in the repository but not locally is
+    /// left untouched, so pushing can never delete repository content.
+    pub fn push_to_repository(&self) -> Result<SyncRunResult> {
+        let _guard = try_lock_device_sync()?;
+        let mut config = self.require_config()?;
+        anyhow::ensure!(
+            !config.needs_public_upload_confirmation(),
+            "DEVICE_SYNC_PUBLIC_UPLOAD_CONFIRMATION"
+        );
+        let proxy_url = get_github_proxy_url(self.store)?;
+        let token = self.read_token(&config, &proxy_url)?;
+        let repo_path = self.workspace_root.join("repository");
+        let repo = git_repo::open_or_clone(&repo_path, &config, token.as_deref(), &proxy_url)
+            .context(read_failure_context(&config))?;
+        let parent = git_repo::fetch_and_checkout(&repo, &config, token.as_deref(), &proxy_url)
+            .context(read_failure_context(&config))?;
+        let mut remote = SyncManifest::read(&repo_path)?;
+        let device = self.local_device_identity()?;
+
+        let mut added = 0usize;
+        let mut updated = 0usize;
+        let mut items = Vec::new();
+        for skill in self.store.list_skills()? {
+            if !Path::new(&skill.central_path).is_dir() {
+                // Nothing to upload, and a missing local folder is never a repository
+                // deletion.
+                log::warn!(
+                    "not pushing {}: {:?} is gone",
+                    skill.name,
+                    skill.central_path
+                );
+                continue;
+            }
+            let destination = repo_path.join("skills").join(&skill.id);
+            let portable = manifest::export_skill(self.store, skill, &destination)?;
+            let existed = remote
+                .skills
+                .insert(portable.id.clone(), portable.clone())
+                .is_some();
+            if existed {
+                updated += 1;
+            } else {
+                added += 1;
+            }
+            items.push(SyncChangeItem {
+                skill_id: portable.id,
+                name: portable.name,
+                kind: if existed {
+                    "updated".into()
+                } else {
+                    "added".into()
+                },
+                direction: "upload".into(),
+            });
+        }
+
+        remote.write(&repo_path)?;
+        let message = format!(
+            "Push Skills Hub library\n\nSkills-Hub-Device-ID: {}\nSkills-Hub-Device-Name: {}",
+            device.id, device.name
+        );
+        let commit = git_repo::commit_all_allow_empty(&repo, &message, parent)?;
+        let final_oid = match commit {
+            Some(oid) => {
+                let write_token = if token.is_some() {
+                    token
+                } else {
+                    self.token(&config, &proxy_url)?
+                };
+                git_repo::push(&repo, &config, write_token.as_deref(), oid, &proxy_url)?;
+                git_repo::update_remote_head(&repo, &config, oid)?;
+                Some(oid)
+            }
+            None => parent,
+        };
+        config.last_synced_commit = final_oid.map(|oid| oid.to_string());
+        self.store.save_device_sync_config(&config)?;
+        Ok(SyncRunResult {
+            status: "ok".to_string(),
+            commit: config.last_synced_commit,
+            changes: SyncChangeSummary {
+                added,
+                updated,
+                items,
+                ..SyncChangeSummary::default()
+            },
+            message: "pushed to repository".to_string(),
+        })
     }
 
     pub fn resolve_conflict(
@@ -528,18 +685,25 @@ impl<'a> DeviceSyncService<'a> {
         for (old_id, new_id) in reconcile_identities(&mut local, &remote, &export)? {
             self.store.adopt_skill_id(&old_id, &new_id)?;
         }
+        let unreadable_local = manifest::unreadable_local_skill_ids(self.store)?;
         let resolved_bases = self.apply_resolved_bases(&repo, &config, base_commit, &mut base)?;
-        let plan = plan_merge_with_text(&base, &local, &remote, |id, path| {
-            merge_snapshot_file(
-                &repo,
-                resolved_bases.get(id).copied().or(base_commit),
-                parent,
-                &export,
-                [&base, &local, &remote],
-                id,
-                path,
-            )
-        })?;
+        let plan = plan_merge_with_text_and_unreadable(
+            &base,
+            &local,
+            &remote,
+            &unreadable_local,
+            |id, path| {
+                merge_snapshot_file(
+                    &repo,
+                    resolved_bases.get(id).copied().or(base_commit),
+                    parent,
+                    &export,
+                    [&base, &local, &remote],
+                    id,
+                    path,
+                )
+            },
+        )?;
         self.record_conflicts(&plan, &local, &remote, base_commit, parent)?;
         let changes = summarize(&plan, &local, &remote);
         if !plan.conflicts.is_empty() {

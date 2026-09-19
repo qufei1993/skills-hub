@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **One-way library sync**: Device sync can pull every Skill the repository holds into this library, or push this library into the repository, without running the three-way merge. Both directions only add and update, so a one-way action can never delete content.
+
+### Fixed
+- **Device sync deleted content it could not read**: A Skill whose central folder is gone is skipped when the library is exported, so it never reached the local manifest, and the three-way merge read that as "deleted on this computer": it deleted the copy in the repository, pushed the deletion, and the resulting remote deletion removed the record locally. A library that had lost its content could therefore empty the repository as well. Skills that cannot be exported are now reported to the merge, which restores them from the repository instead of deleting anything, and the skip is logged so the state is diagnosable.
+
 ## [0.10.1] - 2026-09-13
 
 ### Fixed

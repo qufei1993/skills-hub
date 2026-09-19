@@ -136,6 +136,13 @@ pub fn export_library(store: &SkillStore, destination: &Path) -> Result<SyncMani
     for skill in store.list_skills()? {
         let source = Path::new(&skill.central_path);
         if !source.is_dir() {
+            // Nothing to export. The merge must not read this as a deletion, so callers
+            // pair the export with `unreadable_local_skill_ids`.
+            log::warn!(
+                "skipping {} from the device sync export: {:?} is gone",
+                skill.name,
+                source
+            );
             continue;
         }
         let target = skill_dir(destination, &skill.id);
@@ -144,6 +151,24 @@ pub fn export_library(store: &SkillStore, destination: &Path) -> Result<SyncMani
     }
     manifest.write(destination)?;
     Ok(manifest)
+}
+
+/// Skills the library still holds while their central folder is gone.
+///
+/// [`export_library`] cannot export them, so they are absent from the local manifest. The
+/// merge treats a Skill that is missing locally as one the user deleted and removes the
+/// copy from the repository, which is how a library that lost its content could also empty
+/// the repository. Passing these ids lets the merge restore them from the repository
+/// instead.
+pub fn unreadable_local_skill_ids(
+    store: &SkillStore,
+) -> Result<std::collections::BTreeSet<String>> {
+    Ok(store
+        .list_skills()?
+        .into_iter()
+        .filter(|skill| !Path::new(&skill.central_path).is_dir())
+        .map(|skill| skill.id)
+        .collect())
 }
 
 pub(super) fn export_skill(

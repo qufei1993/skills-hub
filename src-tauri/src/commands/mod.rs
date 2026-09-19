@@ -2645,6 +2645,38 @@ pub async fn run_device_sync(
 }
 
 #[tauri::command]
+pub async fn pull_device_sync(
+    app: tauri::AppHandle,
+    store: State<'_, SkillStore>,
+) -> Result<SyncRunResult, String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (workspace, central) = device_sync_paths(&app, &store)?;
+        let credentials = SystemCredentialStore;
+        DeviceSyncService::new(&store, &credentials, workspace, central).pull_from_repository()
+    })
+    .await
+    .map_err(|_| "DEVICE_SYNC_FAILURE_unknown".to_string())?
+    .map_err(crate::core::device_sync::errors::format_error)
+}
+
+#[tauri::command]
+pub async fn push_device_sync(
+    app: tauri::AppHandle,
+    store: State<'_, SkillStore>,
+) -> Result<SyncRunResult, String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (workspace, central) = device_sync_paths(&app, &store)?;
+        let credentials = SystemCredentialStore;
+        DeviceSyncService::new(&store, &credentials, workspace, central).push_to_repository()
+    })
+    .await
+    .map_err(|_| "DEVICE_SYNC_FAILURE_unknown".to_string())?
+    .map_err(crate::core::device_sync::errors::format_error)
+}
+
+#[tauri::command]
 pub fn get_device_sync_history(
     store: State<'_, SkillStore>,
     limit: Option<usize>,

@@ -275,6 +275,8 @@ pub fn run() {
             commands::get_device_sync_status,
             commands::check_device_sync,
             commands::run_device_sync,
+            commands::pull_device_sync,
+            commands::push_device_sync,
             commands::get_device_sync_history,
             commands::get_device_sync_devices,
             commands::set_device_sync_device_alias,
