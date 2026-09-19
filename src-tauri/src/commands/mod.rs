@@ -179,12 +179,53 @@ fn format_anyhow_error(err: anyhow::Error) -> String {
 fn format_service_error(error: crate::services::error::ServiceError) -> String {
     match error.code {
         crate::services::error::ErrorCode::MultiSkills => {
-            format!("MULTI_SKILLS|{}", error.message)
+            let candidates = error
+                .details
+                .get("candidates")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!([]));
+            format!(
+                "MULTI_SKILLS|{}",
+                serde_json::to_string(&candidates).unwrap_or_else(|_| "[]".to_string())
+            )
         }
         crate::services::error::ErrorCode::UpdateHeldBack => {
-            format!("UPDATE_HELD_BACK|{}", error.message)
+            let removal_count = error.details["removal_count"].as_u64().unwrap_or(0);
+            format!("UPDATE_HELD_BACK|{removal_count}")
         }
-        _ => error.message,
+        crate::services::error::ErrorCode::TargetConflict => match error.details["path"].as_str() {
+            Some(path) => format!("TARGET_EXISTS|{path}"),
+            None => format_anyhow_error(anyhow::anyhow!(error.message)),
+        },
+        _ => match error.details["legacy_category"].as_str() {
+            Some("github_auth") => format_anyhow_error(anyhow::anyhow!(
+                "git clone https://github.com/<owner>/<repo> failed: authentication failed"
+            )),
+            Some("github_network") => format_anyhow_error(anyhow::anyhow!(
+                "git clone https://github.com/<owner>/<repo> failed"
+            )),
+            Some("github_tls") => format_anyhow_error(anyhow::anyhow!(
+                "git clone https://github.com/<owner>/<repo> failed: SecureTransport certificate error"
+            )),
+            Some("github_not_found") => format_anyhow_error(anyhow::anyhow!(
+                "git clone https://github.com/<owner>/<repo> failed: repository not found"
+            )),
+            Some("github_dns") => format_anyhow_error(anyhow::anyhow!(
+                "git clone https://github.com/<owner>/<repo> failed: could not resolve host"
+            )),
+            Some("github_timeout") => format_anyhow_error(anyhow::anyhow!(
+                "git clone https://github.com/<owner>/<repo> failed: connection timed out"
+            )),
+            Some("github_connection") => format_anyhow_error(anyhow::anyhow!(
+                "git clone https://github.com/<owner>/<repo> failed: connection refused"
+            )),
+            Some("github_rate_limited") => {
+                "GitHub API 频率限制已触发。可在设置中配置 GitHub Token 以提升限额。"
+                    .to_string()
+            }
+            Some("cancelled") => "CANCELLED|操作已被用户取消。".to_string(),
+            _ => format_anyhow_error(anyhow::anyhow!(error.message)),
+        },
     }
 }
 
@@ -1168,30 +1209,39 @@ pub async fn install_git(
 #[allow(non_snake_case)]
 pub async fn list_git_skills_cmd(
     service: State<'_, SkillsHubService>,
+    cancel: State<'_, Arc<CancelToken>>,
     repoUrl: String,
 ) -> Result<Vec<GitSkillCandidate>, String> {
     let service = service.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || service.git_install_candidates(&repoUrl))
-        .await
-        .map_err(|err| err.to_string())?
-        .map_err(format_service_error)
+    cancel.reset();
+    let cancel_token = Arc::clone(cancel.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        service.git_install_candidates_with_cancel(&repoUrl, Some(&cancel_token))
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_service_error)
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn install_git_selection(
     service: State<'_, SkillsHubService>,
+    cancel: State<'_, Arc<CancelToken>>,
     repoUrl: String,
     subpath: String,
     name: Option<String>,
 ) -> Result<InstallResultDto, String> {
     let service = service.inner().clone();
+    cancel.reset();
+    let cancel_token = Arc::clone(cancel.inner());
     tauri::async_runtime::spawn_blocking(move || {
         service
-            .install(
+            .install_with_cancel(
                 InstallRequest::git(repoUrl)
                     .with_subpath(subpath)
                     .with_name(name),
+                Some(&cancel_token),
             )
             .map(to_service_install_dto)
     })

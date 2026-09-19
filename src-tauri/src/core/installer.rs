@@ -1286,6 +1286,7 @@ pub fn list_git_skills(
     paths: &RuntimePaths,
     store: &SkillStore,
     repo_url: &str,
+    cancel: Option<&CancelToken>,
 ) -> Result<Vec<GitSkillCandidate>> {
     let parsed = parse_github_url(repo_url);
     let (repo_dir, _rev) = clone_to_cache(
@@ -1293,7 +1294,7 @@ pub fn list_git_skills(
         store,
         &parsed.clone_url,
         parsed.branch.as_deref(),
-        None,
+        cancel,
     )?;
 
     let mut out: Vec<GitSkillCandidate> = Vec::new();
@@ -1590,6 +1591,7 @@ pub fn install_git_skill_from_selection(
     repo_url: &str,
     subpath: &str,
     name: Option<String>,
+    cancel: Option<&CancelToken>,
 ) -> Result<InstallResult> {
     let parsed = parse_github_url(repo_url);
     let user_provided_name = name.is_some();
@@ -1617,7 +1619,7 @@ pub fn install_git_skill_from_selection(
         store,
         &parsed.clone_url,
         parsed.branch.as_deref(),
-        None,
+        cancel,
     )?;
 
     let copy_src = if subpath == "." {

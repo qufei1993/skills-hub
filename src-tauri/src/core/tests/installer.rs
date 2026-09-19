@@ -996,6 +996,7 @@ fn lists_and_installs_git_skills_without_network() {
         &runtime_paths(app.handle()),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
+        None,
     )
     .unwrap();
     let subpaths: Vec<String> = candidates.into_iter().map(|c| c.subpath).collect();
@@ -1007,6 +1008,7 @@ fn lists_and_installs_git_skills_without_network() {
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         "skills/a",
+        None,
         None,
     )
     .unwrap();
@@ -1155,6 +1157,7 @@ fn install_git_skill_uses_skill_md_name_over_subpath_skills() {
         repo_dir.path().to_string_lossy().as_ref(),
         "skills",
         None,
+        None,
     )
     .unwrap();
 
@@ -1198,6 +1201,7 @@ fn install_git_skill_rejects_container_subpath_without_skill_md() {
         repo_dir.path().to_string_lossy().as_ref(),
         "awesome_agent_skills",
         None,
+        None,
     ) {
         Ok(_) => panic!("expected invalid skill path"),
         Err(e) => e,
@@ -1235,6 +1239,7 @@ fn install_git_skill_selection_accepts_specific_child_under_container() {
         repo_dir.path().to_string_lossy().as_ref(),
         "awesome_agent_skills/technical-writer",
         None,
+        None,
     )
     .unwrap();
 
@@ -1263,6 +1268,7 @@ fn install_git_skill_respects_user_provided_name() {
         repo_dir.path().to_string_lossy().as_ref(),
         "skills",
         Some("user-custom-name".to_string()),
+        None,
     )
     .unwrap();
 
@@ -1372,6 +1378,7 @@ fn list_git_skills_finds_root_level_skills() {
         &runtime_paths(app.handle()),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
+        None,
     )
     .unwrap();
 
@@ -1408,6 +1415,7 @@ fn list_git_skills_finds_root_skill_container_layout() {
         &runtime_paths(app.handle()),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
+        None,
     )
     .unwrap();
 
@@ -1596,7 +1604,8 @@ fn lists_and_installs_nested_git_skill() {
     let repo = init_git_repo(source.path());
     commit_all(&repo, "add nested skill");
     let url = source.path().to_string_lossy();
-    let candidates = super::list_git_skills(&runtime_paths(app.handle()), &store, &url).unwrap();
+    let candidates =
+        super::list_git_skills(&runtime_paths(app.handle()), &store, &url, None).unwrap();
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0].subpath, subpath);
     assert_eq!(candidates[0].description.as_deref(), Some("Review code"));
@@ -1605,6 +1614,7 @@ fn lists_and_installs_nested_git_skill() {
         &store,
         &url,
         &candidates[0].subpath,
+        None,
         None,
     )
     .unwrap();
@@ -1760,7 +1770,8 @@ fn issue_129_discovers_and_installs_skills_across_categories() {
     commit_all(&repo, "add categorized skills for issue 129");
     let url = source.path().to_string_lossy();
 
-    let candidates = super::list_git_skills(&runtime_paths(app.handle()), &store, &url).unwrap();
+    let candidates =
+        super::list_git_skills(&runtime_paths(app.handle()), &store, &url, None).unwrap();
     let actual: Vec<_> = candidates
         .iter()
         .map(|candidate| (candidate.name.as_str(), candidate.subpath.as_str()))
@@ -1778,6 +1789,7 @@ fn issue_129_discovers_and_installs_skills_across_categories() {
             &store,
             &url,
             &candidate.subpath,
+            None,
             None,
         )
         .unwrap();

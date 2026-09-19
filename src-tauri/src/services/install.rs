@@ -189,7 +189,7 @@ impl SkillsHubService {
             ServiceError::new(
                 ErrorCode::NetworkError,
                 "skill search request failed",
-                json!({}),
+                json!({ "legacy_category": "github_network" }),
             )
         })
     }
@@ -203,13 +203,14 @@ impl SkillsHubService {
         list_local_skills(&source).map_err(map_install_error)
     }
 
-    pub(crate) fn git_install_candidates(
+    pub(crate) fn git_install_candidates_with_cancel(
         &self,
         reference: &str,
+        cancel: Option<&CancelToken>,
     ) -> Result<Vec<GitSkillCandidate>, ServiceError> {
         self.ensure_database_compatible()?;
         validate_git_reference(reference)?;
-        list_git_skills(self.paths(), self.store(), reference).map_err(map_install_error)
+        list_git_skills(self.paths(), self.store(), reference, cancel).map_err(map_install_error)
     }
 
     pub fn check_updates(&self, selector: SkillSelector) -> Result<UpdateCheck, ServiceError> {
@@ -295,11 +296,12 @@ fn install_git_request(
             reference,
             subpath,
             name,
+            cancel,
         )
         .map_err(map_install_error);
     }
 
-    let candidates = service.git_install_candidates(reference)?;
+    let candidates = service.git_install_candidates_with_cancel(reference, cancel)?;
     for candidate in &candidates {
         validate_skill_name(&candidate.name)?;
     }
@@ -312,6 +314,7 @@ fn install_git_request(
             reference,
             &candidate.subpath,
             name,
+            cancel,
         )
         .map_err(map_install_error),
         _ => Err(multi_git_candidates(&candidates)),
@@ -350,6 +353,17 @@ fn validate_git_reference(reference: &str) -> Result<(), ServiceError> {
             || url.fragment().is_some()
             || (matches!(url.scheme(), "http" | "https") && !url.username().is_empty())
         {
+            return Err(invalid_source());
+        }
+        if url
+            .host_str()
+            .is_some_and(|host| host.eq_ignore_ascii_case("github.com"))
+            && !looks_like_marketplace_shorthand(url.path().trim_start_matches('/'))
+        {
+            return Err(invalid_source());
+        }
+    } else if let Some(shorthand) = reference.strip_prefix("github.com/") {
+        if !looks_like_marketplace_shorthand(shorthand) {
             return Err(invalid_source());
         }
     }
@@ -424,9 +438,24 @@ fn looks_like_marketplace_shorthand(input: &str) -> bool {
             .chars()
             .all(|value| value.is_ascii_alphanumeric() || matches!(value, '-' | '_' | '.'))
     };
-    safe(parts[0])
-        && safe(parts[1].trim_end_matches(".git"))
-        && (parts.len() == 2 || matches!(parts.get(2), Some(&"tree") | Some(&"blob")))
+    let repo = parts[1].strip_suffix(".git").unwrap_or(parts[1]);
+    if !safe(parts[0])
+        || matches!(parts[0], "." | "..")
+        || repo.is_empty()
+        || matches!(repo, "." | "..")
+        || !safe(repo)
+    {
+        return false;
+    }
+    if parts.len() == 2 {
+        return true;
+    }
+    if parts.len() < 5 || !matches!(parts[2], "tree" | "blob") {
+        return false;
+    }
+    parts[3..]
+        .iter()
+        .all(|segment| !segment.is_empty() && *segment != "." && *segment != ".." && safe(segment))
 }
 
 fn multi_git_candidates(candidates: &[GitSkillCandidate]) -> ServiceError {
@@ -452,6 +481,8 @@ fn multi_local_candidates(candidates: &[LocalSkillCandidate]) -> ServiceError {
                 "name": candidate.name,
                 "description": candidate.description,
                 "subpath": candidate.subpath,
+                "valid": candidate.valid,
+                "reason": candidate.reason,
             })).collect::<Vec<_>>()
         }),
     )
@@ -466,20 +497,27 @@ fn invalid_source() -> ServiceError {
 }
 
 fn map_install_error(error: anyhow::Error) -> ServiceError {
-    let category = crate::core::skill_issues::safe_code(&format!("{error:#}"));
+    let safe_error = format!("{error:#}");
+    let lower = safe_error.to_lowercase();
+    if lower.contains("cancelled|") {
+        return ServiceError::new(
+            ErrorCode::InternalError,
+            "the operation was cancelled",
+            json!({ "legacy_category": "cancelled" }),
+        );
+    }
+    if lower.contains("skill already exists in central repo") {
+        return ServiceError::new(
+            ErrorCode::TargetConflict,
+            "the skill already exists in the Skills Hub library",
+            json!({ "legacy_category": "skill_exists" }),
+        );
+    }
+    let category = crate::core::skill_issues::safe_code(&safe_error);
     match category {
-        "auth" => ServiceError::new(
-            ErrorCode::AuthRequired,
-            "the remote source requires authentication",
-            json!({}),
-        ),
-        "network" => ServiceError::new(
-            ErrorCode::NetworkError,
-            "the remote source could not be reached",
-            json!({}),
-        ),
         "sourceMissing" | "repoPathMissing" => invalid_source(),
-        _ => ServiceError::internal("skill installation failed"),
+        _ => map_remote_error(&safe_error)
+            .unwrap_or_else(|| ServiceError::internal("skill installation failed")),
     }
 }
 
@@ -499,18 +537,111 @@ fn map_update_error(error: anyhow::Error) -> ServiceError {
             json!({ "removal_count": count.parse::<usize>().unwrap_or(0) }),
         );
     }
-    let category = crate::core::skill_issues::safe_code(&format!("{error:#}"));
-    match category {
-        "auth" => ServiceError::new(
+    map_remote_error(&format!("{error:#}"))
+        .unwrap_or_else(|| ServiceError::internal("skill update failed"))
+}
+
+fn map_remote_error(safe_error: &str) -> Option<ServiceError> {
+    let lower = safe_error.to_lowercase();
+    let category = crate::core::skill_issues::safe_code(safe_error);
+    let remote_context = lower.contains("github")
+        || lower.contains("git ")
+        || lower.contains("clone")
+        || lower.contains("remote")
+        || lower.contains("repository");
+    if category == "auth"
+        || lower.contains("credentials")
+        || lower.contains("unauthorized")
+        || lower.contains("访问被拒绝")
+        || (remote_context && lower.contains("permission denied"))
+    {
+        return Some(ServiceError::new(
             ErrorCode::AuthRequired,
             "the remote source requires authentication",
-            json!({}),
-        ),
-        "network" => ServiceError::new(
+            json!({ "legacy_category": "github_auth" }),
+        ));
+    }
+    if remote_context && (lower.contains("not found") || lower.contains("未找到")) {
+        return Some(ServiceError::new(
+            ErrorCode::InvalidSource,
+            "the remote source was not found or is not accessible",
+            json!({ "legacy_category": "github_not_found" }),
+        ));
+    }
+    if lower.contains("rate limit") || lower.contains("频率限制") {
+        return Some(ServiceError::new(
+            ErrorCode::NetworkError,
+            "the remote source rate limit was reached",
+            json!({ "legacy_category": "github_rate_limited" }),
+        ));
+    }
+    let network_category = if lower.contains("securetransport") {
+        Some("github_tls")
+    } else if lower.contains("failed to resolve")
+        || lower.contains("could not resolve")
+        || lower.contains("resolve host")
+        || lower.contains("dns")
+    {
+        Some("github_dns")
+    } else if lower.contains("timed out") || lower.contains("timeout") || lower.contains("超时") {
+        Some("github_timeout")
+    } else if lower.contains("connection refused")
+        || lower.contains("connection reset")
+        || lower.contains("failed to connect")
+    {
+        Some("github_connection")
+    } else if category == "network"
+        || lower.contains("proxy")
+        || lower.contains("网络")
+        || lower.contains("代理")
+    {
+        Some("github_network")
+    } else {
+        None
+    };
+    if let Some(legacy_category) = network_category {
+        return Some(ServiceError::new(
             ErrorCode::NetworkError,
             "the remote source could not be reached",
-            json!({}),
-        ),
-        _ => ServiceError::internal("skill update failed"),
+            json!({ "legacy_category": legacy_category }),
+        ));
+    }
+    None
+}
+
+#[cfg(test)]
+mod error_mapping_tests {
+    use super::*;
+
+    #[test]
+    fn localized_git_failures_keep_stable_safe_categories() {
+        for (message, code, category) in [
+            (
+                "该 Skill 在 GitHub 上未找到（可能已被删除或路径已变更）。",
+                ErrorCode::InvalidSource,
+                "github_not_found",
+            ),
+            (
+                "GitHub API 频率限制已触发。可在设置中配置 GitHub Token 以提升限额。",
+                ErrorCode::NetworkError,
+                "github_rate_limited",
+            ),
+            (
+                "GitHub API 访问被拒绝（可能触发了频率限制）。请稍后再试。",
+                ErrorCode::AuthRequired,
+                "github_auth",
+            ),
+            (
+                "git 操作超时（120s）。请检查网络/代理是否可访问 GitHub。",
+                ErrorCode::NetworkError,
+                "github_timeout",
+            ),
+        ] {
+            let secret = "do-not-leak-service-secret";
+            let error = map_install_error(anyhow::anyhow!("{message} secret={secret}"));
+            assert_eq!(error.code, code);
+            assert_eq!(error.details["legacy_category"], category);
+            assert!(!serde_json::to_string(&error).unwrap().contains(secret));
+        }
     }
 }

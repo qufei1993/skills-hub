@@ -7,6 +7,7 @@ use rusqlite::Connection;
 use serde_json::json;
 use tempfile::TempDir;
 
+use crate::core::cancel_token::CancelToken;
 use crate::core::network_proxy::set_github_proxy_url;
 use crate::core::runtime_paths::{RuntimePaths, RuntimeProfile};
 use crate::core::skill_store::SkillTargetRecord;
@@ -92,6 +93,40 @@ fn source_parser_is_deterministic_and_does_not_guess_bare_local_names() {
 }
 
 #[test]
+fn marketplace_shorthand_requires_a_complete_safe_ref_and_path() {
+    for valid in [
+        "owner/repo",
+        "owner/repo.git",
+        "owner/repo/tree/main/skills/demo",
+        "owner/repo/blob/main/skills/demo/SKILL.md",
+    ] {
+        assert!(
+            InstallRequest::parse(valid).is_ok(),
+            "expected valid shorthand: {valid}"
+        );
+    }
+
+    for invalid in [
+        "owner/repo/tree",
+        "owner/repo/tree/",
+        "owner/repo/tree/main",
+        "owner/repo/tree/main/",
+        "owner/repo/tree//skills/demo",
+        "owner/repo/tree/main/../demo",
+        "owner/repo/blob/main/skills/demo?raw=1",
+        "owner/repo/tree/main/skill name",
+        "owner/..",
+    ] {
+        let error = InstallRequest::parse(invalid).unwrap_err();
+        assert_eq!(
+            error.code,
+            ErrorCode::InvalidSource,
+            "expected invalid shorthand: {invalid}"
+        );
+    }
+}
+
+#[test]
 fn install_checks_database_compatibility_before_writing() {
     let fixture = Fixture::new();
     let source = fixture.paths.app_data_dir.join("future-source");
@@ -169,6 +204,57 @@ fn git_subpath_install_persists_the_selected_source_path() {
 }
 
 #[test]
+fn cancelled_git_candidate_discovery_does_not_install_the_single_candidate() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("cancel-candidate-source");
+    write_skill(&repo, "cancel-candidate");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    let cancel = CancelToken::new();
+    cancel.cancel();
+
+    let error = service
+        .install_with_cancel(
+            InstallRequest::git(format!("file://{}", repo.display())),
+            Some(&cancel),
+        )
+        .unwrap_err();
+
+    assert_eq!(error.details["legacy_category"], "cancelled");
+    assert!(!fixture
+        .paths
+        .default_central_repo
+        .join("cancel-candidate")
+        .exists());
+}
+
+#[test]
+fn cancelled_git_selection_stops_before_installing_the_selected_skill() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("cancel-selection-source");
+    write_skill(&repo.join("skills/selected"), "cancel-selection");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    let cancel = CancelToken::new();
+    cancel.cancel();
+
+    let error = service
+        .install_with_cancel(
+            InstallRequest::git(format!("file://{}", repo.display()))
+                .with_subpath("skills/selected"),
+            Some(&cancel),
+        )
+        .unwrap_err();
+
+    assert_eq!(error.details["legacy_category"], "cancelled");
+    assert!(!fixture
+        .paths
+        .default_central_repo
+        .join("cancel-selection")
+        .exists());
+}
+
+#[test]
 fn install_rejects_a_subpath_that_escapes_the_declared_source() {
     let fixture = Fixture::new();
     let base = fixture.paths.app_data_dir.join("declared-source");
@@ -229,6 +315,57 @@ fn multi_skill_git_source_returns_safe_structured_candidates() {
     );
     let serialized = serde_json::to_string(&error).unwrap();
     assert!(!serialized.contains(repo.to_string_lossy().as_ref()));
+}
+
+#[test]
+fn multi_skill_local_source_keeps_the_complete_desktop_candidate_shape() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("multi-local-source");
+    write_skill(&source.join("skills/alpha"), "alpha");
+    write_skill(&source.join("skills/beta"), "beta");
+    let service = fixture.open();
+
+    let error = service.install(InstallRequest::local(&source)).unwrap_err();
+
+    assert_eq!(error.code, ErrorCode::MultiSkills);
+    assert_eq!(
+        error.details,
+        json!({
+            "candidates": [
+                {
+                    "name": "alpha",
+                    "description": "Test skill",
+                    "subpath": "skills/alpha",
+                    "valid": true,
+                    "reason": null
+                },
+                {
+                    "name": "beta",
+                    "description": "Test skill",
+                    "subpath": "skills/beta",
+                    "valid": true,
+                    "reason": null
+                }
+            ]
+        })
+    );
+}
+
+#[test]
+fn duplicate_install_has_a_stable_conflict_category_without_leaking_the_path() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("duplicate-source");
+    write_skill(&source, "duplicate-demo");
+    let service = fixture.open();
+    service.install(InstallRequest::local(&source)).unwrap();
+
+    let error = service.install(InstallRequest::local(&source)).unwrap_err();
+
+    assert_eq!(error.code, ErrorCode::TargetConflict);
+    assert_eq!(error.details, json!({ "legacy_category": "skill_exists" }));
+    assert!(!serde_json::to_string(&error)
+        .unwrap()
+        .contains(source.to_string_lossy().as_ref()));
 }
 
 #[test]

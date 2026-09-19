@@ -1213,6 +1213,125 @@ fn format_anyhow_error_github_hint_auth() {
 }
 
 #[test]
+fn format_service_error_serializes_all_multi_skill_candidates_for_desktop() {
+    let error = crate::services::error::ServiceError::new(
+        crate::services::error::ErrorCode::MultiSkills,
+        "the source contains multiple skills",
+        serde_json::json!({
+            "candidates": [
+                { "name": "中文技能", "description": "中文说明", "subpath": "skills/zh" },
+                { "name": "한국어 스킬", "description": "한국어 설명", "subpath": "skills/ko" }
+            ]
+        }),
+    );
+
+    let formatted = format_service_error(error);
+    let payload = formatted.strip_prefix("MULTI_SKILLS|").unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(payload).unwrap(),
+        serde_json::json!([
+            { "name": "中文技能", "description": "中文说明", "subpath": "skills/zh" },
+            { "name": "한국어 스킬", "description": "한국어 설명", "subpath": "skills/ko" }
+        ])
+    );
+}
+
+#[test]
+fn format_service_error_restores_safe_legacy_auth_and_network_hints() {
+    let auth = crate::services::error::ServiceError::new(
+        crate::services::error::ErrorCode::AuthRequired,
+        "the remote source requires authentication",
+        serde_json::json!({ "legacy_category": "github_auth" }),
+    );
+    let network = crate::services::error::ServiceError::new(
+        crate::services::error::ErrorCode::NetworkError,
+        "the remote source could not be reached",
+        serde_json::json!({ "legacy_category": "github_network" }),
+    );
+
+    let auth_message = format_service_error(auth);
+    let network_message = format_service_error(network);
+
+    assert!(auth_message.contains("无法访问该仓库"));
+    assert!(network_message.contains("请检查网络/代理"));
+    assert!(!auth_message.contains("INTERNAL_ERROR"));
+    assert!(!network_message.contains("INTERNAL_ERROR"));
+}
+
+#[test]
+fn format_service_error_restores_specific_safe_git_failure_hints() {
+    for (code, category, expected) in [
+        (
+            crate::services::error::ErrorCode::NetworkError,
+            "github_tls",
+            "TLS/证书校验失败",
+        ),
+        (
+            crate::services::error::ErrorCode::InvalidSource,
+            "github_not_found",
+            "仓库不存在或无权限访问",
+        ),
+        (
+            crate::services::error::ErrorCode::NetworkError,
+            "github_dns",
+            "无法解析 GitHub 域名",
+        ),
+        (
+            crate::services::error::ErrorCode::NetworkError,
+            "github_timeout",
+            "连接 GitHub 超时",
+        ),
+        (
+            crate::services::error::ErrorCode::NetworkError,
+            "github_connection",
+            "连接 GitHub 失败",
+        ),
+        (
+            crate::services::error::ErrorCode::NetworkError,
+            "github_rate_limited",
+            "GitHub API 频率限制已触发",
+        ),
+    ] {
+        let error = crate::services::error::ServiceError::new(
+            code,
+            "safe remote failure",
+            serde_json::json!({ "legacy_category": category }),
+        );
+        assert!(format_service_error(error).contains(expected));
+    }
+}
+
+#[test]
+fn format_service_error_preserves_existing_prefixes_and_localized_messages() {
+    for message in [
+        "TARGET_EXISTS|/tmp/safe-target",
+        "无法安装此技能，请检查来源。",
+        "이 스킬을 설치할 수 없습니다. 소스를 확인하세요.",
+    ] {
+        let error = crate::services::error::ServiceError::new(
+            crate::services::error::ErrorCode::InternalError,
+            message,
+            serde_json::json!({}),
+        );
+        assert_eq!(format_service_error(error), message);
+    }
+}
+
+#[test]
+fn format_service_error_maps_target_conflict_back_to_the_desktop_prefix() {
+    let error = crate::services::error::ServiceError::new(
+        crate::services::error::ErrorCode::TargetConflict,
+        "the deployment target already contains unmanaged content",
+        serde_json::json!({ "path": "/tmp/safe-target" }),
+    );
+
+    assert_eq!(
+        format_service_error(error),
+        "TARGET_EXISTS|/tmp/safe-target"
+    );
+}
+
+#[test]
 fn expand_home_path_basic() {
     let home = dirs::home_dir().expect("home");
     assert_eq!(expand_home_path("~").unwrap(), home);
