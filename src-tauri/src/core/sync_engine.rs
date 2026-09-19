@@ -855,7 +855,10 @@ impl PreparedDirReplacement {
     }
 
     pub(crate) fn rollback(&mut self) -> Result<()> {
-        self.rollback_with_outcome().map(|_| ()).map_err(Into::into)
+        let result = self.rollback_with_outcome();
+        // Legacy callers still rely on Drop to retry unfinished compensation.
+        self.rollback_reported = false;
+        result.map(|_| ()).map_err(Into::into)
     }
 
     pub(crate) fn rollback_with_outcome(
