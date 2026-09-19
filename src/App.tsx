@@ -306,6 +306,17 @@ function App() {
     },
     [isTauri],
   )
+  useEffect(() => {
+    // The tray menu is native text drawn by the desktop shell, so unlike the rest of the
+    // interface it cannot read the web i18n bundle. Report the active language instead.
+    const trayLanguage = language.startsWith('zh')
+      ? 'zh'
+      : language.startsWith('ko')
+        ? 'ko'
+        : 'en'
+    if (!isTauri) return
+    void invokeTauri('set_tray_language', { language: trayLanguage }).catch(() => undefined)
+  }, [invokeTauri, isTauri, language])
   const refreshRecycleBinCount = useCallback(async () => {
     if (!isTauri) return
     try {

@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 use core::cancel_token::CancelToken;
 use core::skill_store::{default_db_path, migrate_legacy_db_if_needed, SkillStore};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
 use tauri_plugin_log::{Target, TargetKind};
 
@@ -19,6 +21,80 @@ fn runtime_context() -> tauri::Context<tauri::Wry> {
         context
     };
     context
+}
+
+const TRAY_ID: &str = "skills-hub-tray";
+const TRAY_MENU_SHOW: &str = "tray-show";
+const TRAY_MENU_QUIT: &str = "tray-quit";
+
+/// The tray menu is native window-manager text, so it cannot come from the web i18n
+/// bundle. The frontend pushes the active interface language once it has loaded.
+fn tray_labels(language: &str) -> (&'static str, &'static str) {
+    match language {
+        "zh" => ("显示主窗口", "退出 Skills Hub"),
+        "ko" => ("Skills Hub 열기", "Skills Hub 종료"),
+        _ => ("Show Skills Hub", "Quit Skills Hub"),
+    }
+}
+
+fn build_tray_menu<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    language: &str,
+) -> tauri::Result<Menu<R>> {
+    let (show, quit) = tray_labels(language);
+    let show_item = MenuItem::with_id(app, TRAY_MENU_SHOW, show, true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, TRAY_MENU_QUIT, quit, true, None::<&str>)?;
+    Menu::with_items(app, &[&show_item, &quit_item])
+}
+
+fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+/// The tray must exist before the close button can hide the window, otherwise the app
+/// would become unreachable. Callers therefore treat a missing tray as "not hidden".
+fn setup_tray<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
+    let menu = build_tray_menu(app, "en")?;
+    let mut builder = TrayIconBuilder::with_id(TRAY_ID)
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .tooltip("Skills Hub")
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            TRAY_MENU_SHOW => show_main_window(app),
+            TRAY_MENU_QUIT => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon().cloned() {
+        builder = builder.icon(icon);
+    }
+    builder.build(app)?;
+    Ok(())
+}
+
+/// Re-labels the tray menu for the interface language the web app is currently using.
+pub(crate) fn apply_tray_language<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    language: &str,
+) -> Result<(), String> {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return Ok(());
+    };
+    let menu = build_tray_menu(app, language).map_err(|err| err.to_string())?;
+    tray.set_menu(Some(menu)).map_err(|err| err.to_string())
 }
 
 fn init_store<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> anyhow::Result<SkillStore> {
@@ -204,6 +280,12 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(24 * 60 * 60));
             });
 
+            if let Err(error) = setup_tray(app.handle()) {
+                // Without a tray the window must not hide on close, or the app would be
+                // unreachable. `on_window_event` already falls back to quitting.
+                log::warn!("tray icon setup failed: {error:#}");
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -288,11 +370,19 @@ pub fn run() {
             commands::resolve_device_sync_conflict,
             commands::restore_device_sync_trash,
             commands::disconnect_device_sync,
-            commands::cancel_current_operation
+            commands::cancel_current_operation,
+            commands::set_tray_language
         ])
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                window.app_handle().exit(0);
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Closing keeps the app running in the notification area so scheduled
+                // updates and device sync stay alive. Quit from the tray menu instead.
+                if window.app_handle().tray_by_id(TRAY_ID).is_some() {
+                    api.prevent_close();
+                    let _ = window.hide();
+                } else {
+                    window.app_handle().exit(0);
+                }
             }
         })
         .build(runtime_context())
