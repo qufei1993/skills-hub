@@ -351,6 +351,145 @@ fn json_success_recursively_redacts_sensitive_payload_values() {
 }
 
 #[test]
+fn sanitizer_handles_arbitrary_url_schemes_and_whitespace_auth_credentials() {
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let exit = run_with_executor(
+        ["skillshub-cli", "--json", "doctor"],
+        &mut stdout,
+        &mut stderr,
+        |_| {
+            Ok(CommandSuccess::new(
+                "doctor",
+                json!({
+                    "connections": [
+                        "postgres://db-user:postgres-password@db.example/app?ssl=true#primary",
+                        "mongodb://mongo-user:mongo-password@mongo.example/data?replicaSet=main",
+                        "wss://socket-user:socket-password@socket.example/events?token=socket-query#live",
+                        "custom://custom-user:custom-password@custom.example/resource?credential=custom-query#fragment"
+                    ],
+                    "malformed": "connect custom://[broken@host?secret=malformed-secret",
+                    "headers": [
+                        "Bearer\twhitespace-secret",
+                        "Authorization=Bearer\tassignment-secret",
+                        "Bearer:colon-secret",
+                        "Basic=basic-password"
+                    ],
+                    "description": "basic usage remains readable"
+                }),
+                MessageKey::CommandCompleted,
+            ))
+        },
+    );
+
+    assert_eq!(exit, 0);
+    assert!(stderr.is_empty());
+    let payload = serde_json::from_slice::<Value>(&stdout).unwrap();
+    assert_eq!(
+        payload["data"]["connections"],
+        json!([
+            "postgres://db.example/app",
+            "mongodb://mongo.example/data",
+            "wss://socket.example/events",
+            "custom://custom.example/resource"
+        ])
+    );
+    assert_eq!(payload["data"]["malformed"], "[REDACTED]");
+    assert_eq!(payload["data"]["headers"][0], "[REDACTED]");
+    assert_eq!(payload["data"]["headers"][1], "[REDACTED]");
+    assert_eq!(payload["data"]["headers"][2], "[REDACTED]");
+    assert_eq!(payload["data"]["headers"][3], "[REDACTED]");
+    assert_eq!(
+        payload["data"]["description"],
+        "basic usage remains readable"
+    );
+
+    let serialized = String::from_utf8(stdout).unwrap();
+    for secret in [
+        "postgres-password",
+        "mongo-password",
+        "socket-password",
+        "custom-password",
+        "malformed-secret",
+        "whitespace-secret",
+        "assignment-secret",
+        "colon-secret",
+        "basic-password",
+    ] {
+        assert!(!serialized.contains(secret), "leaked {secret}");
+    }
+}
+
+#[test]
+fn sanitizer_preserves_metadata_and_only_treats_code_as_secret_in_auth_context() {
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let exit = run_with_executor(
+        ["skillshub-cli", "--json", "doctor"],
+        &mut stdout,
+        &mut stderr,
+        |_| {
+            Ok(CommandSuccess::new(
+                "doctor",
+                json!({
+                    "code": 200,
+                    "status": {"code": "READY"},
+                    "metadata": {
+                        "token_count": 42,
+                        "password_policy": {"minimum_length": 12},
+                        "authorization_status": false
+                    },
+                    "candidates": [{"code": 409, "path": "/tmp/candidate", "reason": "conflict"}],
+                    "plan_id": "plan-safe",
+                    "source": "custom://safe.example/resource",
+                    "auth": {
+                        "code": "parent-context-secret",
+                        "grant_type": "authorization_code",
+                        "code_verifier": "verifier-secret",
+                        "result": {"code": 201, "reason": "created"}
+                    },
+                    "flows": [
+                        {"code": "NORMAL", "reason": "not-auth"},
+                        {"oauth": true, "client_id": "public-client", "code": "sibling-context-secret"}
+                    ]
+                }),
+                MessageKey::CommandCompleted,
+            ))
+        },
+    );
+
+    assert_eq!(exit, 0);
+    assert!(stderr.is_empty());
+    let payload = serde_json::from_slice::<Value>(&stdout).unwrap();
+    assert_eq!(payload["data"]["code"], 200);
+    assert_eq!(payload["data"]["status"]["code"], "READY");
+    assert_eq!(payload["data"]["metadata"]["token_count"], 42);
+    assert_eq!(
+        payload["data"]["metadata"]["password_policy"],
+        json!({"minimum_length": 12})
+    );
+    assert_eq!(payload["data"]["metadata"]["authorization_status"], false);
+    assert_eq!(payload["data"]["candidates"][0]["code"], 409);
+    assert_eq!(payload["data"]["candidates"][0]["path"], "/tmp/candidate");
+    assert_eq!(payload["data"]["candidates"][0]["reason"], "conflict");
+    assert_eq!(payload["data"]["plan_id"], "plan-safe");
+    assert_eq!(payload["data"]["source"], "custom://safe.example/resource");
+    assert_eq!(payload["data"]["auth"]["code"], "[REDACTED]");
+    assert_eq!(payload["data"]["auth"]["code_verifier"], "[REDACTED]");
+    assert_eq!(payload["data"]["auth"]["result"]["code"], 201);
+    assert_eq!(payload["data"]["auth"]["result"]["reason"], "created");
+    assert_eq!(payload["data"]["flows"][0]["code"], "NORMAL");
+    assert_eq!(payload["data"]["flows"][1]["oauth"], true);
+    assert_eq!(payload["data"]["flows"][1]["client_id"], "public-client");
+    assert_eq!(payload["data"]["flows"][1]["code"], "[REDACTED]");
+
+    let serialized = String::from_utf8(stdout).unwrap();
+    assert!(!serialized.contains("parent-context-secret"));
+    assert!(!serialized.contains("verifier-secret"));
+    assert!(!serialized.contains("sibling-context-secret"));
+}
+
+#[test]
 fn json_failure_uses_stderr_only_and_skill_not_found_exits_three() {
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
