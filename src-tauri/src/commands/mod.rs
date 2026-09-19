@@ -210,7 +210,7 @@ impl From<ServiceAgent> for ToolInfoDto {
             key: agent.key,
             label: agent.label,
             avatar: agent.avatar,
-            installed: agent.enabled && agent.detected,
+            installed: agent.detected,
             enabled: agent.enabled,
             is_custom: agent.is_custom,
             skills_dir: agent.skills_dir,
@@ -409,18 +409,42 @@ pub async fn set_tool_config(
 #[tauri::command]
 pub async fn get_tool_status(
     service: State<'_, SkillsHubService>,
+    store: State<'_, SkillStore>,
 ) -> Result<ToolStatusDto, String> {
     let service = service.inner().clone();
+    let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        service.list_agents().map(|agents| ToolStatusDto {
-            tools: agents.agents.into_iter().map(ToolInfoDto::from).collect(),
-            installed: agents.installed,
-            newly_installed: agents.newly_installed,
-        })
+        service
+            .list_agents()
+            .map(|agents| desktop_tool_status(&store, agents))
     })
     .await
     .map_err(|err| err.to_string())?
     .map_err(format_service_error)
+}
+
+fn desktop_tool_status(
+    store: &SkillStore,
+    agents: crate::services::types::AgentList,
+) -> ToolStatusDto {
+    let serialized = serde_json::to_string(&agents.installed).unwrap_or_else(|_| "[]".to_string());
+    let previous = store
+        .replace_setting("installed_tools_v1", &serialized)
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<std::collections::HashSet<String>>(&raw).ok())
+        .unwrap_or_default();
+    let newly_installed = agents
+        .installed
+        .iter()
+        .filter(|key| !previous.contains(*key))
+        .cloned()
+        .collect();
+    ToolStatusDto {
+        tools: agents.agents.into_iter().map(ToolInfoDto::from).collect(),
+        installed: agents.installed,
+        newly_installed,
+    }
 }
 
 #[tauri::command]

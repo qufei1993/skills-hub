@@ -1,11 +1,10 @@
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 use serde_json::json;
 
 use crate::core::runtime_paths::{open_store, RuntimePaths, RuntimeProfile};
-use crate::core::skill_store::{SkillRecord, SkillStore};
+use crate::core::skill_store::{IncompatibleDatabaseError, SkillRecord, SkillStore};
 use crate::core::tool_adapters::{
     default_tool_adapters, is_builtin_tool_enabled, load_tool_config, project_relative_skills_dir,
     resolve_adapter_path_in_home, supports_project_scope,
@@ -30,19 +29,19 @@ impl SkillsHubService {
     pub fn open(paths: RuntimePaths) -> Result<Self, ServiceError> {
         match open_store(&paths) {
             Ok(store) => Ok(Self::from_store(paths, store)),
-            Err(error) if error.to_string().contains("newer than app supports") => {
-                let found_version = database_user_version(&paths.database_path)
-                    .map_err(|_| ServiceError::internal("failed to inspect the database schema"))?;
-                Ok(Self {
-                    store: SkillStore::new(paths.database_path.clone()),
-                    paths,
-                    schema_version_at_open: None,
-                    incompatible_schema_version: Some(found_version),
-                })
+            Err(error) => {
+                if let Some(compatibility) = error.downcast_ref::<IncompatibleDatabaseError>() {
+                    return Ok(Self {
+                        store: SkillStore::new(paths.database_path.clone()),
+                        paths,
+                        schema_version_at_open: None,
+                        incompatible_schema_version: Some(compatibility.found_version),
+                    });
+                }
+                Err(ServiceError::internal(
+                    "failed to open the Skills Hub database",
+                ))
             }
-            Err(_) => Err(ServiceError::internal(
-                "failed to open the Skills Hub database",
-            )),
         }
     }
 
@@ -164,34 +163,12 @@ impl SkillsHubService {
 
         let mut installed = agents
             .iter()
-            .filter(|agent| agent.enabled && agent.detected)
+            .filter(|agent| agent.detected)
             .map(|agent| agent.key.clone())
             .collect::<Vec<_>>();
         installed.dedup();
 
-        let previous = self
-            .store
-            .get_setting("installed_tools_v1")
-            .map_err(|_| ServiceError::internal("failed to read Agent detection state"))?
-            .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
-            .unwrap_or_default();
-        let previous = previous.into_iter().collect::<HashSet<_>>();
-        let newly_installed = installed
-            .iter()
-            .filter(|key| !previous.contains(*key))
-            .cloned()
-            .collect();
-
-        let _ = self.store.set_setting(
-            "installed_tools_v1",
-            &serde_json::to_string(&installed).unwrap_or_else(|_| "[]".to_string()),
-        );
-
-        Ok(AgentList {
-            agents,
-            installed,
-            newly_installed,
-        })
+        Ok(AgentList { agents, installed })
     }
 
     pub fn doctor(&self) -> Result<DoctorReport, ServiceError> {
@@ -264,12 +241,13 @@ impl SkillsHubService {
             return Err(ServiceError::skill_not_found(value));
         }
 
+        let normalized_name = value.to_lowercase();
         let mut candidates = self
             .store
             .list_skills()
             .map_err(|_| ServiceError::internal("failed to resolve the skill selector"))?
             .into_iter()
-            .filter(|skill| skill.name.eq_ignore_ascii_case(value))
+            .filter(|skill| skill.name.to_lowercase() == normalized_name)
             .collect::<Vec<_>>();
         candidates.sort_by(|left, right| left.id.cmp(&right.id));
 
@@ -307,7 +285,10 @@ impl SkillsHubService {
                 target_path: target.target_path,
                 mode: target.mode,
                 status: target.status,
-                last_error: target.last_error,
+                last_error: target
+                    .last_error
+                    .as_deref()
+                    .map(crate::core::skill_issues::safe_output),
                 synced_at: target.synced_at,
             })
             .collect();
@@ -321,7 +302,9 @@ impl SkillsHubService {
                 name: tag.name,
             })
             .collect();
-        let source_error = source_check.and_then(|check| check.0.clone());
+        let source_error = source_check
+            .and_then(|check| check.0.as_deref())
+            .map(crate::core::skill_issues::safe_output);
         let content_status = if source_error.is_some() {
             "error".to_string()
         } else {
@@ -399,7 +382,11 @@ fn expand_home_path_in(input: &str, home_root: &Path) -> PathBuf {
 
 fn redact_source_reference(reference: &str) -> String {
     let Ok(mut url) = reqwest::Url::parse(reference) else {
-        return reference.to_string();
+        return reference
+            .split(['?', '#'])
+            .next()
+            .unwrap_or_default()
+            .to_string();
     };
     if !url.username().is_empty() {
         let _ = url.set_username("");
@@ -407,25 +394,7 @@ fn redact_source_reference(reference: &str) -> String {
     if url.password().is_some() {
         let _ = url.set_password(None);
     }
-    if url.query().is_some() {
-        let pairs = url
-            .query_pairs()
-            .map(|(key, value)| {
-                let sensitive = matches!(
-                    key.to_ascii_lowercase().as_str(),
-                    "token" | "access_token" | "auth" | "authorization" | "password" | "secret"
-                );
-                (
-                    key.into_owned(),
-                    if sensitive {
-                        "REDACTED".to_string()
-                    } else {
-                        value.into_owned()
-                    },
-                )
-            })
-            .collect::<Vec<_>>();
-        url.query_pairs_mut().clear().extend_pairs(pairs);
-    }
+    url.set_query(None);
+    url.set_fragment(None);
     url.to_string()
 }

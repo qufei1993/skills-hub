@@ -1285,6 +1285,57 @@ fn saving_custom_tool_config_creates_enabled_skills_dir() {
 }
 
 #[test]
+fn tool_status_adapter_keeps_detected_separate_from_enabled() {
+    let dto = ToolInfoDto::from(ServiceAgent {
+        key: "disabled-agent".to_string(),
+        label: "Disabled Agent".to_string(),
+        avatar: None,
+        detected: true,
+        enabled: false,
+        is_custom: false,
+        skills_dir: "/tmp/agent-skills".to_string(),
+        project_skills_dir: ".agent/skills".to_string(),
+        supports_project_scope: true,
+        sync_mode: SyncMode::Auto,
+    });
+
+    assert!(dto.installed);
+    assert!(!dto.enabled);
+}
+
+#[test]
+fn desktop_tool_status_tracks_newly_detected_agents_after_service_read() {
+    let (_dir, store) = make_store();
+    store
+        .set_setting("installed_tools_v1", r#"["existing"]"#)
+        .unwrap();
+    let status = desktop_tool_status(
+        &store,
+        crate::services::types::AgentList {
+            agents: vec![ServiceAgent {
+                key: "disabled-new".to_string(),
+                label: "Disabled New".to_string(),
+                avatar: None,
+                detected: true,
+                enabled: false,
+                is_custom: false,
+                skills_dir: "/tmp/agent-skills".to_string(),
+                project_skills_dir: ".agent/skills".to_string(),
+                supports_project_scope: true,
+                sync_mode: SyncMode::Auto,
+            }],
+            installed: vec!["existing".to_string(), "disabled-new".to_string()],
+        },
+    );
+
+    assert_eq!(status.newly_installed, vec!["disabled-new"]);
+    assert_eq!(
+        store.get_setting("installed_tools_v1").unwrap().as_deref(),
+        Some(r#"["existing","disabled-new"]"#)
+    );
+}
+
+#[test]
 fn normalize_scope_defaults_to_global_and_rejects_unknown() {
     assert_eq!(normalize_scope(None).unwrap(), "global");
     assert_eq!(normalize_scope(Some("global")).unwrap(), "global");
@@ -1437,7 +1488,7 @@ fn get_managed_skills_impl_maps_targets() {
     assert_eq!(out[0].targets[0].status, "error");
     assert_eq!(
         out[0].targets[0].last_error.as_deref(),
-        Some("permission denied")
+        Some("SKILL_ISSUE|permission")
     );
     assert!(out[0].targets[0].project_path.is_none());
     assert_eq!(out[0].status, "error");

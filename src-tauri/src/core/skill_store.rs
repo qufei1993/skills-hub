@@ -1,3 +1,4 @@
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -24,6 +25,24 @@ const RECYCLE_BIN_SCHEMA_VERSION: &str = "1";
 pub const DEVICE_SYNC_HISTORY_LIMIT: usize = 100;
 const DEVICE_SYNC_STARTUP_CREDENTIAL_CONSENT_MIGRATION: &str =
     "migration.device_sync_startup_credential_consent_v1";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IncompatibleDatabaseError {
+    pub found_version: i32,
+    pub supported_version: i32,
+}
+
+impl fmt::Display for IncompatibleDatabaseError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "database schema version {} is newer than app supports {}",
+            self.found_version, self.supported_version
+        )
+    }
+}
+
+impl std::error::Error for IncompatibleDatabaseError {}
 
 const DEVICE_SYNC_SCHEMA_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS device_sync_config (
@@ -328,11 +347,11 @@ impl SkillStore {
             } else if user_version > SCHEMA_VERSION
                 && user_version != PRE_RELEASE_DEVICE_SYNC_SCHEMA_VERSION
             {
-                anyhow::bail!(
-                    "database schema version {} is newer than app supports {}",
-                    user_version,
-                    SCHEMA_VERSION
-                );
+                return Err(IncompatibleDatabaseError {
+                    found_version: user_version,
+                    supported_version: SCHEMA_VERSION,
+                }
+                .into());
             }
 
             conn.execute_batch(DEVICE_SYNC_SCHEMA_V1)?;
@@ -393,6 +412,37 @@ impl SkillStore {
                 params![key, value],
             )?;
             Ok(())
+        })
+    }
+
+    pub fn replace_setting(&self, key: &str, value: &str) -> Result<Option<String>> {
+        self.with_conn(|conn| {
+            conn.execute_batch("BEGIN IMMEDIATE;")?;
+            let result = (|| -> Result<Option<String>> {
+                let previous = conn
+                    .query_row(
+                        "SELECT value FROM settings WHERE key = ?1",
+                        params![key],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                conn.execute(
+                    "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![key, value],
+                )?;
+                Ok(previous)
+            })();
+            match result {
+                Ok(previous) => {
+                    conn.execute_batch("COMMIT;")?;
+                    Ok(previous)
+                }
+                Err(error) => {
+                    let _ = conn.execute_batch("ROLLBACK;");
+                    Err(error)
+                }
+            }
         })
     }
 

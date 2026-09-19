@@ -100,6 +100,22 @@ fn selector_rejects_ambiguous_case_insensitive_names_with_safe_candidates() {
 }
 
 #[test]
+fn selector_matches_unicode_names_case_insensitively() {
+    let fixture = Fixture::new();
+    let service = fixture.open();
+    service
+        .store()
+        .upsert_skill(&skill("unicode-id", "réact工具", "/central/unicode"))
+        .unwrap();
+
+    let selected = service
+        .show_skill(SkillSelector::Name("RÉACT工具".into()))
+        .unwrap();
+
+    assert_eq!(selected.id, "unicode-id");
+}
+
+#[test]
 fn list_and_status_include_source_tags_targets_scope_and_content_state() {
     let fixture = Fixture::new();
     let service = fixture.open();
@@ -156,9 +172,39 @@ fn source_dto_redacts_credentials_and_sensitive_query_values() {
     let fixture = Fixture::new();
     let service = fixture.open();
     let mut record = skill("private", "Private", "/central/private");
-    record.source_ref =
-        Some("https://user:password@example.com/private.git?token=top-secret&ref=main".to_string());
+    record.source_ref = Some(
+        "https://user:password@example.com/private.git?code=oauth-secret&oauth_code=second-secret&custom=future-secret#access_token=fragment-secret"
+            .to_string(),
+    );
     service.store().upsert_skill(&record).unwrap();
+    service
+        .store()
+        .upsert_skill_target(&SkillTargetRecord {
+            id: "private-target".to_string(),
+            skill_id: "private".to_string(),
+            tool: "codex".to_string(),
+            scope: "global".to_string(),
+            project_path: None,
+            target_path: "/tmp/private-target".to_string(),
+            mode: "copy".to_string(),
+            status: "error".to_string(),
+            last_error: Some("permission denied: Authorization: Bearer target-secret".to_string()),
+            synced_at: None,
+        })
+        .unwrap();
+    let connection = Connection::open(&fixture.paths.database_path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO skill_source_checks (skill_id, error_code, checked_at)
+             VALUES (?1, ?2, 1)
+             ON CONFLICT(skill_id) DO UPDATE SET error_code = excluded.error_code",
+            (
+                "private",
+                "authentication failed: https://user:source-secret@example.com?token=source-secret",
+            ),
+        )
+        .unwrap();
+    drop(connection);
 
     let shown = service
         .show_skill(SkillSelector::Id("private".into()))
@@ -167,8 +213,26 @@ fn source_dto_redacts_credentials_and_sensitive_query_values() {
 
     assert!(!serialized.contains("user"));
     assert!(!serialized.contains("password"));
-    assert!(!serialized.contains("top-secret"));
+    assert!(!serialized.contains("oauth-secret"));
+    assert!(!serialized.contains("second-secret"));
+    assert!(!serialized.contains("future-secret"));
+    assert!(!serialized.contains("fragment-secret"));
+    assert!(!serialized.contains("source-secret"));
+    assert!(!serialized.contains("target-secret"));
     assert!(serialized.contains("example.com"));
+    assert_eq!(shown.source_error.as_deref(), Some("SKILL_ISSUE|auth"));
+    assert_eq!(
+        shown.targets[0].last_error.as_deref(),
+        Some("SKILL_ISSUE|permission")
+    );
+
+    record.source_ref =
+        Some("not a url?code=opaque-secret#access_token=opaque-fragment".to_string());
+    service.store().upsert_skill(&record).unwrap();
+    let malformed = service
+        .show_skill(SkillSelector::Id("private".into()))
+        .unwrap();
+    assert_eq!(malformed.source.reference.as_deref(), Some("not a url"));
 }
 
 #[test]
@@ -207,6 +271,28 @@ fn list_agents_reports_detected_custom_agent_state() {
 }
 
 #[test]
+fn agent_reads_and_doctor_do_not_consume_or_mutate_desktop_detection_state() {
+    let fixture = Fixture::new();
+    let service = fixture.open();
+    service
+        .store()
+        .set_setting("installed_tools_v1", "desktop-owned-state")
+        .unwrap();
+
+    service.list_agents().unwrap();
+    service.doctor().unwrap();
+
+    assert_eq!(
+        service
+            .store()
+            .get_setting("installed_tools_v1")
+            .unwrap()
+            .as_deref(),
+        Some("desktop-owned-state")
+    );
+}
+
+#[test]
 fn built_in_agent_paths_use_the_runtime_home_root() {
     let fixture = Fixture::new();
     let service = fixture.open();
@@ -222,6 +308,35 @@ fn built_in_agent_paths_use_the_runtime_home_root() {
         zcode.skills_dir,
         fixture._home.path().join(".zcode/skills").to_string_lossy()
     );
+}
+
+#[test]
+fn disabled_but_detected_agents_remain_installed() {
+    let fixture = Fixture::new();
+    let service = fixture.open();
+    std::fs::create_dir_all(fixture._home.path().join(".zcode")).unwrap();
+    let config = ToolConfig {
+        disabled_builtin_tools: vec!["zcode".to_string()],
+        custom_tools: Vec::new(),
+    };
+    service
+        .store()
+        .set_setting(
+            TOOL_CONFIG_SETTING,
+            &serde_json::to_string(&config).unwrap(),
+        )
+        .unwrap();
+
+    let agents = service.list_agents().unwrap();
+    let zcode = agents
+        .agents
+        .iter()
+        .find(|agent| agent.key == "zcode")
+        .unwrap();
+
+    assert!(zcode.detected);
+    assert!(!zcode.enabled);
+    assert!(agents.installed.contains(&"zcode".to_string()));
 }
 
 #[test]

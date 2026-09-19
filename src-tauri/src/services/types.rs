@@ -101,7 +101,6 @@ pub struct Agent {
 pub struct AgentList {
     pub agents: Vec<Agent>,
     pub installed: Vec<String>,
-    pub newly_installed: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
