@@ -159,6 +159,15 @@ pub(crate) fn hash_open_dir(
     directory: &std::fs::File,
     ignore_python_cache: bool,
 ) -> Result<String> {
+    hash_open_dir_with_root_link(directory, ignore_python_cache, None)
+}
+
+#[cfg(unix)]
+pub(crate) fn hash_open_dir_with_root_link(
+    directory: &std::fs::File,
+    ignore_python_cache: bool,
+    root_link: Option<&Path>,
+) -> Result<String> {
     use rustix::fs::{openat, readlinkat, statat, AtFlags, Dir, FileType, Mode, OFlags};
     use std::io::Read;
     use std::os::unix::ffi::{OsStrExt, OsStringExt};
@@ -232,7 +241,14 @@ pub(crate) fn hash_open_dir(
         Ok(())
     }
     let mut hasher = Sha256::new();
-    update_record_header(&mut hasher, b'd', Path::new(""));
+    if let Some(destination) = root_link {
+        update_record_header(&mut hasher, b'l', Path::new(""));
+        let encoded = path_bytes(destination);
+        hasher.update((encoded.len() as u64).to_be_bytes());
+        hasher.update(encoded);
+    } else {
+        update_record_header(&mut hasher, b'd', Path::new(""));
+    }
     visit(directory, Path::new(""), ignore_python_cache, &mut hasher)?;
     Ok(hex::encode(hasher.finalize()))
 }

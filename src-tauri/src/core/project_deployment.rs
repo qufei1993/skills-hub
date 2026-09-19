@@ -12,7 +12,7 @@ use rustix::fs::{
 use uuid::Uuid;
 
 use super::{DeploymentParentIdentity, DeploymentParentSnapshot, SyncMode};
-use crate::core::content_hash::hash_open_dir;
+use crate::core::content_hash::{hash_open_dir, hash_open_dir_with_root_link};
 
 // Display paths are never mutation capabilities: every project write stays relative
 // to an opened, identity-checked directory, including rollback after path redirection.
@@ -191,6 +191,8 @@ pub(super) struct ProjectDeployment {
     backup_path: Option<PathBuf>,
     expected: Option<String>,
     prepared: Option<String>,
+    content_directory: Option<File>,
+    content_root_link: Option<PathBuf>,
     activated: bool,
     committed: bool,
     created: Vec<CreatedDirectory>,
@@ -227,6 +229,8 @@ impl ProjectDeployment {
             backup_path: None,
             expected,
             prepared: None,
+            content_directory: None,
+            content_root_link: None,
             activated: false,
             committed: false,
             created,
@@ -257,6 +261,19 @@ impl ProjectDeployment {
                 )?;
                 copy_contents(source, &open_child(&value.parent, &staging)?)?;
             }
+            // Keep the materialized directory (or our link's destination) open across
+            // activation; persisted baselines must never reopen the display path.
+            value.content_directory = Some(if value.mode == SyncMode::Copy {
+                open_child(&value.parent, &staging)?
+            } else {
+                value.content_root_link = Some(source.to_path_buf());
+                File::from(openat(
+                    &value.parent,
+                    staging.as_os_str(),
+                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+                    Mode::empty(),
+                )?)
+            });
             value.prepared = fingerprint(&value.parent, &staging)?;
             value.snapshot.validate()?;
         }
@@ -307,6 +324,17 @@ impl ProjectDeployment {
             );
         }
         Ok(())
+    }
+
+    pub(super) fn content_baseline(&self) -> Result<String> {
+        anyhow::ensure!(self.activated, "deployment is not activated");
+        hash_open_dir_with_root_link(
+            self.content_directory
+                .as_ref()
+                .context("deployment has no content")?,
+            true,
+            self.content_root_link.as_deref(),
+        )
     }
 
     pub(super) fn rollback(&mut self) -> Result<()> {

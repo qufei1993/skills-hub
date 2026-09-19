@@ -497,7 +497,15 @@ impl SkillsHubService {
             };
             if !plan.undeploy {
                 for (target, replacement) in plan.targets.iter_mut().zip(&prepared) {
-                    let hash = hash_dir_for_sync_conflict(&target.path)?;
+                    #[cfg(test)]
+                    crate::core::sync_engine::run_deployment_race_hook(
+                        crate::core::sync_engine::DeploymentRacePoint::BeforeBaselineRead,
+                    );
+                    let hash = replacement.content_baseline()?;
+                    #[cfg(test)]
+                    crate::core::sync_engine::run_deployment_race_hook(
+                        crate::core::sync_engine::DeploymentRacePoint::AfterBaselineRead,
+                    );
                     target.mode = replacement.mode;
                     for agent in &target.agents {
                         let id = plan

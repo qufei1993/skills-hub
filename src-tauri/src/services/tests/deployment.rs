@@ -957,6 +957,73 @@ fn project_new_parent_is_bound_to_its_opened_identity() {
     assert_eq!(f.rows(), 0);
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn project_baseline_ignores_a_parent_redirected_only_during_hashing() {
+    use crate::core::content_hash::hash_dir_for_sync_conflict;
+    use crate::core::sync_engine::{set_deployment_race_hook, DeploymentRacePoint};
+    for agent in ["cursor", "codex"] {
+        let f = Fixture::new();
+        let other_agent = if agent == "cursor" { "codex" } else { "cursor" };
+        fs::remove_dir(f.home.path().join(format!(".{other_agent}"))).unwrap();
+        let project = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        fs::create_dir(outside.path().join("demo")).unwrap();
+        fs::write(outside.path().join("demo/SKILL.md"), "external trap").unwrap();
+        let outside_hash = hash_dir_for_sync_conflict(outside.path()).unwrap();
+        let trap_hash = hash_dir_for_sync_conflict(&outside.path().join("demo")).unwrap();
+        let parent = project.path().join(".agents/skills");
+        let original = project.path().join("original-parent");
+        let outside_path = outside.path().to_path_buf();
+        set_deployment_race_hook(DeploymentRacePoint::BeforeBaselineRead, move || {
+            fs::rename(&parent, &original).unwrap();
+            std::os::unix::fs::symlink(outside_path, &parent).unwrap();
+            set_deployment_race_hook(DeploymentRacePoint::AfterBaselineRead, move || {
+                fs::remove_file(&parent).unwrap();
+                fs::rename(original, parent).unwrap();
+            });
+        });
+        let mut request = DeploymentRequest::global("demo", [agent]);
+        request.scope = DeploymentScope::Project(project.path().to_path_buf());
+        f.service.deploy(request.clone()).unwrap();
+        let skill = f.service.show_skill("demo".into()).unwrap();
+        let rows = f.service.store().list_skill_targets(&skill.id).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].mode,
+            if agent == "cursor" { "copy" } else { "symlink" }
+        );
+        let value = f
+            .service
+            .store()
+            .get_setting(&format!("device_sync.target_baseline.{}", rows[0].id,))
+            .unwrap()
+            .unwrap();
+        let (_, baseline): (String, String) = serde_json::from_str(&value).unwrap();
+        let actual =
+            hash_dir_for_sync_conflict(&project.path().join(".agents/skills/demo")).unwrap();
+        assert_ne!(actual, trap_hash);
+        assert_eq!(
+            baseline, actual,
+            "baseline must describe the activated target for {agent}"
+        );
+        assert_eq!(
+            hash_dir_for_sync_conflict(outside.path()).unwrap(),
+            outside_hash
+        );
+        assert_eq!(
+            fs::read_to_string(outside.path().join("demo/SKILL.md")).unwrap(),
+            "external trap"
+        );
+        f.service.undeploy(request).unwrap();
+        assert_eq!(f.rows(), 0);
+        assert_eq!(
+            hash_dir_for_sync_conflict(outside.path()).unwrap(),
+            outside_hash
+        );
+    }
+}
+
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 #[test]
 fn project_scope_fails_closed_without_descriptor_relative_operations() {

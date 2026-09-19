@@ -314,6 +314,8 @@ pub(crate) struct PreparedDeployment {
 pub(crate) enum DeploymentRacePoint {
     StagingWrite,
     ActivationRename,
+    BeforeBaselineRead,
+    AfterBaselineRead,
 }
 
 #[cfg(test)]
@@ -330,7 +332,7 @@ pub(crate) fn set_deployment_race_hook(point: DeploymentRacePoint, hook: impl Fn
 }
 
 #[cfg(test)]
-fn run_deployment_race_hook(point: DeploymentRacePoint) {
+pub(crate) fn run_deployment_race_hook(point: DeploymentRacePoint) {
     let hook = DEPLOYMENT_RACE_HOOK.with(|slot| {
         let mut value = slot.borrow_mut();
         if value
@@ -507,6 +509,14 @@ impl PreparedDeployment {
             );
         }
         Ok(())
+    }
+
+    pub(crate) fn content_baseline(&self) -> Result<String> {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if let Some(project) = self.project.as_ref() {
+            return project.content_baseline();
+        }
+        hash_dir_for_sync_conflict(&self.target)
     }
 
     pub(crate) fn rollback(&mut self) -> Result<()> {
