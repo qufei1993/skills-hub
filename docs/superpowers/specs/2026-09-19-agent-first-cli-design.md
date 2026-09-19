@@ -1,11 +1,79 @@
 # Skills Hub Agent-first CLI 设计
 
-- 状态：待评审
+- 状态：已确认
 - 日期：2026-09-19
 - 目标版本：v0.11.0
 - npm 主包：`skillshub-cli`
 - 终端命令：`skillshub-cli`
 - 官方 Agent Skill：`skills-hub`
+
+## 本版本功能清单
+
+本节是产品评审入口。后续章节用于说明这些功能如何安全实现。
+
+### 查找 Skill
+
+- 查看当前安装的 Skills；
+- 查看某个 Skill 的详细信息；
+- 搜索新的 Skill；
+- 查看 Skill 已部署到哪些 Agent；
+- 检查 Skill 是否有更新。
+
+### 安装和导入
+
+- 从 Git 仓库安装 Skill；
+- 从本地目录安装 Skill；
+- 从包含多个 Skills 的仓库中选择安装；
+- 把 Codex、Claude Code、Cursor 等 Agent 目录中的已有 Skill 导入 Skills Hub。
+
+### 分配给 Agent
+
+- 把 Skill 部署到明确指定的 Agent；
+- 同时部署到多个 Agent；
+- 部署到全局目录或指定项目；
+- 从某个 Agent 卸载，但保留中央库副本。
+
+### 更新
+
+- 检查和更新单个 Skill；
+- 检查和批量更新全部 Skills；
+- 更新可能覆盖或删除用户文件时停止，由用户处理。
+
+### 标签管理
+
+- 添加、移除或重设 Skill 标签；
+- 查看和重命名标签；
+- 预览并删除标签。
+
+### 删除
+
+- 预览删除会影响的中央文件和 Agent 目标；
+- 删除 Skill，并进入 Skills Hub 回收站；
+- 通过桌面端恢复，不允许 Agent 永久清空回收站。
+
+### 检查和排错
+
+- 检查 Skills Hub 数据状态和 Agent 检测状态；
+- 检查 Skill 是否正确部署；
+- 识别目录冲突并给出具体路径和恢复建议。
+
+### CLI 辅助能力
+
+- 把官方 `skills-hub` Skill 安装到指定 Agent；
+- 通过 `--json` 向 Agent 提供稳定结果；
+- 通过 `--dry-run` 预览操作；
+- 通过 `--yes` 确认危险操作；
+- 查看 CLI 版本和诊断信息。
+
+### 明确不包含
+
+- Preset、Packs 和 Skills 合集网站；
+- 设备同步、自动同步和定时任务；
+- Token、OAuth、账号、代理、存储目录和应用设置管理；
+- 永久清空回收站；
+- 强制覆盖冲突目录。
+
+一句话定义：Agent 可以通过官方 `skills-hub` Skill 完成 Skill 的查找、安装、部署、更新、导入、标签、删除和排错；设备、账号和自动化继续由桌面端管理。
 
 ## 背景
 
