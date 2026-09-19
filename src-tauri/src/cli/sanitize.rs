@@ -55,7 +55,9 @@ fn is_sensitive_key(normalized: &str) -> bool {
             | "refreshtoken"
             | "idtoken"
             | "authtoken"
+            | "oauthtoken"
             | "bearertoken"
+            | "basicauth"
             | "sessiontoken"
             | "apikey"
             | "password"
@@ -103,8 +105,22 @@ fn object_indicates_auth_context(object: &Map<String, Value>) -> bool {
                     | "tokenendpoint"
                     | "authorizationendpoint"
             )
-            || (normalized == "oauth" && !value.is_object() && !value.is_array())
+            || (normalized == "oauth" && oauth_value_establishes_context(value))
     })
+}
+
+fn oauth_value_establishes_context(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(value) => *value,
+        Value::Number(value) => value.as_f64().is_some_and(|value| value != 0.0),
+        Value::String(value) => !matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "" | "0" | "false" | "no" | "off" | "null" | "none"
+        ),
+        Value::Object(_) => true,
+        Value::Array(values) => !values.is_empty(),
+    }
 }
 
 fn sanitize_string(value: &str) -> String {
@@ -272,6 +288,7 @@ fn contains_scheme_credential(value: &str, scheme: &str) -> bool {
         if starts_at_boundary && ends_at_boundary {
             let mut cursor = end;
             let mut has_separator = false;
+            let mut has_explicit_separator = false;
             while cursor < value.len() && value.as_bytes()[cursor].is_ascii_whitespace() {
                 cursor += 1;
                 has_separator = true;
@@ -279,13 +296,14 @@ fn contains_scheme_credential(value: &str, scheme: &str) -> bool {
             if cursor < value.len() && matches!(value.as_bytes()[cursor], b':' | b'=') {
                 cursor += 1;
                 has_separator = true;
+                has_explicit_separator = true;
                 while cursor < value.len() && value.as_bytes()[cursor].is_ascii_whitespace() {
                     cursor += 1;
                 }
             }
             if has_separator {
                 let candidate = next_credential_token(&value[cursor..]);
-                if looks_like_auth_credential(candidate) {
+                if scheme_credential_is_sensitive(scheme, candidate, has_explicit_separator) {
                     return true;
                 }
             }
@@ -335,6 +353,26 @@ fn next_credential_token(value: &str) -> &str {
         })
         .next()
         .unwrap_or_default()
+}
+
+fn scheme_credential_is_sensitive(
+    scheme: &str,
+    candidate: &str,
+    has_explicit_separator: bool,
+) -> bool {
+    !candidate.is_empty()
+        && (scheme != "basic" || has_explicit_separator || is_base64_credential(candidate))
+}
+
+fn is_base64_credential(value: &str) -> bool {
+    let unpadded = value.trim_end_matches('=');
+    let padding = value.len() - unpadded.len();
+    value.len() % 4 == 0
+        && !unpadded.is_empty()
+        && padding <= 2
+        && unpadded
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/'))
 }
 
 fn looks_like_auth_credential(value: &str) -> bool {

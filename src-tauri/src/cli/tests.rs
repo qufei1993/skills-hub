@@ -373,7 +373,10 @@ fn sanitizer_handles_arbitrary_url_schemes_and_whitespace_auth_credentials() {
                         "Bearer\twhitespace-secret",
                         "Authorization=Bearer\tassignment-secret",
                         "Bearer:colon-secret",
-                        "Basic=basic-password"
+                        "Basic=basic-password",
+                        "Bearer abc",
+                        "Basic YTpi",
+                        "Authorization: Bearer abc"
                     ],
                     "description": "basic usage remains readable"
                 }),
@@ -399,6 +402,9 @@ fn sanitizer_handles_arbitrary_url_schemes_and_whitespace_auth_credentials() {
     assert_eq!(payload["data"]["headers"][1], "[REDACTED]");
     assert_eq!(payload["data"]["headers"][2], "[REDACTED]");
     assert_eq!(payload["data"]["headers"][3], "[REDACTED]");
+    assert_eq!(payload["data"]["headers"][4], "[REDACTED]");
+    assert_eq!(payload["data"]["headers"][5], "[REDACTED]");
+    assert_eq!(payload["data"]["headers"][6], "[REDACTED]");
     assert_eq!(
         payload["data"]["description"],
         "basic usage remains readable"
@@ -439,6 +445,12 @@ fn sanitizer_preserves_metadata_and_only_treats_code_as_secret_in_auth_context()
                         "password_policy": {"minimum_length": 12},
                         "authorization_status": false
                     },
+                    "key_variants": {
+                        "oauth_token": "oauth-token-secret",
+                        "bearer_token": "bearer-token-secret",
+                        "basic_auth": "basic-auth-secret",
+                        "client_secret": "client-secret-value"
+                    },
                     "candidates": [{"code": 409, "path": "/tmp/candidate", "reason": "conflict"}],
                     "plan_id": "plan-safe",
                     "source": "custom://safe.example/resource",
@@ -450,7 +462,12 @@ fn sanitizer_preserves_metadata_and_only_treats_code_as_secret_in_auth_context()
                     },
                     "flows": [
                         {"code": "NORMAL", "reason": "not-auth"},
-                        {"oauth": true, "client_id": "public-client", "code": "sibling-context-secret"}
+                        {"oauth": false, "code": 200},
+                        {"oauth": null, "code": 201},
+                        {"oauth": 0, "code": 202},
+                        {"oauth": "false", "code": 203},
+                        {"oauth": true, "client_id": "public-client", "code": "sibling-context-secret"},
+                        {"oauth": {"provider": "github"}, "code": "descriptor-context-secret"}
                     ]
                 }),
                 MessageKey::CommandCompleted,
@@ -469,6 +486,16 @@ fn sanitizer_preserves_metadata_and_only_treats_code_as_secret_in_auth_context()
         json!({"minimum_length": 12})
     );
     assert_eq!(payload["data"]["metadata"]["authorization_status"], false);
+    assert_eq!(payload["data"]["key_variants"]["oauth_token"], "[REDACTED]");
+    assert_eq!(
+        payload["data"]["key_variants"]["bearer_token"],
+        "[REDACTED]"
+    );
+    assert_eq!(payload["data"]["key_variants"]["basic_auth"], "[REDACTED]");
+    assert_eq!(
+        payload["data"]["key_variants"]["client_secret"],
+        "[REDACTED]"
+    );
     assert_eq!(payload["data"]["candidates"][0]["code"], 409);
     assert_eq!(payload["data"]["candidates"][0]["path"], "/tmp/candidate");
     assert_eq!(payload["data"]["candidates"][0]["reason"], "conflict");
@@ -479,14 +506,20 @@ fn sanitizer_preserves_metadata_and_only_treats_code_as_secret_in_auth_context()
     assert_eq!(payload["data"]["auth"]["result"]["code"], 201);
     assert_eq!(payload["data"]["auth"]["result"]["reason"], "created");
     assert_eq!(payload["data"]["flows"][0]["code"], "NORMAL");
-    assert_eq!(payload["data"]["flows"][1]["oauth"], true);
-    assert_eq!(payload["data"]["flows"][1]["client_id"], "public-client");
-    assert_eq!(payload["data"]["flows"][1]["code"], "[REDACTED]");
+    assert_eq!(payload["data"]["flows"][1]["code"], 200);
+    assert_eq!(payload["data"]["flows"][2]["code"], 201);
+    assert_eq!(payload["data"]["flows"][3]["code"], 202);
+    assert_eq!(payload["data"]["flows"][4]["code"], 203);
+    assert_eq!(payload["data"]["flows"][5]["oauth"], true);
+    assert_eq!(payload["data"]["flows"][5]["client_id"], "public-client");
+    assert_eq!(payload["data"]["flows"][5]["code"], "[REDACTED]");
+    assert_eq!(payload["data"]["flows"][6]["code"], "[REDACTED]");
 
     let serialized = String::from_utf8(stdout).unwrap();
     assert!(!serialized.contains("parent-context-secret"));
     assert!(!serialized.contains("verifier-secret"));
     assert!(!serialized.contains("sibling-context-secret"));
+    assert!(!serialized.contains("descriptor-context-secret"));
 }
 
 #[test]
