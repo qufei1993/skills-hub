@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use walkdir::WalkDir;
 
 use super::central_repo::resolve_central_repo_path;
 use super::content_hash::hash_dir;
@@ -60,6 +61,154 @@ pub struct OnboardingPlan {
     pub total_tools_scanned: usize,
     pub total_skills_found: usize,
     pub groups: Vec<OnboardingGroup>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub(crate) struct AdoptScanCandidate {
+    pub name: String,
+    pub path: PathBuf,
+    pub content_hash: String,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub(crate) struct AdoptScanExclusion {
+    pub path: PathBuf,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub(crate) struct AdoptScanResult {
+    pub root: PathBuf,
+    pub candidates: Vec<AdoptScanCandidate>,
+    pub excluded: Vec<AdoptScanExclusion>,
+}
+
+pub(crate) fn scan_adopt_directory(
+    root: &Path,
+    central_root: &Path,
+    managed_skills: &[crate::core::skill_store::SkillRecord],
+    managed_targets: &[(String, String)],
+) -> Result<AdoptScanResult> {
+    anyhow::ensure!(root.exists(), "adopt source path not found");
+    let root_metadata = fs::symlink_metadata(root)?;
+    anyhow::ensure!(
+        root_metadata.is_dir() && !root_metadata.file_type().is_symlink(),
+        "adopt source must be a real directory"
+    );
+    let canonical_root = fs::canonicalize(root)?;
+    let canonical_central = fs::canonicalize(central_root)
+        .unwrap_or_else(|_| central_root.components().collect::<PathBuf>());
+    let mut managed_sources = HashSet::new();
+    let mut managed_target_paths = HashSet::new();
+    for skill in managed_skills {
+        managed_sources.insert(normalize_existing_path(Path::new(&skill.central_path)));
+        if let Some(source) = skill
+            .source_ref
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            managed_sources.insert(normalize_existing_path(Path::new(source)));
+        }
+    }
+    for (_, target) in managed_targets {
+        managed_target_paths.insert(normalize_existing_path(Path::new(target)));
+    }
+
+    let direct_skill = regular_skill_manifest(root);
+    let mut paths = if direct_skill {
+        vec![root.to_path_buf()]
+    } else {
+        fs::read_dir(root)?
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| {
+                fs::symlink_metadata(path)
+                    .map(|metadata| metadata.is_dir() || metadata.file_type().is_symlink())
+                    .unwrap_or(false)
+            })
+            .collect::<Vec<_>>()
+    };
+    paths.sort_by_key(|left| normalize_path_for_key(left));
+
+    let mut candidates = Vec::new();
+    let mut excluded = Vec::new();
+    for path in paths {
+        let canonical = match fs::canonicalize(&path) {
+            Ok(value) if value.starts_with(&canonical_root) => value,
+            _ => {
+                excluded.push(adopt_exclusion(path, "path_escape"));
+                continue;
+            }
+        };
+        let normalized = normalize_existing_path(&path);
+        if managed_sources.contains(&normalized) || managed_sources.contains(&canonical) {
+            excluded.push(adopt_exclusion(path, "managed_source"));
+            continue;
+        }
+        if managed_target_paths.contains(&normalized) || managed_target_paths.contains(&canonical) {
+            excluded.push(adopt_exclusion(path, "managed_target"));
+            continue;
+        }
+        if canonical.starts_with(&canonical_central) {
+            excluded.push(adopt_exclusion(path, "managed_source"));
+            continue;
+        }
+        if !regular_skill_manifest(&canonical) {
+            excluded.push(adopt_exclusion(path, "missing_skill_md"));
+            continue;
+        }
+        if tree_has_escaping_symlink(&canonical, &canonical)? {
+            excluded.push(adopt_exclusion(path, "path_escape"));
+            continue;
+        }
+        let Some(name) = canonical
+            .file_name()
+            .map(|value| value.to_string_lossy().into_owned())
+        else {
+            excluded.push(adopt_exclusion(path, "invalid_name"));
+            continue;
+        };
+        candidates.push(AdoptScanCandidate {
+            name,
+            content_hash: hash_dir(&canonical)?,
+            path: canonical,
+        });
+    }
+
+    Ok(AdoptScanResult {
+        root: canonical_root,
+        candidates,
+        excluded,
+    })
+}
+
+fn regular_skill_manifest(path: &Path) -> bool {
+    fs::symlink_metadata(path.join("SKILL.md"))
+        .map(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
+fn tree_has_escaping_symlink(path: &Path, boundary: &Path) -> Result<bool> {
+    for entry in WalkDir::new(path).follow_links(false) {
+        let entry = entry?;
+        if entry.file_type().is_symlink() {
+            let target = fs::canonicalize(entry.path())?;
+            if !target.starts_with(boundary) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn normalize_existing_path(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.components().collect())
+}
+
+fn adopt_exclusion(path: PathBuf, reason: &str) -> AdoptScanExclusion {
+    AdoptScanExclusion {
+        path,
+        reason: reason.to_string(),
+    }
 }
 
 pub fn build_onboarding_plan<R: tauri::Runtime>(

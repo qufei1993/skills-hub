@@ -1331,6 +1331,23 @@ fn format_service_error_maps_target_conflict_back_to_the_desktop_prefix() {
     );
 }
 
+#[test]
+fn format_service_error_preserves_modified_target_semantics_for_safe_removal() {
+    let error = crate::services::error::ServiceError::new(
+        crate::services::error::ErrorCode::TargetConflict,
+        "a managed target contains user changes",
+        serde_json::json!({
+            "path": "/tmp/safe-target",
+            "reason": "target_modified"
+        }),
+    );
+
+    assert_eq!(
+        format_service_error(error),
+        "TARGET_MODIFIED|/tmp/safe-target"
+    );
+}
+
 fn make_install_service() -> (
     tempfile::TempDir,
     tempfile::TempDir,

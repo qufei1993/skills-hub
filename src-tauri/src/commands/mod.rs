@@ -43,9 +43,7 @@ use crate::core::github_token::{
     has_github_token, resolve_github_token, set_github_token as set_github_token_core,
     SystemGithubTokenStore,
 };
-use crate::core::installer::{
-    import_existing_local_skill, GitSkillCandidate, InstallResult, LocalSkillCandidate,
-};
+use crate::core::installer::{GitSkillCandidate, LocalSkillCandidate};
 use crate::core::network_proxy::{
     app_http_client, get_github_proxy_config as get_github_proxy_config_core,
     get_github_proxy_url as get_github_proxy_url_core,
@@ -56,7 +54,7 @@ use crate::core::onboarding::{
     build_onboarding_plan, get_discovery_scan_settings as get_discovery_scan_settings_core,
     save_discovery_scan_config, DiscoveryScanConfig, DiscoveryScanSettings, OnboardingPlan,
 };
-use crate::core::recycle_bin::{DeletionSource, RecycleBinItem, RecycleBinService};
+use crate::core::recycle_bin::{RecycleBinItem, RecycleBinService};
 #[cfg(test)]
 use crate::core::skill_store::{SkillRecord, SkillTargetRecord};
 use crate::core::skill_store::{SkillStore, DEVICE_SYNC_HISTORY_LIMIT};
@@ -75,6 +73,7 @@ use crate::core::tool_adapters::{
     resolve_default_path, save_tool_config, supports_project_scope, CustomToolConfig, ToolConfig,
 };
 use crate::services::install::{InstallOutcome, InstallRequest};
+use crate::services::library::{AdoptRequest, RemoveRequest, TagAction, TagSelector};
 use crate::services::operation_lock::{OperationKind, OperationLock};
 use crate::services::skills_hub::SkillsHubService;
 use crate::services::types::{Agent as ServiceAgent, Skill as ServiceSkill};
@@ -191,10 +190,16 @@ fn format_service_error(error: crate::services::error::ServiceError) -> String {
             let removal_count = error.details["removal_count"].as_u64().unwrap_or(0);
             format!("UPDATE_HELD_BACK|{removal_count}")
         }
-        crate::services::error::ErrorCode::TargetConflict => match error.details["path"].as_str() {
-            Some(path) => format!("TARGET_EXISTS|{path}"),
-            None => format_anyhow_error(anyhow::anyhow!(error.message)),
-        },
+        crate::services::error::ErrorCode::TargetConflict => {
+            match (
+                error.details["reason"].as_str(),
+                error.details["path"].as_str(),
+            ) {
+                (Some("target_modified"), Some(path)) => format!("TARGET_MODIFIED|{path}"),
+                (_, Some(path)) => format!("TARGET_EXISTS|{path}"),
+                _ => format_anyhow_error(anyhow::anyhow!(error.message)),
+            }
+        }
         _ => match error.details["legacy_category"].as_str() {
             Some("github_auth") => format_anyhow_error(anyhow::anyhow!(
                 "git clone https://github.com/<owner>/<repo> failed: authentication failed"
@@ -1623,27 +1628,29 @@ pub async fn set_github_proxy_url(
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn import_existing_skill(
-    app: tauri::AppHandle,
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     sourcePath: String,
     name: Option<String>,
 ) -> Result<InstallResultDto, String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let _operation_lock = acquire_operation_lock(&app, OperationKind::Install)?;
-        let source = std::path::Path::new(&sourcePath);
-        // Validate SKILL.md exists before importing (fixes #8: prevents importing
-        // directories that were "discovered" but lack a valid SKILL.md).
-        if !source.join("SKILL.md").exists() {
-            anyhow::bail!("SKILL_INVALID|missing_skill_md");
+        let plan = service.plan_adopt_with_name(&sourcePath, name)?;
+        if plan.candidates.len() != 1 {
+            return Err(crate::services::error::ServiceError::new(
+                crate::services::error::ErrorCode::InvalidSource,
+                "SKILL_INVALID|missing_skill_md",
+                serde_json::json!({ "reason": "missing_skill_md" }),
+            ));
         }
-        let paths = crate::runtime_paths_for_tauri(&app)?;
-        let result = import_existing_local_skill(&paths, &store, source, name)?;
-        Ok::<_, anyhow::Error>(to_install_dto(result))
+        let mut outcome = service.adopt(AdoptRequest::confirmed(plan.id))?;
+        let adopted = outcome.adopted.pop().ok_or_else(|| {
+            crate::services::error::ServiceError::internal("failed to import the selected skill")
+        })?;
+        Ok::<_, crate::services::error::ServiceError>(to_service_install_dto(adopted))
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(format_service_error)
 }
 
 #[derive(Debug, Serialize)]
@@ -1762,36 +1769,55 @@ pub fn get_tags(store: State<'_, SkillStore>) -> Result<Vec<TagWithCountDto>, St
 
 #[tauri::command]
 #[allow(non_snake_case)]
-pub fn create_tag(store: State<'_, SkillStore>, name: String) -> Result<TagDto, String> {
-    store
-        .create_tag(&name)
+pub fn create_tag(service: State<'_, SkillsHubService>, name: String) -> Result<TagDto, String> {
+    service
+        .apply_tag_action(TagAction::Create { name })
+        .and_then(|outcome| {
+            outcome.tag.ok_or_else(|| {
+                crate::services::error::ServiceError::internal("created tag is missing")
+            })
+        })
         .map(|tag| TagDto {
             id: tag.id,
             name: tag.name,
         })
-        .map_err(format_anyhow_error)
+        .map_err(format_service_error)
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
 pub fn rename_tag(
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     tagId: i64,
     name: String,
 ) -> Result<TagDto, String> {
-    store
-        .rename_tag(tagId, &name)
+    service
+        .apply_tag_action(TagAction::Rename {
+            tag: TagSelector::Id(tagId),
+            name,
+        })
+        .and_then(|outcome| {
+            outcome.tag.ok_or_else(|| {
+                crate::services::error::ServiceError::internal("renamed tag is missing")
+            })
+        })
         .map(|tag| TagDto {
             id: tag.id,
             name: tag.name,
         })
-        .map_err(format_anyhow_error)
+        .map_err(format_service_error)
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
-pub fn delete_tag(store: State<'_, SkillStore>, tagId: i64) -> Result<(), String> {
-    store.delete_tag(tagId).map_err(format_anyhow_error)
+pub fn delete_tag(service: State<'_, SkillsHubService>, tagId: i64) -> Result<(), String> {
+    service
+        .apply_tag_action(TagAction::Delete {
+            tag: TagSelector::Id(tagId),
+            confirmed: true,
+        })
+        .map(|_| ())
+        .map_err(format_service_error)
 }
 
 #[tauri::command]
@@ -1816,13 +1842,17 @@ pub fn get_skill_tags(
 #[tauri::command]
 #[allow(non_snake_case)]
 pub fn set_skill_tags(
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     skillId: String,
     tagIds: Vec<i64>,
 ) -> Result<(), String> {
-    store
-        .set_skill_tags(&skillId, &tagIds)
-        .map_err(format_anyhow_error)
+    service
+        .apply_tag_action(TagAction::SetIds {
+            skill: crate::services::types::SkillSelector::Id(skillId),
+            tag_ids: tagIds,
+        })
+        .map(|_| ())
+        .map_err(format_service_error)
 }
 
 #[tauri::command]
@@ -1833,49 +1863,29 @@ pub fn get_untagged_skill_ids(store: State<'_, SkillStore>) -> Result<Vec<String
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn delete_managed_skill(
-    app: tauri::AppHandle,
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     skillId: String,
 ) -> Result<(), String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let _operation_lock = acquire_operation_lock(&app, OperationKind::Delete)?;
-        let _device_sync_guard = if store.get_device_sync_config()?.is_some() {
-            Some(crate::core::device_sync::try_lock_device_sync()?)
-        } else {
-            None
+        let plan = match service.plan_remove(crate::services::types::SkillSelector::Id(skillId)) {
+            Ok(plan) => plan,
+            Err(error) if error.code == crate::services::error::ErrorCode::SkillNotFound => {
+                return Ok(());
+            }
+            Err(error) => return Err(error),
         };
-        // 便于排查“按钮点了没反应”：确认前端确实触发了命令
-        println!("[delete_managed_skill] skillId={}", skillId);
-
-        if store.get_skill_by_id(&skillId)?.is_some() {
-            let trash_root = app.path().app_data_dir()?.join("recycle-bin");
-            RecycleBinService::new(&store, trash_root).archive(
-                &skillId,
-                DeletionSource::Manual,
-                now_ms(),
-            )?;
-        }
-
-        Ok::<_, anyhow::Error>(())
+        service.remove(RemoveRequest::confirmed(plan.id))?;
+        Ok::<_, crate::services::error::ServiceError>(())
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(format_service_error)
 }
 
 #[cfg(test)]
 fn remove_path_any(path: &str) -> Result<(), String> {
     remove_path_any_core(std::path::Path::new(path)).map_err(|err| format!("{path}: {err:#}"))
-}
-
-fn to_install_dto(result: InstallResult) -> InstallResultDto {
-    InstallResultDto {
-        skill_id: result.skill_id,
-        name: result.name,
-        central_path: result.central_path.to_string_lossy().to_string(),
-        content_hash: result.content_hash,
-    }
 }
 
 fn to_service_install_dto(result: InstallOutcome) -> InstallResultDto {

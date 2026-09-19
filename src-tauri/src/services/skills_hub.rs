@@ -11,6 +11,7 @@ use crate::core::tool_adapters::{
 };
 
 use super::error::{ErrorCode, ServiceError};
+use super::library::LibraryPlanStore;
 use super::operation_lock::{OperationKind, OperationLock};
 use super::types::{
     Agent, AgentList, DoctorReport, Skill, SkillSelector, SkillSource, SkillStatus, SkillTag,
@@ -23,6 +24,7 @@ pub struct SkillsHubService {
     store: SkillStore,
     schema_version_at_open: Option<i32>,
     incompatible_schema_version: Option<i32>,
+    pub(crate) library_plans: LibraryPlanStore,
 }
 
 impl SkillsHubService {
@@ -36,6 +38,7 @@ impl SkillsHubService {
                         paths,
                         schema_version_at_open: None,
                         incompatible_schema_version: Some(compatibility.found_version),
+                        library_plans: LibraryPlanStore::default(),
                     });
                 }
                 Err(ServiceError::internal(
@@ -52,6 +55,7 @@ impl SkillsHubService {
             store,
             schema_version_at_open,
             incompatible_schema_version: None,
+            library_plans: LibraryPlanStore::default(),
         }
     }
 

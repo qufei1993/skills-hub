@@ -160,12 +160,12 @@ impl SkillsHubService {
                 )
             }
         }?;
-        let skill = self.show_skill(SkillSelector::Id(installed.skill_id))?;
+        let skill = self.show_skill(SkillSelector::Id(installed.skill_id.clone()))?;
         Ok(InstallOutcome {
             id: skill.id,
-            name: skill.name,
-            central_path: skill.central_path,
-            content_hash: skill.content_hash,
+            name: installed.name,
+            central_path: installed.central_path.to_string_lossy().into_owned(),
+            content_hash: installed.content_hash,
             source: skill.source,
             targets: skill.targets,
         })
