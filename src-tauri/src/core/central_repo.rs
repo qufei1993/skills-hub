@@ -33,6 +33,19 @@ pub fn ensure_central_repo(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Resolves the same location as [`resolve_central_repo_path`] without an app handle.
+///
+/// Call sites that only need to describe where the repository is — such as the discovery
+/// source list — do not have a handle available. The app-data fallback is intentionally
+/// absent: it only applies on systems with no home directory, where those call sites
+/// simply omit the location.
+pub fn central_repo_path_without_app(store: &SkillStore) -> Option<PathBuf> {
+    if let Ok(Some(path)) = store.get_setting("central_repo_path") {
+        return Some(PathBuf::from(path));
+    }
+    home_dir().map(|home| home.join(CENTRAL_DIR_NAME))
+}
+
 pub fn validate_central_repo_path_change(
     current: &Path,
     destination: &Path,

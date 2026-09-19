@@ -84,17 +84,18 @@ fn install_local_skill_with_existing_policy<R: tauri::Runtime>(
     let central_path = central_dir.join(&name);
 
     if central_path.exists() {
-        if reuse_identical_existing {
-            let existing = store
-                .list_skills()?
-                .into_iter()
-                .find(|skill| Path::new(&skill.central_path) == central_path);
-            let source_hash = hash_dir(source_path).ok();
-            let central_hash = hash_dir(&central_path).ok();
-            if let (Some(record), Some(src_hash), Some(dst_hash)) =
-                (existing, source_hash, central_hash)
-            {
-                if src_hash == dst_hash {
+        let existing = store
+            .list_skills()?
+            .into_iter()
+            .find(|skill| Path::new(&skill.central_path) == central_path);
+        let identical_content = match (hash_dir(source_path), hash_dir(&central_path)) {
+            (Ok(source_hash), Ok(central_hash)) => source_hash == central_hash,
+            _ => false,
+        };
+
+        match existing {
+            Some(record) => {
+                if reuse_identical_existing && identical_content {
                     return Ok(InstallResult {
                         skill_id: record.id,
                         name: record.name,
@@ -102,9 +103,18 @@ fn install_local_skill_with_existing_policy<R: tauri::Runtime>(
                         content_hash: record.content_hash,
                     });
                 }
+                anyhow::bail!("skill already exists in central repo: {:?}", central_path);
             }
+            None if identical_content && central_path.join("SKILL.md").is_file() => {
+                // The central copy is byte-identical to what was requested but nothing in
+                // the library points at it. That is what a cleared or lost database leaves
+                // behind: every tool mirror is a link into the central repository, so tool
+                // scans skip it and the content would otherwise be unreachable. Adopt the
+                // folder in place instead of refusing it.
+                return adopt_existing_central_skill(store, &central_path, source_path, name);
+            }
+            None => anyhow::bail!("skill already exists in central repo: {:?}", central_path),
         }
-        anyhow::bail!("skill already exists in central repo: {:?}", central_path);
     }
 
     copy_dir_recursive(source_path, &central_path)
@@ -138,6 +148,74 @@ fn install_local_skill_with_existing_policy<R: tauri::Runtime>(
         skill_id: record.id,
         name: record.name,
         central_path,
+        content_hash,
+    })
+}
+
+/// Registers a Skill whose content already lives in the central repository, without
+/// copying anything. Only reachable when the folder exists and no library record points
+/// at it, which is how a library looks after its database is cleared or lost.
+fn adopt_existing_central_skill(
+    store: &SkillStore,
+    central_path: &Path,
+    source_path: &Path,
+    name: String,
+) -> Result<InstallResult> {
+    let now = now_ms();
+    let content_hash = compute_content_hash(central_path);
+    let description = parse_skill_md(&central_path.join("SKILL.md")).and_then(|(_, desc)| desc);
+    // Keep an external origin only when the caller pointed somewhere other than the
+    // central folder itself. Adopting that folder leaves the Skill locally owned with no
+    // source, which is the state the UI shows as "no local source".
+    let points_at_central = std::fs::canonicalize(source_path)
+        .ok()
+        .zip(std::fs::canonicalize(central_path).ok())
+        .is_some_and(|(source, central)| source == central);
+    let source_ref = (!points_at_central).then(|| source_path.to_string_lossy().to_string());
+
+    let record = match store
+        .list_skills()?
+        .into_iter()
+        .find(|skill| skill.name == name && !Path::new(&skill.central_path).exists())
+    {
+        // A record for this name can already exist while its central folder is gone. Such
+        // a record is hollow: re-pointing it at the folder that does exist keeps its
+        // identity, so its tags, enabled state and tool targets survive, and adopting a
+        // library folder never leaves two records describing the same Skill.
+        Some(mut record) => {
+            record.description = record.description.or(description);
+            record.central_path = central_path.to_string_lossy().to_string();
+            record.content_hash = content_hash.clone();
+            record.updated_at = now;
+            record.last_seen_at = now;
+            record.status = "ok".to_string();
+            record
+        }
+        None => SkillRecord {
+            id: Uuid::new_v4().to_string(),
+            name,
+            description,
+            source_type: "local".to_string(),
+            source_ref,
+            source_subpath: None,
+            source_revision: None,
+            central_path: central_path.to_string_lossy().to_string(),
+            content_hash: content_hash.clone(),
+            created_at: now,
+            updated_at: now,
+            last_sync_at: None,
+            last_seen_at: now,
+            enabled: true,
+            status: "ok".to_string(),
+        },
+    };
+
+    store.commit_skill_update(&record, &[])?;
+
+    Ok(InstallResult {
+        skill_id: record.id,
+        name: record.name,
+        central_path: central_path.to_path_buf(),
         content_hash,
     })
 }

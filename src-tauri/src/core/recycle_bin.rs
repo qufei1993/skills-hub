@@ -78,7 +78,6 @@ impl<'a> RecycleBinService<'a> {
             .get_skill_by_id(skill_id)?
             .with_context(|| format!("Skill not found: {skill_id}"))?;
         let source = PathBuf::from(&skill.central_path);
-        anyhow::ensure!(source.is_dir(), "Skill content is missing: {:?}", source);
         let tags = self
             .store
             .get_skill_tags(skill_id)?
@@ -86,6 +85,57 @@ impl<'a> RecycleBinService<'a> {
             .map(|tag| tag.name)
             .collect::<Vec<_>>();
         let targets = self.store.list_skill_targets(skill_id)?;
+
+        // The folder can already be gone: the library can hold a record whose content was
+        // never materialised again, which used to make deleting that record impossible —
+        // every attempt failed with "Skill content is missing". There is nothing to keep in
+        // the recycle bin in that case, so the record and its tool links are removed
+        // instead. A device-sync peer that still holds the Skill restores it, with content,
+        // on the next sync.
+        if !source.is_dir() {
+            let mut protected = vec![source.clone()];
+            if let Some(original) = skill.external_local_source() {
+                protected.push(PathBuf::from(original));
+            }
+            self.store.delete_skill(skill_id)?;
+            let mut failures = Vec::new();
+            for target in &targets {
+                let target_path = PathBuf::from(&target.target_path);
+                if path_is_protected_real_content(&target_path, &protected)? {
+                    continue;
+                }
+                if let Err(error) = remove_path(&target_path) {
+                    failures.push(format!("{:?}: {error:#}", target_path));
+                }
+            }
+            if !failures.is_empty() {
+                log::warn!(
+                    "removed Skill {} with missing content but could not clear every tool link: {}",
+                    skill.name,
+                    failures.join("; ")
+                );
+            }
+            log::warn!(
+                "removed Skill {} without recycle bin content; {:?} is gone",
+                skill.name,
+                source
+            );
+            return Ok(RecycleBinItem {
+                id: Uuid::new_v4().to_string(),
+                skill_id: skill.id.clone(),
+                skill_name: skill.name.clone(),
+                description: skill.description.clone(),
+                tags,
+                deletion_source: deletion_source.as_str().to_string(),
+                deleted_at,
+                expires_at: deleted_at + RETENTION_MS,
+                enabled: skill.enabled,
+                source_type: skill.source_type.clone(),
+                source_ref: skill.source_ref.clone(),
+                targets,
+                trash_path: String::new(),
+            });
+        }
         let snapshot = RecycleBinSnapshot {
             skill: skill.clone(),
             tags: tags.clone(),
