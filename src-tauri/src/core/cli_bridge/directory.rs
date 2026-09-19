@@ -5,6 +5,10 @@ use std::fs::File;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+#[cfg(any(windows, test))]
+#[path = "directory/windows_guard.rs"]
+mod windows_guard;
+
 fn unsafe_path() -> io::Error {
     io::Error::new(
         io::ErrorKind::PermissionDenied,
@@ -18,7 +22,53 @@ pub(super) struct BridgeDirectory {
     #[cfg(unix)]
     file: File,
     #[cfg(windows)]
-    _ancestors: Vec<File>,
+    ancestors: Vec<WindowsAncestor>,
+}
+
+#[cfg(windows)]
+struct WindowsAncestor {
+    handle: File,
+    snapshot: windows_guard::Snapshot,
+}
+
+#[cfg(windows)]
+fn windows_snapshot(handle: &File) -> io::Result<windows_guard::Snapshot> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FileAttributeTagInfo, FileIdInfo, GetFileInformationByHandleEx, FILE_ATTRIBUTE_TAG_INFO,
+        FILE_ID_INFO,
+    };
+    let mut attributes = FILE_ATTRIBUTE_TAG_INFO::default();
+    let mut identity = FILE_ID_INFO::default();
+    // Both initialized output buffers match the selected Windows information classes.
+    let attributes_ok = unsafe {
+        GetFileInformationByHandleEx(
+            handle.as_raw_handle(),
+            FileAttributeTagInfo,
+            (&mut attributes as *mut FILE_ATTRIBUTE_TAG_INFO).cast(),
+            std::mem::size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
+        )
+    };
+    if attributes_ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let identity_ok = unsafe {
+        GetFileInformationByHandleEx(
+            handle.as_raw_handle(),
+            FileIdInfo,
+            (&mut identity as *mut FILE_ID_INFO).cast(),
+            std::mem::size_of::<FILE_ID_INFO>() as u32,
+        )
+    };
+    if identity_ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(windows_guard::Snapshot {
+        attributes: attributes.FileAttributes,
+        reparse_tag: attributes.ReparseTag,
+        volume: identity.VolumeSerialNumber,
+        file_id: identity.FileId.Identifier,
+    })
 }
 
 impl BridgeDirectory {
@@ -79,9 +129,9 @@ impl BridgeDirectory {
 
     #[cfg(windows)]
     fn open_platform(path: &Path, create: bool) -> io::Result<Self> {
-        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+        use std::os::windows::fs::OpenOptionsExt;
         let mut current = PathBuf::new();
-        let mut ancestors = Vec::new();
+        let mut ancestors: Vec<WindowsAncestor> = Vec::new();
         let mut created = Vec::new();
         let result: io::Result<()> = (|| {
             for component in path.components() {
@@ -89,11 +139,16 @@ impl BridgeDirectory {
                 if matches!(component, Component::Prefix(_)) {
                     continue;
                 }
-                // No FILE_SHARE_DELETE: verified ancestors cannot be renamed or replaced.
+                for ancestor in &ancestors {
+                    windows_guard::verify(Some(ancestor.snapshot), || {
+                        windows_snapshot(&ancestor.handle)
+                    })?;
+                }
+                // Read sharing only denies both existing and future write/reparse/delete handles.
                 let open = || {
                     fs::OpenOptions::new()
                         .read(true)
-                        .share_mode(3)
+                        .share_mode(windows_guard::share_mode())
                         .custom_flags(0x00200000 | 0x02000000)
                         .open(&current)
                 };
@@ -106,11 +161,8 @@ impl BridgeDirectory {
                     }
                     Err(error) => return Err(error),
                 };
-                let metadata = handle.metadata()?;
-                if !metadata.is_dir() || metadata.file_attributes() & 0x400 != 0 {
-                    return Err(unsafe_path());
-                }
-                ancestors.push(handle);
+                let snapshot = windows_guard::verify(None, || windows_snapshot(&handle))?;
+                ancestors.push(WindowsAncestor { handle, snapshot });
             }
             Ok(())
         })();
@@ -124,7 +176,7 @@ impl BridgeDirectory {
         }
         Ok(Self {
             path: path.to_path_buf(),
-            _ancestors: ancestors,
+            ancestors,
         })
     }
 
@@ -139,7 +191,12 @@ impl BridgeDirectory {
                 return Err(unsafe_path());
             }
         }
-        // Windows ancestor handles deny rename/delete for the lifetime of this directory.
+        #[cfg(windows)]
+        for ancestor in &self.ancestors {
+            windows_guard::verify(Some(ancestor.snapshot), || {
+                windows_snapshot(&ancestor.handle)
+            })?;
+        }
         Ok(())
     }
 

@@ -277,3 +277,49 @@ fn cli_bridge_pinned_directory_rejects_redirection_before_later_writes() {
     assert_eq!(fs::read_dir(prod).unwrap().count(), 0);
     assert_eq!(fs::read_dir(original).unwrap().count(), 0);
 }
+
+#[cfg(windows)]
+fn open_writable_directory(path: &Path) -> std::io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    OpenOptions::new()
+        .write(true)
+        .share_mode(7)
+        .custom_flags(0x00200000 | 0x02000000)
+        .open(path)
+}
+
+#[cfg(windows)]
+#[test]
+fn cli_bridge_windows_held_ancestors_deny_write_and_junction_changes() {
+    let f = Fixture::new();
+    let prod = f.root.path().join("production");
+    fs::create_dir(&prod).unwrap();
+    let destination = f.destination.join("bin");
+    let directory = BridgeDirectory::open(&destination, true).unwrap();
+    for path in [&f.destination, &destination] {
+        let error = open_writable_directory(path).unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(32)); // ERROR_SHARING_VIOLATION
+        assert!(junction::create(&prod, path).is_err());
+    }
+    directory.verify().unwrap();
+    let mut temp = directory.temp().unwrap();
+    temp.file.write_all(b"verified child operation").unwrap();
+    temp.persist("child").unwrap();
+    assert_eq!(
+        fs::read(destination.join("child")).unwrap(),
+        b"verified child operation"
+    );
+    assert_eq!(fs::read_dir(&prod).unwrap().count(), 0);
+    drop(directory);
+}
+
+#[cfg(windows)]
+#[test]
+fn cli_bridge_windows_existing_writable_ancestor_blocks_preparation() {
+    let f = Fixture::new();
+    fs::create_dir(&f.destination).unwrap();
+    let writable = open_writable_directory(&f.destination).unwrap();
+    assert!(BridgeDirectory::open(&f.destination.join("bin"), true).is_err());
+    assert_eq!(fs::read_dir(&f.destination).unwrap().count(), 0);
+    drop(writable);
+}
