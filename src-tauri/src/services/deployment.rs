@@ -8,7 +8,8 @@ use uuid::Uuid;
 use crate::core::content_hash::{hash_dir_for_sync_conflict, hash_dir_strict};
 use crate::core::skill_store::SkillTargetRecord;
 use crate::core::sync_engine::{
-    deployment_fingerprint, path_for_comparison, PreparedDeployment, SyncMode,
+    deployment_fingerprint, path_for_comparison, DeploymentParentSnapshot, PreparedDeployment,
+    SyncMode,
 };
 
 use super::error::{ErrorCode, ServiceError};
@@ -76,6 +77,8 @@ pub struct DeploymentPlan {
     rows: Vec<SkillTargetRecord>,
     #[serde(skip)]
     fingerprints: Vec<Option<String>>,
+    #[serde(skip)]
+    parent_snapshots: Vec<DeploymentParentSnapshot>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -114,6 +117,10 @@ impl SkillsHubService {
         &self,
         plan: DeploymentPlan,
     ) -> Result<DeploymentOutcome, ServiceError> {
+        self.ensure_database_compatible()?;
+        if plan.snapshot["undeploy"].as_bool() != Some(plan.undeploy) {
+            return Err(stale());
+        }
         let _lock = self.begin_write(if plan.undeploy {
             OperationKind::Undeploy
         } else {
@@ -429,7 +436,12 @@ impl SkillsHubService {
             .map(|target| target_location(&target.path))
             .collect::<anyhow::Result<Vec<_>>>()
             .map_err(|_| ServiceError::internal("failed to inspect deployment paths"))?;
-        let snapshot = json!({"skill":skill,"source_hash":source_hash,"agents":agents,"records":all_records,"baselines":baseline_snapshot,"fingerprints":fingerprints,"locations":locations});
+        let parent_snapshots = targets
+            .iter()
+            .map(|target| DeploymentParentSnapshot::capture(&target.path, project.as_deref()))
+            .collect::<anyhow::Result<Vec<_>>>()
+            .map_err(|_| stale())?;
+        let snapshot = json!({"undeploy":undeploy,"parents":parent_snapshots,"skill":skill,"source_hash":source_hash,"agents":agents,"records":all_records,"baselines":baseline_snapshot,"fingerprints":fingerprints,"locations":locations});
         if !undeploy {
             rows = records;
         }
@@ -443,6 +455,7 @@ impl SkillsHubService {
             source,
             rows,
             fingerprints,
+            parent_snapshots,
         })
     }
 
@@ -452,12 +465,18 @@ impl SkillsHubService {
     ) -> Result<DeploymentOutcome, ServiceError> {
         let mut prepared = Vec::new();
         let result = (|| -> anyhow::Result<()> {
-            for (target, expected) in plan.targets.iter().zip(&plan.fingerprints) {
-                prepared.push(PreparedDeployment::prepare(
+            for ((target, expected), parents) in plan
+                .targets
+                .iter()
+                .zip(&plan.fingerprints)
+                .zip(&plan.parent_snapshots)
+            {
+                prepared.push(PreparedDeployment::prepare_in(
                     (!plan.undeploy).then_some(plan.source.as_path()),
                     &target.path,
                     target.mode,
                     expected.clone(),
+                    parents.clone(),
                 )?);
             }
             for replacement in &mut prepared {
@@ -525,6 +544,17 @@ impl SkillsHubService {
             self.store().commit_deployment_targets(
                 &upserts,
                 if plan.undeploy { &plan.rows } else { &[] },
+                || {
+                    for replacement in &prepared {
+                        replacement.verify_unchanged()?;
+                    }
+                    anyhow::ensure!(
+                        Some(hash_dir_strict(&plan.source)?.as_str())
+                            == plan.snapshot["source_hash"].as_str(),
+                        "PLAN_STALE"
+                    );
+                    Ok(())
+                },
             )?;
             Ok(())
         })();

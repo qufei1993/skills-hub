@@ -604,3 +604,258 @@ fn shared_directory_rejects_incompatible_explicit_modes_before_writing() {
     assert!(!root.join("demo").exists());
     assert_eq!(f.rows(), 0);
 }
+
+#[test]
+fn apply_rejects_a_tampered_operation_without_removing_deployment() {
+    let f = Fixture::new();
+    f.service
+        .deploy(DeploymentRequest::global("demo", ["cursor"]))
+        .unwrap();
+    let mut plan = f
+        .service
+        .plan_deploy(DeploymentRequest::global("demo", ["cursor"]))
+        .unwrap();
+    plan.undeploy = true;
+    assert_eq!(
+        f.service.apply_deployment_plan(plan).unwrap_err().code,
+        ErrorCode::PlanStale
+    );
+    assert!(f.target("cursor").join("SKILL.md").exists());
+    assert_eq!(f.rows(), 1);
+}
+
+#[test]
+fn plan_binds_an_existing_parent_directory_identity() {
+    let f = Fixture::new();
+    let project = TempDir::new().unwrap();
+    let parent = project.path().join(".agents/skills");
+    fs::create_dir_all(&parent).unwrap();
+    let mut request = DeploymentRequest::global("demo", ["cursor"]);
+    request.scope = DeploymentScope::Project(project.path().to_path_buf());
+    let plan = f.service.plan_deploy(request).unwrap();
+    fs::rename(&parent, project.path().join("original-parent")).unwrap();
+    fs::create_dir(&parent).unwrap();
+    assert_eq!(
+        f.service.apply_deployment_plan(plan).unwrap_err().code,
+        ErrorCode::PlanStale
+    );
+    assert!(!parent.join("demo").exists());
+    assert_eq!(f.rows(), 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn apply_rejects_a_project_parent_redirected_after_planning() {
+    let f = Fixture::new();
+    let project = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    let parent = project.path().join(".agents/skills");
+    fs::create_dir_all(&parent).unwrap();
+    let mut request = DeploymentRequest::global("demo", ["cursor"]);
+    request.scope = DeploymentScope::Project(project.path().to_path_buf());
+    let plan = f.service.plan_deploy(request).unwrap();
+    fs::rename(&parent, project.path().join("original-parent")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), &parent).unwrap();
+    assert_eq!(
+        f.service.apply_deployment_plan(plan).unwrap_err().code,
+        ErrorCode::PlanStale
+    );
+    assert!(fs::read_dir(outside.path()).unwrap().next().is_none());
+    assert_eq!(f.rows(), 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn activation_rejects_parent_redirection_without_touching_external_staging() {
+    use crate::core::sync_engine::{PreparedDeployment, SyncMode};
+    let f = Fixture::new();
+    let outside = TempDir::new().unwrap();
+    let target = f.target("cursor");
+    let skill = f.service.show_skill("demo".into()).unwrap();
+    let mut staged = PreparedDeployment::prepare(
+        Some(std::path::Path::new(&skill.central_path)),
+        &target,
+        SyncMode::Copy,
+        None,
+    )
+    .unwrap();
+    let parent = target.parent().unwrap();
+    let staging_name = fs::read_dir(parent)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .file_name();
+    let original = f.home.path().join("original-parent");
+    fs::rename(parent, &original).unwrap();
+    std::os::unix::fs::symlink(outside.path(), parent).unwrap();
+    let external_staging = outside.path().join(staging_name);
+    fs::create_dir(&external_staging).unwrap();
+    fs::write(external_staging.join("user.txt"), "outside").unwrap();
+    let result = staged.activate();
+    assert!(result.unwrap_err().to_string().contains("PLAN_STALE"));
+    assert!(staged.rollback().is_err());
+    drop(staged);
+    assert!(!outside.path().join("demo").exists());
+    assert_eq!(
+        fs::read_to_string(external_staging.join("user.txt")).unwrap(),
+        "outside"
+    );
+    assert!(fs::read_dir(original).unwrap().next().is_some());
+}
+
+#[cfg(unix)]
+#[test]
+fn precommit_and_rollback_reject_parent_redirection_after_activation() {
+    use crate::core::sync_engine::{PreparedDeployment, SyncMode};
+    let f = Fixture::new();
+    let outside = TempDir::new().unwrap();
+    let target = f.target("cursor");
+    let skill = f.service.show_skill("demo".into()).unwrap();
+    let mut staged = PreparedDeployment::prepare(
+        Some(std::path::Path::new(&skill.central_path)),
+        &target,
+        SyncMode::Copy,
+        None,
+    )
+    .unwrap();
+    staged.activate().unwrap();
+    let original = f.home.path().join("original-parent");
+    fs::rename(target.parent().unwrap(), &original).unwrap();
+    std::os::unix::fs::symlink(outside.path(), target.parent().unwrap()).unwrap();
+    fs::create_dir(outside.path().join("demo")).unwrap();
+    fs::copy(
+        original.join("demo/SKILL.md"),
+        outside.path().join("demo/SKILL.md"),
+    )
+    .unwrap();
+    assert!(staged
+        .verify_unchanged()
+        .unwrap_err()
+        .to_string()
+        .contains("PLAN_STALE"));
+    assert!(staged.rollback().is_err());
+    drop(staged);
+    assert!(outside.path().join("demo/SKILL.md").is_file());
+    assert!(original.join("demo/SKILL.md").is_file());
+}
+
+#[test]
+fn committed_overwrite_and_undeploy_recycle_original_real_directories() {
+    use crate::core::sync_engine::{deployment_fingerprint, PreparedDeployment, SyncMode};
+    for undeploy in [false, true] {
+        let f = Fixture::new();
+        let target = f.target("cursor");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("original.txt"), "recoverable").unwrap();
+        let skill = f.service.show_skill("demo".into()).unwrap();
+        let source = (!undeploy).then_some(std::path::Path::new(&skill.central_path));
+        let mut staged = PreparedDeployment::prepare(
+            source,
+            &target,
+            SyncMode::Copy,
+            deployment_fingerprint(&target).unwrap(),
+        )
+        .unwrap();
+        staged.activate().unwrap();
+        let backup = staged.backup_path().unwrap().to_path_buf();
+        assert_eq!(
+            fs::read_to_string(backup.join("original.txt")).unwrap(),
+            "recoverable"
+        );
+        let recycled = f.home.path().join("simulated-trash");
+        let mut called = false;
+        staged
+            .commit_with_recycler(|path| {
+                called = true;
+                fs::rename(path, &recycled)?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(called);
+        assert_eq!(
+            fs::read_to_string(recycled.join("original.txt")).unwrap(),
+            "recoverable"
+        );
+        assert_eq!(target.exists(), !undeploy);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn committed_deployment_unlinks_backup_without_recycling_its_destination() {
+    use crate::core::sync_engine::{deployment_fingerprint, PreparedDeployment, SyncMode};
+    let f = Fixture::new();
+    let target = f.target("codex");
+    fs::create_dir_all(target.parent().unwrap()).unwrap();
+    let skill = f.service.show_skill("demo".into()).unwrap();
+    std::os::unix::fs::symlink(&skill.central_path, &target).unwrap();
+    let mut staged = PreparedDeployment::prepare(
+        None,
+        &target,
+        SyncMode::Symlink,
+        deployment_fingerprint(&target).unwrap(),
+    )
+    .unwrap();
+    staged.activate().unwrap();
+    staged
+        .commit_with_recycler(|_| panic!("link destination must never be recycled"))
+        .unwrap();
+    assert!(!target.exists());
+    assert!(std::path::Path::new(&skill.central_path)
+        .join("SKILL.md")
+        .exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn preparation_revalidates_the_planned_parent_before_creating_staging() {
+    use crate::core::sync_engine::{DeploymentParentSnapshot, PreparedDeployment, SyncMode};
+    let f = Fixture::new();
+    let project = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    let parent = project.path().join(".agents/skills");
+    fs::create_dir_all(&parent).unwrap();
+    let target = parent.join("demo");
+    let project_root = fs::canonicalize(project.path()).unwrap();
+    let snapshot = DeploymentParentSnapshot::capture(&target, Some(&project_root)).unwrap();
+    fs::rename(&parent, project.path().join("original-parent")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), &parent).unwrap();
+    let skill = f.service.show_skill("demo".into()).unwrap();
+    let result = PreparedDeployment::prepare_in(
+        Some(std::path::Path::new(&skill.central_path)),
+        &target,
+        SyncMode::Copy,
+        None,
+        snapshot,
+    );
+    assert!(result.err().unwrap().to_string().contains("PLAN_STALE"));
+    assert!(fs::read_dir(outside.path()).unwrap().next().is_none());
+}
+
+#[test]
+fn database_validation_failure_keeps_target_rows_and_baselines() {
+    let f = Fixture::new();
+    f.service
+        .deploy(DeploymentRequest::global("demo", ["cursor"]))
+        .unwrap();
+    let skill = f.service.show_skill("demo".into()).unwrap();
+    let rows = f.service.store().list_skill_targets(&skill.id).unwrap();
+    let baseline_key = format!("device_sync.target_baseline.{}", rows[0].id);
+    let baseline = f.service.store().get_setting(&baseline_key).unwrap();
+    let mut validated = false;
+    let result = f.service.store().commit_deployment_targets(&[], &rows, || {
+        validated = true;
+        anyhow::bail!("PLAN_STALE")
+    });
+    assert!(validated);
+    assert!(result.unwrap_err().to_string().contains("PLAN_STALE"));
+    assert_eq!(
+        f.service.store().list_skill_targets(&skill.id).unwrap(),
+        rows
+    );
+    assert_eq!(
+        f.service.store().get_setting(&baseline_key).unwrap(),
+        baseline
+    );
+}

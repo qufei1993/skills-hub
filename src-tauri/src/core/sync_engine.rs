@@ -156,6 +156,140 @@ pub(crate) struct PreparedDirReplacement {
     activated: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct DeploymentParentIdentity {
+    path: PathBuf,
+    canonical: PathBuf,
+    identity: (u64, u64),
+    symlink: bool,
+}
+
+impl DeploymentParentIdentity {
+    fn capture(path: &Path) -> Result<Self> {
+        let metadata = std::fs::symlink_metadata(path)?;
+        anyhow::ensure!(std::fs::metadata(path)?.is_dir(), "PLAN_STALE");
+        Ok(Self {
+            path: path.to_path_buf(),
+            canonical: std::fs::canonicalize(path)?,
+            identity: directory_identity(path)?,
+            symlink: metadata.file_type().is_symlink(),
+        })
+    }
+}
+
+#[cfg(unix)]
+fn directory_identity(path: &Path) -> Result<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = std::fs::metadata(path)?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+#[cfg(windows)]
+fn directory_identity(path: &Path) -> Result<(u64, u64)> {
+    use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+    #[repr(C)]
+    #[derive(Default)]
+    struct FileInformation {
+        attributes: u32,
+        creation: [u32; 2],
+        access: [u32; 2],
+        write: [u32; 2],
+        volume: u32,
+        size_high: u32,
+        size_low: u32,
+        links: u32,
+        index_high: u32,
+        index_low: u32,
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetFileInformationByHandle(
+            handle: *mut std::ffi::c_void,
+            information: *mut FileInformation,
+        ) -> i32;
+    }
+    let file = std::fs::OpenOptions::new()
+        .access_mode(0)
+        .share_mode(7)
+        .custom_flags(0x02000000)
+        .open(path)?;
+    let mut information = FileInformation::default();
+    anyhow::ensure!(
+        unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut information) } != 0,
+        "read directory identity failed"
+    );
+    Ok((
+        information.volume as u64,
+        ((information.index_high as u64) << 32) | information.index_low as u64,
+    ))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn directory_identity(_path: &Path) -> Result<(u64, u64)> {
+    anyhow::bail!("directory identity is unsupported on this platform")
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct DeploymentParentSnapshot {
+    parent: PathBuf,
+    physical_parent: PathBuf,
+    project: Option<PathBuf>,
+    identities: Vec<DeploymentParentIdentity>,
+}
+
+impl DeploymentParentSnapshot {
+    pub(crate) fn capture(target: &Path, project: Option<&Path>) -> Result<Self> {
+        let parent = target
+            .parent()
+            .context("target has no parent")?
+            .to_path_buf();
+        let mut identities = Vec::new();
+        for ancestor in parent.ancestors() {
+            match std::fs::symlink_metadata(ancestor) {
+                Ok(_) => identities.push(DeploymentParentIdentity::capture(ancestor)?),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        let snapshot = Self {
+            physical_parent: path_for_comparison(&parent)?,
+            parent,
+            project: project.map(Path::to_path_buf),
+            identities,
+        };
+        snapshot.validate()?;
+        Ok(snapshot)
+    }
+
+    pub(crate) fn validate(&self) -> Result<()> {
+        let result = (|| -> Result<()> {
+            for expected in self.identities.iter().rev() {
+                anyhow::ensure!(
+                    DeploymentParentIdentity::capture(&expected.path)? == *expected,
+                    "parent identity changed"
+                );
+            }
+            let physical = path_for_comparison(&self.parent)?;
+            anyhow::ensure!(physical == self.physical_parent, "parent redirected");
+            if let Some(project) = &self.project {
+                anyhow::ensure!(
+                    std::fs::canonicalize(project)? == *project && physical.starts_with(project),
+                    "project boundary changed"
+                );
+            }
+            Ok(())
+        })();
+        result.context("PLAN_STALE")
+    }
+
+    fn record_created_parent(&mut self, path: &Path) -> Result<()> {
+        self.validate()?;
+        self.identities
+            .push(DeploymentParentIdentity::capture(path).context("PLAN_STALE")?);
+        self.validate()
+    }
+}
+
 /// Keeps every original target until the caller's database transaction commits.
 pub(crate) struct PreparedDeployment {
     target: PathBuf,
@@ -166,6 +300,7 @@ pub(crate) struct PreparedDeployment {
     activated: bool,
     created_parents: Vec<PathBuf>,
     pub(crate) mode: SyncMode,
+    parent_snapshot: DeploymentParentSnapshot,
 }
 
 pub(crate) fn deployment_fingerprint(path: &Path) -> Result<Option<String>> {
@@ -187,12 +322,29 @@ pub(crate) fn deployment_fingerprint(path: &Path) -> Result<Option<String>> {
 }
 
 impl PreparedDeployment {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn prepare(
         source: Option<&Path>,
         target: &Path,
         mode: SyncMode,
         expected: Option<String>,
     ) -> Result<Self> {
+        let parent_snapshot = DeploymentParentSnapshot::capture(target, None)?;
+        Self::prepare_in(source, target, mode, expected, parent_snapshot)
+    }
+
+    pub(crate) fn prepare_in(
+        source: Option<&Path>,
+        target: &Path,
+        mode: SyncMode,
+        expected: Option<String>,
+        parent_snapshot: DeploymentParentSnapshot,
+    ) -> Result<Self> {
+        anyhow::ensure!(
+            target.parent() == Some(parent_snapshot.parent.as_path()),
+            "PLAN_STALE"
+        );
+        parent_snapshot.validate()?;
         let mut value = Self {
             target: target.to_path_buf(),
             staging: None,
@@ -202,6 +354,7 @@ impl PreparedDeployment {
             activated: false,
             created_parents: Vec::new(),
             mode,
+            parent_snapshot,
         };
         if let Some(source) = source {
             let parent = target.parent().context("target has no parent")?;
@@ -212,12 +365,16 @@ impl PreparedDeployment {
                 ancestor = ancestor.parent().context("target has no ancestor")?;
             }
             for path in missing.into_iter().rev() {
+                value.parent_snapshot.validate()?;
                 std::fs::create_dir(&path)?;
-                value.created_parents.push(path);
+                value.created_parents.push(path.clone());
+                value.parent_snapshot.record_created_parent(&path)?;
             }
             let staging = parent.join(format!(".skills-hub-deploy-{}", Uuid::new_v4()));
             value.staging = Some(staging.clone());
+            value.parent_snapshot.validate()?;
             let outcome = sync_dir_with_mode_with_overwrite(mode, source, &staging, false)?;
+            value.parent_snapshot.validate()?;
             value.mode = outcome.mode_used;
             value.prepared = deployment_fingerprint(&staging)?;
         }
@@ -225,6 +382,7 @@ impl PreparedDeployment {
     }
 
     pub(crate) fn activate(&mut self) -> Result<()> {
+        self.parent_snapshot.validate()?;
         anyhow::ensure!(
             deployment_fingerprint(&self.target)? == self.expected,
             "PLAN_STALE"
@@ -235,19 +393,23 @@ impl PreparedDeployment {
                 .parent()
                 .context("target has no parent")?
                 .join(format!(".skills-hub-backup-{}", Uuid::new_v4()));
+            self.parent_snapshot.validate()?;
             std::fs::rename(&self.target, &backup)?;
             self.backup = Some(backup);
             self.verify_backup()?;
         }
         if let Some(staging) = self.staging.as_ref() {
+            self.parent_snapshot.validate()?;
             std::fs::rename(staging, &self.target)?;
             self.staging = None;
         }
         self.activated = true;
+        self.parent_snapshot.validate()?;
         Ok(())
     }
 
     pub(crate) fn verify_backup(&self) -> Result<()> {
+        self.parent_snapshot.validate()?;
         if let Some(backup) = &self.backup {
             anyhow::ensure!(
                 deployment_fingerprint(backup)? == self.expected,
@@ -269,6 +431,7 @@ impl PreparedDeployment {
     }
 
     pub(crate) fn rollback(&mut self) -> Result<()> {
+        self.parent_snapshot.validate()?;
         if self.activated {
             if std::fs::symlink_metadata(&self.target).is_ok() {
                 let recovery = self
@@ -276,56 +439,76 @@ impl PreparedDeployment {
                     .parent()
                     .context("target has no parent")?
                     .join(format!(".skills-hub-recovery-{}", Uuid::new_v4()));
+                self.parent_snapshot.validate()?;
                 std::fs::rename(&self.target, &recovery)?;
                 let unchanged =
                     deployment_fingerprint(&recovery).ok() == Some(self.prepared.clone());
                 if !unchanged {
                     if std::fs::symlink_metadata(&self.target).is_err() {
+                        self.parent_snapshot.validate()?;
                         std::fs::rename(&recovery, &self.target)?;
                     }
                     anyhow::bail!("ROLLBACK_CONFLICT|{}", self.target.display());
                 }
+                self.parent_snapshot.validate()?;
                 remove_path_permanently(&recovery)?;
             }
             self.activated = false;
         }
         if let Some(backup) = &self.backup {
+            self.parent_snapshot.validate()?;
             anyhow::ensure!(
                 std::fs::symlink_metadata(&self.target).is_err(),
                 "ROLLBACK_CONFLICT|{}",
                 self.target.display()
             );
+            self.parent_snapshot.validate()?;
             std::fs::rename(backup, &self.target)?;
             self.backup = None;
         }
         if let Some(staging) = self.staging.take() {
+            self.parent_snapshot.validate()?;
             remove_path_permanently(&staging)?;
         }
         for parent in self.created_parents.iter().rev() {
+            self.parent_snapshot.validate()?;
             let _ = std::fs::remove_dir(parent);
+            self.parent_snapshot
+                .identities
+                .retain(|identity| &identity.path != parent);
         }
         self.created_parents.clear();
         Ok(())
     }
 
     pub(crate) fn commit(&mut self) {
+        if let Err(error) = self.commit_with_recycler(recycle_path) {
+            log::warn!(
+                "deployment retained backup requiring recovery at {}: {error:#}",
+                self.target.display()
+            );
+        }
+    }
+
+    pub(crate) fn commit_with_recycler<F>(&mut self, recycle: F) -> Result<()>
+    where
+        F: FnOnce(&Path) -> Result<()>,
+    {
         self.activated = false;
         self.created_parents.clear();
         if let Some(backup) = self.backup.take() {
+            self.parent_snapshot.validate()?;
             if deployment_fingerprint(&backup).ok() != Some(self.expected.clone()) {
                 log::warn!(
                     "deployment retained a concurrently modified backup at {}",
                     backup.display()
                 );
-                return;
+                return Ok(());
             }
-            if let Err(error) = remove_path_permanently(&backup) {
-                log::warn!(
-                    "deployment backup cleanup failed at {}: {error}",
-                    backup.display()
-                );
-            }
+            self.parent_snapshot.validate()?;
+            remove_path_safely_with(&backup, recycle)?;
         }
+        Ok(())
     }
 
     pub(crate) fn backup_path(&self) -> Option<&Path> {

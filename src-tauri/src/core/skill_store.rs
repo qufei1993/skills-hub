@@ -1210,6 +1210,7 @@ impl SkillStore {
         &self,
         upserts: &[(SkillTargetRecord, String)],
         deletions: &[SkillTargetRecord],
+        validate: impl FnOnce() -> Result<()>,
     ) -> Result<()> {
         self.with_conn(|conn| {
             let tx = conn.unchecked_transaction()?;
@@ -1222,6 +1223,7 @@ impl SkillStore {
                 tx.execute("INSERT INTO settings (key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                     params![format!("device_sync.target_baseline.{}", record.id), serde_json::to_string(&(&record.target_path, hash))?])?;
             }
+            validate()?;
             tx.commit()?;
             Ok(())
         })
