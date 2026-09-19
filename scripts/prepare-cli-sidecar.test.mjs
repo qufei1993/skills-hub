@@ -36,6 +36,7 @@ describe('CLI sidecar preparation', () => {
     assert.deepEqual(desktopSidecarOptions(['--target=x86_64-pc-windows-msvc', '--debug'], 'darwin', 'arm64'), { target: 'x86_64-pc-windows-msvc', debug: true })
     assert.throws(() => desktopSidecarOptions(['--target'], 'darwin', 'arm64'))
     assert.throws(() => desktopSidecarOptions(['--target', 'linux-x64', '--target=linux-arm64'], 'linux', 'x64'))
+    assert.throws(() => desktopSidecarOptions(['--profile', 'custom'], 'linux', 'x64'), /CLI_BRIDGE_UNSUPPORTED_PROFILE/)
   })
 
   it('builds exactly the requested binary and stages exact sidecar naming and trusted metadata', () => {
@@ -50,17 +51,17 @@ describe('CLI sidecar preparation', () => {
         const output = path.join(root, 'src-tauri/target/x86_64-pc-windows-msvc/debug')
         mkdirSync(output, { recursive: true })
         writeFileSync(path.join(output, 'skillshub-cli.exe'), 'abc')
-        return { status: 0 }
+        return { status: 0, stdout: JSON.stringify({ reason: 'compiler-artifact', target: { name: 'skillshub-cli', kind: ['bin'] }, executable: path.join(output, 'skillshub-cli.exe'), profile: { debug_assertions: true } }) }
       } })
       assert.equal(calls.length, 1)
       assert.equal(calls[0].command, 'cargo')
-      assert.deepEqual(calls[0].args, ['build', '--locked', '--bin', 'skillshub-cli', '--target', 'x86_64-pc-windows-msvc'])
+      assert.deepEqual(calls[0].args, ['build', '--locked', '--bin', 'skillshub-cli', '--target', 'x86_64-pc-windows-msvc', '--message-format=json-render-diagnostics'])
       assert.equal(calls[0].options.shell, false)
       assert.equal(calls[0].options.env.SKILLS_HUB_PREPARE_CLI_SIDECAR, '1')
       assert.equal(calls[0].options.env.CARGO_TARGET_DIR, path.join(root, 'src-tauri/target'))
       assert.equal(readFileSync(path.join(root, 'src-tauri/binaries/skillshub-cli-x86_64-pc-windows-msvc.exe'), 'utf8'), 'abc')
       assert.deepEqual(JSON.parse(readFileSync(result.metadataPath, 'utf8')), {
-        version: '0.10.1', target: 'x86_64-pc-windows-msvc', sha256: createHash('sha256').update('abc').digest('hex'),
+        version: '0.10.1', target: 'x86_64-pc-windows-msvc', profile: 'debug', sha256: createHash('sha256').update('abc').digest('hex'),
       })
       assert.equal(existsSync(path.join(root, 'src-tauri/binaries/skillshub-cli-x86_64-pc-windows-msvc.exe.version')), false)
     } finally { rmSync(root, { recursive: true, force: true }) }
@@ -78,5 +79,25 @@ describe('CLI sidecar preparation', () => {
       assert.equal(existsSync(metadata), false)
       assert.equal(existsSync(path.join(root, 'src-tauri/binaries/skillshub-cli-aarch64-apple-darwin')), false)
     } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
+  it('refuses staging when the actual compiler profile disagrees in either direction', () => {
+    for (const debug of [true, false]) {
+      const root = mkdtempSync(path.join(tmpdir(), 'sidecar-profile-'))
+      try {
+        mkdirSync(path.join(root, 'src-tauri'))
+        writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '0.10.1' }))
+        writeFileSync(path.join(root, 'src-tauri/tauri.conf.json'), JSON.stringify({ version: '0.10.1' }))
+        assert.throws(() => prepareCliSidecar({ root, target: 'darwin-arm64', debug, run: (_command, args) => {
+          assert.equal(args.includes('--release'), !debug)
+          const output = path.join(root, 'src-tauri/target/aarch64-apple-darwin', debug ? 'debug' : 'release', 'skillshub-cli')
+          mkdirSync(path.dirname(output), { recursive: true })
+          writeFileSync(output, 'abc')
+          return { status: 0, stdout: JSON.stringify({ reason: 'compiler-artifact', target: { name: 'skillshub-cli', kind: ['bin'] }, executable: output, profile: { debug_assertions: !debug } }) }
+        } }), /CLI_BRIDGE_PROFILE_MISMATCH/)
+        assert.equal(existsSync(path.join(root, 'src-tauri/binaries/skillshub-cli-aarch64-apple-darwin')), false)
+        assert.equal(existsSync(path.join(root, 'src-tauri/binaries/skillshub-cli-aarch64-apple-darwin.json')), false)
+      } finally { rmSync(root, { recursive: true, force: true }) }
+    }
   })
 })

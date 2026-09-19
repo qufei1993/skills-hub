@@ -7,7 +7,7 @@ All notable changes to this project will be documented in this file.
 ## [0.10.1] - 2026-09-13
 
 ### Added
-- **Verified desktop CLI bridge**: Desktop builds bundle the matching native CLI and publish it atomically with version and SHA-256 stamps at startup. Interrupted or damaged bridges remain distinguishable from missing installations, and development builds use a separate bridge directory.
+- **Verified desktop CLI bridge**: Desktop builds bundle the matching native CLI and publish it atomically with version and SHA-256 stamps at startup. Interrupted or damaged bridges remain distinguishable from missing installations. Development builds use a separate bridge directory, reject redirected destination ancestors, and require matching CLI/desktop build profiles.
 
 ### Fixed
 - **Windows command-window flashing**: Automatic-update progress refreshes now read runtime data without querying the operating-system scheduler every five seconds. Windows scheduler and system Git child processes also start without a console window, preventing repeated command-window flashes while preserving background progress updates (fixes [#150](https://github.com/qufei1993/skills-hub/issues/150)).

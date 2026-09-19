@@ -13,6 +13,21 @@ fn prepare_cli_bridge_metadata() {
     use std::{env, fs, path::PathBuf};
 
     println!("cargo:rerun-if-env-changed=SKILLS_HUB_PREPARE_CLI_SIDECAR");
+    println!("cargo:rerun-if-changed=cli_sidecar_profile.rs");
+    let profile = env::var("PROFILE").expect("CLI_BRIDGE_UNSUPPORTED_PROFILE");
+    let output = PathBuf::from(env::var("OUT_DIR").expect("CLI_BRIDGE_UNSUPPORTED_PROFILE"));
+    let output_profile = output
+        .ancestors()
+        .nth(3)
+        .and_then(|path| path.file_name())
+        .and_then(|name| name.to_str())
+        .expect("CLI_BRIDGE_UNSUPPORTED_PROFILE");
+    cli_sidecar_profile::validate_profile(&profile, &profile, output_profile)
+        .unwrap_or_else(|reason| panic!("{reason}"));
+    println!(
+        "cargo:rustc-env=SKILLS_HUB_EXPECT_DEBUG_ASSERTIONS={}",
+        if profile == "debug" { "1" } else { "0" }
+    );
     if env::var("SKILLS_HUB_PREPARE_CLI_SIDECAR").as_deref() == Ok("1") {
         // The CLI must be built before Tauri can copy it as an external binary.
         let mut config: serde_json::Value = env::var("TAURI_CONFIG")
@@ -38,6 +53,12 @@ fn prepare_cli_bridge_metadata() {
     )
     .expect("invalid CLI sidecar metadata");
     let version = env::var("CARGO_PKG_VERSION").expect("missing package version");
+    cli_sidecar_profile::validate_profile(
+        metadata["profile"].as_str().unwrap_or(""),
+        &profile,
+        output_profile,
+    )
+    .unwrap_or_else(|reason| panic!("{reason}"));
     assert_eq!(
         metadata["version"].as_str(),
         Some(version.as_str()),
@@ -57,3 +78,4 @@ fn prepare_cli_bridge_metadata() {
     );
     println!("cargo:rustc-env=SKILLS_HUB_BUNDLED_CLI_SHA256={hash}");
 }
+mod cli_sidecar_profile;

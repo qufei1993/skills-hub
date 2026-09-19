@@ -3,6 +3,15 @@ mod commands;
 pub mod core;
 pub mod services;
 
+const _: () = assert!(
+    cfg!(debug_assertions) == (env!("SKILLS_HUB_EXPECT_DEBUG_ASSERTIONS").as_bytes()[0] == b'1'),
+    "CLI_BRIDGE_PROFILE_MISMATCH"
+);
+
+#[cfg(test)]
+#[path = "../cli_sidecar_profile.rs"]
+mod cli_bridge_profile;
+
 use std::sync::Arc;
 
 use core::cancel_token::CancelToken;

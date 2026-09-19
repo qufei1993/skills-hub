@@ -20,6 +20,7 @@ export function resolveSidecarTarget(target) {
 }
 
 export function desktopSidecarOptions(args, platform = process.platform, arch = process.arch) {
+  if (args.some(arg => arg === '--profile' || arg.startsWith('--profile='))) throw new Error('CLI_BRIDGE_UNSUPPORTED_PROFILE')
   let target
   for (let index = 0; index < args.length; index += 1) {
     if (args[index] === '--target' || args[index] === '-t' || args[index].startsWith('--target=')) {
@@ -46,16 +47,22 @@ export function prepareCliSidecar({ root, target, debug = false, run = spawnSync
   if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version) || version !== desktopVersion) {
     throw new Error('CLI and desktop package versions must match.')
   }
-  const args = ['build', '--locked', '--bin', 'skillshub-cli', '--target', triple]
+  const profile = debug ? 'debug' : 'release'
+  const args = ['build', '--locked', '--bin', 'skillshub-cli', '--target', triple, '--message-format=json-render-diagnostics']
   if (!debug) args.push('--release')
   const result = run('cargo', args, {
     cwd: tauriRoot,
     env: { ...env, SKILLS_HUB_PREPARE_CLI_SIDECAR: '1', CARGO_TARGET_DIR: path.join(tauriRoot, 'target') },
-    stdio: 'inherit',
+    stdio: ['ignore', 'pipe', 'inherit'],
+    encoding: 'utf8',
+    maxBuffer: 32 * 1024 * 1024,
     shell: false,
   })
   if (result.error || result.status !== 0) throw new Error('CLI sidecar build failed.')
   const source = path.join(tauriRoot, 'target', triple, debug ? 'debug' : 'release', `skillshub-cli${extension}`)
+  const artifacts = (result.stdout ?? '').split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line))
+    .filter(item => item.reason === 'compiler-artifact' && item.target?.name === 'skillshub-cli' && item.target.kind?.includes('bin') && item.executable === source)
+  if (artifacts.length !== 1 || artifacts[0].profile?.debug_assertions !== debug) throw new Error('CLI_BRIDGE_PROFILE_MISMATCH')
   const binaryPath = path.join(binaries, `${base}${extension}`)
   const tempBinary = `${binaryPath}.${process.pid}.tmp`
   const tempMetadata = `${metadataPath}.${process.pid}.tmp`
@@ -63,7 +70,7 @@ export function prepareCliSidecar({ root, target, debug = false, run = spawnSync
     copyFileSync(source, tempBinary)
     const sha256 = createHash('sha256').update(readFileSync(tempBinary)).digest('hex')
     renameSync(tempBinary, binaryPath)
-    writeFileSync(tempMetadata, `${JSON.stringify({ version, target: triple, sha256 })}\n`, { mode: 0o600 })
+    writeFileSync(tempMetadata, `${JSON.stringify({ version, target: triple, profile, sha256 })}\n`, { mode: 0o600 })
     renameSync(tempMetadata, metadataPath)
     return { binaryPath, metadataPath }
   } finally {
@@ -73,6 +80,7 @@ export function prepareCliSidecar({ root, target, debug = false, run = spawnSync
 }
 
 function main(args) {
+  if (args.some(arg => arg === '--profile' || arg.startsWith('--profile='))) throw new Error('CLI_BRIDGE_UNSUPPORTED_PROFILE')
   const targetIndex = args.indexOf('--target')
   if (targetIndex !== 0 || !args[1] || args.some((arg, index) => index > 1 && arg !== '--debug')) {
     throw new Error('Usage: prepare-cli-sidecar.mjs --target <platform-arch|rust-triple> [--debug]')
