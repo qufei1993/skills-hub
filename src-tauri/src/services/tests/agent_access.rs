@@ -179,6 +179,131 @@ fn agent_access_failed_upgrade_restores_old_bundle_and_deployment() {
     );
 }
 
+fn assert_bundle_rollback_recovery(upgrade: bool, database_failure: bool) {
+    use crate::core::sync_engine::{set_deployment_race_hook, DeploymentRacePoint};
+    let f = Fixture::new();
+    if upgrade {
+        f.old_bundle();
+    }
+    let central = f.service.paths().default_central_repo.join("skills-hub");
+    let old_content = upgrade.then(|| fs::read(central.join("SKILL.md")).unwrap());
+    if database_failure {
+        rusqlite::Connection::open(&f.service.paths().database_path).unwrap().execute_batch(
+            "CREATE TRIGGER fail_bundle BEFORE INSERT ON skills BEGIN SELECT RAISE(FAIL, 'raw-db-error-do-not-leak'); END;"
+        ).unwrap();
+    }
+    let modified = central.clone();
+    set_deployment_race_hook(
+        if database_failure {
+            DeploymentRacePoint::BundledBeforeCommit
+        } else {
+            DeploymentRacePoint::StagingWrite
+        },
+        move || {
+            fs::write(
+                modified.join("user-created.txt"),
+                "private-user-content-do-not-leak",
+            )
+            .unwrap()
+        },
+    );
+    let error = f
+        .service
+        .setup_agent_access(SetupAgentRequest::install("codex"))
+        .unwrap_err();
+    assert_eq!(
+        error.code,
+        if database_failure {
+            ErrorCode::InternalError
+        } else {
+            ErrorCode::PlanStale
+        }
+    );
+    let recovery = &error.details["bundled_rollback"];
+    assert_eq!(recovery["reason"], "concurrent_content_preserved");
+    assert_eq!(recovery["files_restored"], upgrade);
+    let recovery_path = PathBuf::from(
+        recovery["recovery_path"]
+            .as_str()
+            .expect("preserved content must have an actionable path"),
+    );
+    assert_eq!(
+        fs::read_to_string(recovery_path.join("user-created.txt")).unwrap(),
+        "private-user-content-do-not-leak"
+    );
+    assert_eq!(
+        fs::read_to_string(recovery_path.join("SKILL.md")).unwrap(),
+        super::super::agent_access::OFFICIAL_SKILL_MD
+    );
+    if let Some(old_content) = old_content {
+        assert_eq!(fs::read(central.join("SKILL.md")).unwrap(), old_content);
+        assert_ne!(recovery_path, central);
+        assert!(!central.join("user-created.txt").exists());
+        assert_eq!(
+            f.service
+                .show_skill("skills-hub".into())
+                .unwrap()
+                .source
+                .revision
+                .as_deref(),
+            Some("0.0.1")
+        );
+    } else {
+        assert_eq!(recovery_path, central);
+        assert!(f.service.list_skills().unwrap().is_empty());
+    }
+    assert!(!f.target("codex").exists());
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    crate::cli::run_with_executor(
+        ["skillshub-cli", "--json", "setup", "--agent", "codex"],
+        &mut stdout,
+        &mut stderr,
+        |_| Err(error.clone()),
+    );
+    assert!(stdout.is_empty());
+    let payload: serde_json::Value = serde_json::from_slice(&stderr).unwrap();
+    assert_eq!(
+        payload["details"]["bundled_rollback"]["recovery_path"],
+        recovery["recovery_path"]
+    );
+    assert_eq!(
+        payload["details"]["bundled_rollback"]["files_restored"],
+        upgrade
+    );
+    assert_eq!(
+        payload["details"]["bundled_rollback"]["reason"],
+        "concurrent_content_preserved"
+    );
+    for secret in [
+        "raw-db-error-do-not-leak",
+        "private-user-content-do-not-leak",
+    ] {
+        assert!(!serde_json::to_string(&error).unwrap().contains(secret));
+        assert!(!String::from_utf8_lossy(&stderr).contains(secret));
+    }
+}
+
+#[test]
+fn agent_access_new_install_reports_preserved_content_after_database_commit_failure() {
+    assert_bundle_rollback_recovery(false, true);
+}
+
+#[test]
+fn agent_access_upgrade_reports_restored_files_and_recovery_after_database_commit_failure() {
+    assert_bundle_rollback_recovery(true, true);
+}
+
+#[test]
+fn agent_access_new_install_reports_preserved_content_after_deployment_failure() {
+    assert_bundle_rollback_recovery(false, false);
+}
+
+#[test]
+fn agent_access_upgrade_reports_restored_files_and_recovery_after_deployment_failure() {
+    assert_bundle_rollback_recovery(true, false);
+}
+
 #[test]
 fn agent_access_existing_library_content_cannot_be_claimed_as_bundled() {
     let f = Fixture::new();

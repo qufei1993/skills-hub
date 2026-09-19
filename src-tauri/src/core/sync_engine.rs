@@ -158,7 +158,55 @@ pub(crate) struct PreparedDirReplacement {
     prepared_hash: String,
     allow_missing: bool,
     activated: bool,
+    rollback_reported: bool,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum DirRollbackReason {
+    Restored,
+    ConcurrentContentPreserved,
+    RollbackFailed,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct DirRollbackOutcome {
+    pub path: PathBuf,
+    pub files_restored: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recovery_path: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backup_path: Option<PathBuf>,
+    pub reason: DirRollbackReason,
+}
+
+#[derive(Debug)]
+pub(crate) struct DirRollbackError {
+    pub outcome: DirRollbackOutcome,
+}
+
+impl std::fmt::Display for DirRollbackError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let code = if self.outcome.reason == DirRollbackReason::ConcurrentContentPreserved {
+            "ROLLBACK_CONFLICT"
+        } else {
+            "ROLLBACK_FAILED"
+        };
+        write!(
+            formatter,
+            "{code}|{}",
+            serde_json::json!({
+                "target": self.outcome.path,
+                "recovery": self.outcome.recovery_path,
+                "backup": self.outcome.backup_path,
+                "files_restored": self.outcome.files_restored,
+                "reason": self.outcome.reason,
+            })
+        )
+    }
+}
+
+impl std::error::Error for DirRollbackError {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 struct DeploymentParentIdentity {
@@ -312,6 +360,7 @@ pub(crate) struct PreparedDeployment {
 #[cfg(test)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DeploymentRacePoint {
+    BundledBeforeCommit,
     StagingWrite,
     ActivationRename,
     BeforeBaselineRead,
@@ -698,6 +747,7 @@ impl PreparedDirReplacement {
             prepared_hash,
             allow_missing,
             activated: false,
+            rollback_reported: false,
         })
     }
 
@@ -805,62 +855,77 @@ impl PreparedDirReplacement {
     }
 
     pub(crate) fn rollback(&mut self) -> Result<()> {
-        if self.activated {
-            let parent = self
-                .target
-                .parent()
-                .context("replacement target has no parent")?;
-            let recovery = parent.join(format!(".skills-hub-recovery-{}", Uuid::new_v4()));
-            let had_backup = self.backup.is_some();
-            let current_exists = match std::fs::symlink_metadata(&self.target) {
-                Ok(_) => true,
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
-                Err(err) => {
-                    return Err(err).with_context(|| format!("stat {:?}", self.target));
-                }
-            };
-            if current_exists {
-                std::fs::rename(&self.target, &recovery)
-                    .with_context(|| format!("isolate rollback content {:?}", self.target))?;
-            }
-            self.activated = false;
-            self.restore_backup_before_activation()?;
+        self.rollback_with_outcome().map(|_| ()).map_err(Into::into)
+    }
 
-            if current_exists {
-                let metadata = std::fs::symlink_metadata(&recovery)
-                    .with_context(|| format!("stat rollback content {:?}", recovery))?;
-                let unchanged = metadata.is_dir()
-                    && !metadata.file_type().is_symlink()
-                    && hash_dir_strict(&recovery)
-                        .map(|hash| hash == self.prepared_hash)
-                        .unwrap_or(false);
-                if unchanged {
-                    remove_path_permanently(&recovery)
-                        .with_context(|| format!("remove rolled back content {:?}", recovery))?;
-                } else {
-                    let preserved_at = if had_backup {
-                        recovery
-                    } else {
-                        std::fs::rename(&recovery, &self.target).with_context(|| {
-                            format!("restore concurrently modified target {:?}", self.target)
-                        })?;
-                        self.target.clone()
-                    };
-                    let detail = serde_json::json!({
-                        "target": self.target.to_string_lossy(),
-                        "recovery": preserved_at.to_string_lossy(),
-                    });
-                    anyhow::bail!("ROLLBACK_CONFLICT|{detail}");
+    pub(crate) fn rollback_with_outcome(
+        &mut self,
+    ) -> std::result::Result<DirRollbackOutcome, DirRollbackError> {
+        let mut outcome = DirRollbackOutcome {
+            path: self.target.clone(),
+            files_restored: !self.activated && self.backup.is_none(),
+            recovery_path: None,
+            backup_path: self.backup.clone(),
+            reason: DirRollbackReason::RollbackFailed,
+        };
+        let result = (|| -> std::result::Result<(), ()> {
+            if self.activated {
+                let parent = self.target.parent().ok_or(())?;
+                let recovery = parent.join(format!(".skills-hub-recovery-{}", Uuid::new_v4()));
+                let had_backup = self.backup.is_some();
+                let current_exists = match std::fs::symlink_metadata(&self.target) {
+                    Ok(_) => true,
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
+                    Err(_) => return Err(()),
+                };
+                if current_exists {
+                    std::fs::rename(&self.target, &recovery).map_err(|_| ())?;
+                    outcome.recovery_path = Some(recovery.clone());
                 }
+                self.activated = false;
+                self.restore_backup_before_activation().map_err(|_| ())?;
+                outcome.files_restored = true;
+
+                if current_exists {
+                    let metadata = std::fs::symlink_metadata(&recovery).map_err(|_| ())?;
+                    let unchanged = metadata.is_dir()
+                        && !metadata.file_type().is_symlink()
+                        && hash_dir_strict(&recovery)
+                            .map(|hash| hash == self.prepared_hash)
+                            .unwrap_or(false);
+                    if unchanged {
+                        remove_path_permanently(&recovery).map_err(|_| ())?;
+                        outcome.recovery_path = None;
+                    } else {
+                        if !had_backup {
+                            std::fs::rename(&recovery, &self.target).map_err(|_| ())?;
+                            outcome.recovery_path = Some(self.target.clone());
+                            outcome.files_restored = false;
+                        }
+                        outcome.reason = DirRollbackReason::ConcurrentContentPreserved;
+                        return Err(());
+                    }
+                }
+            } else {
+                self.restore_backup_before_activation().map_err(|_| ())?;
+                outcome.files_restored = true;
             }
+            if let Some(staging) = self.staging.as_ref() {
+                outcome.recovery_path = Some(staging.clone());
+                remove_path_permanently(staging).map_err(|_| ())?;
+                self.staging = None;
+                outcome.recovery_path = None;
+            }
+            Ok(())
+        })();
+        outcome.backup_path = self.backup.clone();
+        self.rollback_reported = result.is_err();
+        if result.is_ok() {
+            outcome.reason = DirRollbackReason::Restored;
+            Ok(outcome)
         } else {
-            self.restore_backup_before_activation()?;
+            Err(DirRollbackError { outcome })
         }
-        if let Some(staging) = self.staging.take() {
-            remove_path_permanently(&staging)
-                .with_context(|| format!("remove replacement staging {:?}", staging))?;
-        }
-        Ok(())
     }
 
     pub(crate) fn commit(&mut self) {
@@ -895,6 +960,9 @@ impl PreparedDirReplacement {
 
 impl Drop for PreparedDirReplacement {
     fn drop(&mut self) {
+        if self.rollback_reported {
+            return;
+        }
         if self.activated || self.backup.is_some() {
             if let Err(err) = self.rollback() {
                 eprintln!("[sync] failed to roll back {:?}: {err:#}", self.target);

@@ -373,6 +373,13 @@ fn rollback_preserves_changes_written_after_activation() {
     let error = replacement.rollback().unwrap_err();
 
     assert!(format!("{error:#}").contains("ROLLBACK_CONFLICT"));
+    let typed = error.downcast_ref::<super::DirRollbackError>().unwrap();
+    assert!(typed.outcome.files_restored);
+    assert_eq!(
+        typed.outcome.reason,
+        super::DirRollbackReason::ConcurrentContentPreserved
+    );
+    assert!(typed.outcome.backup_path.is_none());
     assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"old");
     let recovery = fs::read_dir(target_root.path())
         .unwrap()
@@ -385,6 +392,8 @@ fn rollback_preserves_changes_written_after_activation() {
                 .starts_with(".skills-hub-recovery-")
         })
         .expect("concurrent changes should be preserved in a recovery directory");
+    assert_eq!(typed.outcome.recovery_path.as_ref(), Some(&recovery));
+    drop(replacement);
     assert_eq!(
         fs::read(recovery.join("user-created.txt")).unwrap(),
         b"keep me"

@@ -262,16 +262,22 @@ impl SkillsHubService {
             replacement.activate().map(|_| ())
         }
         .map_err(|_| bundled_conflict(path, "bundled_target_changed"))?;
+        #[cfg(test)]
+        crate::core::sync_engine::run_deployment_race_hook(
+            crate::core::sync_engine::DeploymentRacePoint::BundledBeforeCommit,
+        );
         if self
             .store()
             .commit_skill_update(&bundled.record, &[])
             .is_err()
         {
-            let rolled_back = replacement.rollback().is_ok();
+            let rollback = bundled_rollback(&mut replacement);
+            let rolled_back =
+                rollback.reason == crate::core::sync_engine::DirRollbackReason::Restored;
             return Err(ServiceError::new(
                 ErrorCode::InternalError,
                 "bundled skill commit failed",
-                json!({"path": path, "rolled_back": rolled_back}),
+                json!({"path": path, "rolled_back": rolled_back, "bundled_rollback": rollback}),
             ));
         }
         match apply() {
@@ -280,14 +286,20 @@ impl SkillsHubService {
                 Ok(outcome)
             }
             Err(mut error) => {
-                let files_restored = replacement.rollback().is_ok();
+                let rollback = bundled_rollback(&mut replacement);
                 let database_restored = if let Some(previous) = bundled.previous {
                     self.store().commit_skill_update(&previous, &[])
                 } else {
                     self.store().delete_skill(&bundled.record.id)
                 }
                 .is_ok();
-                error.details["bundled_rollback"] = json!({"path": path, "files_restored": files_restored, "database_restored": database_restored});
+                if rollback.reason != crate::core::sync_engine::DirRollbackReason::Restored
+                    && error.code != ErrorCode::PlanStale
+                {
+                    error.code = ErrorCode::InternalError;
+                }
+                error.details["bundled_rollback"] = json!(rollback);
+                error.details["bundled_rollback"]["database_restored"] = json!(database_restored);
                 Err(error)
             }
         }
@@ -427,6 +439,14 @@ fn bundled_conflict(path: &Path, reason: &str) -> ServiceError {
         "bundled skill cannot be safely changed",
         json!({"path":path,"reason":reason}),
     )
+}
+
+fn bundled_rollback(
+    replacement: &mut crate::core::sync_engine::PreparedDirReplacement,
+) -> crate::core::sync_engine::DirRollbackOutcome {
+    replacement
+        .rollback_with_outcome()
+        .unwrap_or_else(|error| error.outcome)
 }
 
 fn install_local_request(

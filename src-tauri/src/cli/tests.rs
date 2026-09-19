@@ -580,6 +580,12 @@ fn json_failure_redacts_details_without_changing_protocol_or_safe_recovery_field
                     "agent": "codex",
                     "path": "/tmp/safe-target",
                     "reason": "unmanaged_target",
+                    "bundled_rollback": {
+                        "files_restored": true,
+                        "recovery_path": "/tmp/.skills-hub-recovery-example",
+                        "backup_path": "/tmp/.skills-hub-backup-example",
+                        "reason": "concurrent_content_preserved"
+                    },
                     "nested": {
                         "refreshToken": "failure-token",
                         "password": "failure-password",
@@ -603,6 +609,22 @@ fn json_failure_redacts_details_without_changing_protocol_or_safe_recovery_field
     assert_eq!(payload["details"]["agent"], "codex");
     assert_eq!(payload["details"]["path"], "/tmp/safe-target");
     assert_eq!(payload["details"]["reason"], "unmanaged_target");
+    assert_eq!(
+        payload["details"]["bundled_rollback"]["recovery_path"],
+        "/tmp/.skills-hub-recovery-example"
+    );
+    assert_eq!(
+        payload["details"]["bundled_rollback"]["backup_path"],
+        "/tmp/.skills-hub-backup-example"
+    );
+    assert_eq!(
+        payload["details"]["bundled_rollback"]["files_restored"],
+        true
+    );
+    assert_eq!(
+        payload["details"]["bundled_rollback"]["reason"],
+        "concurrent_content_preserved"
+    );
     for key in [
         "refreshToken",
         "password",
