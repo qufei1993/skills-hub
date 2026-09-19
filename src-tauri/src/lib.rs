@@ -1,10 +1,12 @@
 mod commands;
 mod core;
+mod services;
 
 use std::sync::Arc;
 
 use core::cancel_token::CancelToken;
 use core::runtime_paths::{open_store, RuntimePaths, RuntimeProfile};
+use services::operation_lock::{OperationKind, OperationLock};
 use tauri::Manager;
 use tauri_plugin_log::{Target, TargetKind};
 
@@ -78,11 +80,15 @@ pub fn run() {
                 {
                     app.set_activation_policy(tauri::ActivationPolicy::Accessory);
                 }
-                let run_result = if force_background_update {
-                    core::auto_update::run_auto_update_now(app.handle(), &store).map(Some)
-                } else {
-                    core::auto_update::run_due_auto_update(app.handle(), &store)
-                };
+                let run_result = (|| -> anyhow::Result<_> {
+                    let _operation_lock =
+                        OperationLock::acquire(&paths, OperationKind::AutoUpdate)?;
+                    if force_background_update {
+                        core::auto_update::run_auto_update_now(app.handle(), &store).map(Some)
+                    } else {
+                        core::auto_update::run_due_auto_update(app.handle(), &store)
+                    }
+                })();
                 match run_result {
                     Ok(Some(result)) => {
                         log::info!(
@@ -109,14 +115,17 @@ pub fn run() {
             let sync_workspace = paths.app_data_dir.join("device-sync");
             let sync_central = core::central_repo::resolve_central_repo_path(&paths, &store)?;
             let sync_credentials = core::device_sync::credentials::SystemCredentialStore;
-            match core::device_sync::DeviceSyncService::new(
-                &store,
-                &sync_credentials,
-                sync_workspace,
-                sync_central,
-            )
-            .repair_legacy_same_device_conflicts()
-            {
+            let repair_result = (|| -> anyhow::Result<bool> {
+                let _operation_lock = OperationLock::acquire(&paths, OperationKind::DeviceSync)?;
+                core::device_sync::DeviceSyncService::new(
+                    &store,
+                    &sync_credentials,
+                    sync_workspace,
+                    sync_central,
+                )
+                .repair_legacy_same_device_conflicts()
+            })();
+            match repair_result {
                 Ok(true) => {
                     log::info!("recovered same-device sync baseline from repository history")
                 }
@@ -134,6 +143,8 @@ pub fn run() {
                     tauri::async_runtime::spawn(async move {
                         let result = tauri::async_runtime::spawn_blocking(move || {
                             let paths = handle.state::<RuntimePaths>();
+                            let _operation_lock =
+                                OperationLock::acquire(paths.inner(), OperationKind::DeviceSync)?;
                             let workspace = paths.app_data_dir.join("device-sync");
                             let central = core::central_repo::resolve_central_repo_path(
                                 paths.inner(),
@@ -194,17 +205,21 @@ pub fn run() {
             let recycle_handle = app.handle().clone();
             let recycle_store = store.clone();
             std::thread::spawn(move || loop {
-                let root = recycle_handle
-                    .state::<RuntimePaths>()
-                    .recycle_bin_dir
-                    .clone();
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_millis() as i64;
-                match core::recycle_bin::RecycleBinService::new(&recycle_store, root)
+                let cleanup_result = (|| -> anyhow::Result<usize> {
+                    let paths = recycle_handle.state::<RuntimePaths>();
+                    let _operation_lock =
+                        OperationLock::acquire(paths.inner(), OperationKind::Delete)?;
+                    core::recycle_bin::RecycleBinService::new(
+                        &recycle_store,
+                        paths.recycle_bin_dir.clone(),
+                    )
                     .cleanup_expired(now)
-                {
+                })();
+                match cleanup_result {
                     Ok(removed) if removed > 0 => {
                         log::info!("cleaned up {removed} expired recycle bin items");
                     }

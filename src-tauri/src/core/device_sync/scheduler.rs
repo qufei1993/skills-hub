@@ -270,6 +270,11 @@ pub fn start(app: tauri::AppHandle, store: crate::core::skill_store::SkillStore)
                 if clock.due(now) {
                     let result = (|| -> anyhow::Result<Option<super::types::SyncRunResult>> {
                         let paths = crate::runtime_paths_for_tauri(&app)?;
+                        let _operation_lock =
+                            crate::services::operation_lock::OperationLock::acquire(
+                                &paths,
+                                crate::services::operation_lock::OperationKind::DeviceSync,
+                            )?;
                         let workspace = paths.app_data_dir.join("device-sync");
                         let central =
                             crate::core::central_repo::resolve_central_repo_path(&paths, &store)?;

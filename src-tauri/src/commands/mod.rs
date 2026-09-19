@@ -80,12 +80,21 @@ use crate::core::tool_adapters::{
     is_tool_installed, load_tool_config, project_relative_skills_dir, resolve_default_path,
     save_tool_config, supports_project_scope, CustomToolConfig, ToolConfig,
 };
+use crate::services::operation_lock::{OperationKind, OperationLock};
 use uuid::Uuid;
 
 const RECENT_PROJECTS_SETTING: &str = "recent_projects_v1";
 const DEVICE_SYNC_PENDING_OAUTH_SETTING: &str = "device_sync_pending_oauth_v1";
 const DEVICE_SYNC_CREDENTIAL_CLEANUP_QUEUE_SETTING: &str =
     "device_sync_credential_cleanup_queue_v1";
+
+fn acquire_operation_lock<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    kind: OperationKind,
+) -> anyhow::Result<OperationLock> {
+    let paths = crate::runtime_paths_for_tauri(app)?;
+    OperationLock::acquire(&paths, kind).map_err(Into::into)
+}
 
 fn oauth_proxy_url(store: &SkillStore, _provider_id: ProviderId) -> anyhow::Result<String> {
     get_github_proxy_url_core(store)
@@ -718,6 +727,7 @@ pub async fn run_auto_update_now(
 ) -> Result<AutoUpdateRunResultDto, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::AutoUpdate)?;
         run_auto_update_now_core(&app, &store).map(to_auto_update_run_result_dto)
     })
     .await
@@ -951,6 +961,7 @@ pub async fn set_central_repo_path(
 ) -> Result<String, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::StorageMigration)?;
         let new_base = expand_home_path(&path)?;
         if !new_base.is_absolute() {
             anyhow::bail!("storage path must be absolute");
@@ -1070,6 +1081,7 @@ pub async fn install_local(
 ) -> Result<InstallResultDto, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::Install)?;
         let result = install_local_skill(&app, &store, sourcePath.as_ref(), name)?;
         Ok::<_, anyhow::Error>(to_install_dto(result))
     })
@@ -1101,6 +1113,7 @@ pub async fn install_local_selection(
 ) -> Result<InstallResultDto, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::Install)?;
         let base = std::path::PathBuf::from(basePath);
         let result =
             install_local_skill_from_selection(&app, &store, base.as_ref(), &subpath, name)?;
@@ -1124,6 +1137,7 @@ pub async fn install_git(
     cancel.reset();
     let cancel_token = Arc::clone(cancel.inner());
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::Install)?;
         let result = install_git_skill(&app, &store, &repoUrl, name, Some(&cancel_token))?;
         Ok::<_, anyhow::Error>(to_install_dto(result))
     })
@@ -1157,6 +1171,7 @@ pub async fn install_git_selection(
 ) -> Result<InstallResultDto, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::Install)?;
         let result = install_git_skill_from_selection(&app, &store, &repoUrl, &subpath, name)?;
         Ok::<_, anyhow::Error>(to_install_dto(result))
     })
@@ -1215,10 +1230,12 @@ fn record_skill_target_failure(
 
 #[tauri::command]
 pub async fn sync_skill_dir(
+    app: tauri::AppHandle,
     source_path: String,
     target_path: String,
 ) -> Result<SyncResultDto, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::Deploy)?;
         let result = sync_dir_hybrid(source_path.as_ref(), target_path.as_ref())?;
         Ok::<_, anyhow::Error>(SyncResultDto {
             mode_used: match result.mode_used {
@@ -1240,6 +1257,7 @@ pub async fn sync_skill_dir(
 #[allow(non_snake_case)]
 #[allow(clippy::too_many_arguments)]
 pub async fn sync_skill_to_tool(
+    app: tauri::AppHandle,
     store: State<'_, SkillStore>,
     sourcePath: String,
     skillId: String,
@@ -1252,6 +1270,7 @@ pub async fn sync_skill_to_tool(
 ) -> Result<SyncResultDto, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::Deploy)?;
         let runtime_tool = runtime_tool_by_key(&store, &tool)?;
         let scope = normalize_scope(scope.as_deref())?;
         if scope == "project" && !runtime_tool.supports_project_scope {
@@ -1490,6 +1509,7 @@ fn remove_skill_target_safely(
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn unsync_skill_from_tool(
+    app: tauri::AppHandle,
     store: State<'_, SkillStore>,
     skillId: String,
     tool: String,
@@ -1498,6 +1518,7 @@ pub async fn unsync_skill_from_tool(
 ) -> Result<(), String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::Undeploy)?;
         let scope = normalize_scope(scope.as_deref())?;
         let project_path = if scope == "project" {
             let raw = projectPath
@@ -1566,12 +1587,19 @@ pub async fn unsync_skill_from_tool(
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn set_skill_enabled(
+    app: tauri::AppHandle,
     store: State<'_, SkillStore>,
     skillId: String,
     enabled: bool,
 ) -> Result<(), String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let operation_kind = if enabled {
+            OperationKind::Deploy
+        } else {
+            OperationKind::Undeploy
+        };
+        let _operation_lock = acquire_operation_lock(&app, operation_kind)?;
         if !enabled {
             let targets = store.list_skill_targets(&skillId)?;
             let mut remove_failures: Vec<String> = Vec::new();
@@ -1629,6 +1657,7 @@ pub async fn update_managed_skill(
 ) -> Result<UpdateResultDto, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::Update)?;
         let res = update_managed_skill_from_source(&app, &store, &skillId)?;
         Ok::<_, anyhow::Error>(UpdateResultDto {
             skill_id: res.skill_id,
@@ -1804,6 +1833,7 @@ pub async fn import_existing_skill(
 ) -> Result<InstallResultDto, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::Install)?;
         let source = std::path::Path::new(&sourcePath);
         // Validate SKILL.md exists before importing (fixes #8: prevents importing
         // directories that were "discovered" but lack a valid SKILL.md).
@@ -1964,6 +1994,7 @@ pub async fn delete_managed_skill(
 ) -> Result<(), String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::Delete)?;
         let _device_sync_guard = if store.get_device_sync_config()?.is_some() {
             Some(crate::core::device_sync::try_lock_device_sync()?)
         } else {
@@ -2622,6 +2653,7 @@ pub async fn check_device_sync(
 ) -> Result<SyncChangeSummary, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::DeviceSync)?;
         let (workspace, central) = device_sync_paths(&app, &store)?;
         let credentials = SystemCredentialStore;
         DeviceSyncService::new(&store, &credentials, workspace, central).check()
@@ -2638,6 +2670,7 @@ pub async fn run_device_sync(
 ) -> Result<SyncRunResult, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::DeviceSync)?;
         let (workspace, central) = device_sync_paths(&app, &store)?;
         let credentials = SystemCredentialStore;
         DeviceSyncService::new(&store, &credentials, workspace, central).sync()
@@ -2742,6 +2775,7 @@ pub async fn restore_recycle_bin_item(
 ) -> Result<(), String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::Restore)?;
         let root = app.path().app_data_dir()?.join("recycle-bin");
         let service = RecycleBinService::new(&store, root);
         if service.has_snapshot(&trashId)? {
@@ -2771,6 +2805,7 @@ pub async fn delete_recycle_bin_item(
 ) -> Result<(), String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::Delete)?;
         let root = app.path().app_data_dir()?.join("recycle-bin");
         RecycleBinService::new(&store, root).delete_permanently(&trashId)
     })
@@ -2788,6 +2823,7 @@ pub async fn clear_recycle_bin(
 ) -> Result<usize, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::Delete)?;
         let root = app.path().app_data_dir()?.join("recycle-bin");
         RecycleBinService::new(&store, root).clear(&trashIds)
     })
@@ -2806,6 +2842,7 @@ pub async fn resolve_device_sync_conflict(
 ) -> Result<(), String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::DeviceSync)?;
         let (workspace, central) = device_sync_paths(&app, &store)?;
         let credentials = SystemCredentialStore;
         DeviceSyncService::new(&store, &credentials, workspace, central)
@@ -2825,6 +2862,7 @@ pub async fn restore_device_sync_trash(
 ) -> Result<(), String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::Restore)?;
         let (workspace, central) = device_sync_paths(&app, &store)?;
         let credentials = SystemCredentialStore;
         DeviceSyncService::new(&store, &credentials, workspace, central).restore_trash(&trashId)
