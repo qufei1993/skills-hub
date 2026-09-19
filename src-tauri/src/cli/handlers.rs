@@ -135,8 +135,12 @@ fn runtime_paths() -> Result<RuntimePaths, ServiceError> {
             root.join("data"),
         ));
     }
-    RuntimePaths::for_cli(RuntimeProfile::Production)
+    RuntimePaths::for_cli(default_runtime_profile())
         .map_err(|_| ServiceError::internal("failed to resolve runtime paths"))
+}
+
+fn default_runtime_profile() -> RuntimeProfile {
+    RuntimeProfile::current()
 }
 
 fn selection(args: &SelectorOrAllArgs) -> Result<SkillSelection, ServiceError> {
@@ -171,4 +175,44 @@ fn success(command: &'static str, data: impl Serialize) -> Result<CommandSuccess
     serde_json::to_value(data)
         .map(|data| CommandSuccess::new(command, data, MessageKey::CommandCompleted))
         .map_err(|_| ServiceError::internal("failed to serialize command result"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_cli_paths_use_the_build_namespace_without_opening_directories() {
+        let paths =
+            RuntimePaths::from_roots(default_runtime_profile(), "/fixture/home", "/fixture/data");
+        let (identifier, central, bridge) = if cfg!(debug_assertions) {
+            (
+                "com.qufei1993.skillshub.dev",
+                ".skillshub-dev",
+                ".skills-hub-dev",
+            )
+        } else {
+            ("com.qufei1993.skillshub", ".skillshub", ".skills-hub")
+        };
+        assert_eq!(
+            paths.app_data_dir,
+            std::path::Path::new("/fixture/data").join(identifier)
+        );
+        assert_eq!(
+            paths.database_path,
+            std::path::Path::new("/fixture/data")
+                .join(identifier)
+                .join("skills_hub.db")
+        );
+        assert_eq!(
+            paths.default_central_repo,
+            std::path::Path::new("/fixture/home").join(central)
+        );
+        assert_eq!(
+            paths.cli_bridge_dir,
+            std::path::Path::new("/fixture/home")
+                .join(bridge)
+                .join("bin")
+        );
+    }
 }

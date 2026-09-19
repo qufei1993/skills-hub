@@ -1072,6 +1072,86 @@ pub fn check_managed_skill_update(
     result
 }
 
+#[derive(Debug)]
+pub(crate) struct UpdateTargetConflict {
+    pub skill_id: String,
+    pub agent: String,
+    pub path: String,
+    pub reason: &'static str,
+}
+
+impl std::fmt::Display for UpdateTargetConflict {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("managed update target failed preflight")
+    }
+}
+
+impl std::error::Error for UpdateTargetConflict {}
+
+pub(crate) fn preflight_managed_skill_update_targets(
+    store: &SkillStore,
+    skill_id: &str,
+) -> Result<()> {
+    let skill = store
+        .get_skill_by_id(skill_id)?
+        .context("skill not found")?;
+    let source = Path::new(&skill.central_path);
+    let previous_hash = hash_dir_for_sync_conflict(source)?;
+    for target in store.list_skill_targets(skill_id)? {
+        if target.status == "disabled" {
+            continue;
+        }
+        let conflict = |reason| UpdateTargetConflict {
+            skill_id: skill_id.into(),
+            agent: target.tool.clone(),
+            path: target.target_path.clone(),
+            reason,
+        };
+        if target.status != "ok" && target.synced_at.is_none() {
+            return Err(conflict("unmanaged_target").into());
+        }
+        if store.is_target_used_by_other_skill(&target.target_path, skill_id)? {
+            return Err(conflict("target_owned_elsewhere").into());
+        }
+        if target.mode == "copy" {
+            super::tool_distribution::preflight_copy_refresh(
+                store,
+                source,
+                &target,
+                &previous_hash,
+            )
+            .map_err(|error| {
+                conflict(if error.to_string().starts_with("TARGET_MODIFIED|") {
+                    "modified_target"
+                } else {
+                    "unsafe_target"
+                })
+            })?;
+        } else {
+            let path = Path::new(&target.target_path);
+            match std::fs::symlink_metadata(path) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(_) => return Err(conflict("unreadable_target").into()),
+                Ok(_) => {}
+            }
+            let link = std::fs::read_link(path).map_err(|_| conflict("modified_target"))?;
+            let resolved = if link.is_absolute() {
+                link
+            } else {
+                path.parent().context("target has no parent")?.join(link)
+            };
+            let expected = super::sync_engine::path_for_comparison(source)?;
+            if super::sync_engine::path_for_comparison(&resolved)
+                .map_err(|_| conflict("modified_target"))?
+                != expected
+            {
+                return Err(conflict("modified_target").into());
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn update_managed_skill_from_source_with_lock_held(
     paths: &RuntimePaths,
     store: &SkillStore,

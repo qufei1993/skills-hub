@@ -22,7 +22,11 @@ pub enum RuntimeProfile {
 
 impl RuntimeProfile {
     pub const fn current() -> Self {
-        if cfg!(debug_assertions) {
+        Self::for_build(cfg!(debug_assertions))
+    }
+
+    pub(crate) const fn for_build(debug_assertions: bool) -> Self {
+        if debug_assertions {
             Self::Development
         } else {
             Self::Production

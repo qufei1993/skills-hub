@@ -232,6 +232,11 @@ impl SkillsHubService {
         self.update_under_lock(selector)
     }
 
+    pub(super) fn preflight_update_targets(&self, skill_id: &str) -> Result<(), ServiceError> {
+        crate::core::installer::preflight_managed_skill_update_targets(self.store(), skill_id)
+            .map_err(map_update_error)
+    }
+
     pub(super) fn update_under_lock(
         &self,
         selector: SkillSelector,
@@ -522,6 +527,15 @@ fn map_install_error(error: anyhow::Error) -> ServiceError {
 }
 
 fn map_update_error(error: anyhow::Error) -> ServiceError {
+    if let Some(conflict) = error.downcast_ref::<crate::core::installer::UpdateTargetConflict>() {
+        return ServiceError::new(
+            ErrorCode::TargetConflict,
+            "a managed update target has changed",
+            json!({
+                "skill_id": conflict.skill_id, "agent": conflict.agent, "path": conflict.path, "reason": conflict.reason,
+            }),
+        );
+    }
     let first = error.to_string();
     if first.starts_with("UPDATE_IN_PROGRESS|") {
         return ServiceError::new(

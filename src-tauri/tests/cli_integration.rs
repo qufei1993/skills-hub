@@ -91,6 +91,34 @@ impl Fixture {
         let source = self.source(name);
         self.json(&["skills", "install", source.to_str().unwrap()], None)["data"].clone()
     }
+
+    fn copy_target(&self, skill: &app_lib::core::skill_store::SkillRecord) -> PathBuf {
+        let target = self.root.path().join("copies").join(&skill.name);
+        app_lib::core::sync_engine::copy_dir_recursive(Path::new(&skill.central_path), &target)
+            .unwrap();
+        let baseline = app_lib::core::content_hash::hash_dir_for_sync_conflict(&target).unwrap();
+        let record = app_lib::core::skill_store::SkillTargetRecord {
+            id: format!("copy-{}", skill.id),
+            skill_id: skill.id.clone(),
+            tool: "custom-copy".into(),
+            scope: "global".into(),
+            project_path: None,
+            target_path: target.to_string_lossy().into_owned(),
+            mode: "copy".into(),
+            status: "ok".into(),
+            last_error: None,
+            synced_at: Some(1),
+        };
+        let store = self.store();
+        store.upsert_skill_target(&record).unwrap();
+        store
+            .set_setting(
+                &format!("device_sync.target_baseline.{}", record.id),
+                &serde_json::to_string(&(record.target_path, baseline)).unwrap(),
+            )
+            .unwrap();
+        target
+    }
 }
 
 fn write_skill(path: &Path, name: &str) {
@@ -498,6 +526,15 @@ fn batch_update_checks_every_skill_before_changing_any_skill() {
     let held = fixture.install("held");
     let safe_central = Path::new(safe["central_path"].as_str().unwrap()).join("SKILL.md");
     let original = fs::read(&safe_central).unwrap();
+    let before_skills = fixture.store().list_skills().unwrap();
+    let targets = before_skills
+        .iter()
+        .map(|skill| fixture.copy_target(skill))
+        .collect::<Vec<_>>();
+    let before_targets = targets
+        .iter()
+        .map(|path| app_lib::core::content_hash::hash_dir_strict(path).unwrap())
+        .collect::<Vec<_>>();
     fs::write(
         fixture.root.path().join("sources/safe/new.txt"),
         "new content",
@@ -508,12 +545,25 @@ fn batch_update_checks_every_skill_before_changing_any_skill() {
         "keep",
     )
     .unwrap();
+    let before = fixture.service().list_skills().unwrap();
     fixture.json(
         &["skills", "update", "--all"],
         Some(("UPDATE_HELD_BACK", 4)),
     );
     assert_eq!(fs::read(&safe_central).unwrap(), original);
     assert!(!safe_central.parent().unwrap().join("new.txt").exists());
+    assert_eq!(fixture.store().list_skills().unwrap(), before_skills);
+    assert_eq!(fixture.service().list_skills().unwrap(), before);
+    for (path, hash) in targets.iter().zip(before_targets) {
+        assert_eq!(
+            app_lib::core::content_hash::hash_dir_strict(path).unwrap(),
+            hash
+        );
+    }
+    assert_eq!(
+        fs::read(Path::new(held["central_path"].as_str().unwrap()).join("personal.txt")).unwrap(),
+        b"keep"
+    );
 }
 
 #[test]
@@ -523,6 +573,142 @@ fn tag_filter_uses_the_same_unicode_case_folding_as_tag_mutations() {
     fixture.json(&["skills", "tag", "add", "demo", "Äpfel"], None);
     let filtered = fixture.json(&["skills", "list", "--tag", "äpfel"], None);
     assert_eq!(filtered["data"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn batch_update_rejects_a_modified_copy_before_any_skill_or_metadata_changes() {
+    let fixture = Fixture::new();
+    fixture.install("first");
+    fixture.install("second");
+    let store = fixture.store();
+    let mut skills = store.list_skills().unwrap();
+    // Match the actual update traversal so a safe candidate precedes the conflict.
+    let first = skills.remove(0);
+    let second = skills.remove(0);
+    for skill in [&first, &second] {
+        fixture.copy_target(skill);
+        fs::write(
+            fixture
+                .root
+                .path()
+                .join("sources")
+                .join(&skill.name)
+                .join("SKILL.md"),
+            format!(
+                "---\nname: {}\ndescription: Updated\n---\nUpdated content\n",
+                skill.name
+            ),
+        )
+        .unwrap();
+    }
+    let conflict_path = fixture.root.path().join("copies").join(&second.name);
+    fs::write(
+        conflict_path.join("SKILL.md"),
+        "Personal edit, same filename",
+    )
+    .unwrap();
+    let before_skills = store.list_skills().unwrap();
+    let before_targets =
+        [&first, &second].map(|skill| store.list_skill_targets(&skill.id).unwrap());
+    let before_files = [&first, &second].map(|skill| {
+        (
+            fs::read(Path::new(&skill.central_path).join("SKILL.md")).unwrap(),
+            fs::read(
+                fixture
+                    .root
+                    .path()
+                    .join("copies")
+                    .join(&skill.name)
+                    .join("SKILL.md"),
+            )
+            .unwrap(),
+        )
+    });
+    let before_checks = serde_json::to_value(fixture.service().list_skills().unwrap()).unwrap();
+    let result = fixture.json(&["skills", "update", "--all"], Some(("TARGET_CONFLICT", 4)));
+    assert_eq!(result["details"]["skill_id"], second.id);
+    assert_eq!(result["details"]["agent"], "custom-copy");
+    assert_eq!(
+        result["details"]["path"],
+        conflict_path.to_string_lossy().as_ref()
+    );
+    assert_eq!(result["details"]["reason"], "modified_target");
+    let reopened = fixture.store();
+    assert_eq!(reopened.list_skills().unwrap(), before_skills);
+    assert_eq!(
+        serde_json::to_value(fixture.service().list_skills().unwrap()).unwrap(),
+        before_checks
+    );
+    for (index, skill) in [&first, &second].iter().enumerate() {
+        assert_eq!(
+            reopened.list_skill_targets(&skill.id).unwrap(),
+            before_targets[index]
+        );
+        assert_eq!(
+            fs::read(Path::new(&skill.central_path).join("SKILL.md")).unwrap(),
+            before_files[index].0
+        );
+        assert_eq!(
+            fs::read(
+                fixture
+                    .root
+                    .path()
+                    .join("copies")
+                    .join(&skill.name)
+                    .join("SKILL.md")
+            )
+            .unwrap(),
+            before_files[index].1
+        );
+    }
+}
+
+#[test]
+fn batch_update_accepts_a_saved_copy_baseline_when_central_content_has_changed() {
+    let fixture = Fixture::new();
+    fixture.install("demo");
+    let skill = fixture.store().list_skills().unwrap().remove(0);
+    let target = fixture.copy_target(&skill);
+    fs::write(
+        Path::new(&skill.central_path).join("SKILL.md"),
+        "Central changed since deployment",
+    )
+    .unwrap();
+    fs::write(
+        fixture.root.path().join("sources/demo/SKILL.md"),
+        "---\nname: demo\ndescription: New\n---\nNew source\n",
+    )
+    .unwrap();
+    let result = fixture.json(&["skills", "update", "--all"], None);
+    assert_eq!(result["data"][0]["pending_targets"], serde_json::json!([]));
+    assert!(fs::read_to_string(target.join("SKILL.md"))
+        .unwrap()
+        .contains("New source"));
+}
+
+#[cfg(unix)]
+#[test]
+fn batch_update_rejects_a_redirected_managed_link_before_mutation() {
+    let fixture = Fixture::new();
+    fixture.install("demo");
+    fixture.json(&["skills", "deploy", "demo", "--agent", "codex"], None);
+    let skill = fixture.service().show_skill("demo".into()).unwrap();
+    let target = Path::new(&skill.targets[0].target_path);
+    let unrelated = fixture.root.path().join("unrelated");
+    write_skill(&unrelated, "unrelated");
+    fs::remove_file(target).unwrap();
+    std::os::unix::fs::symlink(&unrelated, target).unwrap();
+    fs::write(
+        fixture.root.path().join("sources/demo/new.txt"),
+        "New source content",
+    )
+    .unwrap();
+    let before = fixture.service().list_skills().unwrap();
+    fixture.json(&["skills", "update", "--all"], Some(("TARGET_CONFLICT", 4)));
+    assert_eq!(fixture.service().list_skills().unwrap(), before);
+    assert!(!Path::new(&skill.central_path).join("new.txt").exists());
+    assert!(!unrelated.join("new.txt").exists());
+    assert_eq!(fs::read_link(target).unwrap(), unrelated);
 }
 
 #[test]

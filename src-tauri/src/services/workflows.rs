@@ -135,6 +135,9 @@ impl SkillsHubService {
                 let _lock = self.begin_write(OperationKind::Update)?;
                 let skills = self.list_skills()?;
                 for skill in &skills {
+                    self.preflight_update_targets(&skill.id)?;
+                }
+                for skill in &skills {
                     let check = self.check_updates(SkillSelector::Id(skill.id.clone()))?;
                     if check.held_back {
                         return Err(ServiceError::new(

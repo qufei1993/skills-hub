@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::Result;
 
 use super::content_hash::{hash_dir_for_sync_conflict, hash_dir_strict};
-use super::skill_store::SkillStore;
+use super::skill_store::{SkillStore, SkillTargetRecord};
 use super::sync_engine::{ensure_paths_do_not_overlap, PreparedDirReplacement};
 
 pub(crate) fn matches_saved_target_baseline(
@@ -15,6 +15,82 @@ pub(crate) fn matches_saved_target_baseline(
         let same_path = Path::new(&path) == target || matches!((super::sync_engine::path_for_comparison(Path::new(&path)), super::sync_engine::path_for_comparison(target)), (Ok(first), Ok(second)) if first == second);
         same_path && actual == Some(hash.as_str())
     })
+}
+
+fn copy_target_matches_baseline(
+    store: &SkillStore,
+    records: &[SkillTargetRecord],
+    target: &Path,
+    previous_hash: Option<&str>,
+    actual: &str,
+) -> Result<bool> {
+    if previous_hash == Some(actual) {
+        return Ok(true);
+    }
+    for record in records {
+        let saved = store.get_setting(&format!("device_sync.target_baseline.{}", record.id))?;
+        if saved
+            .as_ref()
+            .is_some_and(|value| matches_saved_target_baseline(value, target, Some(actual)))
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn validate_copy_target_location(
+    store: &SkillStore,
+    skill_id: &str,
+    source: &Path,
+    target: &Path,
+) -> Result<()> {
+    ensure_paths_do_not_overlap(source, target)?;
+    if let Some(skill) = store.get_skill_by_id(skill_id)? {
+        if skill.source_type == "local" {
+            if let Some(original) = skill.source_ref.filter(|value| !value.trim().is_empty()) {
+                ensure_paths_do_not_overlap(Path::new(&original), target)?;
+            }
+        }
+    }
+    anyhow::ensure!(
+        !store.is_target_used_by_other_skill(&target.to_string_lossy(), skill_id)?,
+        "unsafe shared tool target"
+    );
+    Ok(())
+}
+
+pub(crate) fn preflight_copy_refresh(
+    store: &SkillStore,
+    source: &Path,
+    record: &SkillTargetRecord,
+    previous_hash: &str,
+) -> Result<()> {
+    let target = Path::new(&record.target_path);
+    validate_copy_target_location(store, &record.skill_id, source, target)?;
+    let metadata = match std::fs::symlink_metadata(target) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    anyhow::ensure!(
+        metadata.is_dir() && !metadata.file_type().is_symlink(),
+        "TARGET_MODIFIED|{}",
+        target.display()
+    );
+    let actual = hash_dir_for_sync_conflict(target)?;
+    anyhow::ensure!(
+        copy_target_matches_baseline(
+            store,
+            std::slice::from_ref(record),
+            target,
+            Some(previous_hash),
+            &actual
+        )?,
+        "TARGET_MODIFIED|{}",
+        target.display()
+    );
+    Ok(())
 }
 
 // Both explicit tool sync and device sync use the same guarded copy refresh.
@@ -36,18 +112,7 @@ pub fn refresh_copy(
         .collect();
     anyhow::ensure!(!records.is_empty(), "copy target not registered");
     let result = (|| -> Result<()> {
-        ensure_paths_do_not_overlap(source, target)?;
-        if let Some(skill) = store.get_skill_by_id(skill_id)? {
-            if skill.source_type == "local" {
-                if let Some(original) = skill.source_ref.filter(|value| !value.trim().is_empty()) {
-                    ensure_paths_do_not_overlap(Path::new(&original), target)?;
-                }
-            }
-        }
-        anyhow::ensure!(
-            !store.is_target_used_by_other_skill(&target.to_string_lossy(), skill_id)?,
-            "unsafe shared tool target"
-        );
+        validate_copy_target_location(store, skill_id, source, target)?;
         let (staging, expected) =
             super::device_sync::manifest::prepare_library_directory(source, target)?;
         let next_hash = hash_dir_for_sync_conflict(staging.path())?;
@@ -55,14 +120,8 @@ pub fn refresh_copy(
         if expected.as_ref() != Some(&hash_dir_strict(staging.path())?) {
             if target.exists() {
                 let actual = hash_dir_for_sync_conflict(target)?;
-                let mut trusted = previous_hash == Some(actual.as_str());
-                for record in &records {
-                    let saved =
-                        store.get_setting(&format!("device_sync.target_baseline.{}", record.id))?;
-                    trusted |= saved.as_ref().is_some_and(|value| {
-                        matches_saved_target_baseline(value, target, Some(&actual))
-                    });
-                }
+                let trusted =
+                    copy_target_matches_baseline(store, &records, target, previous_hash, &actual)?;
                 anyhow::ensure!(trusted, "TARGET_MODIFIED|{}", target.display());
             }
             let mut prepared = PreparedDirReplacement::from_staging(
