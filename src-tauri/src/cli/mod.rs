@@ -1,6 +1,7 @@
 pub mod args;
 pub mod locale;
 pub mod output;
+mod sanitize;
 
 pub use args::Cli;
 pub use output::JsonEnvelope;
@@ -9,7 +10,10 @@ use std::ffi::{OsStr, OsString};
 use std::io::Write;
 use std::process::ExitCode;
 
-use clap::{error::ErrorKind, Parser};
+use clap::{
+    error::{ContextKind, ContextValue, ErrorKind},
+    CommandFactory, FromArgMatches,
+};
 use serde_json::json;
 
 use self::locale::{Language, Locale, MessageKey};
@@ -58,7 +62,11 @@ where
     let locale = Locale::resolve(requested_language(&raw_args));
     let command_hint = protocol_command_hint(&raw_args);
 
-    let cli = match Cli::try_parse_from(raw_args) {
+    let cli = match locale
+        .localize_command(Cli::command())
+        .try_get_matches_from(raw_args)
+        .and_then(|matches| Cli::from_arg_matches(&matches))
+    {
         Ok(cli) => cli,
         Err(error)
             if matches!(
@@ -83,14 +91,7 @@ where
                 if write_failure(stderr, command_hint, &service_error, locale, true).is_err() {
                     return 10;
                 }
-            } else if writeln!(
-                stderr,
-                "{}: {}",
-                ErrorCode::InvalidArgument,
-                locale.text(MessageKey::InvalidArguments)
-            )
-            .is_err()
-            {
+            } else if write_human_parse_failure(stderr, locale, &error).is_err() {
                 return 10;
             }
             return 2;
@@ -122,6 +123,58 @@ where
             }
         }
     }
+}
+
+fn write_human_parse_failure(
+    writer: &mut impl Write,
+    locale: Locale,
+    error: &clap::Error,
+) -> std::io::Result<()> {
+    writeln!(
+        writer,
+        "{}: {}",
+        ErrorCode::InvalidArgument,
+        locale.text(MessageKey::InvalidArguments)
+    )?;
+
+    if error.kind() == ErrorKind::MissingRequiredArgument {
+        if let Some(ContextValue::Strings(arguments)) = error.get(ContextKind::InvalidArg) {
+            let safe_arguments = arguments
+                .iter()
+                .filter(|argument| is_safe_usage_fragment(argument))
+                .collect::<Vec<_>>();
+            if !safe_arguments.is_empty() {
+                writeln!(
+                    writer,
+                    "{}",
+                    locale.text(MessageKey::MissingRequiredArguments)
+                )?;
+                for argument in safe_arguments {
+                    writeln!(writer, "  {argument}")?;
+                }
+            }
+        }
+    }
+
+    if let Some(ContextValue::StyledStr(usage)) = error.get(ContextKind::Usage) {
+        let usage = usage.to_string();
+        let usage = usage.strip_prefix("Usage: ").unwrap_or(&usage);
+        if is_safe_usage_fragment(usage) {
+            writeln!(writer, "{}{}", locale.text(MessageKey::Usage), usage)?;
+        }
+    }
+    Ok(())
+}
+
+fn is_safe_usage_fragment(value: &str) -> bool {
+    !value.is_empty()
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric()
+                || matches!(
+                    character,
+                    ' ' | '\n' | '\r' | '\t' | '-' | '_' | '<' | '>' | '[' | ']' | '|' | '.'
+                )
+        })
 }
 
 fn requested_json(args: &[OsString]) -> bool {

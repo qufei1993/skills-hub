@@ -277,6 +277,80 @@ fn json_success_uses_stdout_only() {
 }
 
 #[test]
+fn json_success_recursively_redacts_sensitive_payload_values() {
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let exit = run_with_executor(
+        ["skillshub-cli", "--json", "doctor"],
+        &mut stdout,
+        &mut stderr,
+        |_| {
+            Ok(CommandSuccess::new(
+                "doctor",
+                json!({
+                    "agent": "codex",
+                    "path": "/tmp/safe-target",
+                    "nested": {
+                        "access_token": "success-token",
+                        "Password": "success-password",
+                        "client_secret": "success-client-secret",
+                        "private-key": "-----BEGIN PRIVATE KEY-----",
+                        "authorization": "Bearer success-authorization",
+                        "Cookie": "session=success-cookie",
+                        "code": "success-oauth-code"
+                    },
+                    "source": "https://alice:success-password@example.com/private.git?access_token=success-query#success-fragment",
+                    "message": "fetch https://bob:success-password@example.com/repo.git?token=success-query#fragment failed",
+                    "notes": ["safe note", "Bearer success-bearer", "request token=success-plain-token"]
+                }),
+                MessageKey::CommandCompleted,
+            ))
+        },
+    );
+
+    assert_eq!(exit, 0);
+    assert!(stderr.is_empty());
+    let payload = serde_json::from_slice::<Value>(&stdout).unwrap();
+    assert_eq!(payload["data"]["agent"], "codex");
+    assert_eq!(payload["data"]["path"], "/tmp/safe-target");
+    for key in [
+        "access_token",
+        "Password",
+        "client_secret",
+        "private-key",
+        "authorization",
+        "Cookie",
+        "code",
+    ] {
+        assert_eq!(payload["data"]["nested"][key], "[REDACTED]");
+    }
+    assert_eq!(payload["data"]["source"], "https://example.com/private.git");
+    assert_eq!(
+        payload["data"]["message"],
+        "fetch https://example.com/repo.git failed"
+    );
+    assert_eq!(payload["data"]["notes"][0], "safe note");
+    assert_eq!(payload["data"]["notes"][1], "[REDACTED]");
+    assert_eq!(payload["data"]["notes"][2], "[REDACTED]");
+
+    let serialized = String::from_utf8(stdout).unwrap();
+    for secret in [
+        "success-token",
+        "success-password",
+        "success-authorization",
+        "success-client-secret",
+        "success-cookie",
+        "success-oauth-code",
+        "success-query",
+        "success-fragment",
+        "success-bearer",
+        "success-plain-token",
+    ] {
+        assert!(!serialized.contains(secret), "leaked {secret}");
+    }
+}
+
+#[test]
 fn json_failure_uses_stderr_only_and_skill_not_found_exits_three() {
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
@@ -307,6 +381,84 @@ fn json_failure_uses_stderr_only_and_skill_not_found_exits_three() {
             "details": {"selector": "missing"}
         })
     );
+}
+
+#[test]
+fn json_failure_redacts_details_without_changing_protocol_or_safe_recovery_fields() {
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let exit = run_with_executor(
+        [
+            "skillshub-cli",
+            "--json",
+            "skills",
+            "deploy",
+            "demo",
+            "--agent",
+            "codex",
+        ],
+        &mut stdout,
+        &mut stderr,
+        |_| {
+            Err(ServiceError::new(
+                ErrorCode::TargetConflict,
+                "target conflict",
+                json!({
+                    "candidates": [{"id": "one", "name": "demo"}],
+                    "agent": "codex",
+                    "path": "/tmp/safe-target",
+                    "reason": "unmanaged_target",
+                    "nested": {
+                        "refreshToken": "failure-token",
+                        "password": "failure-password",
+                        "client-secret": "failure-client-secret",
+                        "Authorization": "Bearer failure-authorization",
+                        "cookie": "session=failure-cookie",
+                        "code": "failure-oauth-code",
+                        "repository": "https://user:failure-password@example.com/repo.git?oauth_code=failure-query#failure-fragment"
+                    }
+                }),
+            ))
+        },
+    );
+
+    assert_eq!(exit, 4);
+    assert!(stdout.is_empty());
+    let payload = serde_json::from_slice::<Value>(&stderr).unwrap();
+    assert_eq!(payload["code"], "TARGET_CONFLICT");
+    assert_eq!(payload["command"], "skills.deploy");
+    assert_eq!(payload["details"]["candidates"][0]["name"], "demo");
+    assert_eq!(payload["details"]["agent"], "codex");
+    assert_eq!(payload["details"]["path"], "/tmp/safe-target");
+    assert_eq!(payload["details"]["reason"], "unmanaged_target");
+    for key in [
+        "refreshToken",
+        "password",
+        "client-secret",
+        "Authorization",
+        "cookie",
+        "code",
+    ] {
+        assert_eq!(payload["details"]["nested"][key], "[REDACTED]");
+    }
+    assert_eq!(
+        payload["details"]["nested"]["repository"],
+        "https://example.com/repo.git"
+    );
+
+    let serialized = String::from_utf8(stderr).unwrap();
+    for secret in [
+        "failure-token",
+        "failure-password",
+        "failure-authorization",
+        "failure-client-secret",
+        "failure-cookie",
+        "failure-oauth-code",
+        "failure-query",
+        "failure-fragment",
+    ] {
+        assert!(!serialized.contains(secret), "leaked {secret}");
+    }
 }
 
 #[test]
@@ -401,6 +553,27 @@ fn explicit_language_precedes_supported_environment_then_english() {
 }
 
 #[test]
+fn supported_environment_locale_drives_help_when_lang_is_absent() {
+    let environment = |name: &str| match name {
+        "LC_ALL" => Some(OsString::from("fr_FR.UTF-8")),
+        "LC_MESSAGES" => Some(OsString::from("ko_KR.UTF-8")),
+        "LANG" => Some(OsString::from("zh_CN.UTF-8")),
+        _ => None,
+    };
+    let locale = Locale::resolve_with(None, environment);
+    let error = locale
+        .localize_command(Cli::command())
+        .try_get_matches_from(["skillshub-cli", "--help"])
+        .unwrap_err();
+
+    assert_eq!(error.kind(), ErrorKind::DisplayHelp);
+    let help = error.to_string();
+    assert!(help.contains("Agent 또는 터미널에서 Skills Hub를 관리합니다"));
+    assert!(help.contains("사용법:"));
+    assert!(!help.contains("__bridge"));
+}
+
+#[test]
 fn every_stable_error_has_complete_human_catalog_entries() {
     for locale in [Locale::En, Locale::ZhCn, Locale::Ko] {
         assert!(!locale.text(MessageKey::CommandCompleted).is_empty());
@@ -457,8 +630,63 @@ fn human_parser_failures_use_the_selected_locale() {
 
     assert_eq!(exit, 2);
     assert!(stdout.is_empty());
-    assert_eq!(
-        String::from_utf8(stderr).unwrap(),
-        "INVALID_ARGUMENT: 命令参数无效。\n"
+    let error = String::from_utf8(stderr).unwrap();
+    assert!(error.starts_with("INVALID_ARGUMENT: 命令参数无效。\n"));
+    assert!(error.contains("缺少必需参数：\n  --agent <AGENT>"));
+    assert!(error.contains("用法：skillshub-cli skills deploy --agent <AGENT> <SKILL>"));
+    assert!(!error.contains("\u{1b}["));
+}
+
+#[test]
+fn top_level_help_is_localized_from_the_shared_command_definition() {
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let exit = run_with_executor(
+        ["skillshub-cli", "--lang", "zh-CN", "--help"],
+        &mut stdout,
+        &mut stderr,
+        |_| panic!("help must not reach the executor"),
     );
+
+    assert_eq!(exit, 0);
+    assert!(stderr.is_empty());
+    let help = String::from_utf8(stdout).unwrap();
+    assert!(help.contains("从 Agent 或终端管理 Skills Hub"));
+    assert!(help.contains("用法："));
+    assert!(help.contains("命令："));
+    assert!(help.contains("选项："));
+    assert!(help.contains("查找、安装、部署、更新、标记、导入或移除 Skill"));
+    assert!(!help.contains("参数：\n\n"));
+    assert!(!help.contains("__bridge"));
+}
+
+#[test]
+fn deploy_help_is_localized_in_korean_with_argument_guidance() {
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let exit = run_with_executor(
+        [
+            "skillshub-cli",
+            "--lang",
+            "ko",
+            "skills",
+            "deploy",
+            "--help",
+        ],
+        &mut stdout,
+        &mut stderr,
+        |_| panic!("help must not reach the executor"),
+    );
+
+    assert_eq!(exit, 0);
+    assert!(stderr.is_empty());
+    let help = String::from_utf8(stdout).unwrap();
+    assert!(help.contains("Skill을 하나 이상의 명시적 Agent에 배포합니다"));
+    assert!(help.contains("사용법:"));
+    assert!(help.contains("인수:"));
+    assert!(help.contains("옵션:"));
+    assert!(help.contains("배포할 Skill 이름 또는 ID"));
+    assert!(help.contains("대상 Agent를 하나 이상 지정"));
+    assert!(!help.contains("\n명령:\n"));
+    assert!(!help.contains("__bridge"));
 }

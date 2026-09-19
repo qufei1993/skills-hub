@@ -4,6 +4,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use super::locale::{Locale, MessageKey};
+use super::sanitize::sanitize_payload;
 use crate::services::error::{ErrorCode, ServiceError};
 
 #[derive(Clone, Debug)]
@@ -65,11 +66,12 @@ pub fn write_success(
     locale: Locale,
     json: bool,
 ) -> io::Result<()> {
+    let data = sanitize_payload(&success.data);
     if json {
         let envelope = JsonEnvelope::Success {
             ok: true,
             command: success.command,
-            data: &success.data,
+            data,
         };
         serde_json::to_writer(&mut *writer, &envelope)?;
         writeln!(writer)
@@ -86,13 +88,14 @@ pub fn write_failure(
     json: bool,
 ) -> io::Result<()> {
     let message = locale.error_message(error.code);
+    let details = sanitize_payload(&error.details);
     if json {
         let envelope = JsonEnvelope::<Value>::Failure {
             ok: false,
             command,
             code: error.code,
             message: message.to_string(),
-            details: error.details.clone(),
+            details,
         };
         serde_json::to_writer(&mut *writer, &envelope)?;
         writeln!(writer)
