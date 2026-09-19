@@ -15,7 +15,7 @@ use crate::core::sync_engine::{
 use super::error::{ErrorCode, ServiceError};
 use super::operation_lock::OperationKind;
 use super::skills_hub::SkillsHubService;
-use super::types::{Agent, SkillSelector};
+use super::types::{Agent, Skill, SkillSelector};
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", content = "path", rename_all = "lowercase")]
@@ -90,6 +90,20 @@ pub struct DeploymentOutcome {
 }
 
 impl SkillsHubService {
+    pub(super) fn execute_bundled_deployment(
+        &self,
+        previous: DeploymentPlan,
+    ) -> Result<DeploymentOutcome, ServiceError> {
+        let current = self.build_deployment_plan(previous.request.clone(), previous.undeploy)?;
+        if current.targets != previous.targets
+            || current.fingerprints != previous.fingerprints
+            || current.parent_snapshots != previous.parent_snapshots
+        {
+            return Err(stale());
+        }
+        self.execute_deployment_plan(current)
+    }
+
     pub fn plan_deploy(&self, request: DeploymentRequest) -> Result<DeploymentPlan, ServiceError> {
         self.build_deployment_plan(request, false)
     }
@@ -144,6 +158,16 @@ impl SkillsHubService {
         request: DeploymentRequest,
         undeploy: bool,
     ) -> Result<DeploymentPlan, ServiceError> {
+        let skill = self.show_skill(request.skill.clone())?;
+        self.plan_deployment_for_skill(request, undeploy, skill)
+    }
+
+    pub(super) fn plan_deployment_for_skill(
+        &self,
+        request: DeploymentRequest,
+        undeploy: bool,
+        skill: Skill,
+    ) -> Result<DeploymentPlan, ServiceError> {
         self.ensure_database_compatible()?;
         if request.agents.is_empty() || request.agents.iter().any(|agent| agent.trim().is_empty()) {
             return Err(ServiceError::new(
@@ -152,7 +176,6 @@ impl SkillsHubService {
                 json!({"argument":"agent"}),
             ));
         }
-        let skill = self.show_skill(request.skill.clone())?;
         if Path::new(&skill.name).components().count() != 1
             || !matches!(
                 Path::new(&skill.name).components().next(),
@@ -462,7 +485,7 @@ impl SkillsHubService {
         })
     }
 
-    fn execute_deployment_plan(
+    pub(super) fn execute_deployment_plan(
         &self,
         mut plan: DeploymentPlan,
     ) -> Result<DeploymentOutcome, ServiceError> {

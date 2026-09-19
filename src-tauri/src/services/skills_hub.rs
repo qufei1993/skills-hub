@@ -276,7 +276,7 @@ impl SkillsHubService {
         }
     }
 
-    fn skill_from_record(
+    pub(super) fn skill_from_record(
         &self,
         record: SkillRecord,
         source_check: Option<&(Option<String>, i64)>,

@@ -18,6 +18,22 @@ use super::operation_lock::OperationKind;
 use super::skills_hub::SkillsHubService;
 use super::types::{SkillSelector, SkillSource, SkillTarget};
 
+pub(super) struct BundledInstall {
+    staging: tempfile::TempDir,
+    pub record: crate::core::skill_store::SkillRecord,
+    previous: Option<crate::core::skill_store::SkillRecord>,
+}
+
+impl BundledInstall {
+    pub fn preview_record(&self) -> crate::core::skill_store::SkillRecord {
+        self.previous.clone().unwrap_or_else(|| {
+            let mut record = self.record.clone();
+            record.central_path = self.staging.path().to_string_lossy().into_owned();
+            record
+        })
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", content = "value", rename_all = "lowercase")]
 pub enum InstallSource {
@@ -128,6 +144,155 @@ pub struct UpdateOutcome {
 }
 
 impl SkillsHubService {
+    pub(super) fn prepare_bundled_install(
+        &self,
+        name: &str,
+        content: &str,
+        revision: &str,
+    ) -> Result<BundledInstall, ServiceError> {
+        use crate::core::content_hash::hash_dir_strict;
+        self.ensure_database_compatible()?;
+        validate_skill_name(name)?;
+        let mut existing = self
+            .store()
+            .list_skills()
+            .map_err(|_| ServiceError::internal("failed to inspect bundled skill"))?
+            .into_iter()
+            .filter(|skill| skill.name.eq_ignore_ascii_case(name));
+        let previous = existing.next();
+        let central =
+            crate::core::central_repo::resolve_central_repo_path(self.paths(), self.store())
+                .map_err(|_| ServiceError::internal("failed to resolve bundled skill path"))?
+                .join(name);
+        if existing.next().is_some() {
+            return Err(bundled_conflict(&central, "ambiguous_bundled_skill"));
+        }
+        let target = previous
+            .as_ref()
+            .map(|skill| PathBuf::from(&skill.central_path))
+            .unwrap_or(central);
+        if let Some(previous) = &previous {
+            if previous.source_type != "bundled" || previous.name != name {
+                return Err(bundled_conflict(&target, "non_bundled_skill"));
+            }
+            let safe_directory = std::fs::symlink_metadata(&target)
+                .is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink());
+            if !safe_directory
+                || previous.content_hash.is_none()
+                || hash_dir_strict(&target).ok().as_ref() != previous.content_hash.as_ref()
+            {
+                return Err(bundled_conflict(&target, "bundled_skill_modified"));
+            }
+        } else if std::fs::symlink_metadata(&target)
+            .map(|_| true)
+            .unwrap_or_else(|error| error.kind() != std::io::ErrorKind::NotFound)
+        {
+            return Err(bundled_conflict(&target, "unmanaged_library_target"));
+        }
+        let staging = tempfile::Builder::new()
+            .prefix("skills-hub-bundled-")
+            .tempdir()
+            .map_err(|_| ServiceError::internal("failed to stage bundled skill"))?;
+        std::fs::write(staging.path().join("SKILL.md"), content)
+            .map_err(|_| ServiceError::internal("failed to stage bundled skill"))?;
+        let content_hash = hash_dir_strict(staging.path())
+            .map_err(|_| ServiceError::internal("failed to hash bundled skill"))?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        let record = crate::core::skill_store::SkillRecord {
+            id: previous
+                .as_ref()
+                .map(|skill| skill.id.clone())
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            name: name.into(),
+            description: crate::core::installer::parse_skill_md(&staging.path().join("SKILL.md"))
+                .and_then(|(_, description)| description),
+            source_type: "bundled".into(),
+            source_ref: None,
+            source_subpath: None,
+            source_revision: Some(revision.into()),
+            central_path: target.to_string_lossy().into_owned(),
+            content_hash: Some(content_hash),
+            created_at: previous
+                .as_ref()
+                .map(|skill| skill.created_at)
+                .unwrap_or(now),
+            updated_at: now,
+            last_sync_at: previous.as_ref().and_then(|skill| skill.last_sync_at),
+            last_seen_at: now,
+            enabled: previous.as_ref().map_or(true, |skill| skill.enabled),
+            status: "ok".into(),
+        };
+        Ok(BundledInstall {
+            staging,
+            record,
+            previous,
+        })
+    }
+
+    pub(super) fn apply_bundled_install<T>(
+        &self,
+        bundled: BundledInstall,
+        apply: impl FnOnce() -> Result<T, ServiceError>,
+    ) -> Result<T, ServiceError> {
+        use crate::core::sync_engine::PreparedDirReplacement;
+        let path = Path::new(&bundled.record.central_path);
+        let unchanged = bundled.previous.as_ref().is_some_and(|previous| {
+            previous.content_hash == bundled.record.content_hash
+                && previous.source_revision == bundled.record.source_revision
+        });
+        if unchanged {
+            return apply();
+        }
+        let mut replacement = PreparedDirReplacement::prepare_copy(
+            bundled.staging.path(),
+            path,
+            bundled
+                .previous
+                .as_ref()
+                .and_then(|previous| previous.content_hash.clone()),
+            bundled.previous.is_none(),
+        )
+        .map_err(|_| bundled_conflict(path, "bundled_stage_failed"))?;
+        if bundled.previous.is_none() {
+            replacement.activate_missing_only()
+        } else {
+            replacement.activate().map(|_| ())
+        }
+        .map_err(|_| bundled_conflict(path, "bundled_target_changed"))?;
+        if self
+            .store()
+            .commit_skill_update(&bundled.record, &[])
+            .is_err()
+        {
+            let rolled_back = replacement.rollback().is_ok();
+            return Err(ServiceError::new(
+                ErrorCode::InternalError,
+                "bundled skill commit failed",
+                json!({"path": path, "rolled_back": rolled_back}),
+            ));
+        }
+        match apply() {
+            Ok(outcome) => {
+                replacement.commit();
+                Ok(outcome)
+            }
+            Err(mut error) => {
+                let files_restored = replacement.rollback().is_ok();
+                let database_restored = if let Some(previous) = bundled.previous {
+                    self.store().commit_skill_update(&previous, &[])
+                } else {
+                    self.store().delete_skill(&bundled.record.id)
+                }
+                .is_ok();
+                error.details["bundled_rollback"] = json!({"path": path, "files_restored": files_restored, "database_restored": database_restored});
+                Err(error)
+            }
+        }
+    }
+
     pub fn install(&self, request: InstallRequest) -> Result<InstallOutcome, ServiceError> {
         self.install_with_cancel(request, None)
     }
@@ -254,6 +419,14 @@ impl SkillsHubService {
             changed: updated.changed,
         })
     }
+}
+
+fn bundled_conflict(path: &Path, reason: &str) -> ServiceError {
+    ServiceError::new(
+        ErrorCode::TargetConflict,
+        "bundled skill cannot be safely changed",
+        json!({"path":path,"reason":reason}),
+    )
 }
 
 fn install_local_request(

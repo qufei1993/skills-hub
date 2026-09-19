@@ -234,14 +234,21 @@ pub fn build_onboarding_plan<R: tauri::Runtime>(
     let home =
         dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to resolve home directory"))?;
     let paths = crate::runtime_paths_for_tauri(app)?;
-    let central = resolve_central_repo_path(&paths, store)?;
+    build_onboarding_plan_for_runtime(&paths, store, &home)
+}
+
+pub(crate) fn build_onboarding_plan_for_runtime(
+    paths: &crate::core::runtime_paths::RuntimePaths,
+    store: &SkillStore,
+    home: &Path,
+) -> Result<OnboardingPlan> {
+    let central = resolve_central_repo_path(paths, store)?;
     let mut managed_targets = store
-        .list_all_skill_target_paths()
-        .unwrap_or_default()
+        .list_all_skill_target_paths()?
         .into_iter()
         .map(|(tool, path)| managed_target_key(&tool, Path::new(&path)))
         .collect::<std::collections::HashSet<_>>();
-    for skill in store.list_skills().unwrap_or_default() {
+    for skill in store.list_skills()? {
         if let Some(source_ref) = skill.source_ref {
             managed_targets.insert(managed_target_key(
                 CLAUDE_PLUGIN_TOOL_KEY,
@@ -249,13 +256,13 @@ pub fn build_onboarding_plan<R: tauri::Runtime>(
             ));
         }
     }
-    let claude_config_dir = resolve_claude_config_dir(&home);
+    let claude_config_dir = resolve_claude_config_dir(home);
     let disabled_source_keys = load_discovery_scan_config(store)?
         .disabled_source_keys
         .into_iter()
         .collect::<HashSet<_>>();
     build_onboarding_plan_with_claude_dir(
-        &home,
+        home,
         &claude_config_dir,
         Some(&central),
         Some(&managed_targets),
@@ -721,7 +728,8 @@ fn is_under(path: &Path, base: &Path) -> bool {
 
 fn managed_target_key(tool: &str, path: &Path) -> String {
     let tool = tool.to_ascii_lowercase();
-    let normalized = normalize_path_for_key(path);
+    let resolved = path_for_comparison(path).unwrap_or_else(|_| path.to_path_buf());
+    let normalized = normalize_path_for_key(&resolved);
     format!("{tool}\n{normalized}")
 }
 

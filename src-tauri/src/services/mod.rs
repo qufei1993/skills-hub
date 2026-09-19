@@ -7,5 +7,6 @@ pub mod skills_hub;
 pub mod types;
 pub mod workflows;
 
+pub mod agent_access;
 #[cfg(test)]
 mod tests;

@@ -26,6 +26,11 @@ use super::tool_adapters::{
     adapter_by_key, is_tool_installed, project_relative_skills_dir, resolve_default_path, ToolId,
 };
 
+pub const OFFICIAL_SKILL_MD: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../skills/skills-hub/SKILL.md"
+));
+
 pub struct InstallResult {
     pub skill_id: String,
     pub name: String,
@@ -1423,6 +1428,31 @@ fn stage_skill_source(
     let central_parent = central_path
         .parent()
         .ok_or_else(|| anyhow::anyhow!("invalid central path"))?;
+    if record.source_type == "bundled" {
+        let conflict = |reason| UpdateTargetConflict {
+            skill_id: record.id.clone(),
+            agent: "library".into(),
+            path: record.central_path.clone(),
+            reason,
+        };
+        anyhow::ensure!(
+            record.name == "skills-hub",
+            conflict("unknown_bundled_skill")
+        );
+        let metadata = std::fs::symlink_metadata(&central_path)?;
+        anyhow::ensure!(
+            metadata.is_dir()
+                && !metadata.file_type().is_symlink()
+                && record.content_hash.as_ref() == Some(&hash_dir_strict(&central_path)?),
+            conflict("bundled_skill_modified")
+        );
+        preflight_managed_skill_update_targets(store, &record.id)?;
+        let staging = tempfile::Builder::new()
+            .prefix(".skills-hub-update-")
+            .tempdir_in(central_parent)?;
+        std::fs::write(staging.path().join("SKILL.md"), OFFICIAL_SKILL_MD)?;
+        return Ok((staging.keep(), Some(env!("CARGO_PKG_VERSION").into()), None));
+    }
     let staging_dir = central_parent.join(format!(".skills-hub-update-{}", Uuid::new_v4()));
     if staging_dir.exists() {
         let _ = std::fs::remove_dir_all(&staging_dir);

@@ -7,6 +7,7 @@ use super::args::{
 use super::locale::MessageKey;
 use super::output::CommandSuccess;
 use crate::core::runtime_paths::{RuntimePaths, RuntimeProfile};
+use crate::services::agent_access::SetupAgentRequest;
 use crate::services::deployment::{DeploymentRequest, DeploymentScope};
 use crate::services::error::ServiceError;
 use crate::services::install::InstallRequest;
@@ -18,7 +19,7 @@ pub fn execute(cli: &Cli) -> Result<CommandSuccess, ServiceError> {
     let command = cli.command.protocol_name();
     match &cli.command {
         Command::Version => return success(command, json!({"version": env!("CARGO_PKG_VERSION")})),
-        Command::Setup(_) | Command::Bridge(_) => {
+        Command::Bridge(_) => {
             return Err(ServiceError::internal(
                 "CLI workflow handler is not available",
             ))
@@ -27,6 +28,15 @@ pub fn execute(cli: &Cli) -> Result<CommandSuccess, ServiceError> {
     }
     let service = SkillsHubService::open(runtime_paths()?)?;
     match &cli.command {
+        Command::Setup(args) => success(
+            command,
+            service.setup_agent_access(SetupAgentRequest {
+                agents: args.agent.clone(),
+                remove: args.remove,
+                dry_run: args.dry_run,
+                confirmed: args.yes,
+            })?,
+        ),
         Command::Doctor => success(command, service.doctor()?),
         Command::Agents(_) => success(command, service.list_agents()?),
         Command::Skills(args) => match &args.command {
@@ -118,7 +128,7 @@ pub fn execute(cli: &Cli) -> Result<CommandSuccess, ServiceError> {
                 ),
             },
         },
-        Command::Version | Command::Setup(_) | Command::Bridge(_) => unreachable!(),
+        Command::Version | Command::Bridge(_) => unreachable!(),
     }
 }
 

@@ -276,14 +276,17 @@ impl AgentsCommand {
 
 #[derive(Clone, Debug, Args)]
 pub struct SetupArgs {
-    #[arg(long)]
-    pub agent: String,
+    #[arg(long, required = true)]
+    pub agent: Vec<String>,
 
     #[arg(long)]
     pub remove: bool,
 
-    #[arg(long, requires = "remove")]
+    #[arg(long, requires = "remove", conflicts_with = "dry_run")]
     pub yes: bool,
+
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Clone, Debug, Args)]

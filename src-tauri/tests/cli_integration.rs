@@ -17,6 +17,49 @@ struct Fixture {
     paths: RuntimePaths,
 }
 
+#[test]
+fn cli_setup_installs_previews_and_removes_only_requested_agent() {
+    let f = Fixture::new();
+    fs::create_dir_all(f.root.path().join("home/.cursor")).unwrap();
+    let preview = f.json(&["setup", "--agent", "codex", "--dry-run"], None);
+    assert_eq!(preview["data"]["installed"], false);
+    assert!(preview["data"]["plan"].is_object());
+    assert!(f.service().list_skills().unwrap().is_empty());
+    let installed = f.json(&["setup", "--agent", "codex"], None);
+    assert_eq!(installed["data"]["skill"]["source"]["kind"], "bundled");
+    assert!(!f
+        .root
+        .path()
+        .join("home/.cursor/skills/skills-hub")
+        .exists());
+    let confirmation = f.json(
+        &["setup", "--agent", "codex", "--remove"],
+        Some(("CONFIRMATION_REQUIRED", 4)),
+    );
+    assert!(confirmation["details"]["plan"].is_object());
+    f.json(&["setup", "--agent", "codex", "--remove", "--yes"], None);
+    assert!(!f.root.path().join("home/.codex/skills/skills-hub").exists());
+    assert_eq!(f.service().list_skills().unwrap().len(), 1);
+}
+
+#[test]
+fn cli_setup_multiple_agents_requires_explicit_scope() {
+    let f = Fixture::new();
+    fs::create_dir_all(f.root.path().join("home/.cursor")).unwrap();
+    f.json(&["setup"], Some(("INVALID_ARGUMENT", 2)));
+    f.json(&["setup", "--agent", "codex", "--agent", "cursor"], None);
+    assert!(f
+        .root
+        .path()
+        .join("home/.codex/skills/skills-hub/SKILL.md")
+        .exists());
+    assert!(f
+        .root
+        .path()
+        .join("home/.cursor/skills/skills-hub/SKILL.md")
+        .exists());
+}
+
 impl Fixture {
     fn new() -> Self {
         let root = TempDir::new().unwrap();
@@ -728,6 +771,7 @@ fn search_uses_saved_proxy_and_returns_network_error_on_stderr() {
         loop {
             match listener.accept() {
                 Ok((mut stream, _)) => {
+                    stream.set_nonblocking(false).unwrap();
                     stream
                         .set_read_timeout(Some(std::time::Duration::from_secs(5)))
                         .unwrap();
