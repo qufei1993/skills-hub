@@ -1331,6 +1331,93 @@ fn format_service_error_maps_target_conflict_back_to_the_desktop_prefix() {
     );
 }
 
+fn make_install_service() -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    crate::core::runtime_paths::RuntimePaths,
+    SkillsHubService,
+) {
+    let home = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let paths = crate::core::runtime_paths::RuntimePaths::from_roots(
+        crate::core::runtime_paths::RuntimeProfile::Test,
+        home.path(),
+        data.path(),
+    );
+    let service = SkillsHubService::open(paths.clone()).unwrap();
+    (home, data, paths, service)
+}
+
+fn write_install_test_skill(path: &Path, name: &str) {
+    std::fs::create_dir_all(path).unwrap();
+    std::fs::write(
+        path.join("SKILL.md"),
+        format!("---\nname: {name}\ndescription: Test skill\n---\n\nBody\n"),
+    )
+    .unwrap();
+}
+
+fn init_install_test_git_repo(path: &Path) {
+    let repo = git2::Repository::init(path).unwrap();
+    let signature = git2::Signature::now("Skills Hub Test", "test@example.com").unwrap();
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+        .unwrap();
+}
+
+#[test]
+fn duplicate_local_install_reaches_the_desktop_target_exists_protocol() {
+    let (_home, _data, paths, service) = make_install_service();
+    let source = paths.app_data_dir.join("private-local-source");
+    write_install_test_skill(&source, "duplicate-local");
+    service.install(InstallRequest::local(&source)).unwrap();
+
+    let error = service.install(InstallRequest::local(&source)).unwrap_err();
+    let formatted = format_service_error(error);
+
+    assert_eq!(
+        formatted,
+        format!(
+            "TARGET_EXISTS|{}",
+            paths.default_central_repo.join("duplicate-local").display()
+        )
+    );
+    assert!(!formatted.contains(source.to_string_lossy().as_ref()));
+}
+
+#[test]
+fn duplicate_git_install_reaches_desktop_without_leaking_the_source_url() {
+    let (_home, _data, paths, service) = make_install_service();
+    let secret = "do-not-leak-source-secret";
+    let repo_path = paths.app_data_dir.join(secret);
+    write_install_test_skill(&repo_path, "duplicate-git");
+    init_install_test_git_repo(&repo_path);
+    let source_url = format!("file://{}", repo_path.display());
+    service
+        .install(InstallRequest::git(&source_url).with_name(Some("duplicate-git".to_string())))
+        .unwrap();
+
+    let error = service
+        .install(InstallRequest::git(&source_url).with_name(Some("duplicate-git".to_string())))
+        .unwrap_err();
+    let formatted = format_service_error(error);
+
+    assert_eq!(
+        formatted,
+        format!(
+            "TARGET_EXISTS|{}",
+            paths.default_central_repo.join("duplicate-git").display()
+        )
+    );
+    assert!(!formatted.contains(secret));
+    assert!(!formatted.contains(&source_url));
+}
+
 #[test]
 fn expand_home_path_basic() {
     let home = dirs::home_dir().expect("home");

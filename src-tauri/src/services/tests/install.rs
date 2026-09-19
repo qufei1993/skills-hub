@@ -352,7 +352,7 @@ fn multi_skill_local_source_keeps_the_complete_desktop_candidate_shape() {
 }
 
 #[test]
-fn duplicate_install_has_a_stable_conflict_category_without_leaking_the_path() {
+fn duplicate_install_carries_only_the_safe_local_target_path() {
     let fixture = Fixture::new();
     let source = fixture.paths.app_data_dir.join("duplicate-source");
     write_skill(&source, "duplicate-demo");
@@ -362,7 +362,13 @@ fn duplicate_install_has_a_stable_conflict_category_without_leaking_the_path() {
     let error = service.install(InstallRequest::local(&source)).unwrap_err();
 
     assert_eq!(error.code, ErrorCode::TargetConflict);
-    assert_eq!(error.details, json!({ "legacy_category": "skill_exists" }));
+    assert_eq!(
+        error.details,
+        json!({
+            "legacy_category": "skill_exists",
+            "path": fixture.paths.default_central_repo.join("duplicate-demo"),
+        })
+    );
     assert!(!serde_json::to_string(&error)
         .unwrap()
         .contains(source.to_string_lossy().as_ref()));

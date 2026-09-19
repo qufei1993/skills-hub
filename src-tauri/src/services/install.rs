@@ -8,6 +8,7 @@ use crate::core::installer::{
     check_managed_skill_update, install_git_skill, install_git_skill_from_selection,
     install_local_skill_from_selection, list_git_skills, list_local_skills,
     update_managed_skill_from_source, GitSkillCandidate, LocalSkillCandidate,
+    SkillAlreadyExistsError,
 };
 use crate::core::network_proxy::get_github_proxy_url;
 use crate::core::skills_search::{search_skills_online, OnlineSkillResult};
@@ -497,6 +498,16 @@ fn invalid_source() -> ServiceError {
 }
 
 fn map_install_error(error: anyhow::Error) -> ServiceError {
+    if let Some(conflict) = error.downcast_ref::<SkillAlreadyExistsError>() {
+        return ServiceError::new(
+            ErrorCode::TargetConflict,
+            "the skill already exists in the Skills Hub library",
+            json!({
+                "legacy_category": "skill_exists",
+                "path": conflict.central_path().to_string_lossy().into_owned(),
+            }),
+        );
+    }
     let safe_error = format!("{error:#}");
     let lower = safe_error.to_lowercase();
     if lower.contains("cancelled|") {
@@ -504,13 +515,6 @@ fn map_install_error(error: anyhow::Error) -> ServiceError {
             ErrorCode::InternalError,
             "the operation was cancelled",
             json!({ "legacy_category": "cancelled" }),
-        );
-    }
-    if lower.contains("skill already exists in central repo") {
-        return ServiceError::new(
-            ErrorCode::TargetConflict,
-            "the skill already exists in the Skills Hub library",
-            json!({ "legacy_category": "skill_exists" }),
         );
     }
     let category = crate::core::skill_issues::safe_code(&safe_error);

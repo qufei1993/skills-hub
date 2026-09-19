@@ -33,6 +33,29 @@ pub struct InstallResult {
     pub content_hash: Option<String>,
 }
 
+#[derive(Debug)]
+pub(crate) struct SkillAlreadyExistsError {
+    central_path: PathBuf,
+}
+
+impl SkillAlreadyExistsError {
+    fn new(central_path: PathBuf) -> Self {
+        Self { central_path }
+    }
+
+    pub(crate) fn central_path(&self) -> &Path {
+        &self.central_path
+    }
+}
+
+impl std::fmt::Display for SkillAlreadyExistsError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("skill already exists in central repo")
+    }
+}
+
+impl std::error::Error for SkillAlreadyExistsError {}
+
 fn record_target_sync_failure(
     store: &SkillStore,
     target: &SkillTargetRecord,
@@ -105,7 +128,7 @@ fn install_local_skill_with_existing_policy(
                 }
             }
         }
-        anyhow::bail!("skill already exists in central repo: {:?}", central_path);
+        return Err(SkillAlreadyExistsError::new(central_path).into());
     }
 
     copy_dir_recursive(source_path, &central_path)
@@ -173,7 +196,7 @@ pub fn install_git_skill(
     let mut central_path = central_dir.join(&name);
 
     if central_path.exists() {
-        anyhow::bail!("skill already exists in central repo: {:?}", central_path);
+        return Err(SkillAlreadyExistsError::new(central_path).into());
     }
 
     // Fast path: for subpath installs, prefer sparse git checkout.
@@ -1611,7 +1634,7 @@ pub fn install_git_skill_from_selection(
     ensure_central_repo(&central_dir)?;
     let mut central_path = central_dir.join(&display_name);
     if central_path.exists() {
-        anyhow::bail!("skill already exists in central repo: {:?}", central_path);
+        return Err(SkillAlreadyExistsError::new(central_path).into());
     }
 
     let (repo_dir, revision) = clone_to_cache(
