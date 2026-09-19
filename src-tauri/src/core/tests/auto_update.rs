@@ -575,8 +575,9 @@ fn unchanged_skill_is_checked_but_not_counted_as_updated() {
             central_root.path().to_string_lossy().as_ref(),
         )
         .unwrap();
+    let paths = crate::runtime_paths_for_tauri(app.handle()).unwrap();
     crate::core::installer::install_local_skill(
-        app.handle(),
+        &paths,
         &store,
         source.path(),
         Some("unchanged".to_string()),

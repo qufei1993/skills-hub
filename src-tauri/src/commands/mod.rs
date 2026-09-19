@@ -45,9 +45,7 @@ use crate::core::github_token::{
     SystemGithubTokenStore,
 };
 use crate::core::installer::{
-    import_existing_local_skill, install_git_skill, install_git_skill_from_selection,
-    install_local_skill, install_local_skill_from_selection, list_git_skills, list_local_skills,
-    update_managed_skill_from_source, GitSkillCandidate, InstallResult, LocalSkillCandidate,
+    import_existing_local_skill, GitSkillCandidate, InstallResult, LocalSkillCandidate,
 };
 use crate::core::network_proxy::{
     app_http_client, get_github_proxy_config as get_github_proxy_config_core,
@@ -63,9 +61,7 @@ use crate::core::recycle_bin::{DeletionSource, RecycleBinItem, RecycleBinService
 #[cfg(test)]
 use crate::core::skill_store::SkillRecord;
 use crate::core::skill_store::{SkillStore, SkillTargetRecord, DEVICE_SYNC_HISTORY_LIMIT};
-use crate::core::skills_search::{
-    search_skills_online as search_skills_online_core, OnlineSkillResult,
-};
+use crate::core::skills_search::OnlineSkillResult;
 use crate::core::sync_engine::{
     copy_dir_recursive, path_is_protected_real_content, paths_overlap,
     remove_path_any as remove_path_any_core, sync_dir_for_tool_with_overwrite, sync_dir_hybrid,
@@ -80,6 +76,7 @@ use crate::core::tool_adapters::{
     is_tool_installed, load_tool_config, project_relative_skills_dir, resolve_default_path,
     save_tool_config, supports_project_scope, CustomToolConfig, ToolConfig,
 };
+use crate::services::install::{InstallOutcome, InstallRequest};
 use crate::services::operation_lock::{OperationKind, OperationLock};
 use crate::services::skills_hub::SkillsHubService;
 use crate::services::types::{Agent as ServiceAgent, Skill as ServiceSkill};
@@ -180,7 +177,15 @@ fn format_anyhow_error(err: anyhow::Error) -> String {
 }
 
 fn format_service_error(error: crate::services::error::ServiceError) -> String {
-    error.message
+    match error.code {
+        crate::services::error::ErrorCode::MultiSkills => {
+            format!("MULTI_SKILLS|{}", error.message)
+        }
+        crate::services::error::ErrorCode::UpdateHeldBack => {
+            format!("UPDATE_HELD_BACK|{}", error.message)
+        }
+        _ => error.message,
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -511,7 +516,8 @@ pub async fn set_git_cache_cleanup_days(
 #[tauri::command]
 pub async fn clear_git_cache_now(app: tauri::AppHandle) -> Result<usize, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        cleanup_git_cache_dirs(&app, std::time::Duration::from_secs(0))
+        let paths = crate::runtime_paths_for_tauri(&app)?;
+        cleanup_git_cache_dirs(&paths, std::time::Duration::from_secs(0))
     })
     .await
     .map_err(|err| err.to_string())?
@@ -1083,110 +1089,115 @@ pub async fn set_central_repo_path(
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn install_local(
-    app: tauri::AppHandle,
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     sourcePath: String,
     name: Option<String>,
 ) -> Result<InstallResultDto, String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let _operation_lock = acquire_operation_lock(&app, OperationKind::Install)?;
-        let result = install_local_skill(&app, &store, sourcePath.as_ref(), name)?;
-        Ok::<_, anyhow::Error>(to_install_dto(result))
+        service
+            .install(InstallRequest::local(sourcePath).with_name(name))
+            .map(to_service_install_dto)
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(format_service_error)
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
-pub async fn list_local_skills_cmd(basePath: String) -> Result<Vec<LocalSkillCandidate>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let path = std::path::PathBuf::from(basePath);
-        list_local_skills(&path)
-    })
-    .await
-    .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+pub async fn list_local_skills_cmd(
+    service: State<'_, SkillsHubService>,
+    basePath: String,
+) -> Result<Vec<LocalSkillCandidate>, String> {
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || service.local_install_candidates(basePath))
+        .await
+        .map_err(|err| err.to_string())?
+        .map_err(format_service_error)
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn install_local_selection(
-    app: tauri::AppHandle,
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     basePath: String,
     subpath: String,
     name: Option<String>,
 ) -> Result<InstallResultDto, String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let _operation_lock = acquire_operation_lock(&app, OperationKind::Install)?;
-        let base = std::path::PathBuf::from(basePath);
-        let result =
-            install_local_skill_from_selection(&app, &store, base.as_ref(), &subpath, name)?;
-        Ok::<_, anyhow::Error>(to_install_dto(result))
+        service
+            .install(
+                InstallRequest::local(basePath)
+                    .with_subpath(subpath)
+                    .with_name(name),
+            )
+            .map(to_service_install_dto)
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(format_service_error)
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn install_git(
-    app: tauri::AppHandle,
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     cancel: State<'_, Arc<CancelToken>>,
     repoUrl: String,
     name: Option<String>,
 ) -> Result<InstallResultDto, String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
     cancel.reset();
     let cancel_token = Arc::clone(cancel.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        let _operation_lock = acquire_operation_lock(&app, OperationKind::Install)?;
-        let result = install_git_skill(&app, &store, &repoUrl, name, Some(&cancel_token))?;
-        Ok::<_, anyhow::Error>(to_install_dto(result))
+        service
+            .install_with_cancel(
+                InstallRequest::git(repoUrl).with_name(name),
+                Some(&cancel_token),
+            )
+            .map(to_service_install_dto)
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(format_service_error)
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn list_git_skills_cmd(
-    app: tauri::AppHandle,
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     repoUrl: String,
 ) -> Result<Vec<GitSkillCandidate>, String> {
-    let store = store.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || list_git_skills(&app, &store, &repoUrl))
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || service.git_install_candidates(&repoUrl))
         .await
         .map_err(|err| err.to_string())?
-        .map_err(format_anyhow_error)
+        .map_err(format_service_error)
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn install_git_selection(
-    app: tauri::AppHandle,
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     repoUrl: String,
     subpath: String,
     name: Option<String>,
 ) -> Result<InstallResultDto, String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let _operation_lock = acquire_operation_lock(&app, OperationKind::Install)?;
-        let result = install_git_skill_from_selection(&app, &store, &repoUrl, &subpath, name)?;
-        Ok::<_, anyhow::Error>(to_install_dto(result))
+        service
+            .install(
+                InstallRequest::git(repoUrl)
+                    .with_subpath(subpath)
+                    .with_name(name),
+            )
+            .map(to_service_install_dto)
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(format_service_error)
 }
 
 #[derive(Debug, Serialize)]
@@ -1660,16 +1671,13 @@ pub struct UpdateResultDto {
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn update_managed_skill(
-    app: tauri::AppHandle,
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     skillId: String,
 ) -> Result<UpdateResultDto, String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let _operation_lock = acquire_operation_lock(&app, OperationKind::Update)?;
-        let res = update_managed_skill_from_source(&app, &store, &skillId)?;
-        Ok::<_, anyhow::Error>(UpdateResultDto {
-            skill_id: res.skill_id,
+        service.update(skillId.into()).map(|res| UpdateResultDto {
+            skill_id: res.id,
             name: res.name,
             content_hash: res.content_hash,
             source_revision: res.source_revision,
@@ -1680,7 +1688,7 @@ pub async fn update_managed_skill(
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(format_service_error)
 }
 
 #[tauri::command]
@@ -1849,7 +1857,8 @@ pub async fn import_existing_skill(
         if !source.join("SKILL.md").exists() {
             anyhow::bail!("SKILL_INVALID|missing_skill_md");
         }
-        let result = import_existing_local_skill(&app, &store, source, name)?;
+        let paths = crate::runtime_paths_for_tauri(&app)?;
+        let result = import_existing_local_skill(&paths, &store, source, name)?;
         Ok::<_, anyhow::Error>(to_install_dto(result))
     })
     .await
@@ -2089,6 +2098,15 @@ fn to_install_dto(result: InstallResult) -> InstallResultDto {
     }
 }
 
+fn to_service_install_dto(result: InstallOutcome) -> InstallResultDto {
+    InstallResultDto {
+        skill_id: result.id,
+        name: result.name,
+        central_path: result.central_path,
+        content_hash: result.content_hash,
+    }
+}
+
 fn to_auto_update_config_dto(mut config: AutoUpdateConfig) -> AutoUpdateConfigDto {
     let task_status = get_auto_update_task_status();
     if config.last_status.as_deref() == Some("running")
@@ -2251,20 +2269,20 @@ impl From<OnlineSkillResult> for OnlineSkillDto {
 
 #[tauri::command]
 pub async fn search_skills_online(
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     query: String,
     limit: Option<u32>,
 ) -> Result<Vec<OnlineSkillDto>, String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
     let limit = limit.unwrap_or(20) as usize;
     tauri::async_runtime::spawn_blocking(move || {
-        let proxy_url = get_github_proxy_url_core(&store)?;
-        let results = search_skills_online_core(&query, limit, &proxy_url)?;
-        Ok::<_, anyhow::Error>(results.into_iter().map(OnlineSkillDto::from).collect())
+        service
+            .search(&query, limit)
+            .map(|results| results.into_iter().map(OnlineSkillDto::from).collect())
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(format_service_error)
 }
 
 #[derive(Debug, Serialize)]

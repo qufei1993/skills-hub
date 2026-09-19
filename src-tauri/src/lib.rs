@@ -180,11 +180,11 @@ pub fn run() {
             // - Only deletes directories that match prefix `skills-hub-git-*`
             // - And contain our marker file `.skills-hub-git-temp`
             // - And are older than the max age.
-            let handle = app.handle().clone();
+            let cleanup_paths = app.state::<RuntimePaths>().inner().clone();
             let store_for_cleanup = store.clone();
             tauri::async_runtime::spawn(async move {
                 let removed = core::temp_cleanup::cleanup_old_git_temp_dirs(
-                    &handle,
+                    &cleanup_paths,
                     std::time::Duration::from_secs(24 * 60 * 60),
                 )
                 .unwrap_or(0);
@@ -198,7 +198,8 @@ pub fn run() {
                     let max_age =
                         std::time::Duration::from_secs(cleanup_days as u64 * 24 * 60 * 60);
                     let removed =
-                        core::cache_cleanup::cleanup_git_cache_dirs(&handle, max_age).unwrap_or(0);
+                        core::cache_cleanup::cleanup_git_cache_dirs(&cleanup_paths, max_age)
+                            .unwrap_or(0);
                     if removed > 0 {
                         log::info!("cleaned up {} git cache dirs", removed);
                     }

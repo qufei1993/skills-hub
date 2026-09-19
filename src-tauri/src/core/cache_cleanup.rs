@@ -1,13 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::Deserialize;
-use tauri::Manager;
 
+use super::runtime_paths::RuntimePaths;
 use super::skill_store::SkillStore;
 
-const CACHE_DIR_NAME: &str = "skills-hub-git-cache";
 const CACHE_META_FILE: &str = ".skills-hub-cache.json";
 pub const GIT_CACHE_CLEANUP_DAYS_KEY: &str = "git_cache_cleanup_days";
 pub const DEFAULT_GIT_CACHE_CLEANUP_DAYS: i64 = 30;
@@ -53,19 +52,11 @@ pub fn set_git_cache_ttl_secs(store: &SkillStore, secs: i64) -> Result<i64> {
     Ok(secs)
 }
 
-pub fn cleanup_git_cache_dirs<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    max_age: Duration,
-) -> Result<usize> {
-    let cache_dir = app
-        .path()
-        .app_cache_dir()
-        .context("failed to resolve app cache dir")?;
-    cleanup_git_cache_dirs_in(&cache_dir, max_age)
+pub fn cleanup_git_cache_dirs(paths: &RuntimePaths, max_age: Duration) -> Result<usize> {
+    cleanup_git_cache_dirs_in(&paths.git_cache_dir, max_age)
 }
 
-fn cleanup_git_cache_dirs_in(cache_dir: &Path, max_age: Duration) -> Result<usize> {
-    let cache_root = cache_dir.join(CACHE_DIR_NAME);
+fn cleanup_git_cache_dirs_in(cache_root: &Path, max_age: Duration) -> Result<usize> {
     if !cache_root.exists() {
         return Ok(0);
     }
@@ -76,7 +67,7 @@ fn cleanup_git_cache_dirs_in(cache_dir: &Path, max_age: Duration) -> Result<usiz
         .unwrap_or(SystemTime::UNIX_EPOCH);
 
     let mut removed = 0usize;
-    let rd = match std::fs::read_dir(&cache_root) {
+    let rd = match std::fs::read_dir(cache_root) {
         Ok(v) => v,
         Err(err) => {
             return Err(anyhow::anyhow!(

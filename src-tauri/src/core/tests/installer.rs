@@ -1,7 +1,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::core::runtime_paths::RuntimePaths;
 use crate::core::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
+
+fn runtime_paths<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> RuntimePaths {
+    crate::runtime_paths_for_tauri(app).unwrap()
+}
 
 fn make_store() -> (tempfile::TempDir, SkillStore) {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -287,7 +292,7 @@ fn installs_local_skill_and_updates_from_source() {
     fs::write(source.path().join("a.txt"), b"v1").unwrap();
 
     let res = super::install_local_skill(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         source.path(),
         Some("local1".to_string()),
@@ -319,7 +324,12 @@ fn installs_local_skill_and_updates_from_source() {
     fs::create_dir(target.join("__pycache__")).unwrap();
     fs::write(target.join("__pycache__/module.cpython-313.pyc"), b"cache").unwrap();
     fs::write(source.path().join("a.txt"), b"v2").unwrap();
-    let up = super::update_managed_skill_from_source(app.handle(), &store, &res.skill_id).unwrap();
+    let up = super::update_managed_skill_from_source(
+        &runtime_paths(app.handle()),
+        &store,
+        &res.skill_id,
+    )
+    .unwrap();
     assert_eq!(up.skill_id, res.skill_id);
     assert!(up.updated_targets.contains(&"unknown_tool".to_string()));
     assert!(PathBuf::from(
@@ -337,7 +347,7 @@ fn installs_local_skill_and_updates_from_source() {
     assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"v2");
 
     let err = match super::install_local_skill(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         source.path(),
         Some("local1".to_string()),
@@ -359,7 +369,7 @@ fn unchanged_local_skill_skips_central_and_copy_target_replacement() {
     fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
     fs::write(source.path().join("a.txt"), b"same").unwrap();
     let installed = super::install_local_skill(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         source.path(),
         Some("unchanged".to_string()),
@@ -383,8 +393,12 @@ fn unchanged_local_skill_skips_central_and_copy_target_replacement() {
         })
         .unwrap();
 
-    let result =
-        super::update_managed_skill_from_source(app.handle(), &store, &installed.skill_id).unwrap();
+    let result = super::update_managed_skill_from_source(
+        &runtime_paths(app.handle()),
+        &store,
+        &installed.skill_id,
+    )
+    .unwrap();
 
     assert!(result.updated_targets.is_empty());
     assert!(!target.exists());
@@ -404,7 +418,7 @@ fn changed_skill_does_not_overwrite_a_copy_target_with_unexpected_content() {
     fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
     fs::write(source.path().join("a.txt"), b"v1").unwrap();
     let installed = super::install_local_skill(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         source.path(),
         Some("modified-target".to_string()),
@@ -433,8 +447,12 @@ fn changed_skill_does_not_overwrite_a_copy_target_with_unexpected_content() {
         .unwrap();
     fs::write(source.path().join("a.txt"), b"v2").unwrap();
 
-    let result =
-        super::update_managed_skill_from_source(app.handle(), &store, &installed.skill_id).unwrap();
+    let result = super::update_managed_skill_from_source(
+        &runtime_paths(app.handle()),
+        &store,
+        &installed.skill_id,
+    )
+    .unwrap();
     assert!(result.changed);
 
     assert_eq!(fs::read(manual_content.join("a.txt")).unwrap(), b"manual");
@@ -460,7 +478,7 @@ fn changed_skill_updates_central_and_healthy_targets_despite_modified_copy() {
     fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
     fs::write(source.path().join("a.txt"), b"v1").unwrap();
     let installed = super::install_local_skill(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         source.path(),
         Some("transactional-update".to_string()),
@@ -497,23 +515,35 @@ fn changed_skill_updates_central_and_healthy_targets_despite_modified_copy() {
     fs::write(second_target.join("a.txt"), b"manual").unwrap();
     fs::write(source.path().join("a.txt"), b"v2").unwrap();
 
-    let result =
-        super::update_managed_skill_from_source(app.handle(), &store, &installed.skill_id).unwrap();
+    let result = super::update_managed_skill_from_source(
+        &runtime_paths(app.handle()),
+        &store,
+        &installed.skill_id,
+    )
+    .unwrap();
     assert!(result.changed);
     assert_eq!(fs::read(central_path.join("a.txt")).unwrap(), b"v2");
     assert_eq!(fs::read(first_target.join("a.txt")).unwrap(), b"v2");
     assert_eq!(fs::read(second_target.join("a.txt")).unwrap(), b"manual");
     assert_eq!(result.updated_targets, vec!["aaa"]);
     assert_eq!(result.pending_targets, vec!["zzz"]);
-    let unchanged =
-        super::update_managed_skill_from_source(app.handle(), &store, &installed.skill_id).unwrap();
+    let unchanged = super::update_managed_skill_from_source(
+        &runtime_paths(app.handle()),
+        &store,
+        &installed.skill_id,
+    )
+    .unwrap();
     assert!(!unchanged.changed);
     assert!(unchanged.updated_targets.is_empty());
     assert!(unchanged.pending_targets.is_empty());
     assert_eq!(fs::read(second_target.join("a.txt")).unwrap(), b"manual");
     fs::write(source.path().join("a.txt"), b"v3").unwrap();
-    let next =
-        super::update_managed_skill_from_source(app.handle(), &store, &installed.skill_id).unwrap();
+    let next = super::update_managed_skill_from_source(
+        &runtime_paths(app.handle()),
+        &store,
+        &installed.skill_id,
+    )
+    .unwrap();
     assert_eq!(next.pending_targets, vec!["zzz"]);
     assert_eq!(fs::read(first_target.join("a.txt")).unwrap(), b"v3");
     assert_eq!(fs::read(central_path.join("a.txt")).unwrap(), b"v3");
@@ -555,7 +585,7 @@ fn unexpected_target_symlink_does_not_block_healthy_copy_updates() {
     fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
     fs::write(source.path().join("a.txt"), b"v1").unwrap();
     let installed = super::install_local_skill(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         source.path(),
         Some("rollback-conflict".to_string()),
@@ -591,8 +621,12 @@ fn unexpected_target_symlink_does_not_block_healthy_copy_updates() {
             .unwrap();
     }
     fs::write(source.path().join("a.txt"), b"v2").unwrap();
-    let result =
-        super::update_managed_skill_from_source(app.handle(), &store, &installed.skill_id).unwrap();
+    let result = super::update_managed_skill_from_source(
+        &runtime_paths(app.handle()),
+        &store,
+        &installed.skill_id,
+    )
+    .unwrap();
     assert!(result.changed);
     assert_eq!(fs::read(first.join("a.txt")).unwrap(), b"v2");
     assert_eq!(fs::read(manual.join("a.txt")).unwrap(), b"manual");
@@ -622,7 +656,7 @@ fn changed_skill_updates_a_shared_copy_directory_only_once() {
     fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
     fs::write(source.path().join("a.txt"), b"v1").unwrap();
     let installed = super::install_local_skill(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         source.path(),
         Some("shared-copy".to_string()),
@@ -651,8 +685,12 @@ fn changed_skill_updates_a_shared_copy_directory_only_once() {
     }
     fs::write(source.path().join("a.txt"), b"v2").unwrap();
 
-    let result =
-        super::update_managed_skill_from_source(app.handle(), &store, &installed.skill_id).unwrap();
+    let result = super::update_managed_skill_from_source(
+        &runtime_paths(app.handle()),
+        &store,
+        &installed.skill_id,
+    )
+    .unwrap();
 
     assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"v2");
     assert_eq!(result.updated_targets, vec!["aaa", "bbb"]);
@@ -694,7 +732,11 @@ fn failed_update_marks_skill_error_and_success_clears_it() {
     };
     store.upsert_skill(&skill).unwrap();
 
-    let error = match super::update_managed_skill_from_source(app.handle(), &store, &skill.id) {
+    let error = match super::update_managed_skill_from_source(
+        &runtime_paths(app.handle()),
+        &store,
+        &skill.id,
+    ) {
         Ok(_) => panic!("expected source update failure"),
         Err(err) => err.to_string(),
     };
@@ -710,7 +752,8 @@ fn failed_update_marks_skill_error_and_success_clears_it() {
 
     fs::create_dir_all(&source).unwrap();
     fs::write(source.join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
-    super::update_managed_skill_from_source(app.handle(), &store, &skill.id).unwrap();
+    super::update_managed_skill_from_source(&runtime_paths(app.handle()), &store, &skill.id)
+        .unwrap();
     assert_eq!(store.source_checks().unwrap()[&skill.id].0, None);
     assert_eq!(
         store.get_skill_by_id(&skill.id).unwrap().unwrap().status,
@@ -733,7 +776,9 @@ fn failed_update_marks_skill_error_and_success_clears_it() {
     };
     store.upsert_skill_target(&target).unwrap();
     fs::write(source.join("a.txt"), b"changed").unwrap();
-    let result = super::update_managed_skill_from_source(app.handle(), &store, &skill.id).unwrap();
+    let result =
+        super::update_managed_skill_from_source(&runtime_paths(app.handle()), &store, &skill.id)
+            .unwrap();
     assert_eq!(result.pending_targets, vec!["unknown_tool"]);
     assert_eq!(
         store.get_skill_by_id(&skill.id).unwrap().unwrap().status,
@@ -760,7 +805,7 @@ fn imports_identical_existing_local_skill_but_rejects_different_content() {
     fs::write(original.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
     fs::write(original.path().join("a.txt"), b"same").unwrap();
     let installed = super::install_local_skill(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         original.path(),
         Some("local1".to_string()),
@@ -771,7 +816,7 @@ fn imports_identical_existing_local_skill_but_rejects_different_content() {
     fs::write(discovered.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
     fs::write(discovered.path().join("a.txt"), b"same").unwrap();
     let imported = super::import_existing_local_skill(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         discovered.path(),
         Some("local1".to_string()),
@@ -782,7 +827,7 @@ fn imports_identical_existing_local_skill_but_rejects_different_content() {
 
     fs::write(discovered.path().join("a.txt"), b"different").unwrap();
     let err = match super::import_existing_local_skill(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         discovered.path(),
         Some("local1".to_string()),
@@ -804,7 +849,7 @@ fn auto_update_migrates_legacy_kimi_target_without_removing_old_path() {
     fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
     fs::write(source.path().join("content.txt"), b"v1").unwrap();
     let installed = super::install_local_skill(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         source.path(),
         Some("local1".to_string()),
@@ -831,8 +876,12 @@ fn auto_update_migrates_legacy_kimi_target_without_removing_old_path() {
         .unwrap();
 
     fs::write(source.path().join("content.txt"), b"v2").unwrap();
-    let update =
-        super::update_managed_skill_from_source(app.handle(), &store, &installed.skill_id).unwrap();
+    let update = super::update_managed_skill_from_source(
+        &runtime_paths(app.handle()),
+        &store,
+        &installed.skill_id,
+    )
+    .unwrap();
 
     let expected_target = project.path().join(".kimi-code/skills/local1");
     assert_eq!(fs::read(legacy_target.join("content.txt")).unwrap(), b"v1");
@@ -866,7 +915,7 @@ fn auto_update_preserves_conflicting_new_kimi_target_and_marks_legacy_record_fai
     fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
     fs::write(source.path().join("content.txt"), b"v1").unwrap();
     let installed = super::install_local_skill(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         source.path(),
         Some("local1".to_string()),
@@ -896,8 +945,12 @@ fn auto_update_preserves_conflicting_new_kimi_target_and_marks_legacy_record_fai
         .unwrap();
 
     fs::write(source.path().join("content.txt"), b"v2").unwrap();
-    let result =
-        super::update_managed_skill_from_source(app.handle(), &store, &installed.skill_id).unwrap();
+    let result = super::update_managed_skill_from_source(
+        &runtime_paths(app.handle()),
+        &store,
+        &installed.skill_id,
+    )
+    .unwrap();
     assert!(result.changed);
 
     assert_eq!(
@@ -940,7 +993,7 @@ fn lists_and_installs_git_skills_without_network() {
     commit_all(&repo, "add skills");
 
     let candidates = super::list_git_skills(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
     )
@@ -950,7 +1003,7 @@ fn lists_and_installs_git_skills_without_network() {
     assert!(subpaths.iter().any(|s| s.ends_with("skills/a")));
 
     let res = super::install_git_skill_from_selection(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         "skills/a",
@@ -984,7 +1037,7 @@ fn install_git_skill_errors_on_multi_skills_repo_root() {
     commit_all(&repo, "multi skills");
 
     let err = match super::install_git_skill(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         None,
@@ -1048,7 +1101,7 @@ fn install_local_selection_validates_skill_md() {
     .unwrap();
 
     let res = super::install_local_skill_from_selection(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         base.path(),
         "skills/a",
@@ -1060,7 +1113,7 @@ fn install_local_selection_validates_skill_md() {
     assert_eq!(skill.name, "Local A");
 
     let err = match super::install_local_skill_from_selection(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         base.path(),
         "skills/b",
@@ -1097,7 +1150,7 @@ fn install_git_skill_uses_skill_md_name_over_subpath_skills() {
 
     // install_git_skill_from_selection with subpath "skills" (no user-provided name)
     let res = super::install_git_skill_from_selection(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         "skills",
@@ -1140,7 +1193,7 @@ fn install_git_skill_rejects_container_subpath_without_skill_md() {
     commit_all(&repo, "add container skill");
 
     let err = match super::install_git_skill_from_selection(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         "awesome_agent_skills",
@@ -1177,7 +1230,7 @@ fn install_git_skill_selection_accepts_specific_child_under_container() {
     commit_all(&repo, "add container skill");
 
     let res = super::install_git_skill_from_selection(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         "awesome_agent_skills/technical-writer",
@@ -1205,7 +1258,7 @@ fn install_git_skill_respects_user_provided_name() {
     commit_all(&repo, "add skill");
 
     let res = super::install_git_skill_from_selection(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         "skills",
@@ -1237,7 +1290,7 @@ fn install_git_skill_derives_name_from_skill_md() {
     // The repo name (derived from path) will be something like a temp dir name.
     // After install, the name should be "proper-name" from SKILL.md.
     let res = super::install_git_skill(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         None,
@@ -1277,7 +1330,7 @@ fn install_git_skill_detects_root_level_multi_skills() {
 
     // install_git_skill should detect multiple skills and bail with MULTI_SKILLS
     let err = match super::install_git_skill(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         None,
@@ -1316,7 +1369,7 @@ fn list_git_skills_finds_root_level_skills() {
     commit_all(&repo, "add root-level skills");
 
     let candidates = super::list_git_skills(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
     )
@@ -1352,7 +1405,7 @@ fn list_git_skills_finds_root_skill_container_layout() {
     commit_all(&repo, "add container skill");
 
     let candidates = super::list_git_skills(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
     )
@@ -1543,12 +1596,12 @@ fn lists_and_installs_nested_git_skill() {
     let repo = init_git_repo(source.path());
     commit_all(&repo, "add nested skill");
     let url = source.path().to_string_lossy();
-    let candidates = super::list_git_skills(app.handle(), &store, &url).unwrap();
+    let candidates = super::list_git_skills(&runtime_paths(app.handle()), &store, &url).unwrap();
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0].subpath, subpath);
     assert_eq!(candidates[0].description.as_deref(), Some("Review code"));
     let installed = super::install_git_skill_from_selection(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         &url,
         &candidates[0].subpath,
@@ -1574,7 +1627,7 @@ fn unchanged_git_source_does_not_overwrite_content_received_from_device_sync() {
     let repo = init_git_repo(source.path());
     commit_all(&repo, "add skill");
     let installed = super::install_git_skill(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         source.path().to_string_lossy().as_ref(),
         None,
@@ -1591,7 +1644,7 @@ fn unchanged_git_source_does_not_overwrite_content_received_from_device_sync() {
         .unwrap();
 
     let update = super::update_managed_skill_from_source_with_lock_held(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         &installed.skill_id,
         true,
@@ -1618,8 +1671,12 @@ fn unchanged_git_source_does_not_overwrite_content_received_from_device_sync() {
         .0
         .is_none());
 
-    let explicit =
-        super::update_managed_skill_from_source(app.handle(), &store, &installed.skill_id).unwrap();
+    let explicit = super::update_managed_skill_from_source(
+        &runtime_paths(app.handle()),
+        &store,
+        &installed.skill_id,
+    )
+    .unwrap();
     assert!(explicit.changed);
     assert!(fs::read_to_string(installed.central_path.join("SKILL.md"))
         .unwrap()
@@ -1641,7 +1698,7 @@ fn newer_git_revision_is_applied_when_a_synced_skill_has_no_source_baseline() {
     let repo = init_git_repo(source.path());
     commit_all(&repo, "revision one");
     let installed = super::install_git_skill(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         source.path().to_string_lossy().as_ref(),
         None,
@@ -1663,7 +1720,7 @@ fn newer_git_revision_is_applied_when_a_synced_skill_has_no_source_baseline() {
     commit_all(&repo, "revision two");
 
     let update = super::update_managed_skill_from_source_with_lock_held(
-        app.handle(),
+        &runtime_paths(app.handle()),
         &store,
         &installed.skill_id,
         true,
@@ -1703,21 +1760,21 @@ fn issue_129_discovers_and_installs_skills_across_categories() {
     commit_all(&repo, "add categorized skills for issue 129");
     let url = source.path().to_string_lossy();
 
-    let candidates = super::list_git_skills(app.handle(), &store, &url).unwrap();
+    let candidates = super::list_git_skills(&runtime_paths(app.handle()), &store, &url).unwrap();
     let actual: Vec<_> = candidates
         .iter()
         .map(|candidate| (candidate.name.as_str(), candidate.subpath.as_str()))
         .collect();
     assert_eq!(actual, skills);
 
-    let error = super::install_git_skill(app.handle(), &store, &url, None, None)
+    let error = super::install_git_skill(&runtime_paths(app.handle()), &store, &url, None, None)
         .err()
         .expect("a categorized multi-skill repo must require selection");
     assert!(format!("{error:#}").contains("MULTI_SKILLS|"));
 
     for candidate in candidates {
         let installed = super::install_git_skill_from_selection(
-            app.handle(),
+            &runtime_paths(app.handle()),
             &store,
             &url,
             &candidate.subpath,

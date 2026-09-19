@@ -60,6 +60,10 @@ impl SkillsHubService {
         &self.store
     }
 
+    pub(crate) fn paths(&self) -> &RuntimePaths {
+        &self.paths
+    }
+
     #[allow(dead_code)]
     pub(crate) fn begin_write(&self, kind: OperationKind) -> Result<OperationLock, ServiceError> {
         self.ensure_database_compatible()?;
@@ -201,7 +205,7 @@ impl SkillsHubService {
         })
     }
 
-    fn ensure_database_compatible(&self) -> Result<(), ServiceError> {
+    pub(crate) fn ensure_database_compatible(&self) -> Result<(), ServiceError> {
         match self.current_incompatible_schema_version()? {
             Some(version) => Err(ServiceError::incompatible_database(version)),
             None => Ok(()),
