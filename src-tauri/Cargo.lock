@@ -115,6 +115,7 @@ dependencies = [
  "mockito",
  "reqwest",
  "rusqlite",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",

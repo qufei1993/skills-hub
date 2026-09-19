@@ -227,7 +227,10 @@ impl SkillsHubService {
                         json!({"agent":key}),
                     )
                 })?;
-            if project.is_some() && !agent.supports_project_scope {
+            if project.is_some()
+                && (!agent.supports_project_scope
+                    || !cfg!(any(target_os = "macos", target_os = "linux")))
+            {
                 return Err(ServiceError::new(
                     ErrorCode::ProjectScopeUnsupported,
                     "Agent does not support project scope",

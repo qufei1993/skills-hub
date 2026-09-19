@@ -185,6 +185,7 @@ fn undeploy_database_failure_restores_all_targets_and_rows() {
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn project_scope_deploys_inside_requested_project() {
     let f = Fixture::new();
     let project = TempDir::new().unwrap();
@@ -199,6 +200,7 @@ fn project_scope_deploys_inside_requested_project() {
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn shared_project_agents_use_one_directory_and_all_affected_rows() {
     let f = Fixture::new();
     let project = TempDir::new().unwrap();
@@ -625,6 +627,7 @@ fn apply_rejects_a_tampered_operation_without_removing_deployment() {
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn plan_binds_an_existing_parent_directory_identity() {
     let f = Fixture::new();
     let project = TempDir::new().unwrap();
@@ -858,4 +861,117 @@ fn database_validation_failure_keeps_target_rows_and_baselines() {
         f.service.store().get_setting(&baseline_key).unwrap(),
         baseline
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn project_staging_write_is_bound_even_when_parent_changes_after_validation() {
+    use crate::core::sync_engine::{set_deployment_race_hook, DeploymentRacePoint};
+    let f = Fixture::new();
+    let project = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    let parent = project.path().join(".agents/skills");
+    fs::create_dir_all(&parent).unwrap();
+    let original = project.path().join("original-parent");
+    let outside_path = outside.path().to_path_buf();
+    set_deployment_race_hook(DeploymentRacePoint::StagingWrite, move || {
+        fs::rename(&parent, &original).unwrap();
+        std::os::unix::fs::symlink(outside_path, parent).unwrap();
+    });
+    let mut request = DeploymentRequest::global("demo", ["cursor"]);
+    request.scope = DeploymentScope::Project(project.path().to_path_buf());
+    let error = f.service.deploy(request).unwrap_err();
+    assert_eq!(error.code, ErrorCode::PlanStale);
+    assert!(fs::read_dir(outside.path()).unwrap().next().is_none());
+    assert_eq!(f.rows(), 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn project_activation_does_not_rename_external_trap_after_validation() {
+    use crate::core::sync_engine::{set_deployment_race_hook, DeploymentRacePoint};
+    let f = Fixture::new();
+    let project = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    let parent = project.path().join(".agents/skills");
+    fs::create_dir_all(&parent).unwrap();
+    let original = project.path().join("original-parent");
+    let outside_path = outside.path().to_path_buf();
+    set_deployment_race_hook(DeploymentRacePoint::ActivationRename, move || {
+        let staging = fs::read_dir(&parent)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .find(|name| name.to_string_lossy().starts_with(".skills-hub-deploy-"))
+            .unwrap();
+        fs::rename(&parent, &original).unwrap();
+        std::os::unix::fs::symlink(&outside_path, parent).unwrap();
+        fs::create_dir(outside_path.join(&staging)).unwrap();
+        fs::write(outside_path.join(staging).join("trap.txt"), "unchanged").unwrap();
+    });
+    let mut request = DeploymentRequest::global("demo", ["cursor"]);
+    request.scope = DeploymentScope::Project(project.path().to_path_buf());
+    assert_eq!(
+        f.service.deploy(request).unwrap_err().code,
+        ErrorCode::PlanStale
+    );
+    assert!(!outside.path().join("demo").exists());
+    let entries: Vec<_> = fs::read_dir(outside.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        fs::read_to_string(entries[0].join("trap.txt")).unwrap(),
+        "unchanged"
+    );
+    assert!(fs::read_dir(project.path().join("original-parent"))
+        .unwrap()
+        .next()
+        .is_none());
+    assert_eq!(f.rows(), 0);
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn project_new_parent_is_bound_to_its_opened_identity() {
+    use crate::core::sync_engine::{set_deployment_race_hook, DeploymentRacePoint};
+    let f = Fixture::new();
+    let project = TempDir::new().unwrap();
+    let parent = project.path().join(".agents/skills");
+    let original = project.path().join("original-parent");
+    set_deployment_race_hook(DeploymentRacePoint::ActivationRename, move || {
+        fs::rename(&parent, &original).unwrap();
+        fs::create_dir(&parent).unwrap();
+    });
+    let mut request = DeploymentRequest::global("demo", ["cursor"]);
+    request.scope = DeploymentScope::Project(project.path().to_path_buf());
+    assert_eq!(
+        f.service.deploy(request).unwrap_err().code,
+        ErrorCode::PlanStale
+    );
+    assert!(fs::read_dir(project.path().join("original-parent"))
+        .unwrap()
+        .next()
+        .is_none());
+    assert!(project.path().join(".agents/skills").is_dir());
+    assert_eq!(f.rows(), 0);
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[test]
+fn project_scope_fails_closed_without_descriptor_relative_operations() {
+    let f = Fixture::new();
+    let project = TempDir::new().unwrap();
+    let mut request = DeploymentRequest::global("demo", ["cursor"]);
+    request.scope = DeploymentScope::Project(project.path().to_path_buf());
+    for undeploy in [false, true] {
+        let result = if undeploy {
+            f.service.undeploy(request.clone())
+        } else {
+            f.service.deploy(request.clone())
+        };
+        assert_eq!(result.unwrap_err().code, ErrorCode::ProjectScopeUnsupported);
+        assert!(fs::read_dir(project.path()).unwrap().next().is_none());
+        assert_eq!(f.rows(), 0);
+    }
 }

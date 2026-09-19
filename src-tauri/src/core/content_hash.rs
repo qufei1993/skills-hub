@@ -154,6 +154,89 @@ pub fn hash_dir_for_sync_conflict(path: &Path) -> Result<String> {
     hash_dir_with_mode(path, true, true)
 }
 
+#[cfg(unix)]
+pub(crate) fn hash_open_dir(
+    directory: &std::fs::File,
+    ignore_python_cache: bool,
+) -> Result<String> {
+    use rustix::fs::{openat, readlinkat, statat, AtFlags, Dir, FileType, Mode, OFlags};
+    use std::io::Read;
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+    fn visit(
+        dir: &std::fs::File,
+        relative: &Path,
+        ignore_cache: bool,
+        hasher: &mut Sha256,
+    ) -> Result<()> {
+        let mut names = Dir::read_from(dir)?
+            .map(|entry| {
+                entry.map(|entry| {
+                    std::ffi::OsString::from_vec(entry.file_name().to_bytes().to_vec())
+                })
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        names.retain(|name| name != "." && name != "..");
+        names.sort_by_key(|name| path_bytes(Path::new(name)));
+        for name in names {
+            let path = relative.join(&name);
+            let kind = FileType::from_raw_mode(
+                statat(dir, name.as_os_str(), AtFlags::SYMLINK_NOFOLLOW)?.st_mode,
+            );
+            match kind {
+                FileType::Directory => {
+                    let child = std::fs::File::from(openat(
+                        dir,
+                        name.as_os_str(),
+                        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                        Mode::empty(),
+                    )?);
+                    if !(ignore_cache && name == "__pycache__") {
+                        update_record_header(hasher, b'd', &path);
+                    }
+                    visit(&child, &path, ignore_cache, hasher)?;
+                }
+                FileType::RegularFile => {
+                    if ignore_cache
+                        && relative.file_name() == Some(OsStr::new("__pycache__"))
+                        && matches!(
+                            path.extension().and_then(OsStr::to_str),
+                            Some("pyc" | "pyo")
+                        )
+                    {
+                        continue;
+                    }
+                    let mut file = std::fs::File::from(openat(
+                        dir,
+                        name.as_os_str(),
+                        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                        Mode::empty(),
+                    )?);
+                    update_record_header(hasher, b'f', &path);
+                    update_file_attributes(hasher, &file.metadata()?);
+                    let mut bytes = Vec::new();
+                    file.read_to_end(&mut bytes)?;
+                    hasher.update((bytes.len() as u64).to_be_bytes());
+                    hasher.update(bytes);
+                }
+                FileType::Symlink => {
+                    update_record_header(hasher, b'l', &path);
+                    let destination = readlinkat(dir, name.as_os_str(), Vec::new())?;
+                    let encoded = path_bytes(Path::new(OsStr::from_bytes(destination.as_bytes())));
+                    hasher.update((encoded.len() as u64).to_be_bytes());
+                    hasher.update(encoded);
+                }
+                _ => update_record_header(hasher, b's', &path),
+            }
+        }
+        Ok(())
+    }
+    let mut hasher = Sha256::new();
+    update_record_header(&mut hasher, b'd', Path::new(""));
+    visit(directory, Path::new(""), ignore_python_cache, &mut hasher)?;
+    Ok(hex::encode(hasher.finalize()))
+}
+
 #[cfg(test)]
 #[path = "tests/content_hash.rs"]
 mod tests;

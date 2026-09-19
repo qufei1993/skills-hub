@@ -6,6 +6,10 @@ use uuid::Uuid;
 
 use super::content_hash::{hash_dir_for_sync_conflict, hash_dir_strict};
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[path = "project_deployment.rs"]
+mod project_deployment;
+
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -301,6 +305,46 @@ pub(crate) struct PreparedDeployment {
     created_parents: Vec<PathBuf>,
     pub(crate) mode: SyncMode,
     parent_snapshot: DeploymentParentSnapshot,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    project: Option<project_deployment::ProjectDeployment>,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeploymentRacePoint {
+    StagingWrite,
+    ActivationRename,
+}
+
+#[cfg(test)]
+type DeploymentRaceHook = (DeploymentRacePoint, Box<dyn FnOnce()>);
+
+#[cfg(test)]
+thread_local! {
+    static DEPLOYMENT_RACE_HOOK: std::cell::RefCell<Option<DeploymentRaceHook>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_deployment_race_hook(point: DeploymentRacePoint, hook: impl FnOnce() + 'static) {
+    DEPLOYMENT_RACE_HOOK.with(|slot| *slot.borrow_mut() = Some((point, Box::new(hook))));
+}
+
+#[cfg(test)]
+fn run_deployment_race_hook(point: DeploymentRacePoint) {
+    let hook = DEPLOYMENT_RACE_HOOK.with(|slot| {
+        let mut value = slot.borrow_mut();
+        if value
+            .as_ref()
+            .is_some_and(|(expected, _)| *expected == point)
+        {
+            value.take()
+        } else {
+            None
+        }
+    });
+    if let Some((_, hook)) = hook {
+        hook();
+    }
 }
 
 pub(crate) fn deployment_fingerprint(path: &Path) -> Result<Option<String>> {
@@ -355,7 +399,26 @@ impl PreparedDeployment {
             created_parents: Vec::new(),
             mode,
             parent_snapshot,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            project: None,
         };
+        if value.parent_snapshot.project.is_some() {
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            {
+                let project = project_deployment::ProjectDeployment::prepare(
+                    source,
+                    target,
+                    mode,
+                    value.expected.clone(),
+                    value.parent_snapshot.clone(),
+                )?;
+                value.mode = project.mode;
+                value.project = Some(project);
+                return Ok(value);
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+            anyhow::bail!("PROJECT_SCOPE_UNSUPPORTED");
+        }
         if let Some(source) = source {
             let parent = target.parent().context("target has no parent")?;
             let mut missing = Vec::new();
@@ -373,6 +436,8 @@ impl PreparedDeployment {
             let staging = parent.join(format!(".skills-hub-deploy-{}", Uuid::new_v4()));
             value.staging = Some(staging.clone());
             value.parent_snapshot.validate()?;
+            #[cfg(test)]
+            run_deployment_race_hook(DeploymentRacePoint::StagingWrite);
             let outcome = sync_dir_with_mode_with_overwrite(mode, source, &staging, false)?;
             value.parent_snapshot.validate()?;
             value.mode = outcome.mode_used;
@@ -382,6 +447,10 @@ impl PreparedDeployment {
     }
 
     pub(crate) fn activate(&mut self) -> Result<()> {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if let Some(project) = self.project.as_mut() {
+            return project.activate();
+        }
         self.parent_snapshot.validate()?;
         anyhow::ensure!(
             deployment_fingerprint(&self.target)? == self.expected,
@@ -400,6 +469,8 @@ impl PreparedDeployment {
         }
         if let Some(staging) = self.staging.as_ref() {
             self.parent_snapshot.validate()?;
+            #[cfg(test)]
+            run_deployment_race_hook(DeploymentRacePoint::ActivationRename);
             std::fs::rename(staging, &self.target)?;
             self.staging = None;
         }
@@ -409,6 +480,10 @@ impl PreparedDeployment {
     }
 
     pub(crate) fn verify_backup(&self) -> Result<()> {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if let Some(project) = self.project.as_ref() {
+            return project.verify_backup();
+        }
         self.parent_snapshot.validate()?;
         if let Some(backup) = &self.backup {
             anyhow::ensure!(
@@ -420,6 +495,10 @@ impl PreparedDeployment {
     }
 
     pub(crate) fn verify_unchanged(&self) -> Result<()> {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if let Some(project) = self.project.as_ref() {
+            return project.verify_unchanged();
+        }
         self.verify_backup()?;
         if self.activated {
             anyhow::ensure!(
@@ -431,6 +510,10 @@ impl PreparedDeployment {
     }
 
     pub(crate) fn rollback(&mut self) -> Result<()> {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if let Some(project) = self.project.as_mut() {
+            return project.rollback();
+        }
         self.parent_snapshot.validate()?;
         if self.activated {
             if std::fs::symlink_metadata(&self.target).is_ok() {
@@ -494,6 +577,10 @@ impl PreparedDeployment {
     where
         F: FnOnce(&Path) -> Result<()>,
     {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if let Some(project) = self.project.as_mut() {
+            return project.commit();
+        }
         self.activated = false;
         self.created_parents.clear();
         if let Some(backup) = self.backup.take() {
@@ -512,6 +599,10 @@ impl PreparedDeployment {
     }
 
     pub(crate) fn backup_path(&self) -> Option<&Path> {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if let Some(project) = self.project.as_ref() {
+            return project.backup_path();
+        }
         self.backup.as_deref()
     }
 }
