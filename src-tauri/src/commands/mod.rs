@@ -60,9 +60,9 @@ use crate::core::onboarding::{
     save_discovery_scan_config, DiscoveryScanConfig, DiscoveryScanSettings, OnboardingPlan,
 };
 use crate::core::recycle_bin::{DeletionSource, RecycleBinItem, RecycleBinService};
-use crate::core::skill_store::{
-    SkillRecord, SkillStore, SkillTargetRecord, DEVICE_SYNC_HISTORY_LIMIT,
-};
+#[cfg(test)]
+use crate::core::skill_store::SkillRecord;
+use crate::core::skill_store::{SkillStore, SkillTargetRecord, DEVICE_SYNC_HISTORY_LIMIT};
 use crate::core::skills_search::{
     search_skills_online as search_skills_online_core, OnlineSkillResult,
 };
@@ -81,6 +81,8 @@ use crate::core::tool_adapters::{
     save_tool_config, supports_project_scope, CustomToolConfig, ToolConfig,
 };
 use crate::services::operation_lock::{OperationKind, OperationLock};
+use crate::services::skills_hub::SkillsHubService;
+use crate::services::types::{Agent as ServiceAgent, Skill as ServiceSkill};
 use uuid::Uuid;
 
 const RECENT_PROJECTS_SETTING: &str = "recent_projects_v1";
@@ -177,6 +179,10 @@ fn format_anyhow_error(err: anyhow::Error) -> String {
     full
 }
 
+fn format_service_error(error: crate::services::error::ServiceError) -> String {
+    error.message
+}
+
 #[derive(Debug, Serialize)]
 pub struct ToolInfoDto {
     pub key: String,
@@ -198,7 +204,25 @@ pub struct ToolStatusDto {
     pub newly_installed: Vec<String>,
 }
 
+impl From<ServiceAgent> for ToolInfoDto {
+    fn from(agent: ServiceAgent) -> Self {
+        Self {
+            key: agent.key,
+            label: agent.label,
+            avatar: agent.avatar,
+            installed: agent.enabled && agent.detected,
+            enabled: agent.enabled,
+            is_custom: agent.is_custom,
+            skills_dir: agent.skills_dir,
+            project_skills_dir: agent.project_skills_dir,
+            supports_project_scope: agent.supports_project_scope,
+            sync_mode: agent.sync_mode,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 struct RuntimeTool {
     key: String,
     label: String,
@@ -383,59 +407,20 @@ pub async fn set_tool_config(
 }
 
 #[tauri::command]
-pub async fn get_tool_status(store: State<'_, SkillStore>) -> Result<ToolStatusDto, String> {
-    let store = store.inner().clone();
+pub async fn get_tool_status(
+    service: State<'_, SkillsHubService>,
+) -> Result<ToolStatusDto, String> {
+    let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut tools: Vec<ToolInfoDto> = Vec::new();
-        let mut installed: Vec<String> = Vec::new();
-
-        for tool in runtime_tools(&store, true)? {
-            tools.push(ToolInfoDto {
-                key: tool.key.clone(),
-                label: tool.label,
-                avatar: tool.avatar,
-                installed: tool.installed,
-                enabled: tool.enabled,
-                is_custom: tool.is_custom,
-                skills_dir: tool.skills_dir.to_string_lossy().to_string(),
-                project_skills_dir: tool.project_skills_dir,
-                supports_project_scope: tool.supports_project_scope,
-                sync_mode: tool.sync_mode,
-            });
-            if tool.installed {
-                installed.push(tool.key);
-            }
-        }
-
-        installed.dedup();
-
-        let prev: Vec<String> = store
-            .get_setting("installed_tools_v1")?
-            .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
-            .unwrap_or_default();
-
-        let prev_set: std::collections::HashSet<String> = prev.into_iter().collect();
-        let newly_installed: Vec<String> = installed
-            .iter()
-            .filter(|k| !prev_set.contains(*k))
-            .cloned()
-            .collect();
-
-        // Persist current set (best effort).
-        let _ = store.set_setting(
-            "installed_tools_v1",
-            &serde_json::to_string(&installed).unwrap_or_else(|_| "[]".to_string()),
-        );
-
-        Ok::<_, anyhow::Error>(ToolStatusDto {
-            tools,
-            installed,
-            newly_installed,
+        service.list_agents().map(|agents| ToolStatusDto {
+            tools: agents.agents.into_iter().map(ToolInfoDto::from).collect(),
+            installed: agents.installed,
+            newly_installed: agents.newly_installed,
         })
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(format_service_error)
 }
 
 #[tauri::command]
@@ -1893,9 +1878,56 @@ pub struct SkillTargetDto {
     pub synced_at: Option<i64>,
 }
 
+impl From<ServiceSkill> for ManagedSkillDto {
+    fn from(skill: ServiceSkill) -> Self {
+        Self {
+            id: skill.id,
+            name: skill.name,
+            description: skill.description,
+            source_type: skill.source.kind,
+            source_ref: skill.source.reference,
+            central_path: skill.central_path,
+            created_at: skill.created_at,
+            updated_at: skill.updated_at,
+            last_sync_at: skill.last_sync_at,
+            enabled: skill.enabled,
+            status: skill.content_status,
+            source_error: skill.source_error,
+            source_checked_at: skill.source_checked_at,
+            tags: skill
+                .tags
+                .into_iter()
+                .map(|tag| TagDto {
+                    id: tag.id,
+                    name: tag.name,
+                })
+                .collect(),
+            targets: skill
+                .targets
+                .into_iter()
+                .map(|target| SkillTargetDto {
+                    tool: target.tool,
+                    scope: target.scope,
+                    project_path: target.project_path,
+                    mode: target.mode,
+                    status: target.status,
+                    last_error: target.last_error,
+                    target_path: target.target_path,
+                    synced_at: target.synced_at,
+                })
+                .collect(),
+        }
+    }
+}
+
 #[tauri::command]
-pub fn get_managed_skills(store: State<'_, SkillStore>) -> Result<Vec<ManagedSkillDto>, String> {
-    get_managed_skills_impl(store.inner())
+pub fn get_managed_skills(
+    service: State<'_, SkillsHubService>,
+) -> Result<Vec<ManagedSkillDto>, String> {
+    service
+        .list_skills()
+        .map(|skills| skills.into_iter().map(ManagedSkillDto::from).collect())
+        .map_err(format_service_error)
 }
 
 #[tauri::command]
@@ -2114,83 +2146,27 @@ fn now_ms() -> i64 {
     now.as_millis() as i64
 }
 
+#[cfg(test)]
 fn managed_skill_status(skill: &SkillRecord) -> String {
-    if skill.status != "ok" {
-        return skill.status.clone();
-    }
-    if skill.source_type != "local" || skill.has_unbound_local_source() {
-        return skill.status.clone();
-    }
-    let source_exists = skill
-        .source_ref
-        .as_deref()
-        .and_then(|source| expand_home_path(source).ok())
-        .map(|source| source.exists())
-        .unwrap_or(false);
-    if source_exists {
-        skill.status.clone()
-    } else {
-        "error".to_string()
-    }
+    crate::services::skills_hub::content_status(skill)
 }
 
+#[cfg(test)]
 fn get_managed_skills_impl(store: &SkillStore) -> Result<Vec<ManagedSkillDto>, String> {
-    let skills = store.list_skills().map_err(|err| err.to_string())?;
-    let checks = store.source_checks().map_err(format_anyhow_error)?;
-    Ok(skills
-        .into_iter()
-        .map(|skill| {
-            let source_check = checks.get(&skill.id);
-            let source_error = source_check.and_then(|check| check.0.clone());
-            let status = if source_error.is_some() {
-                "error".into()
-            } else {
-                managed_skill_status(&skill)
-            };
-            let targets = store
-                .list_skill_targets(&skill.id)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|target| SkillTargetDto {
-                    tool: target.tool,
-                    scope: target.scope,
-                    project_path: target.project_path,
-                    mode: target.mode,
-                    status: target.status,
-                    last_error: target.last_error,
-                    target_path: target.target_path,
-                    synced_at: target.synced_at,
-                })
-                .collect();
-            let tags = store
-                .get_skill_tags(&skill.id)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|tag| TagDto {
-                    id: tag.id,
-                    name: tag.name,
-                })
-                .collect();
-
-            ManagedSkillDto {
-                source_error,
-                source_checked_at: source_check.map(|check| check.1),
-                id: skill.id,
-                name: skill.name,
-                description: skill.description,
-                source_type: skill.source_type,
-                source_ref: skill.source_ref,
-                central_path: skill.central_path,
-                created_at: skill.created_at,
-                updated_at: skill.updated_at,
-                last_sync_at: skill.last_sync_at,
-                enabled: skill.enabled,
-                status,
-                tags,
-                targets,
-            }
-        })
-        .collect())
+    let app_data_dir = store
+        .db_path()
+        .parent()
+        .ok_or_else(|| "test database has no parent".to_string())?;
+    let paths = crate::core::runtime_paths::RuntimePaths::from_tauri(
+        crate::core::runtime_paths::RuntimeProfile::Test,
+        app_data_dir,
+        app_data_dir,
+        app_data_dir,
+    );
+    SkillsHubService::from_store(paths, store.clone())
+        .list_skills()
+        .map(|skills| skills.into_iter().map(ManagedSkillDto::from).collect())
+        .map_err(format_service_error)
 }
 
 #[derive(Debug, Serialize)]

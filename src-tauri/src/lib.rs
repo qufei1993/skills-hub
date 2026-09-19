@@ -1,12 +1,14 @@
 mod commands;
 mod core;
-mod services;
+pub mod services;
 
 use std::sync::Arc;
 
 use core::cancel_token::CancelToken;
-use core::runtime_paths::{open_store, RuntimePaths, RuntimeProfile};
+use core::runtime_paths::open_store;
+pub use core::runtime_paths::{RuntimePaths, RuntimeProfile};
 use services::operation_lock::{OperationKind, OperationLock};
+use services::skills_hub::SkillsHubService;
 use tauri::Manager;
 use tauri_plugin_log::{Target, TargetKind};
 
@@ -74,6 +76,7 @@ pub fn run() {
             let store = open_store(&paths).map_err(tauri::Error::from)?;
             app.manage(paths.clone());
             app.manage(store.clone());
+            app.manage(SkillsHubService::from_store(paths.clone(), store.clone()));
 
             if is_background_update {
                 #[cfg(target_os = "macos")]
