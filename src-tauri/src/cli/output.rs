@@ -76,7 +76,9 @@ pub fn write_success(
         serde_json::to_writer(&mut *writer, &envelope)?;
         writeln!(writer)
     } else {
-        writeln!(writer, "{}", locale.text(success.message))
+        writeln!(writer, "{}", locale.text(success.message))?;
+        serde_json::to_writer_pretty(&mut *writer, &data)?;
+        writeln!(writer)
     }
 }
 
@@ -100,6 +102,24 @@ pub fn write_failure(
         serde_json::to_writer(&mut *writer, &envelope)?;
         writeln!(writer)
     } else {
-        writeln!(writer, "{}: {message}", error.code)
+        writeln!(writer, "{}: {message}", error.code)?;
+        if matches!(
+            error.code,
+            ErrorCode::MultiSkills
+                | ErrorCode::AmbiguousSkill
+                | ErrorCode::TargetConflict
+                | ErrorCode::UpdateHeldBack
+                | ErrorCode::ConfirmationRequired
+                | ErrorCode::PlanStale
+                | ErrorCode::OperationBusy
+                | ErrorCode::ProjectScopeUnsupported
+        ) && details
+            .as_object()
+            .is_some_and(|details| !details.is_empty())
+        {
+            serde_json::to_writer_pretty(&mut *writer, &details)?;
+            writeln!(writer)?;
+        }
+        Ok(())
     }
 }

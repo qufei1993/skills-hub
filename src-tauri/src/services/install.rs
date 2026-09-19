@@ -229,6 +229,13 @@ impl SkillsHubService {
 
     pub fn update(&self, selector: SkillSelector) -> Result<UpdateOutcome, ServiceError> {
         let _operation_lock = self.begin_write(OperationKind::Update)?;
+        self.update_under_lock(selector)
+    }
+
+    pub(super) fn update_under_lock(
+        &self,
+        selector: SkillSelector,
+    ) -> Result<UpdateOutcome, ServiceError> {
         let skill = self.show_skill(selector)?;
         let updated = update_managed_skill_from_source(self.paths(), self.store(), &skill.id)
             .map_err(map_update_error)?;

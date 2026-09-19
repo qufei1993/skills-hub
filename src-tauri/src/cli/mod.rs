@@ -1,4 +1,5 @@
 pub mod args;
+mod handlers;
 pub mod locale;
 pub mod output;
 mod sanitize;
@@ -37,11 +38,7 @@ where
     Stdout: Write,
     Stderr: Write,
 {
-    run_with_executor(args, stdout, stderr, |_| {
-        Err(ServiceError::internal(
-            "CLI workflow handler is not available",
-        ))
-    })
+    run_with_executor(args, stdout, stderr, handlers::execute)
 }
 
 pub fn run_with_executor<I, T, Stdout, Stderr, Executor>(
