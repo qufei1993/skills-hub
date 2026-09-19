@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::content_hash::{hash_dir_for_sync_conflict, hash_dir_strict};
+use super::content_hash::{hash_dir, hash_dir_for_sync_conflict, hash_dir_strict};
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[path = "project_deployment.rs"]
@@ -629,6 +629,14 @@ impl Drop for PreparedDeployment {
 }
 
 impl PreparedDirReplacement {
+    pub(crate) fn staged_content_hash(&self) -> Result<String> {
+        let staging = self
+            .staging
+            .as_ref()
+            .context("replacement staging path already consumed")?;
+        hash_dir(staging)
+    }
+
     pub(crate) fn prepare_managed_copy(
         source: &Path,
         target: &Path,
@@ -737,6 +745,40 @@ impl PreparedDirReplacement {
         self.staging = None;
         self.activated = true;
         Ok(had_target)
+    }
+
+    pub(crate) fn activate_missing_only(&mut self) -> Result<()> {
+        anyhow::ensure!(
+            self.allow_missing,
+            "replacement target must allow a missing path"
+        );
+        let staging = self
+            .staging
+            .as_ref()
+            .context("replacement staging path already consumed")?;
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        rustix::fs::renameat_with(
+            rustix::fs::CWD,
+            staging,
+            rustix::fs::CWD,
+            &self.target,
+            rustix::fs::RenameFlags::NOREPLACE,
+        )
+        .with_context(|| format!("activate new managed directory {:?}", self.target))?;
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        {
+            anyhow::ensure!(
+                std::fs::symlink_metadata(&self.target)
+                    .map(|_| false)
+                    .unwrap_or_else(|error| error.kind() == std::io::ErrorKind::NotFound),
+                "replacement target already exists"
+            );
+            std::fs::rename(staging, &self.target)
+                .with_context(|| format!("activate new managed directory {:?}", self.target))?;
+        }
+        self.staging = None;
+        self.activated = true;
+        Ok(())
     }
 
     pub(crate) fn verify_backup_unchanged(&self) -> Result<()> {

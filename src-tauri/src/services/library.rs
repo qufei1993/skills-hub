@@ -7,13 +7,13 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use crate::core::central_repo::resolve_central_repo_path;
-use crate::core::installer::import_existing_local_skill;
+use crate::core::installer::{import_existing_local_skills_batch, BatchImportCandidate};
 use crate::core::onboarding::{
     scan_adopt_directory, AdoptScanCandidate, AdoptScanExclusion, AdoptScanResult,
 };
 use crate::core::recycle_bin::{DeletionSource, RecycleBinItem, RecycleBinService};
 use crate::core::skill_store::{SkillRecord, SkillTargetRecord, TagWithCountRecord};
-use crate::core::sync_engine::deployment_fingerprint;
+use crate::core::sync_engine::{deployment_fingerprint, path_for_comparison};
 
 use super::error::{ErrorCode, ServiceError};
 use super::install::InstallOutcome;
@@ -26,6 +26,7 @@ pub struct AdoptCandidate {
     pub name: String,
     pub source_path: String,
     pub content_hash: String,
+    pub target_path: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -102,9 +103,17 @@ pub enum TagAction {
         name: String,
     },
     Delete {
-        tag: TagSelector,
+        plan_id: String,
         confirmed: bool,
     },
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct TagDeletePlan {
+    pub id: String,
+    pub tag: SkillTag,
+    pub affected_skill_ids: Vec<String>,
+    pub affected_skill_count: i64,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -167,9 +176,26 @@ pub struct RemoveOutcome {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 struct AdoptSnapshot {
     operation: &'static str,
+    mode: AdoptMode,
     source_path: PathBuf,
     name_override: Option<String>,
+    central_root: PathBuf,
+    target_paths: Vec<PathBuf>,
     scan: AdoptScanResult,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+enum AdoptMode {
+    Container,
+    Direct,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct TagDeleteSnapshot {
+    operation: &'static str,
+    tag_id: i64,
+    tag_name: String,
+    skill_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -190,6 +216,7 @@ struct RemoveSnapshot {
 #[derive(Clone, Debug)]
 enum LibraryPlanSnapshot {
     Adopt(AdoptSnapshot),
+    TagDelete(TagDeleteSnapshot),
     Remove(Box<RemoveSnapshot>),
 }
 
@@ -227,13 +254,31 @@ impl LibraryPlanStore {
 
 impl SkillsHubService {
     pub fn plan_adopt(&self, source: impl AsRef<Path>) -> Result<AdoptPlan, ServiceError> {
-        self.plan_adopt_with_name(source, None)
+        self.plan_adopt_in_mode(source.as_ref(), None, AdoptMode::Container)
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn plan_adopt_with_name(
         &self,
         source: impl AsRef<Path>,
         name_override: Option<String>,
+    ) -> Result<AdoptPlan, ServiceError> {
+        self.plan_adopt_in_mode(source.as_ref(), name_override, AdoptMode::Container)
+    }
+
+    pub(crate) fn plan_adopt_direct_with_name(
+        &self,
+        source: impl AsRef<Path>,
+        name_override: Option<String>,
+    ) -> Result<AdoptPlan, ServiceError> {
+        self.plan_adopt_in_mode(source.as_ref(), name_override, AdoptMode::Direct)
+    }
+
+    fn plan_adopt_in_mode(
+        &self,
+        source: &Path,
+        name_override: Option<String>,
+        mode: AdoptMode,
     ) -> Result<AdoptPlan, ServiceError> {
         self.ensure_database_compatible()?;
         if name_override
@@ -242,7 +287,7 @@ impl SkillsHubService {
         {
             return Err(invalid_argument("name", "skill name must not be empty"));
         }
-        let snapshot = self.capture_adopt(source.as_ref(), name_override)?;
+        let snapshot = self.capture_adopt(source, name_override, mode)?;
         let id = plan_id(&snapshot)?;
         let plan = adopt_plan(&id, &snapshot);
         self.library_plans
@@ -263,19 +308,33 @@ impl SkillsHubService {
             ));
         }
         let _operation_lock = self.begin_write(OperationKind::Install)?;
-        let fresh = self.capture_adopt(&snapshot.source_path, snapshot.name_override.clone())?;
+        validate_planned_source(&snapshot.source_path)?;
+        let fresh = self
+            .capture_adopt(
+                &snapshot.source_path,
+                snapshot.name_override.clone(),
+                snapshot.mode,
+            )
+            .map_err(map_adopt_revalidation_error)?;
         if fresh != snapshot || plan_id(&fresh)? != request.plan_id {
             return Err(plan_stale());
         }
-        let mut adopted = Vec::new();
-        for candidate in &snapshot.scan.candidates {
-            let installed = import_existing_local_skill(
-                self.paths(),
-                self.store(),
-                &candidate.path,
-                Some(candidate.name.clone()),
-            )
-            .map_err(|_| ServiceError::internal("failed to adopt a local skill"))?;
+        let candidates = snapshot
+            .scan
+            .candidates
+            .iter()
+            .zip(&snapshot.target_paths)
+            .map(|(candidate, target_path)| BatchImportCandidate {
+                name: candidate.name.clone(),
+                source_path: candidate.path.clone(),
+                target_path: target_path.clone(),
+                expected_content_hash: candidate.content_hash.clone(),
+            })
+            .collect::<Vec<_>>();
+        let installed = import_existing_local_skills_batch(self.store(), &candidates)
+            .map_err(map_batch_adopt_error)?;
+        let mut adopted = Vec::with_capacity(installed.len());
+        for installed in installed {
             let skill = self.show_skill(SkillSelector::Id(installed.skill_id.clone()))?;
             adopted.push(InstallOutcome {
                 id: skill.id,
@@ -290,18 +349,64 @@ impl SkillsHubService {
         Ok(AdoptOutcome { adopted })
     }
 
+    pub fn plan_tag_delete(&self, selector: TagSelector) -> Result<TagDeletePlan, ServiceError> {
+        self.ensure_database_compatible()?;
+        let tag = self.resolve_tag(&selector)?;
+        let snapshot = self.capture_tag_delete(tag.id)?.ok_or_else(plan_stale)?;
+        let id = plan_id(&snapshot)?;
+        let plan = TagDeletePlan {
+            id: id.clone(),
+            tag: SkillTag {
+                id: snapshot.tag_id,
+                name: snapshot.tag_name.clone(),
+            },
+            affected_skill_count: snapshot.skill_ids.len() as i64,
+            affected_skill_ids: snapshot.skill_ids.clone(),
+        };
+        self.library_plans
+            .insert(id, LibraryPlanSnapshot::TagDelete(snapshot))?;
+        Ok(plan)
+    }
+
     pub fn apply_tag_action(&self, action: TagAction) -> Result<TagOutcome, ServiceError> {
         self.ensure_database_compatible()?;
         if let TagAction::Delete {
-            tag,
-            confirmed: false,
+            plan_id: delete_plan_id,
+            confirmed,
         } = &action
         {
-            let current = self.resolve_tag(tag)?;
-            return Err(ServiceError::new(
-                ErrorCode::ConfirmationRequired,
-                "deleting a tag requires explicit confirmation",
-                json!({ "affected_skill_count": current.skill_count, "tag": current.name }),
+            let snapshot = match self.library_plans.get(delete_plan_id)? {
+                Some(LibraryPlanSnapshot::TagDelete(snapshot)) => snapshot,
+                _ => return Err(plan_stale()),
+            };
+            if !confirmed {
+                return Err(ServiceError::new(
+                    ErrorCode::ConfirmationRequired,
+                    "deleting a tag requires explicit confirmation",
+                    json!({
+                        "affected_skill_count": snapshot.skill_ids.len(),
+                        "tag": snapshot.tag_name
+                    }),
+                ));
+            }
+            let _operation_lock = self.begin_write(OperationKind::Update)?;
+            let fresh = self
+                .capture_tag_delete(snapshot.tag_id)?
+                .ok_or_else(plan_stale)?;
+            if fresh != snapshot || plan_id(&fresh)? != *delete_plan_id {
+                return Err(plan_stale());
+            }
+            self.store()
+                .delete_tag(snapshot.tag_id)
+                .map_err(|_| ServiceError::internal("failed to delete tag"))?;
+            self.library_plans.remove(delete_plan_id);
+            return Ok(tag_outcome(
+                "delete",
+                Some(snapshot.tag_id),
+                Some(snapshot.tag_name),
+                None,
+                snapshot.skill_ids.len() as i64,
+                true,
             ));
         }
         let _operation_lock = self.begin_write(OperationKind::Update)?;
@@ -364,26 +469,7 @@ impl SkillsHubService {
                     changed,
                 ))
             }
-            TagAction::Delete {
-                tag,
-                confirmed: true,
-            } => {
-                let current = self.resolve_tag(&tag)?;
-                self.store()
-                    .delete_tag(current.id)
-                    .map_err(|_| ServiceError::internal("failed to delete tag"))?;
-                Ok(tag_outcome(
-                    "delete",
-                    Some(current.id),
-                    Some(current.name),
-                    None,
-                    current.skill_count,
-                    true,
-                ))
-            }
-            TagAction::Delete {
-                confirmed: false, ..
-            } => unreachable!(),
+            TagAction::Delete { .. } => unreachable!(),
         }
     }
 
@@ -411,7 +497,10 @@ impl SkillsHubService {
             ));
         }
         let _operation_lock = self.begin_write(OperationKind::Delete)?;
-        let fresh = self.capture_remove(&snapshot.skill.id)?;
+        validate_remove_paths(&snapshot.files)?;
+        let fresh = self
+            .capture_remove(&snapshot.skill.id)
+            .map_err(map_remove_revalidation_error)?;
         if fresh != snapshot || plan_id(&fresh)? != request.plan_id {
             return Err(plan_stale());
         }
@@ -435,7 +524,7 @@ impl SkillsHubService {
         };
         let item = RecycleBinService::new(self.store(), self.paths().recycle_bin_dir.clone())
             .archive(&snapshot.skill.id, DeletionSource::Manual, now_ms())
-            .map_err(map_archive_error)?;
+            .map_err(map_confirmed_archive_error)?;
         self.library_plans.remove(&request.plan_id);
         Ok(RemoveOutcome {
             skill_id: snapshot.skill.id,
@@ -447,9 +536,19 @@ impl SkillsHubService {
         &self,
         source: &Path,
         name_override: Option<String>,
+        mode: AdoptMode,
     ) -> Result<AdoptSnapshot, ServiceError> {
         let central = resolve_central_repo_path(self.paths(), self.store())
             .map_err(|_| ServiceError::internal("failed to resolve the central skill library"))?;
+        let central_root = path_for_comparison(&central)
+            .map_err(|_| ServiceError::internal("failed to resolve the central skill library"))?;
+        if mode == AdoptMode::Direct && !has_regular_skill_manifest(source) {
+            return Err(ServiceError::new(
+                ErrorCode::InvalidSource,
+                "SKILL_INVALID|missing_skill_md",
+                json!({ "reason": "missing_skill_md" }),
+            ));
+        }
         let skills = self
             .store()
             .list_skills()
@@ -458,15 +557,23 @@ impl SkillsHubService {
             .store()
             .list_all_skill_target_paths()
             .map_err(|_| ServiceError::internal("failed to inspect managed targets"))?;
-        let mut scan = scan_adopt_directory(source, &central, &skills, &targets).map_err(|_| {
-            ServiceError::new(
-                ErrorCode::InvalidSource,
-                "adopt source is not a safe skill directory",
-                json!({ "argument": "source" }),
-            )
-        })?;
+        let mut scan =
+            scan_adopt_directory(source, &central, &skills, &targets).map_err(|error| {
+                if error.chain().any(|cause| {
+                    cause.downcast_ref::<std::io::Error>().is_some()
+                        || cause.downcast_ref::<walkdir::Error>().is_some()
+                }) {
+                    ServiceError::internal("failed to inspect the adopt source")
+                } else {
+                    ServiceError::new(
+                        ErrorCode::InvalidSource,
+                        "adopt source is not a safe skill directory",
+                        json!({ "argument": "source" }),
+                    )
+                }
+            })?;
         if let Some(name) = name_override.as_deref() {
-            validate_adopt_name(name)?;
+            super::install::validate_skill_name(name)?;
             if scan.candidates.len() != 1 {
                 return Err(invalid_argument(
                     "name",
@@ -521,12 +628,42 @@ impl SkillsHubService {
             }
             scan.candidates = candidates;
         }
+        let target_paths = scan
+            .candidates
+            .iter()
+            .map(|candidate| central_root.join(&candidate.name))
+            .collect::<Vec<_>>();
         Ok(AdoptSnapshot {
             operation: "adopt",
+            mode,
             source_path: scan.root.clone(),
             name_override,
+            central_root,
+            target_paths,
             scan,
         })
+    }
+
+    fn capture_tag_delete(&self, tag_id: i64) -> Result<Option<TagDeleteSnapshot>, ServiceError> {
+        let tag = self
+            .store()
+            .list_tags_with_counts()
+            .map_err(tag_read_error)?
+            .into_iter()
+            .find(|tag| tag.id == tag_id);
+        let Some(tag) = tag else {
+            return Ok(None);
+        };
+        let skill_ids = self
+            .store()
+            .list_tag_skill_ids(tag_id)
+            .map_err(tag_read_error)?;
+        Ok(Some(TagDeleteSnapshot {
+            operation: "tag_delete",
+            tag_id,
+            tag_name: tag.name,
+            skill_ids,
+        }))
     }
 
     fn capture_remove(&self, skill_id: &str) -> Result<RemoveSnapshot, ServiceError> {
@@ -694,17 +831,19 @@ fn adopt_plan(id: &str, snapshot: &AdoptSnapshot) -> AdoptPlan {
             .scan
             .candidates
             .iter()
-            .map(adopt_candidate)
+            .zip(&snapshot.target_paths)
+            .map(|(candidate, target)| adopt_candidate(candidate, target))
             .collect(),
         excluded: snapshot.scan.excluded.iter().map(adopt_exclusion).collect(),
     }
 }
 
-fn adopt_candidate(candidate: &AdoptScanCandidate) -> AdoptCandidate {
+fn adopt_candidate(candidate: &AdoptScanCandidate, target: &Path) -> AdoptCandidate {
     AdoptCandidate {
         name: candidate.name.clone(),
         source_path: candidate.path.to_string_lossy().into_owned(),
         content_hash: candidate.content_hash.clone(),
+        target_path: target.to_string_lossy().into_owned(),
     }
 }
 
@@ -750,27 +889,79 @@ fn normalized_tag(name: &str) -> Result<String, ServiceError> {
     Ok(name.to_string())
 }
 
-fn validate_adopt_name(name: &str) -> Result<(), ServiceError> {
-    let name = name.trim();
-    let path = Path::new(name);
-    if name.is_empty()
-        || path.is_absolute()
-        || path.components().count() != 1
-        || matches!(name, "." | "..")
-        || name.contains('/')
-        || name.contains('\\')
-    {
-        return Err(invalid_argument("name", "skill name is not safe"));
-    }
-    Ok(())
-}
-
 fn invalid_argument(argument: &str, message: &str) -> ServiceError {
     ServiceError::new(
         ErrorCode::InvalidArgument,
         message,
         json!({ "argument": argument }),
     )
+}
+
+fn has_regular_skill_manifest(path: &Path) -> bool {
+    std::fs::symlink_metadata(path.join("SKILL.md"))
+        .map(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
+fn validate_planned_source(path: &Path) -> Result<(), ServiceError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => Ok(()),
+        Ok(_) => Err(plan_stale()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(plan_stale()),
+        Err(_) => Err(ServiceError::internal("failed to inspect the adopt source")),
+    }
+}
+
+fn map_adopt_revalidation_error(error: ServiceError) -> ServiceError {
+    match error.code {
+        ErrorCode::InvalidSource | ErrorCode::InvalidArgument | ErrorCode::TargetConflict => {
+            plan_stale()
+        }
+        _ => error,
+    }
+}
+
+fn map_batch_adopt_error(error: anyhow::Error) -> ServiceError {
+    let message = error.to_string();
+    if message.contains("PLAN_STALE") || message.contains("adopt target already exists") {
+        plan_stale()
+    } else {
+        ServiceError::internal("failed to adopt local skills")
+    }
+}
+
+fn validate_remove_paths(paths: &[PathSnapshot]) -> Result<(), ServiceError> {
+    for expected in paths {
+        let path = Path::new(&expected.path);
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) => {
+                if let Some(fingerprint) = &expected.fingerprint {
+                    let expected_directory = fingerprint.starts_with("dir:");
+                    let expected_symlink = fingerprint.starts_with("link:");
+                    if (expected_directory
+                        && (!metadata.is_dir() || metadata.file_type().is_symlink()))
+                        || (expected_symlink && !metadata.file_type().is_symlink())
+                    {
+                        return Err(plan_stale());
+                    }
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if expected.fingerprint.is_some() {
+                    return Err(plan_stale());
+                }
+            }
+            Err(_) => return Err(ServiceError::internal("failed to inspect skill files")),
+        }
+    }
+    Ok(())
+}
+
+fn map_remove_revalidation_error(error: ServiceError) -> ServiceError {
+    match error.code {
+        ErrorCode::SkillNotFound | ErrorCode::TargetConflict => plan_stale(),
+        _ => error,
+    }
 }
 
 fn plan_stale() -> ServiceError {
@@ -844,6 +1035,20 @@ fn map_archive_error(error: anyhow::Error) -> ServiceError {
         );
     }
     ServiceError::internal("failed to archive the skill in the recycle bin")
+}
+
+fn map_confirmed_archive_error(error: anyhow::Error) -> ServiceError {
+    let message = error.to_string();
+    if message.starts_with("TARGET_MODIFIED|")
+        || message.starts_with("UNSAFE_TARGET|")
+        || message.contains("Skill not found")
+        || message.contains("Skill content is missing")
+        || message.contains("unsafe central Skill path")
+    {
+        plan_stale()
+    } else {
+        ServiceError::internal("failed to archive the skill in the recycle bin")
+    }
 }
 
 fn now_ms() -> i64 {

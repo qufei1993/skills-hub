@@ -33,6 +33,154 @@ pub struct InstallResult {
     pub content_hash: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct BatchImportCandidate {
+    pub name: String,
+    pub source_path: PathBuf,
+    pub target_path: PathBuf,
+    pub expected_content_hash: String,
+}
+
+pub(crate) fn validate_skill_name(name: &str) -> Result<()> {
+    let mut components = Path::new(name).components();
+    let one_normal_component = matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none();
+    let device_base = name.split('.').next().unwrap_or(name);
+    let windows_device = matches!(
+        device_base.to_ascii_uppercase().as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    );
+    anyhow::ensure!(
+        !name.trim().is_empty()
+            && name.trim() == name
+            && one_normal_component
+            && !name.contains('/')
+            && !name.contains('\\')
+            && !name.chars().any(|character| character.is_control()
+                || matches!(character, '<' | '>' | ':' | '"' | '|' | '?' | '*'))
+            && !name.ends_with(['.', ' '])
+            && !windows_device
+            && name != "."
+            && name != "..",
+        "skill name must be a safe single file name"
+    );
+    Ok(())
+}
+
+pub(crate) fn import_existing_local_skills_batch(
+    store: &SkillStore,
+    candidates: &[BatchImportCandidate],
+) -> Result<Vec<InstallResult>> {
+    let mut seen_targets = HashSet::new();
+    let now = now_ms();
+    let mut records = Vec::with_capacity(candidates.len());
+    let mut replacements = Vec::with_capacity(candidates.len());
+
+    for candidate in candidates {
+        validate_skill_name(&candidate.name)?;
+        let source = std::fs::canonicalize(&candidate.source_path)
+            .with_context(|| "adopt source changed after planning")?;
+        let metadata = std::fs::symlink_metadata(&candidate.source_path)?;
+        anyhow::ensure!(
+            metadata.is_dir() && !metadata.file_type().is_symlink(),
+            "PLAN_STALE"
+        );
+        anyhow::ensure!(
+            source.join("SKILL.md").is_file(),
+            "SKILL_INVALID|missing_skill_md"
+        );
+        anyhow::ensure!(
+            seen_targets.insert(candidate.target_path.clone()),
+            "duplicate adopt target"
+        );
+        anyhow::ensure!(
+            std::fs::symlink_metadata(&candidate.target_path)
+                .map(|_| false)
+                .unwrap_or_else(|error| error.kind() == std::io::ErrorKind::NotFound),
+            "adopt target already exists"
+        );
+        let replacement =
+            PreparedDirReplacement::prepare_copy(&source, &candidate.target_path, None, true)?;
+        anyhow::ensure!(
+            replacement.staged_content_hash()? == candidate.expected_content_hash,
+            "PLAN_STALE"
+        );
+        let content_hash = Some(candidate.expected_content_hash.clone());
+        records.push(SkillRecord {
+            id: Uuid::new_v4().to_string(),
+            name: candidate.name.clone(),
+            description: parse_skill_md(&source.join("SKILL.md")).and_then(|(_, value)| value),
+            source_type: "local".to_string(),
+            source_ref: Some(source.to_string_lossy().into_owned()),
+            source_subpath: None,
+            source_revision: None,
+            central_path: candidate.target_path.to_string_lossy().into_owned(),
+            content_hash,
+            created_at: now,
+            updated_at: now,
+            last_sync_at: None,
+            last_seen_at: now,
+            enabled: true,
+            status: "ok".to_string(),
+        });
+        replacements.push(replacement);
+    }
+
+    for index in 0..replacements.len() {
+        if let Err(error) = replacements[index].activate_missing_only() {
+            for replacement in replacements.iter_mut().take(index).rev() {
+                let _ = replacement.rollback();
+            }
+            return Err(error);
+        }
+    }
+    if let Err(error) = store.commit_skill_updates(&records) {
+        let mut rollback_error = None;
+        for replacement in replacements.iter_mut().rev() {
+            if let Err(error) = replacement.rollback() {
+                rollback_error = Some(error);
+            }
+        }
+        if let Some(rollback_error) = rollback_error {
+            return Err(rollback_error).context("adopt database commit and rollback failed");
+        }
+        return Err(error).context("commit adopted skills");
+    }
+    for replacement in &mut replacements {
+        replacement.commit();
+    }
+    Ok(records
+        .into_iter()
+        .map(|record| InstallResult {
+            skill_id: record.id,
+            name: record.name,
+            central_path: PathBuf::from(record.central_path),
+            content_hash: record.content_hash,
+        })
+        .collect())
+}
+
 #[derive(Debug)]
 pub(crate) struct SkillAlreadyExistsError {
     central_path: PathBuf,
@@ -76,6 +224,7 @@ pub fn install_local_skill(
     install_local_skill_with_existing_policy(paths, store, source_path, name, false)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn import_existing_local_skill(
     paths: &RuntimePaths,
     store: &SkillStore,

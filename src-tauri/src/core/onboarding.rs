@@ -9,6 +9,7 @@ use walkdir::WalkDir;
 use super::central_repo::resolve_central_repo_path;
 use super::content_hash::hash_dir;
 use super::skill_store::SkillStore;
+use super::sync_engine::path_for_comparison;
 use super::tool_adapters::{
     default_tool_adapters, resolve_adapter_path_in_home, scan_tool_dir, DetectedSkill,
 };
@@ -96,22 +97,28 @@ pub(crate) fn scan_adopt_directory(
         "adopt source must be a real directory"
     );
     let canonical_root = fs::canonicalize(root)?;
-    let canonical_central = fs::canonicalize(central_root)
+    let canonical_central = path_for_comparison(central_root)
         .unwrap_or_else(|_| central_root.components().collect::<PathBuf>());
-    let mut managed_sources = HashSet::new();
-    let mut managed_target_paths = HashSet::new();
+    let mut managed_sources = Vec::new();
+    let mut managed_target_paths = Vec::new();
     for skill in managed_skills {
-        managed_sources.insert(normalize_existing_path(Path::new(&skill.central_path)));
-        if let Some(source) = skill
-            .source_ref
-            .as_deref()
+        if let Ok(path) = path_for_comparison(Path::new(&skill.central_path)) {
+            managed_sources.push(path);
+        }
+        if let Some(source) = (skill.source_type == "local")
+            .then_some(skill.source_ref.as_deref())
+            .flatten()
             .filter(|value| !value.trim().is_empty())
         {
-            managed_sources.insert(normalize_existing_path(Path::new(source)));
+            if let Ok(path) = path_for_comparison(Path::new(source)) {
+                managed_sources.push(path);
+            }
         }
     }
     for (_, target) in managed_targets {
-        managed_target_paths.insert(normalize_existing_path(Path::new(target)));
+        if let Ok(path) = path_for_comparison(Path::new(target)) {
+            managed_target_paths.push(path);
+        }
     }
 
     let direct_skill = regular_skill_manifest(root);
@@ -139,12 +146,17 @@ pub(crate) fn scan_adopt_directory(
                 continue;
             }
         };
-        let normalized = normalize_existing_path(&path);
-        if managed_sources.contains(&normalized) || managed_sources.contains(&canonical) {
+        if managed_sources
+            .iter()
+            .any(|managed| paths_overlap_physical(&canonical, managed))
+        {
             excluded.push(adopt_exclusion(path, "managed_source"));
             continue;
         }
-        if managed_target_paths.contains(&normalized) || managed_target_paths.contains(&canonical) {
+        if managed_target_paths
+            .iter()
+            .any(|managed| paths_overlap_physical(&canonical, managed))
+        {
             excluded.push(adopt_exclusion(path, "managed_target"));
             continue;
         }
@@ -191,7 +203,11 @@ fn tree_has_escaping_symlink(path: &Path, boundary: &Path) -> Result<bool> {
     for entry in WalkDir::new(path).follow_links(false) {
         let entry = entry?;
         if entry.file_type().is_symlink() {
-            let target = fs::canonicalize(entry.path())?;
+            let target = match fs::canonicalize(entry.path()) {
+                Ok(target) => target,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+                Err(error) => return Err(error.into()),
+            };
             if !target.starts_with(boundary) {
                 return Ok(true);
             }
@@ -200,8 +216,8 @@ fn tree_has_escaping_symlink(path: &Path, boundary: &Path) -> Result<bool> {
     Ok(false)
 }
 
-fn normalize_existing_path(path: &Path) -> PathBuf {
-    fs::canonicalize(path).unwrap_or_else(|_| path.components().collect())
+fn paths_overlap_physical(left: &Path, right: &Path) -> bool {
+    left == right || left.starts_with(right) || right.starts_with(left)
 }
 
 fn adopt_exclusion(path: PathBuf, reason: &str) -> AdoptScanExclusion {

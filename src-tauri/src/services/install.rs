@@ -7,8 +7,8 @@ use crate::core::cancel_token::CancelToken;
 use crate::core::installer::{
     check_managed_skill_update, install_git_skill, install_git_skill_from_selection,
     install_local_skill_from_selection, list_git_skills, list_local_skills,
-    update_managed_skill_from_source, GitSkillCandidate, LocalSkillCandidate,
-    SkillAlreadyExistsError,
+    update_managed_skill_from_source, validate_skill_name as validate_core_skill_name,
+    GitSkillCandidate, LocalSkillCandidate, SkillAlreadyExistsError,
 };
 use crate::core::network_proxy::get_github_proxy_url;
 use crate::core::skills_search::{search_skills_online, OnlineSkillResult};
@@ -383,25 +383,14 @@ fn validate_subpath(subpath: &str) -> Result<(), ServiceError> {
     Ok(())
 }
 
-fn validate_skill_name(name: &str) -> Result<(), ServiceError> {
-    let mut components = Path::new(name).components();
-    let one_normal_component =
-        matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none();
-    if name.trim().is_empty()
-        || !one_normal_component
-        || name.contains('/')
-        || name.contains('\\')
-        || name.contains(':')
-        || name == "."
-        || name == ".."
-    {
-        return Err(ServiceError::new(
+pub(crate) fn validate_skill_name(name: &str) -> Result<(), ServiceError> {
+    validate_core_skill_name(name).map_err(|_| {
+        ServiceError::new(
             ErrorCode::InvalidArgument,
             "skill name must be a single file name",
             json!({ "argument": "name" }),
-        ));
-    }
-    Ok(())
+        )
+    })
 }
 
 fn looks_like_explicit_local_path(input: &str) -> bool {

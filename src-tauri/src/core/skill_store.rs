@@ -1255,6 +1255,37 @@ impl SkillStore {
         })
     }
 
+    pub(crate) fn commit_skill_updates(&self, skills: &[SkillRecord]) -> Result<()> {
+        self.with_conn(|conn| {
+            let transaction = conn.unchecked_transaction()?;
+            for skill in skills {
+                upsert_skill_with_conn(&transaction, skill)?;
+                if let Some(baseline) = skill
+                    .content_hash
+                    .clone()
+                    .and_then(|hash| SourceBaseline::from_skill(skill, hash))
+                {
+                    transaction.execute(
+                        "INSERT INTO settings (key,value) VALUES (?1,?2)
+                         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                        params![
+                            format!("device_sync.source_baseline.{}", skill.id),
+                            serde_json::to_string(&baseline)?
+                        ],
+                    )?;
+                }
+                transaction.execute(
+                    "INSERT INTO skill_source_checks (skill_id,error_code,checked_at)
+                     VALUES (?1,NULL,?2)
+                     ON CONFLICT(skill_id) DO UPDATE SET error_code=NULL,checked_at=excluded.checked_at",
+                    params![skill.id, now_ms()],
+                )?;
+            }
+            transaction.commit()?;
+            Ok(())
+        })
+    }
+
     pub(crate) fn was_skill_imported_by_device_sync(
         &self,
         id: &str,
@@ -1642,6 +1673,16 @@ impl SkillStore {
                 items.push(row?);
             }
             Ok(items)
+        })
+    }
+
+    pub(crate) fn list_tag_skill_ids(&self, tag_id: i64) -> Result<Vec<String>> {
+        self.with_conn(|conn| {
+            let mut statement = conn.prepare(
+                "SELECT skill_id FROM skill_tag_links WHERE tag_id = ?1 ORDER BY skill_id ASC",
+            )?;
+            let rows = statement.query_map(params![tag_id], |row| row.get(0))?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })
     }
 

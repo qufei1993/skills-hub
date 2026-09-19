@@ -1634,14 +1634,7 @@ pub async fn import_existing_skill(
 ) -> Result<InstallResultDto, String> {
     let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let plan = service.plan_adopt_with_name(&sourcePath, name)?;
-        if plan.candidates.len() != 1 {
-            return Err(crate::services::error::ServiceError::new(
-                crate::services::error::ErrorCode::InvalidSource,
-                "SKILL_INVALID|missing_skill_md",
-                serde_json::json!({ "reason": "missing_skill_md" }),
-            ));
-        }
+        let plan = service.plan_adopt_direct_with_name(&sourcePath, name)?;
         let mut outcome = service.adopt(AdoptRequest::confirmed(plan.id))?;
         let adopted = outcome.adopted.pop().ok_or_else(|| {
             crate::services::error::ServiceError::internal("failed to import the selected skill")
@@ -1812,9 +1805,12 @@ pub fn rename_tag(
 #[allow(non_snake_case)]
 pub fn delete_tag(service: State<'_, SkillsHubService>, tagId: i64) -> Result<(), String> {
     service
-        .apply_tag_action(TagAction::Delete {
-            tag: TagSelector::Id(tagId),
-            confirmed: true,
+        .plan_tag_delete(TagSelector::Id(tagId))
+        .and_then(|plan| {
+            service.apply_tag_action(TagAction::Delete {
+                plan_id: plan.id,
+                confirmed: true,
+            })
         })
         .map(|_| ())
         .map_err(format_service_error)

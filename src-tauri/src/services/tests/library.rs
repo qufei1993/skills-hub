@@ -1,7 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde_json::json;
 use tempfile::TempDir;
 
 use crate::core::runtime_paths::{RuntimePaths, RuntimeProfile};
@@ -399,18 +398,20 @@ fn tag_actions_are_unicode_case_insensitive_and_report_exact_impact() {
         .unwrap();
     assert_eq!(renamed.affected_skill_count, 2);
 
+    let plan = fixture
+        .service
+        .plan_tag_delete(TagSelector::Name("界面".into()))
+        .unwrap();
+    assert_eq!(plan.affected_skill_count, 2);
+    assert_eq!(plan.affected_skill_ids, vec!["one", "two"]);
     let error = fixture
         .service
         .apply_tag_action(TagAction::Delete {
-            tag: TagSelector::Name("界面".into()),
+            plan_id: plan.id.clone(),
             confirmed: false,
         })
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::ConfirmationRequired);
-    assert_eq!(
-        error.details,
-        json!({ "affected_skill_count": 2, "tag": "界面" })
-    );
     assert_eq!(
         fixture
             .service
@@ -424,7 +425,7 @@ fn tag_actions_are_unicode_case_insensitive_and_report_exact_impact() {
     let deleted = fixture
         .service
         .apply_tag_action(TagAction::Delete {
-            tag: TagSelector::Name("界面".into()),
+            plan_id: plan.id,
             confirmed: true,
         })
         .unwrap();
@@ -435,4 +436,315 @@ fn tag_actions_are_unicode_case_insensitive_and_report_exact_impact() {
         .list_tags_with_counts()
         .unwrap()
         .is_empty());
+}
+
+#[test]
+fn tag_delete_plan_rejects_changed_links_and_cannot_be_applied_as_another_operation() {
+    let fixture = Fixture::new();
+    fixture.add_skill("one", "one", "one");
+    fixture.add_skill("two", "two", "two");
+    fixture
+        .service
+        .apply_tag_action(TagAction::Add {
+            skill: "one".into(),
+            tags: vec!["Shared".into()],
+        })
+        .unwrap();
+    let plan = fixture
+        .service
+        .plan_tag_delete(TagSelector::Name("shared".into()))
+        .unwrap();
+
+    let wrong_operation = fixture
+        .service
+        .remove(RemoveRequest::confirmed(plan.id.clone()))
+        .unwrap_err();
+    assert_eq!(wrong_operation.code, ErrorCode::PlanStale);
+
+    fixture
+        .service
+        .apply_tag_action(TagAction::Add {
+            skill: "two".into(),
+            tags: vec!["SHARED".into()],
+        })
+        .unwrap();
+    let error = fixture
+        .service
+        .apply_tag_action(TagAction::Delete {
+            plan_id: plan.id,
+            confirmed: true,
+        })
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::PlanStale);
+    assert_eq!(
+        fixture
+            .service
+            .store()
+            .list_tags_with_counts()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn adopt_source_disappearance_and_symlink_replacement_are_plan_stale() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("source");
+    write_skill(&source, "source", "source");
+    let missing_plan = fixture.service.plan_adopt(&source).unwrap();
+    fs::remove_dir_all(&source).unwrap();
+    let error = fixture
+        .service
+        .adopt(AdoptRequest::confirmed(missing_plan.id))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::PlanStale);
+
+    #[cfg(unix)]
+    {
+        write_skill(&source, "source", "source");
+        let link_plan = fixture.service.plan_adopt(&source).unwrap();
+        fs::remove_dir_all(&source).unwrap();
+        let elsewhere = fixture.paths.app_data_dir.join("elsewhere");
+        write_skill(&elsewhere, "elsewhere", "elsewhere");
+        std::os::unix::fs::symlink(&elsewhere, &source).unwrap();
+        let error = fixture
+            .service
+            .adopt(AdoptRequest::confirmed(link_plan.id))
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::PlanStale);
+    }
+}
+
+#[test]
+fn remove_deleted_skill_and_changed_target_are_plan_stale() {
+    let fixture = Fixture::new();
+    fixture.add_skill("gone-id", "gone", "gone");
+    let gone_plan = fixture.service.plan_remove("gone-id".into()).unwrap();
+    fixture.service.store().delete_skill("gone-id").unwrap();
+    let error = fixture
+        .service
+        .remove(RemoveRequest::confirmed(gone_plan.id))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::PlanStale);
+
+    let skill = fixture.add_skill("target-id", "target", "target");
+    let target_path = fixture.paths.app_data_dir.join("agent/target");
+    write_skill(&target_path, "target", "target");
+    fixture
+        .service
+        .store()
+        .upsert_skill_target(&SkillTargetRecord {
+            id: "target-record".into(),
+            skill_id: skill.id,
+            tool: "cursor".into(),
+            scope: "global".into(),
+            project_path: None,
+            target_path: target_path.to_string_lossy().into_owned(),
+            mode: "copy".into(),
+            status: "ok".into(),
+            last_error: None,
+            synced_at: Some(50),
+        })
+        .unwrap();
+    let target_plan = fixture.service.plan_remove("target-id".into()).unwrap();
+    fs::write(target_path.join("changed.txt"), "user change").unwrap();
+    let error = fixture
+        .service
+        .remove(RemoveRequest::confirmed(target_plan.id))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::PlanStale);
+}
+
+#[test]
+fn adopt_binds_the_central_root_and_never_writes_to_a_new_setting() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("source");
+    write_skill(&source, "source", "source");
+    let central_a = fixture.paths.app_data_dir.join("central-a");
+    let central_b = fixture.paths.default_central_repo.clone();
+    fixture
+        .service
+        .store()
+        .set_setting("central_repo_path", central_a.to_string_lossy().as_ref())
+        .unwrap();
+    let plan = fixture.service.plan_adopt(&source).unwrap();
+    fixture
+        .service
+        .store()
+        .delete_setting("central_repo_path")
+        .unwrap();
+
+    let error = fixture
+        .service
+        .adopt(AdoptRequest::confirmed(plan.id))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::PlanStale);
+    assert!(!central_a.join("source").exists());
+    assert!(!central_b.join("source").exists());
+}
+
+#[test]
+fn direct_adopt_does_not_silently_choose_a_container_child() {
+    let fixture = Fixture::new();
+    let container = fixture.paths.app_data_dir.join("container");
+    write_skill(&container.join("only-child"), "only-child", "child");
+    assert_eq!(
+        fixture
+            .service
+            .plan_adopt(&container)
+            .unwrap()
+            .candidates
+            .len(),
+        1
+    );
+
+    let error = fixture
+        .service
+        .plan_adopt_direct_with_name(&container, None)
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidSource);
+    assert_eq!(error.message, "SKILL_INVALID|missing_skill_md");
+}
+
+#[test]
+fn multi_candidate_adopt_rolls_back_files_and_database_when_the_second_insert_fails() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("container");
+    write_skill(&source.join("one"), "one", "one");
+    write_skill(&source.join("two"), "two", "two");
+    let plan = fixture.service.plan_adopt(&source).unwrap();
+    let connection = rusqlite::Connection::open(&fixture.paths.database_path).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER fail_second_adopt BEFORE INSERT ON skills
+             WHEN NEW.name = 'two' BEGIN SELECT RAISE(FAIL, 'second insert failed'); END;",
+        )
+        .unwrap();
+
+    let error = fixture
+        .service
+        .adopt(AdoptRequest::confirmed(plan.id))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InternalError);
+    assert!(fixture.service.store().list_skills().unwrap().is_empty());
+    assert!(!fixture.central_skill_exists("one"));
+    assert!(!fixture.central_skill_exists("two"));
+    assert!(source.join("one/SKILL.md").is_file());
+    assert!(source.join("two/SKILL.md").is_file());
+}
+
+#[test]
+fn adopt_excludes_bidirectional_overlaps_with_managed_sources_and_targets() {
+    let fixture = Fixture::new();
+    let root = fixture.paths.app_data_dir.join("overlaps");
+    let source_parent = root.join("source-parent");
+    let source_child = source_parent.join("candidate");
+    write_skill(&source_child, "candidate", "candidate");
+    let mut parent_record = fixture.add_skill("source-parent-id", "managed-a", "managed");
+    parent_record.source_type = "local".into();
+    parent_record.source_ref = Some(source_parent.to_string_lossy().into_owned());
+    fixture
+        .service
+        .store()
+        .upsert_skill(&parent_record)
+        .unwrap();
+    let plan = fixture.service.plan_adopt(&source_parent).unwrap();
+    assert!(plan
+        .excluded
+        .iter()
+        .any(|item| item.reason == "managed_source"));
+
+    let candidate_parent = root.join("candidate-parent");
+    write_skill(&candidate_parent, "candidate-parent", "parent");
+    let nested_source = candidate_parent.join("nested");
+    fs::create_dir_all(&nested_source).unwrap();
+    let mut child_record = fixture.add_skill("source-child-id", "managed-b", "managed");
+    child_record.source_type = "local".into();
+    child_record.source_ref = Some(nested_source.to_string_lossy().into_owned());
+    fixture.service.store().upsert_skill(&child_record).unwrap();
+    let plan = fixture.service.plan_adopt(&candidate_parent).unwrap();
+    assert!(plan.candidates.is_empty());
+    assert!(plan
+        .excluded
+        .iter()
+        .any(|item| item.reason == "managed_source"));
+
+    let target_parent = root.join("target-parent");
+    let target_child = target_parent.join("candidate");
+    write_skill(&target_child, "candidate", "candidate");
+    let target_owner = fixture.add_skill("target-parent-id", "managed-c", "managed");
+    fixture
+        .service
+        .store()
+        .upsert_skill_target(&SkillTargetRecord {
+            id: "target-parent-record".into(),
+            skill_id: target_owner.id,
+            tool: "cursor".into(),
+            scope: "global".into(),
+            project_path: None,
+            target_path: target_parent.to_string_lossy().into_owned(),
+            mode: "copy".into(),
+            status: "ok".into(),
+            last_error: None,
+            synced_at: None,
+        })
+        .unwrap();
+    let plan = fixture.service.plan_adopt(&target_parent).unwrap();
+    assert!(plan
+        .excluded
+        .iter()
+        .any(|item| item.reason == "managed_target"));
+
+    let candidate_target_parent = root.join("candidate-target-parent");
+    write_skill(
+        &candidate_target_parent,
+        "candidate-target-parent",
+        "candidate",
+    );
+    let nested_target = candidate_target_parent.join("nested");
+    fs::create_dir_all(&nested_target).unwrap();
+    let target_owner = fixture.add_skill("target-child-id", "managed-d", "managed");
+    fixture
+        .service
+        .store()
+        .upsert_skill_target(&SkillTargetRecord {
+            id: "target-child-record".into(),
+            skill_id: target_owner.id,
+            tool: "codex".into(),
+            scope: "global".into(),
+            project_path: None,
+            target_path: nested_target.to_string_lossy().into_owned(),
+            mode: "copy".into(),
+            status: "ok".into(),
+            last_error: None,
+            synced_at: None,
+        })
+        .unwrap();
+    let plan = fixture
+        .service
+        .plan_adopt(&candidate_target_parent)
+        .unwrap();
+    assert!(plan.candidates.is_empty());
+    assert!(plan
+        .excluded
+        .iter()
+        .any(|item| item.reason == "managed_target"));
+}
+
+#[test]
+fn adopt_custom_names_use_cross_platform_safe_filename_rules() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("source");
+    write_skill(&source, "source", "source");
+    for name in [
+        "CON", "con.txt", "name.", "name ", "bad:name", "bad*name", "bad?name", "bad<name",
+        "bad>name", "bad|name",
+    ] {
+        let error = fixture
+            .service
+            .plan_adopt_with_name(&source, Some(name.into()))
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidArgument, "{name}");
+    }
 }
