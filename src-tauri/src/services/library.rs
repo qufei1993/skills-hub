@@ -220,6 +220,28 @@ enum LibraryPlanSnapshot {
     Remove(Box<RemoveSnapshot>),
 }
 
+#[cfg(test)]
+thread_local! {
+    static ADOPT_AFTER_REVALIDATION_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_adopt_after_revalidation_hook(hook: impl FnOnce() + 'static) {
+    ADOPT_AFTER_REVALIDATION_HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+}
+
+#[cfg(test)]
+fn run_adopt_after_revalidation_hook() {
+    let hook = ADOPT_AFTER_REVALIDATION_HOOK.with(|slot| slot.borrow_mut().take());
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
+#[cfg(not(test))]
+fn run_adopt_after_revalidation_hook() {}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct LibraryPlanStore(Arc<Mutex<HashMap<String, LibraryPlanSnapshot>>>);
 
@@ -319,6 +341,7 @@ impl SkillsHubService {
         if fresh != snapshot || plan_id(&fresh)? != request.plan_id {
             return Err(plan_stale());
         }
+        run_adopt_after_revalidation_hook();
         let candidates = snapshot
             .scan
             .candidates
@@ -542,7 +565,7 @@ impl SkillsHubService {
             .map_err(|_| ServiceError::internal("failed to resolve the central skill library"))?;
         let central_root = path_for_comparison(&central)
             .map_err(|_| ServiceError::internal("failed to resolve the central skill library"))?;
-        if mode == AdoptMode::Direct && !has_regular_skill_manifest(source) {
+        if mode == AdoptMode::Direct && !has_regular_skill_manifest(source)? {
             return Err(ServiceError::new(
                 ErrorCode::InvalidSource,
                 "SKILL_INVALID|missing_skill_md",
@@ -897,10 +920,27 @@ fn invalid_argument(argument: &str, message: &str) -> ServiceError {
     )
 }
 
-fn has_regular_skill_manifest(path: &Path) -> bool {
-    std::fs::symlink_metadata(path.join("SKILL.md"))
-        .map(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
-        .unwrap_or(false)
+fn has_regular_skill_manifest(path: &Path) -> Result<bool, ServiceError> {
+    let stat = match std::fs::symlink_metadata(path.join("SKILL.md")) {
+        Ok(metadata) => Ok(Some(
+            metadata.is_file() && !metadata.file_type().is_symlink(),
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    };
+    classify_direct_manifest_stat(stat)
+}
+
+pub(crate) fn classify_direct_manifest_stat(
+    stat: std::io::Result<Option<bool>>,
+) -> Result<bool, ServiceError> {
+    match stat {
+        Ok(Some(regular)) => Ok(regular),
+        Ok(None) => Ok(false),
+        Err(_) => Err(ServiceError::internal(
+            "failed to inspect the adopt manifest",
+        )),
+    }
 }
 
 fn validate_planned_source(path: &Path) -> Result<(), ServiceError> {
@@ -921,9 +961,11 @@ fn map_adopt_revalidation_error(error: ServiceError) -> ServiceError {
     }
 }
 
-fn map_batch_adopt_error(error: anyhow::Error) -> ServiceError {
-    let message = error.to_string();
-    if message.contains("PLAN_STALE") || message.contains("adopt target already exists") {
+pub(crate) fn map_batch_adopt_error(error: anyhow::Error) -> ServiceError {
+    if error
+        .chain()
+        .any(|cause| cause.is::<crate::core::installer::AdoptPlanStaleError>())
+    {
         plan_stale()
     } else {
         ServiceError::internal("failed to adopt local skills")

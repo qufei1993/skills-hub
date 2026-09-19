@@ -41,6 +41,71 @@ pub(crate) struct BatchImportCandidate {
     pub expected_content_hash: String,
 }
 
+#[derive(Debug)]
+pub(crate) struct AdoptPlanStaleError;
+
+impl std::fmt::Display for AdoptPlanStaleError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("adopt plan state changed")
+    }
+}
+
+impl std::error::Error for AdoptPlanStaleError {}
+
+fn adopt_plan_stale<T>() -> Result<T> {
+    Err(AdoptPlanStaleError.into())
+}
+
+fn validate_adopt_source_stat(result: std::io::Result<std::fs::Metadata>) -> Result<()> {
+    match result {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => Ok(()),
+        Ok(_) => adopt_plan_stale(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => adopt_plan_stale(),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn validate_adopt_manifest_stat(result: std::io::Result<std::fs::Metadata>) -> Result<()> {
+    match result {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(()),
+        Ok(_) => adopt_plan_stale(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => adopt_plan_stale(),
+        Err(error) => Err(error.into()),
+    }
+}
+
+pub(crate) fn validate_adopt_target_stat(result: std::io::Result<std::fs::Metadata>) -> Result<()> {
+    match result {
+        Ok(_) => adopt_plan_stale(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn canonicalize_adopt_source(path: &Path) -> Result<PathBuf> {
+    match std::fs::canonicalize(path) {
+        Ok(path) => Ok(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => adopt_plan_stale(),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn error_is_not_found(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+    })
+}
+
+fn error_is_already_exists(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| error.kind() == std::io::ErrorKind::AlreadyExists)
+    })
+}
+
 pub(crate) fn validate_skill_name(name: &str) -> Result<()> {
     let mut components = Path::new(name).components();
     let one_normal_component = matches!(components.next(), Some(std::path::Component::Normal(_)))
@@ -99,33 +164,30 @@ pub(crate) fn import_existing_local_skills_batch(
 
     for candidate in candidates {
         validate_skill_name(&candidate.name)?;
-        let source = std::fs::canonicalize(&candidate.source_path)
-            .with_context(|| "adopt source changed after planning")?;
-        let metadata = std::fs::symlink_metadata(&candidate.source_path)?;
-        anyhow::ensure!(
-            metadata.is_dir() && !metadata.file_type().is_symlink(),
-            "PLAN_STALE"
-        );
-        anyhow::ensure!(
-            source.join("SKILL.md").is_file(),
-            "SKILL_INVALID|missing_skill_md"
-        );
+        let source = canonicalize_adopt_source(&candidate.source_path)?;
+        validate_adopt_source_stat(std::fs::symlink_metadata(&candidate.source_path))?;
+        validate_adopt_manifest_stat(std::fs::symlink_metadata(source.join("SKILL.md")))?;
         anyhow::ensure!(
             seen_targets.insert(candidate.target_path.clone()),
             "duplicate adopt target"
         );
-        anyhow::ensure!(
-            std::fs::symlink_metadata(&candidate.target_path)
-                .map(|_| false)
-                .unwrap_or_else(|error| error.kind() == std::io::ErrorKind::NotFound),
-            "adopt target already exists"
-        );
+        validate_adopt_target_stat(std::fs::symlink_metadata(&candidate.target_path))?;
         let replacement =
-            PreparedDirReplacement::prepare_copy(&source, &candidate.target_path, None, true)?;
+            match PreparedDirReplacement::prepare_copy(&source, &candidate.target_path, None, true)
+            {
+                Ok(replacement) => replacement,
+                Err(error) if error_is_not_found(&error) => return adopt_plan_stale(),
+                Err(error) => return Err(error),
+            };
+        validate_adopt_source_stat(std::fs::symlink_metadata(&candidate.source_path))?;
         anyhow::ensure!(
-            replacement.staged_content_hash()? == candidate.expected_content_hash,
-            "PLAN_STALE"
+            canonicalize_adopt_source(&candidate.source_path)? == source,
+            AdoptPlanStaleError
         );
+        validate_adopt_manifest_stat(std::fs::symlink_metadata(source.join("SKILL.md")))?;
+        if replacement.staged_content_hash()? != candidate.expected_content_hash {
+            return adopt_plan_stale();
+        }
         let content_hash = Some(candidate.expected_content_hash.clone());
         records.push(SkillRecord {
             id: Uuid::new_v4().to_string(),
@@ -152,7 +214,11 @@ pub(crate) fn import_existing_local_skills_batch(
             for replacement in replacements.iter_mut().take(index).rev() {
                 let _ = replacement.rollback();
             }
-            return Err(error);
+            return if error_is_already_exists(&error) {
+                adopt_plan_stale()
+            } else {
+                Err(error)
+            };
         }
     }
     if let Err(error) = store.commit_skill_updates(&records) {

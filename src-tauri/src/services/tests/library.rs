@@ -6,7 +6,10 @@ use tempfile::TempDir;
 use crate::core::runtime_paths::{RuntimePaths, RuntimeProfile};
 use crate::core::skill_store::{SkillRecord, SkillTargetRecord};
 use crate::services::error::ErrorCode;
-use crate::services::library::{AdoptRequest, RemoveRequest, TagAction, TagSelector};
+use crate::services::library::{
+    classify_direct_manifest_stat, map_batch_adopt_error, set_adopt_after_revalidation_hook,
+    AdoptRequest, RemoveRequest, TagAction, TagSelector,
+};
 use crate::services::skills_hub::SkillsHubService;
 
 struct Fixture {
@@ -514,6 +517,74 @@ fn adopt_source_disappearance_and_symlink_replacement_are_plan_stale() {
             .unwrap_err();
         assert_eq!(error.code, ErrorCode::PlanStale);
     }
+}
+
+#[test]
+fn adopt_batch_maps_source_and_manifest_drift_after_revalidation_to_plan_stale() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("source");
+    write_skill(&source, "source", "source");
+    let manifest_plan = fixture
+        .service
+        .plan_adopt_direct_with_name(&source, None)
+        .unwrap();
+    let manifest = source.join("SKILL.md");
+    set_adopt_after_revalidation_hook(move || fs::remove_file(manifest).unwrap());
+    let error = fixture
+        .service
+        .adopt(AdoptRequest::confirmed(manifest_plan.id))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::PlanStale);
+
+    write_skill(&source, "source", "source");
+    let source_plan = fixture
+        .service
+        .plan_adopt_direct_with_name(&source, None)
+        .unwrap();
+    let removed_source = source.clone();
+    set_adopt_after_revalidation_hook(move || fs::remove_dir_all(removed_source).unwrap());
+    let error = fixture
+        .service
+        .adopt(AdoptRequest::confirmed(source_plan.id))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::PlanStale);
+}
+
+#[test]
+fn adopt_io_failures_are_not_misclassified_as_stale() {
+    let manifest_error = classify_direct_manifest_stat(Err(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "injected manifest stat failure",
+    )))
+    .unwrap_err();
+    assert_eq!(manifest_error.code, ErrorCode::InternalError);
+
+    let target_error =
+        crate::core::installer::validate_adopt_target_stat(Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "injected target stat failure",
+        )))
+        .unwrap_err();
+    let mapped = map_batch_adopt_error(target_error);
+    assert_eq!(mapped.code, ErrorCode::InternalError);
+
+    crate::core::installer::validate_adopt_target_stat(Err(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "injected missing target",
+    )))
+    .unwrap();
+    let existing_target = tempfile::tempdir().unwrap();
+    let existing_error = crate::core::installer::validate_adopt_target_stat(fs::symlink_metadata(
+        existing_target.path(),
+    ))
+    .unwrap_err();
+    assert_eq!(
+        map_batch_adopt_error(existing_error).code,
+        ErrorCode::PlanStale
+    );
+
+    let stale = map_batch_adopt_error(crate::core::installer::AdoptPlanStaleError.into());
+    assert_eq!(stale.code, ErrorCode::PlanStale);
 }
 
 #[test]

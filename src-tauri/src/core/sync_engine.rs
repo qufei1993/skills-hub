@@ -764,6 +764,7 @@ impl PreparedDirReplacement {
             &self.target,
             rustix::fs::RenameFlags::NOREPLACE,
         )
+        .map_err(std::io::Error::from)
         .with_context(|| format!("activate new managed directory {:?}", self.target))?;
         #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         {
