@@ -22,7 +22,6 @@ use crate::core::central_repo::{
     ensure_central_repo, plan_central_repo_migration, resolve_central_repo_path,
     validate_central_repo_path_change, CentralRepoMigrationItem,
 };
-use crate::core::content_hash::hash_dir;
 #[cfg(test)]
 use crate::core::device_sync::credentials::resolve_access_token;
 use crate::core::device_sync::credentials::{
@@ -59,22 +58,21 @@ use crate::core::onboarding::{
 };
 use crate::core::recycle_bin::{DeletionSource, RecycleBinItem, RecycleBinService};
 #[cfg(test)]
-use crate::core::skill_store::SkillRecord;
-use crate::core::skill_store::{SkillStore, SkillTargetRecord, DEVICE_SYNC_HISTORY_LIMIT};
+use crate::core::skill_store::{SkillRecord, SkillTargetRecord};
+use crate::core::skill_store::{SkillStore, DEVICE_SYNC_HISTORY_LIMIT};
 use crate::core::skills_search::OnlineSkillResult;
 use crate::core::sync_engine::{
     copy_dir_recursive, path_is_protected_real_content, paths_overlap,
-    remove_path_any as remove_path_any_core, sync_dir_for_tool_with_overwrite, sync_dir_hybrid,
-    sync_dir_with_mode_with_overwrite, SyncMode,
+    remove_path_any as remove_path_any_core, sync_dir_hybrid, sync_dir_with_mode_with_overwrite,
+    SyncMode,
 };
 use crate::core::system_scheduler::{
     current_scheduler_config, get_auto_update_task_status, install_auto_update_task,
     trigger_auto_update_task_now, uninstall_auto_update_task,
 };
 use crate::core::tool_adapters::{
-    adapter_by_key, adapters_sharing_project_skills_dir, is_builtin_tool_enabled,
-    is_tool_installed, load_tool_config, project_relative_skills_dir, resolve_default_path,
-    save_tool_config, supports_project_scope, CustomToolConfig, ToolConfig,
+    is_builtin_tool_enabled, is_tool_installed, load_tool_config, project_relative_skills_dir,
+    resolve_default_path, save_tool_config, supports_project_scope, CustomToolConfig, ToolConfig,
 };
 use crate::services::install::{InstallOutcome, InstallRequest};
 use crate::services::operation_lock::{OperationKind, OperationLock};
@@ -387,46 +385,6 @@ fn runtime_tools(store: &SkillStore, include_disabled: bool) -> anyhow::Result<V
     }
 
     Ok(tools)
-}
-
-fn runtime_tool_by_key(store: &SkillStore, key: &str) -> anyhow::Result<RuntimeTool> {
-    runtime_tools(store, false)?
-        .into_iter()
-        .find(|tool| tool.key == key)
-        .ok_or_else(|| anyhow::anyhow!("TOOL_NOT_INSTALLED|{}", key))
-}
-
-fn runtime_tools_sharing_dir(
-    store: &SkillStore,
-    selected: &RuntimeTool,
-    scope: &str,
-) -> anyhow::Result<Vec<RuntimeTool>> {
-    let tools = runtime_tools(store, false)?;
-    let shared = tools
-        .into_iter()
-        .filter(|tool| {
-            tool.installed
-                && if scope == "project" {
-                    tool.project_skills_dir == selected.project_skills_dir
-                } else {
-                    tool.skills_dir == selected.skills_dir
-                }
-        })
-        .collect::<Vec<_>>();
-    Ok(shared)
-}
-
-fn resolve_runtime_tool_root(
-    tool: &RuntimeTool,
-    project_root: Option<&std::path::Path>,
-) -> anyhow::Result<std::path::PathBuf> {
-    if let Some(project_root) = project_root {
-        if !tool.supports_project_scope {
-            anyhow::bail!("PROJECT_SCOPE_UNSUPPORTED|{}", tool.key);
-        }
-        return Ok(project_root.join(&tool.project_skills_dir));
-    }
-    Ok(tool.skills_dir.clone())
 }
 
 #[tauri::command]
@@ -1256,48 +1214,6 @@ pub struct SyncResultDto {
     pub target_path: String,
 }
 
-fn sync_mode_name(mode: SyncMode) -> &'static str {
-    match mode {
-        SyncMode::Auto => "auto",
-        SyncMode::Symlink => "symlink",
-        SyncMode::Junction => "junction",
-        SyncMode::Copy => "copy",
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn record_skill_target_failure(
-    store: &SkillStore,
-    skill_id: &str,
-    tool: &str,
-    scope: &str,
-    project_path: Option<&str>,
-    target_path: &std::path::Path,
-    requested_mode: SyncMode,
-    error: &str,
-) -> anyhow::Result<()> {
-    let existing = store.get_skill_target(skill_id, tool, scope, project_path)?;
-    let record = SkillTargetRecord {
-        id: existing
-            .as_ref()
-            .map(|target| target.id.clone())
-            .unwrap_or_else(|| Uuid::new_v4().to_string()),
-        skill_id: skill_id.to_string(),
-        tool: tool.to_string(),
-        scope: scope.to_string(),
-        project_path: project_path.map(str::to_string),
-        target_path: target_path.to_string_lossy().to_string(),
-        mode: existing
-            .as_ref()
-            .map(|target| target.mode.clone())
-            .unwrap_or_else(|| sync_mode_name(requested_mode).to_string()),
-        status: "error".to_string(),
-        last_error: Some(error.to_string()),
-        synced_at: existing.and_then(|target| target.synced_at),
-    };
-    store.upsert_skill_target(&record)
-}
-
 #[tauri::command]
 pub async fn sync_skill_dir(
     app: tauri::AppHandle,
@@ -1327,8 +1243,7 @@ pub async fn sync_skill_dir(
 #[allow(non_snake_case)]
 #[allow(clippy::too_many_arguments)]
 pub async fn sync_skill_to_tool(
-    app: tauri::AppHandle,
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     sourcePath: String,
     skillId: String,
     tool: String,
@@ -1338,194 +1253,66 @@ pub async fn sync_skill_to_tool(
     scope: Option<String>,
     projectPath: Option<String>,
 ) -> Result<SyncResultDto, String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let _operation_lock = acquire_operation_lock(&app, OperationKind::Deploy)?;
-        let runtime_tool = runtime_tool_by_key(&store, &tool)?;
-        let scope = normalize_scope(scope.as_deref())?;
-        if scope == "project" && !runtime_tool.supports_project_scope {
-            anyhow::bail!("PROJECT_SCOPE_UNSUPPORTED|{}", runtime_tool.key);
+        let skill = service
+            .show_skill(skillId.clone().into())
+            .map_err(format_service_error)?;
+        if skill.central_path != sourcePath || skill.name != name {
+            return Err("PLAN_STALE|skill source or name changed".to_string());
         }
-        let project_root = if scope == "project" {
-            let raw = projectPath
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("projectPath is required for project scope"))?;
-            let path = expand_home_path(raw)?;
-            if !path.is_dir() {
-                anyhow::bail!("projectPath must be an existing directory: {:?}", path);
-            }
-            Some(path)
-        } else {
-            None
-        };
-
-        let tool_root = resolve_runtime_tool_root(&runtime_tool, project_root.as_deref())?;
-        let target = tool_root.join(&name);
-        ensure_target_does_not_overlap_local_source(&store, &skillId, &target)?;
-        let project_path_for_record = project_root
-            .as_ref()
-            .map(|path| path.to_string_lossy().to_string());
-        if scope == "global" && !runtime_tool.installed {
-            let error = format!("TOOL_NOT_INSTALLED|{}", runtime_tool.key);
-            record_skill_target_failure(
-                &store,
-                &skillId,
-                &tool,
-                scope,
-                project_path_for_record.as_deref(),
-                &target,
-                runtime_tool.sync_mode,
-                &error,
-            )?;
-            anyhow::bail!(error);
-        }
-        // Pre-check: ensure the skills directory is writable (fixes #20 — Windows OS error 5).
-        if let Err(err) = std::fs::create_dir_all(&tool_root) {
-            let error = if err.kind() == std::io::ErrorKind::PermissionDenied {
-                format!(
-                    "TOOL_NOT_WRITABLE|{}|{}",
-                    runtime_tool.label,
-                    tool_root.to_string_lossy()
-                )
-            } else {
-                format!("failed to create skills dir {:?}: {}", tool_root, err)
-            };
-            record_skill_target_failure(
-                &store,
-                &skillId,
-                &tool,
-                scope,
-                project_path_for_record.as_deref(),
-                &target,
-                runtime_tool.sync_mode,
-                &error,
-            )?;
-            anyhow::bail!(error);
-        }
-        if let Some(existing) =
-            store.get_skill_target(&skillId, &tool, scope, project_path_for_record.as_deref())?
-        {
-            if existing.mode == "copy"
-                && existing.target_path == target.to_string_lossy()
-                && overwrite != Some(true)
-            {
-                let previous =
-                    crate::core::content_hash::hash_dir_for_sync_conflict(sourcePath.as_ref())?;
-                crate::core::tool_distribution::refresh_copy(
-                    &store,
-                    &skillId,
-                    sourcePath.as_ref(),
-                    &target,
-                    Some(&previous),
-                )?;
-                return Ok(SyncResultDto {
-                    mode_used: "copy".into(),
-                    target_path: existing.target_path,
-                });
-            }
-            if existing.status == "ok"
-                && overwrite != Some(true)
-                && existing.target_path == target.to_string_lossy()
-                && target.exists()
-            {
-                return Ok::<_, anyhow::Error>(SyncResultDto {
-                    mode_used: existing.mode,
-                    target_path: existing.target_path,
-                });
-            }
-        }
-        let overwrite = overwrite.unwrap_or(false)
-            || (overwriteIfSameContent.unwrap_or(false)
-                && target_has_same_content(sourcePath.as_ref(), &target));
-        let result = if runtime_tool.is_custom {
-            sync_dir_with_mode_with_overwrite(
-                runtime_tool.sync_mode,
-                sourcePath.as_ref(),
-                &target,
-                overwrite,
-            )
-        } else {
-            sync_dir_for_tool_with_overwrite(&tool, sourcePath.as_ref(), &target, overwrite)
-        };
-        let result = match result {
-            Ok(result) => result,
-            Err(err) => {
-                let msg = err.to_string();
-                let error = if msg.contains("target already exists") {
-                    format!("TARGET_EXISTS|{}", target.to_string_lossy())
-                } else if msg.contains("os error 5")
-                    || msg.contains("Access is denied")
-                    || msg.contains("Permission denied")
-                {
-                    format!(
-                        "TOOL_NOT_WRITABLE|{}|{}",
-                        runtime_tool.label,
-                        tool_root.to_string_lossy()
-                    )
-                } else {
-                    msg
-                };
-                record_skill_target_failure(
-                    &store,
-                    &skillId,
-                    &tool,
-                    scope,
-                    project_path_for_record.as_deref(),
-                    &target,
-                    runtime_tool.sync_mode,
-                    &error,
-                )?;
-                anyhow::bail!(error);
-            }
-        };
-
-        // Some tools share the same skills directory; keep DB records consistent across them.
-        let group = runtime_tools_sharing_dir(&store, &runtime_tool, scope)?;
-        for a in group {
-            let record = SkillTargetRecord {
-                id: Uuid::new_v4().to_string(),
-                skill_id: skillId.clone(),
-                tool: a.key,
-                scope: scope.to_string(),
-                project_path: project_path_for_record.clone(),
-                target_path: result.target_path.to_string_lossy().to_string(),
-                mode: match result.mode_used {
-                    SyncMode::Auto => "auto",
-                    SyncMode::Symlink => "symlink",
-                    SyncMode::Junction => "junction",
-                    SyncMode::Copy => "copy",
-                }
-                .to_string(),
-                status: "ok".to_string(),
-                last_error: None,
-                synced_at: Some(now_ms()),
-            };
-            store.upsert_skill_target(&record)?;
-        }
-
-        Ok::<_, anyhow::Error>(SyncResultDto {
-            mode_used: match result.mode_used {
-                SyncMode::Auto => "auto",
-                SyncMode::Symlink => "symlink",
-                SyncMode::Junction => "junction",
-                SyncMode::Copy => "copy",
-            }
-            .to_string(),
-            target_path: result.target_path.to_string_lossy().to_string(),
+        let mut request = desktop_deployment_request(skillId, tool, scope, projectPath)?;
+        request.overwrite = overwrite.unwrap_or(false);
+        request.overwrite_if_same_content = overwriteIfSameContent.unwrap_or(false);
+        let outcome = service.deploy(request).map_err(format_deployment_error)?;
+        let target = outcome
+            .targets
+            .first()
+            .ok_or_else(|| "deployment returned no target".to_string())?;
+        Ok(SyncResultDto {
+            mode_used: crate::services::deployment::mode_name(target.mode).to_string(),
+            target_path: target.path.to_string_lossy().into_owned(),
         })
     })
     .await
-    .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(|error| error.to_string())?
 }
 
-fn target_has_same_content(source: &std::path::Path, target: &std::path::Path) -> bool {
-    if !source.is_dir() || !target.is_dir() {
-        return false;
+fn desktop_deployment_request(
+    skill_id: String,
+    tool: String,
+    scope: Option<String>,
+    project_path: Option<String>,
+) -> Result<crate::services::deployment::DeploymentRequest, String> {
+    let mut request = crate::services::deployment::DeploymentRequest::global(
+        crate::services::types::SkillSelector::Id(skill_id),
+        [tool],
+    );
+    if normalize_scope(scope.as_deref()).map_err(format_anyhow_error)? == "project" {
+        request.scope = crate::services::deployment::DeploymentScope::Project(
+            project_path
+                .ok_or_else(|| "projectPath is required for project scope".to_string())?
+                .into(),
+        );
     }
-    match (hash_dir(source), hash_dir(target)) {
-        (Ok(source_hash), Ok(target_hash)) => source_hash == target_hash,
-        _ => false,
+    Ok(request)
+}
+
+fn format_deployment_error(error: crate::services::error::ServiceError) -> String {
+    use crate::services::error::ErrorCode;
+    let agent = error.details["agent"].as_str().unwrap_or_default();
+    let path = error.details["path"].as_str().unwrap_or_default();
+    match error.code {
+        ErrorCode::AgentNotFound => format!("TOOL_NOT_INSTALLED|{agent}"),
+        ErrorCode::ProjectScopeUnsupported => format!("PROJECT_SCOPE_UNSUPPORTED|{agent}"),
+        ErrorCode::TargetConflict if error.details["reason"] == "not_writable" => {
+            format!("TOOL_NOT_WRITABLE|{agent}|{path}")
+        }
+        ErrorCode::TargetConflict if error.details["reason"] == "overlaps_skill_source" => format!(
+            "SKILL_TARGET_OVERLAPS_SOURCE|{path}|sync target overlaps original local source"
+        ),
+        ErrorCode::PlanStale => "PLAN_STALE|deployment state changed".to_string(),
+        _ => format_service_error(error),
     }
 }
 
@@ -1579,79 +1366,22 @@ fn remove_skill_target_safely(
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn unsync_skill_from_tool(
-    app: tauri::AppHandle,
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     skillId: String,
     tool: String,
     scope: Option<String>,
     projectPath: Option<String>,
 ) -> Result<(), String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let _operation_lock = acquire_operation_lock(&app, OperationKind::Undeploy)?;
-        let scope = normalize_scope(scope.as_deref())?;
-        let project_path = if scope == "project" {
-            let raw = projectPath
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("projectPath is required for project scope"))?;
-            Some(expand_home_path(raw)?.to_string_lossy().to_string())
-        } else {
-            None
-        };
-
-        // Some tools share the same skills directory; unsync should update all of them.
-        let group_tool_keys: Vec<String> =
-            if let Ok(runtime_tool) = runtime_tool_by_key(&store, &tool) {
-                runtime_tools_sharing_dir(&store, &runtime_tool, scope)?
-                    .into_iter()
-                    .map(|tool| tool.key)
-                    .collect()
-            } else if let Some(adapter) = adapter_by_key(&tool) {
-                let group = if scope == "project" {
-                    adapters_sharing_project_skills_dir(&adapter)
-                } else {
-                    crate::core::tool_adapters::adapters_sharing_skills_dir(&adapter)
-                };
-                // If none of the group tools are installed, do nothing (treat as already not effective).
-                if scope == "global" {
-                    let mut any_installed = false;
-                    for a in &group {
-                        if is_tool_installed(a)? {
-                            any_installed = true;
-                            break;
-                        }
-                    }
-                    if !any_installed {
-                        return Ok::<_, anyhow::Error>(());
-                    }
-                }
-                group
-                    .into_iter()
-                    .map(|a| a.id.as_key().to_string())
-                    .collect()
-            } else {
-                vec![tool.clone()]
-            };
-
-        // Remove filesystem target once (shared dir => shared target path).
-        let mut removed = false;
-        for k in &group_tool_keys {
-            if let Some(target) =
-                store.get_skill_target(&skillId, k, scope, project_path.as_deref())?
-            {
-                if !removed {
-                    remove_skill_target_safely(&store, &skillId, &target.target_path)?;
-                    removed = true;
-                }
-                store.delete_skill_target(&skillId, k, scope, project_path.as_deref())?;
-            }
-        }
-
-        Ok::<_, anyhow::Error>(())
+        let request = desktop_deployment_request(skillId, tool, scope, projectPath)?;
+        service
+            .undeploy(request)
+            .map(|_| ())
+            .map_err(format_deployment_error)
     })
     .await
-    .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

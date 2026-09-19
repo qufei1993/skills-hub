@@ -1730,47 +1730,59 @@ fn managed_skill_status_keeps_existing_local_sources_healthy() {
 }
 
 #[test]
-fn record_skill_target_failure_persists_error_status() {
-    let (_dir, store) = make_store();
-    let skill = SkillRecord {
-        id: "s1".to_string(),
-        name: "S1".to_string(),
-        description: None,
-        source_type: "local".to_string(),
-        source_ref: Some("/tmp/src".to_string()),
-        source_subpath: None,
-        source_revision: None,
-        central_path: "/tmp/central".to_string(),
-        content_hash: None,
-        created_at: 1,
-        updated_at: 2,
-        last_sync_at: None,
-        last_seen_at: 1,
-        enabled: true,
-        status: "ok".to_string(),
-    };
-    store.upsert_skill(&skill).unwrap();
+fn deployment_errors_preserve_desktop_prefixes() {
+    use crate::services::error::{ErrorCode, ServiceError};
+    for (code, details, expected) in [
+        (
+            ErrorCode::AgentNotFound,
+            serde_json::json!({"agent":"cursor"}),
+            "TOOL_NOT_INSTALLED|cursor",
+        ),
+        (
+            ErrorCode::ProjectScopeUnsupported,
+            serde_json::json!({"agent":"workbuddy"}),
+            "PROJECT_SCOPE_UNSUPPORTED|workbuddy",
+        ),
+        (
+            ErrorCode::TargetConflict,
+            serde_json::json!({"agent":"cursor","path":"/tools/demo","reason":"unmanaged_target"}),
+            "TARGET_EXISTS|/tools/demo",
+        ),
+        (
+            ErrorCode::PlanStale,
+            serde_json::json!({}),
+            "PLAN_STALE|deployment state changed",
+        ),
+    ] {
+        assert_eq!(
+            format_deployment_error(ServiceError::new(code, "domain error", details)),
+            expected
+        );
+    }
+}
 
-    record_skill_target_failure(
-        &store,
-        "s1",
-        "cursor",
-        "global",
-        None,
-        std::path::Path::new("/tmp/target"),
-        SyncMode::Copy,
-        "permission denied",
+#[test]
+fn desktop_deployment_request_keeps_an_explicit_agent_and_project_scope() {
+    let request = desktop_deployment_request(
+        "id".into(),
+        "cursor".into(),
+        Some("project".into()),
+        Some("/project".into()),
     )
     .unwrap();
-
-    let target = store
-        .get_skill_target("s1", "cursor", "global", None)
-        .unwrap()
-        .unwrap();
-    assert_eq!(target.status, "error");
-    assert_eq!(target.last_error.as_deref(), Some("permission denied"));
-    assert_eq!(target.mode, "copy");
-    assert!(target.synced_at.is_none());
+    assert_eq!(
+        request.skill,
+        crate::services::types::SkillSelector::Id("id".into())
+    );
+    assert_eq!(request.agents, ["cursor"]);
+    assert_eq!(
+        request.scope,
+        crate::services::deployment::DeploymentScope::Project("/project".into())
+    );
+    assert!(
+        desktop_deployment_request("id".into(), "cursor".into(), Some("project".into()), None)
+            .is_err()
+    );
 }
 
 #[cfg(unix)]

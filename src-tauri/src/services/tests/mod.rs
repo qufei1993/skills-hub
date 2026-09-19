@@ -1,6 +1,8 @@
 #[path = "install.rs"]
 pub mod install;
 
+mod deployment;
+
 #[path = "operation_lock.rs"]
 mod operation_lock;
 

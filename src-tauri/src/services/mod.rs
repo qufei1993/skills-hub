@@ -1,3 +1,4 @@
+pub mod deployment;
 pub mod error;
 pub mod install;
 pub mod operation_lock;

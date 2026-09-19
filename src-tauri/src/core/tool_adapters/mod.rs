@@ -807,6 +807,7 @@ pub fn default_tool_adapters() -> Vec<ToolAdapter> {
 
 /// Tools can share the same global skills directory.
 /// Use this to coordinate UI warnings and avoid duplicate filesystem operations.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn adapters_sharing_skills_dir(adapter: &ToolAdapter) -> Vec<ToolAdapter> {
     default_tool_adapters()
         .into_iter()
@@ -814,6 +815,7 @@ pub fn adapters_sharing_skills_dir(adapter: &ToolAdapter) -> Vec<ToolAdapter> {
         .collect()
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn adapters_sharing_project_skills_dir(adapter: &ToolAdapter) -> Vec<ToolAdapter> {
     let relative = project_relative_skills_dir(adapter);
     default_tool_adapters()

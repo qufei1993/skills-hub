@@ -1206,6 +1206,27 @@ impl SkillStore {
         })
     }
 
+    pub(crate) fn commit_deployment_targets(
+        &self,
+        upserts: &[(SkillTargetRecord, String)],
+        deletions: &[SkillTargetRecord],
+    ) -> Result<()> {
+        self.with_conn(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            for record in deletions {
+                tx.execute("DELETE FROM skill_targets WHERE id=?1", params![record.id])?;
+                tx.execute("DELETE FROM settings WHERE key=?1", params![format!("device_sync.target_baseline.{}", record.id)])?;
+            }
+            for (record, hash) in upserts {
+                upsert_skill_target_with_conn(&tx, record)?;
+                tx.execute("INSERT INTO settings (key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    params![format!("device_sync.target_baseline.{}", record.id), serde_json::to_string(&(&record.target_path, hash))?])?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
     pub fn commit_skill_update(
         &self,
         skill: &SkillRecord,
@@ -1859,6 +1880,7 @@ impl SkillStore {
         })
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn get_skill_target(
         &self,
         skill_id: &str,
@@ -1895,6 +1917,7 @@ impl SkillStore {
         })
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn delete_skill_target(
         &self,
         skill_id: &str,

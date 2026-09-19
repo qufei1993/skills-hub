@@ -6,6 +6,17 @@ use super::content_hash::{hash_dir_for_sync_conflict, hash_dir_strict};
 use super::skill_store::SkillStore;
 use super::sync_engine::{ensure_paths_do_not_overlap, PreparedDirReplacement};
 
+pub(crate) fn matches_saved_target_baseline(
+    value: &str,
+    target: &Path,
+    actual: Option<&str>,
+) -> bool {
+    serde_json::from_str::<(String, String)>(value).ok().is_some_and(|(path, hash)| {
+        let same_path = Path::new(&path) == target || matches!((super::sync_engine::path_for_comparison(Path::new(&path)), super::sync_engine::path_for_comparison(target)), (Ok(first), Ok(second)) if first == second);
+        same_path && actual == Some(hash.as_str())
+    })
+}
+
 // Both explicit tool sync and device sync use the same guarded copy refresh.
 pub fn refresh_copy(
     store: &SkillStore,
@@ -46,12 +57,11 @@ pub fn refresh_copy(
                 let actual = hash_dir_for_sync_conflict(target)?;
                 let mut trusted = previous_hash == Some(actual.as_str());
                 for record in &records {
-                    let saved = store
-                        .get_setting(&format!("device_sync.target_baseline.{}", record.id))?
-                        .and_then(|value| serde_json::from_str::<(String, String)>(&value).ok());
-                    trusted |= saved
-                        .as_ref()
-                        .is_some_and(|(path, hash)| Path::new(path) == target && hash == &actual);
+                    let saved =
+                        store.get_setting(&format!("device_sync.target_baseline.{}", record.id))?;
+                    trusted |= saved.as_ref().is_some_and(|value| {
+                        matches_saved_target_baseline(value, target, Some(&actual))
+                    });
                 }
                 anyhow::ensure!(trusted, "TARGET_MODIFIED|{}", target.display());
             }
