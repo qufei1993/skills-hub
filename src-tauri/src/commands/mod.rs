@@ -73,7 +73,7 @@ use crate::core::sync_engine::{
 };
 use crate::core::system_scheduler::{
     current_scheduler_config, get_auto_update_task_status, install_auto_update_task,
-    trigger_auto_update_task_now, uninstall_auto_update_task,
+    uninstall_auto_update_task,
 };
 use crate::core::tool_adapters::{
     adapter_by_key, adapters_sharing_project_skills_dir, is_builtin_tool_enabled,
@@ -726,14 +726,27 @@ pub async fn run_auto_update_now(
 }
 
 #[tauri::command]
-pub async fn trigger_auto_update_task_now_cmd(store: State<'_, SkillStore>) -> Result<(), String> {
+pub async fn trigger_auto_update_task_now_cmd(
+    app: tauri::AppHandle,
+    store: State<'_, SkillStore>,
+) -> Result<(), String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let config = get_auto_update_config_core(&store)?;
-        let scheduler_config = current_scheduler_config(config.schedule)?;
-        install_auto_update_task(&scheduler_config)?;
         record_auto_update_triggered(&store)?;
-        trigger_auto_update_task_now()
+        // Run the update inside this process. Triggering the OS task instead started a
+        // second instance of the app, which put its own window on screen for the whole
+        // run. Detached on purpose: this command returns immediately so the UI keeps
+        // polling progress from the store, exactly as it did before.
+        //
+        // The OS schedule is deliberately left alone here. Registering it from this
+        // command re-created the task even when automatic updates were switched off,
+        // which then kept force-updating daily. `set_auto_update_config` owns the task.
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Err(err) = run_auto_update_now_core(&app, &store) {
+                log::warn!("in-process auto update failed: {err:#}");
+            }
+        });
+        Ok::<_, anyhow::Error>(())
     })
     .await
     .map_err(|err| err.to_string())?
