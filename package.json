@@ -19,6 +19,7 @@
     "version:sync": "node scripts/version.mjs sync",
     "version:check": "node scripts/version.mjs check",
     "tauri": "tauri",
+    "cli:prepare": "node scripts/prepare-cli-sidecar.mjs",
     "tauri:dev": "node scripts/build-desktop.mjs --dev",
     "tauri:icon:desktop": "node scripts/tauri-icon-desktop.mjs",
     "tauri:build": "npm run version:check && node scripts/build-desktop.mjs",

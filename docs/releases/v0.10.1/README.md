@@ -24,6 +24,7 @@ v0.10.1 是面向 Windows 用户的 hotfix 版本，修复 Skills Hub v0.10.0 �
 ## 详细文档
 
 - [Windows 命令窗口闪烁修复](bugfix-windows-command-window-flashing.md)
+- [桌面 CLI 桥接](verified-cli-bridge.md)
 
 ## 更新日志
 

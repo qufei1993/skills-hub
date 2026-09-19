@@ -116,6 +116,19 @@ pub fn run() {
 
             app.manage(Arc::new(CancelToken::new()));
 
+            let cli_source = tauri::utils::platform::current_exe()
+                .ok()
+                .and_then(|executable| {
+                    executable
+                        .parent()
+                        .map(|directory| directory.join(core::cli_bridge::BINARY_NAME))
+                })
+                .unwrap_or_default();
+            app.manage(core::cli_bridge::publish_bundled_cli_bridge(
+                &cli_source,
+                &paths.cli_bridge_dir,
+            ));
+
             let sync_workspace = paths.app_data_dir.join("device-sync");
             let sync_central = core::central_repo::resolve_central_repo_path(&paths, &store)?;
             let sync_credentials = core::device_sync::credentials::SystemCredentialStore;

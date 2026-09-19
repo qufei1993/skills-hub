@@ -29,7 +29,7 @@ export function resolveOAuthClientIds(env, contents = '') {
   return Object.fromEntries(oauthClientIdKeys.map(key => [key, resolveOAuthClientId(key, env, contents)]))
 }
 
-function main(args) {
+async function main(args) {
   let contents = ''
   const index = args.indexOf('--oauth-env-file')
   let oauthFilename
@@ -58,12 +58,22 @@ function main(args) {
   }
   const devIndex = args.indexOf('--dev')
   const command = devIndex === -1 ? 'build' : 'dev'
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const env = { ...process.env, ...clientIds }
+  delete env.SKILLS_HUB_PREPARE_CLI_SIDECAR
+  const { desktopSidecarOptions, prepareCliSidecar } = await import('./prepare-cli-sidecar.mjs')
+  prepareCliSidecar({ root, env, ...desktopSidecarOptions(args) })
   if (devIndex !== -1) args.splice(devIndex, 1)
+  if (command === 'build') {
+    const runnerIndex = args.indexOf('--')
+    if (runnerIndex === -1) args.push('--', '--bin', 'app')
+    else args.splice(runnerIndex + 1, 0, '--bin', 'app')
+  }
   const require = createRequire(import.meta.url)
   const cli = path.join(path.dirname(require.resolve('@tauri-apps/cli/package.json')), 'tauri.js')
   const result = spawnSync(process.execPath, [cli, command, ...args], {
-    cwd: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
-    env: { ...process.env, ...clientIds },
+    cwd: root,
+    env,
     stdio: 'inherit',
   })
   if (result.error) throw new Error(`Unable to start Tauri ${command}.`)
@@ -71,7 +81,7 @@ function main(args) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  try { main(process.argv.slice(2)) } catch (error) {
+  try { await main(process.argv.slice(2)) } catch (error) {
     console.error(error.message)
     process.exitCode = 1
   }
