@@ -198,7 +198,7 @@ fn start_with_endpoints_and_proxy(
         }
     };
     if !response.status().is_success() {
-        bail!("OAuth provider rejected the authorization request");
+        bail!("OAuth 授权被拒绝。本地包若使用占位 Client ID，GitHub/GitLab 不会批准浏览器授权，请改用 Token 或 SSH。");
     }
     let device: DeviceResponse = response.json().context("decode OAuth device response")?;
     validate_verification_uri(provider_id, &device.verification_uri, allow_http)?;

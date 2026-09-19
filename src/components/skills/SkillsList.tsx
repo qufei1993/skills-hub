@@ -1,8 +1,9 @@
-import { memo } from 'react'
+import { memo, useEffect, useRef } from 'react'
 import { MessageCircle, SlidersHorizontal } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import type { ManagedSkill, OnboardingPlan, ToolOption } from './types'
 import SkillCard from './SkillCard'
+import { skillBoardColumns } from './skillBoardLayout'
 
 type GithubInfo = {
   label: string
@@ -32,6 +33,8 @@ type SkillsListProps = {
   onOpenScope: (skill: ManagedSkill) => void
   onOpenDetail: (skill: ManagedSkill) => void
   onEditTags: (skill: ManagedSkill) => void
+  onEditProfile?: (skill: ManagedSkill) => void
+  onAutofillProfile?: (skill: ManagedSkill) => void
   onToggleBulkSelection: (skillId: string) => void
   getSkillScope: (skill: ManagedSkill) => 'global' | 'project'
   getSkillProjects: (skill: ManagedSkill) => string[]
@@ -61,15 +64,35 @@ const SkillsList = ({
   onOpenScope,
   onOpenDetail,
   onEditTags,
+  onEditProfile,
+  onAutofillProfile,
   onToggleBulkSelection,
   getSkillScope,
   getSkillProjects,
   t,
 }: SkillsListProps) => {
   const selectedSkillSet = new Set(selectedSkillIds)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = listRef.current
+    if (!el) return
+    const apply = (width: number) => {
+      const cols = skillBoardColumns(width)
+      el.style.setProperty('--skill-card-cols', String(cols))
+      el.dataset.boardCols = String(cols)
+    }
+    apply(el.clientWidth)
+    const observer = new ResizeObserver((entries) => {
+      apply(entries[0]?.contentRect.width ?? el.clientWidth)
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [visibleSkills.length, viewMode, hasManagedSkills])
 
   return (
     <div
+      ref={listRef}
       className="skills-list"
       role="region"
       tabIndex={0}
@@ -146,6 +169,8 @@ const SkillsList = ({
               onOpenScope={onOpenScope}
               onOpenDetail={onOpenDetail}
               onEditTags={onEditTags}
+              onEditProfile={onEditProfile}
+              onAutofillProfile={onAutofillProfile}
               onToggleBulkSelection={onToggleBulkSelection}
               getSkillScope={getSkillScope}
               getSkillProjects={getSkillProjects}

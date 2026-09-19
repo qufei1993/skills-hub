@@ -7,11 +7,13 @@ import {
   ChevronRight,
   Clock,
   Copy,
+  Download,
   File,
   Folder,
   FolderOpen,
   GitBranch,
   Globe2,
+  RefreshCw,
 } from 'lucide-react'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import {
@@ -31,16 +33,28 @@ import {
 } from './skillSyncStatus'
 import ToolIcon from './ToolIcon'
 import type { ManagedSkill, SkillFileEntry, ToolOption } from './types'
+import {
+  SUMMARY_SOFT_MIN_CHARS,
+  SUMMARY_TARGET_MAX_CHARS,
+  countCjkAwareLength,
+  formatSkillSummaryLine,
+  formatSkillTitleLine,
+  isAcceptableSummary,
+  normalizeHexColor,
+} from './skillProfile'
 
 // ─── Types ───────────────────────────────────────────
 type SkillDetailViewProps = {
   skill: ManagedSkill
   onBack: () => void
   invokeTauri: <T>(command: string, args?: Record<string, unknown>) => Promise<T>
+  onProfileSaved?: () => void
   formatRelative: (ms: number | null | undefined) => string
   tools: ToolOption[]
   scope: 'global' | 'project'
   projects: string[]
+  onExportSkill?: (skill: ManagedSkill) => void
+  onSyncSkill?: (skill: ManagedSkill) => void
   t: TFunction
 }
 
@@ -426,10 +440,13 @@ const SkillDetailView = ({
   skill,
   onBack,
   invokeTauri,
+  onProfileSaved,
   formatRelative,
   tools,
   scope,
   projects,
+  onExportSkill,
+  onSyncSkill,
   t,
 }: SkillDetailViewProps) => {
   const [files, setFiles] = useState<SkillFileEntry[]>([])
@@ -571,15 +588,50 @@ const SkillDetailView = ({
         </button>
         <div className="detail-summary">
           <div className="detail-title-row">
-            <div className="detail-skill-name">{skill.name}</div>
+            {skill.profile?.color ? (
+              <span className="skill-color-dot" style={{ background: skill.profile.color }} aria-hidden="true" />
+            ) : null}
+            <div className="detail-skill-name">
+              {formatSkillTitleLine({ name: skill.name, profile: skill.profile })}
+            </div>
+            <span className="detail-english-name" title={t('detail.englishName')}>
+              {skill.name}
+            </span>
             <span className={`detail-sync-status ${syncState}`}>
               <i aria-hidden="true" />
               {syncStatus}
             </span>
           </div>
-          {skill.description ? (
-            <p className="detail-desc">{skill.description}</p>
-          ) : null}
+          <p className="detail-desc">
+            {formatSkillSummaryLine({
+              description: skill.description,
+              profile: skill.profile,
+              emptyLabel: t('skillDescriptionEmpty'),
+            })}
+          </p>
+          <div className="detail-action-row">
+            {onSyncSkill ? (
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() => onSyncSkill(skill)}
+                disabled={skill.enabled === false}
+              >
+                <RefreshCw size={14} />
+                {t('bulk.sync')}
+              </button>
+            ) : null}
+            {onExportSkill ? (
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() => onExportSkill(skill)}
+              >
+                <Download size={14} />
+                {t('bulk.export')}
+              </button>
+            ) : null}
+          </div>
         </div>
         <div className="detail-metadata-rail">
           <div className="detail-context-row">
@@ -660,6 +712,17 @@ const SkillDetailView = ({
         </div>
       </div>
 
+      <div className="detail-scroll">
+      <section className="detail-profile-card" aria-label="管理资料">
+        <div className="detail-profile-head">
+          <strong>管理资料</strong>
+          <span>
+            Hub 界面五元：颜色 + 分类标签 + 英文名称 + 中文名 + 功能简介。备注仅作附加说明；英文调用名不变。
+          </span>
+        </div>
+        <SkillProfileEditor skill={skill} invokeTauri={invokeTauri} onSaved={onProfileSaved} t={t} />
+      </section>
+
       <div className="detail-body">
         <div className="detail-file-list">
           <div className="file-list-title">{t('detail.files')}</div>
@@ -723,8 +786,153 @@ const SkillDetailView = ({
           )}
         </div>
       </div>
+      </div>
     </div>
   )
 }
+
+
+type SkillProfileEditorProps = {
+  skill: ManagedSkill
+  invokeTauri: <T>(command: string, args?: Record<string, unknown>) => Promise<T>
+  onSaved?: () => void
+  t: TFunction
+}
+
+const SkillProfileEditor = ({ skill, invokeTauri, onSaved, t }: SkillProfileEditorProps) => {
+  const [zhName, setZhName] = useState(skill.profile?.zh_name ?? '')
+  const [category, setCategory] = useState(skill.profile?.category ?? '')
+  const [color, setColor] = useState(skill.profile?.color ?? '#3B82F6')
+  const [summary, setSummary] = useState(skill.profile?.summary ?? '')
+  const [note, setNote] = useState(skill.profile?.note ?? '')
+  const [sourceUrl, setSourceUrl] = useState(skill.profile?.source_url ?? '')
+  const [saving, setSaving] = useState(false)
+  const [autofilling, setAutofilling] = useState(false)
+
+  useEffect(() => {
+    setZhName(skill.profile?.zh_name ?? '')
+    setCategory(skill.profile?.category ?? '')
+    setColor(skill.profile?.color ?? '#3B82F6')
+    setSummary(skill.profile?.summary ?? '')
+    setNote(skill.profile?.note ?? '')
+    setSourceUrl(skill.profile?.source_url ?? '')
+  }, [skill])
+
+  const save = async () => {
+    if (!isAcceptableSummary(summary)) {
+      toast.error(`简介最多 ${SUMMARY_TARGET_MAX_CHARS} 字`)
+      return
+    }
+    const normalizedColor = normalizeHexColor(color)
+    if (color.trim() && !normalizedColor) {
+      toast.error('颜色格式需为 #RRGGBB 或 #RRGGBBAA')
+      return
+    }
+    setSaving(true)
+    try {
+      await invokeTauri('upsert_skill_profile', {
+        skillId: skill.id,
+        zhName: zhName.trim() || null,
+        category: category.trim() || null,
+        color: normalizedColor,
+        summary: summary.trim(),
+        note: note.trim() || null,
+        sourceUrl: sourceUrl.trim() || null,
+        summarySource: 'manual',
+        sortOrder: skill.profile?.sort_order ?? 0,
+      })
+      toast.success('管理资料已保存')
+      onSaved?.()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const autofill = async () => {
+    setAutofilling(true)
+    try {
+      const profile = await invokeTauri<{
+        zh_name?: string | null
+        category?: string | null
+        color?: string | null
+        summary?: string | null
+        note?: string | null
+        source_url?: string | null
+      }>('autofill_skill_profile', { skillId: skill.id })
+      setZhName(profile.zh_name ?? '')
+      setCategory(profile.category ?? '')
+      setColor(profile.color ?? '#3B82F6')
+      setSummary(profile.summary ?? '')
+      setNote(profile.note ?? '')
+      setSourceUrl(profile.source_url ?? '')
+      toast.success(t('profileDraft.autofillDone'))
+      onSaved?.()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setAutofilling(false)
+    }
+  }
+
+  return (
+    <div className="detail-profile-grid">
+      <label className="form-field">
+        <span className="label">中文名称</span>
+        <input className="input" value={zhName} onChange={(e) => setZhName(e.target.value)} />
+      </label>
+      <label className="form-field">
+        <span className="label">分类</span>
+        <input className="input" value={category} onChange={(e) => setCategory(e.target.value)} />
+      </label>
+      <label className="form-field">
+        <span className="label">颜色</span>
+        <div className="input-row">
+          <input
+            type="color"
+            value={normalizeHexColor(color)?.slice(0, 7) || '#3B82F6'}
+            onChange={(e) => setColor(e.target.value.toUpperCase())}
+          />
+          <input className="input" value={color} onChange={(e) => setColor(e.target.value)} />
+        </div>
+      </label>
+      <label className="form-field">
+        <span className="label">
+          功能简介（{countCjkAwareLength(summary)}/{SUMMARY_TARGET_MAX_CHARS}，短于 {SUMMARY_SOFT_MIN_CHARS} 也可）
+        </span>
+        <input className="input" value={summary} onChange={(e) => setSummary(e.target.value)} />
+      </label>
+      <label className="form-field">
+        <span className="label">GitHub 来源</span>
+        <input
+          className="input"
+          value={sourceUrl}
+          onChange={(e) => setSourceUrl(e.target.value)}
+          placeholder="https://github.com/owner/repo"
+        />
+      </label>
+      <label className="form-field detail-profile-note">
+        <span className="label">备注</span>
+        <textarea className="input" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
+      </label>
+      <div className="detail-profile-actions">
+        <button
+          className="btn btn-secondary"
+          type="button"
+          disabled={saving || autofilling}
+          onClick={() => void autofill()}
+          title={t('profileDraft.autofillHint')}
+        >
+          {autofilling ? t('profileDraft.autofilling') : t('profileDraft.autofill')}
+        </button>
+        <button className="btn btn-primary" type="button" disabled={saving || autofilling} onClick={() => void save()}>
+          {saving ? '保存中…' : '保存'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 
 export default memo(SkillDetailView)

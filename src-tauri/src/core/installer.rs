@@ -52,6 +52,35 @@ pub fn install_local_skill<R: tauri::Runtime>(
     install_local_skill_with_existing_policy(app, store, source_path, name, false)
 }
 
+pub fn apply_skills_hub_export_sidecar(store: &SkillStore, skill_id: &str, source_path: &Path) -> Result<()> {
+    let sidecar_path = source_path.join(".skills-hub-export.json");
+    if !sidecar_path.exists() { return Ok(()); }
+    let raw = std::fs::read_to_string(&sidecar_path)?;
+    let value: serde_json::Value = serde_json::from_str(&raw)?;
+    let profile = value.get("profile").cloned().unwrap_or(value);
+    let pick = |key: &str| profile.get(key).and_then(|v| v.as_str()).map(|s| s.to_string()).filter(|s| !s.trim().is_empty());
+    let zh = pick("zh_name");
+    let category = pick("category");
+    let color = pick("color");
+    let summary = pick("summary");
+    let note = pick("note");
+    let source_url = pick("source_url");
+    if zh.is_none() && category.is_none() && summary.is_none() && note.is_none() && source_url.is_none() { return Ok(()); }
+    let _ = store.upsert_skill_profile(&super::skill_store::SkillProfileRecord {
+        skill_id: skill_id.to_string(),
+        zh_name: zh,
+        category,
+        color,
+        summary,
+        note,
+        source_url,
+        summary_source: "manual".into(),
+        sort_order: 0,
+        created_at: 0,
+        updated_at: 0,
+    });
+    Ok(())
+}
 pub fn import_existing_local_skill<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     store: &SkillStore,
@@ -95,6 +124,7 @@ fn install_local_skill_with_existing_policy<R: tauri::Runtime>(
                 (existing, source_hash, central_hash)
             {
                 if src_hash == dst_hash {
+                    let _ = apply_skills_hub_export_sidecar(store, &record.id, source_path);
                     return Ok(InstallResult {
                         skill_id: record.id,
                         name: record.name,
@@ -102,6 +132,12 @@ fn install_local_skill_with_existing_policy<R: tauri::Runtime>(
                         content_hash: record.content_hash,
                     });
                 }
+            }
+        }
+        if source_path.join(".skills-hub-export.json").exists() {
+            if let Some(record) = store.list_skills()?.into_iter().find(|skill| Path::new(&skill.central_path) == central_path) {
+                let _ = apply_skills_hub_export_sidecar(store, &record.id, source_path);
+                return Ok(InstallResult { skill_id: record.id, name: record.name, central_path, content_hash: record.content_hash });
             }
         }
         anyhow::bail!("skill already exists in central repo: {:?}", central_path);
@@ -133,6 +169,7 @@ fn install_local_skill_with_existing_policy<R: tauri::Runtime>(
     };
 
     store.commit_skill_update(&record, &[])?;
+    let _ = apply_skills_hub_export_sidecar(store, &record.id, source_path);
 
     Ok(InstallResult {
         skill_id: record.id,
@@ -1911,6 +1948,10 @@ fn clean_frontmatter_value(value: &str) -> String {
 }
 
 fn frontmatter_block_style(value: &str) -> Option<char> {
+    frontmatter_block_style_public(value)
+}
+
+pub(crate) fn frontmatter_block_style_public(value: &str) -> Option<char> {
     let mut chars = value.chars();
     let style = chars.next()?;
     if style != '|' && style != '>' {

@@ -25,7 +25,27 @@ const RECYCLE_BIN_SCHEMA_VERSION: &str = "1";
 pub const DEVICE_SYNC_HISTORY_LIMIT: usize = 100;
 const DEVICE_SYNC_STARTUP_CREDENTIAL_CONSENT_MIGRATION: &str =
     "migration.device_sync_startup_credential_consent_v1";
+const SKILL_PROFILES_SCHEMA_VERSION_KEY: &str = "schema.skill_profiles";
+const SKILL_PROFILES_SCHEMA_VERSION: &str = "2";
 
+const SKILL_PROFILES_SCHEMA_V1: &str = r#"
+CREATE TABLE IF NOT EXISTS skill_profiles (
+  skill_id TEXT PRIMARY KEY,
+  zh_name TEXT NULL,
+  category TEXT NULL,
+  color TEXT NULL,
+  summary TEXT NULL,
+  note TEXT NULL,
+  source_url TEXT NULL,
+  summary_source TEXT NOT NULL DEFAULT 'auto',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(skill_id) REFERENCES skills(id) ON DELETE CASCADE
+);
+"#;
+const SKILL_PROFILES_SOURCE_URL_MIGRATION: &str =
+    "ALTER TABLE skill_profiles ADD COLUMN source_url TEXT NULL;";
 const DEVICE_SYNC_SCHEMA_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS device_sync_config (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -209,6 +229,21 @@ pub struct SkillRecord {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct SkillProfileRecord {
+    pub skill_id: String,
+    pub zh_name: Option<String>,
+    pub category: Option<String>,
+    pub color: Option<String>,
+    pub summary: Option<String>,
+    pub note: Option<String>,
+    pub source_url: Option<String>,
+    pub summary_source: String,
+    pub sort_order: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct SourceBaseline {
     source_type: String,
     source_ref: String,
@@ -366,6 +401,13 @@ impl SkillStore {
                 "INSERT INTO settings (key, value) VALUES (?1, ?2)
                  ON CONFLICT(key) DO NOTHING",
                 params![RECYCLE_BIN_SCHEMA_VERSION_KEY, RECYCLE_BIN_SCHEMA_VERSION],
+            )?;
+            conn.execute_batch(SKILL_PROFILES_SCHEMA_V1)?;
+            let _ = conn.execute_batch(SKILL_PROFILES_SOURCE_URL_MIGRATION);
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![SKILL_PROFILES_SCHEMA_VERSION_KEY, SKILL_PROFILES_SCHEMA_VERSION],
             )?;
             if user_version == PRE_RELEASE_DEVICE_SYNC_SCHEMA_VERSION {
                 conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -1691,6 +1733,149 @@ impl SkillStore {
         })
     }
 
+    pub fn get_skill_profile(&self, skill_id: &str) -> Result<Option<SkillProfileRecord>> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT skill_id, zh_name, category, color, summary, note, source_url, summary_source, sort_order, created_at, updated_at
+                 FROM skill_profiles
+                 WHERE skill_id = ?1",
+            )?;
+            let mut rows = stmt.query(params![skill_id])?;
+            rows.next()?
+                .map(|row| {
+                    Ok(SkillProfileRecord {
+                        skill_id: row.get(0)?,
+                        zh_name: row.get(1)?,
+                        category: row.get(2)?,
+                        color: row.get(3)?,
+                        summary: row.get(4)?,
+                        note: row.get(5)?,
+                        source_url: row.get(6)?,
+                        summary_source: row.get(7)?,
+                        sort_order: row.get(8)?,
+                        created_at: row.get(9)?,
+                        updated_at: row.get(10)?,
+                    })
+                })
+                .transpose()
+        })
+    }
+
+    pub fn list_skill_profiles(&self) -> Result<Vec<SkillProfileRecord>> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT skill_id, zh_name, category, color, summary, note, source_url, summary_source, sort_order, created_at, updated_at
+                 FROM skill_profiles
+                 ORDER BY sort_order ASC, updated_at DESC",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok(SkillProfileRecord {
+                    skill_id: row.get(0)?,
+                    zh_name: row.get(1)?,
+                    category: row.get(2)?,
+                    color: row.get(3)?,
+                    summary: row.get(4)?,
+                    note: row.get(5)?,
+                    source_url: row.get(6)?,
+                    summary_source: row.get(7)?,
+                    sort_order: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
+                })
+            })?;
+            let mut items = Vec::new();
+            for row in rows {
+                items.push(row?);
+            }
+            Ok(items)
+        })
+    }
+
+    pub fn upsert_skill_profile(&self, profile: &SkillProfileRecord) -> Result<SkillProfileRecord> {
+        let color = normalize_profile_color(profile.color.as_deref())?;
+        let summary_source = normalize_summary_source(&profile.summary_source)?;
+        let zh_name = normalize_optional_text(profile.zh_name.as_deref());
+        let category = normalize_optional_text(profile.category.as_deref());
+        let summary = normalize_optional_text(profile.summary.as_deref());
+        let note = normalize_optional_text(profile.note.as_deref());
+        let source_url = normalize_optional_text(profile.source_url.as_deref());
+        let now = now_ms();
+
+        self.with_conn(|conn| {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT 1 FROM skills WHERE id = ?1",
+                    params![profile.skill_id],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+            if !exists {
+                bail!("skill not found: {}", profile.skill_id);
+            }
+
+            let existing = conn
+                .query_row(
+                    "SELECT created_at FROM skill_profiles WHERE skill_id = ?1",
+                    params![profile.skill_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?;
+            let created_at = existing.unwrap_or(now);
+            conn.execute(
+                "INSERT INTO skill_profiles (
+                    skill_id, zh_name, category, color, summary, note, source_url, summary_source, sort_order, created_at, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                 ON CONFLICT(skill_id) DO UPDATE SET
+                    zh_name = excluded.zh_name,
+                    category = excluded.category,
+                    color = excluded.color,
+                    summary = excluded.summary,
+                    note = excluded.note,
+                    source_url = excluded.source_url,
+                    summary_source = excluded.summary_source,
+                    sort_order = excluded.sort_order,
+                    updated_at = excluded.updated_at",
+                params![
+                    profile.skill_id,
+                    zh_name,
+                    category,
+                    color,
+                    summary,
+                    note,
+                    source_url,
+                    summary_source,
+                    profile.sort_order,
+                    created_at,
+                    now
+                ],
+            )?;
+            Ok(SkillProfileRecord {
+                skill_id: profile.skill_id.clone(),
+                zh_name,
+                category,
+                color,
+                summary,
+                note,
+                source_url,
+                summary_source: summary_source.to_string(),
+                sort_order: profile.sort_order,
+                created_at,
+                updated_at: now,
+            })
+        })
+    }
+
+    pub fn delete_skill_profile(&self, skill_id: &str) -> Result<()> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "DELETE FROM skill_profiles WHERE skill_id = ?1",
+                params![skill_id],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn list_skill_targets(&self, skill_id: &str) -> Result<Vec<SkillTargetRecord>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
@@ -2069,6 +2254,34 @@ fn normalize_tag_name(name: &str) -> Result<String> {
         anyhow::bail!("tag name cannot be empty");
     }
     Ok(normalized)
+}
+
+fn normalize_optional_text(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn normalize_summary_source(value: &str) -> Result<&'static str> {
+    match value.trim() {
+        "" | "auto" => Ok("auto"),
+        "manual" => Ok("manual"),
+        other => bail!("invalid summary_source: {other}"),
+    }
+}
+
+fn normalize_profile_color(value: Option<&str>) -> Result<Option<String>> {
+    let Some(raw) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let hex = raw.strip_prefix('#').unwrap_or(raw);
+    let valid_len = hex.len() == 6 || hex.len() == 8;
+    let valid_chars = hex.chars().all(|ch| ch.is_ascii_hexdigit());
+    if !valid_len || !valid_chars {
+        bail!("invalid color: expected #RRGGBB or #RRGGBBAA");
+    }
+    Ok(Some(format!("#{}", hex.to_ascii_uppercase())))
 }
 
 fn now_ms() -> i64 {

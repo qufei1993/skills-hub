@@ -13,6 +13,7 @@ pub mod installer;
 pub mod network_proxy;
 pub mod onboarding;
 pub mod process;
+pub mod profile_draft;
 pub mod recycle_bin;
 pub mod skill_files;
 pub mod skill_issues;

@@ -31,6 +31,7 @@ import TagsPage from './components/skills/TagsPage'
 import AddSkillModal from './components/skills/modals/AddSkillModal'
 import BulkDeleteModal from './components/skills/modals/BulkDeleteModal'
 import BulkSyncModal from './components/skills/modals/BulkSyncModal'
+import ExportSkillsModal from './components/skills/modals/ExportSkillsModal'
 import BulkTagsModal from './components/skills/modals/BulkTagsModal'
 import DeleteModal from './components/skills/modals/DeleteModal'
 import DiscoveryScanModal from './components/skills/modals/DiscoveryScanModal'
@@ -44,6 +45,7 @@ import ScopeSyncModal from './components/skills/modals/ScopeSyncModal'
 import SharedDirModal from './components/skills/modals/SharedDirModal'
 import StoragePathMigrationModal from './components/skills/modals/StoragePathMigrationModal'
 import SettingsPage from './components/skills/SettingsPage'
+import TemporaryActivationModal from './components/skills/TemporaryActivationModal'
 import ToolsPage from './components/skills/ToolsPage'
 import UpdatesPage from './components/skills/UpdatesPage'
 import { useSkillStatusRefresh } from './components/skills/useSkillStatusRefresh'
@@ -64,10 +66,23 @@ import {
   initialGithubTokenSettingsState,
 } from './components/skills/githubTokenSettings'
 import {
+  emptyProfileDraftStatus,
+  type ProfileDraftConfig,
+  type ProfileDraftModelItem,
+  type ProfileDraftStatus,
+} from './components/skills/profileDraftSettings'
+import {
   getSkillSyncState,
   getToolSyncState,
   isActiveSkillTarget,
 } from './components/skills/skillSyncStatus'
+import {
+  buildTemporarySnapshot,
+  hasAnyTag,
+  temporaryActivationKey,
+  type TemporaryActivationEntry,
+  type TemporaryActivationScope,
+} from './components/skills/temporaryActivation'
 import {
   buildInstallSyncJobs,
   filterTargetsForScope,
@@ -79,6 +94,14 @@ import {
   selectInstallToolIds,
   type InstallScope,
 } from './components/skills/installScope'
+import {
+  buildExternalDescription,
+  buildToolExternalDescription,
+  DEFAULT_PRESENTATION,
+  isAcceptableSummary,
+  normalizeHexColor,
+  type PresentationElements,
+} from './components/skills/skillProfile'
 import type {
   AutoUpdateConfigDto,
   AutoUpdateRuntimeDto,
@@ -136,6 +159,7 @@ function App() {
   const themeStorageKey = 'skills-theme'
   const skillScopeStorageKey = 'skills-project-scope-state-v1'
   const skillViewModeStorageKey = 'skills-view-mode'
+  const temporaryActivationStorageKey = 'skills-temporary-activation-v1'
   const sidebarCollapsedStorageKey = 'skills-sidebar-collapsed'
   const changeLanguage = useCallback((nextLanguage: string) => {
     void i18n.changeLanguage(nextLanguage)
@@ -219,6 +243,9 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
     typeof window !== 'undefined' && window.localStorage.getItem(sidebarCollapsedStorageKey) === 'true',
   )
+  const [viewportCompact, setViewportCompact] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches,
+  )
   const [activeView, setActiveView] = useState<ActiveView>('myskills')
   const [managementTab, setManagementTab] = useState<ManagementTab>('tags')
   const [deviceSyncConflictCount, setDeviceSyncConflictCount] = useState(0)
@@ -238,6 +265,11 @@ function App() {
   } | null>(null)
   const [addModalTab, setAddModalTab] = useState<'local' | 'git'>('git')
   const [addModalTagIds, setAddModalTagIds] = useState<number[]>([])
+  const [profileZhName, setProfileZhName] = useState('')
+  const [profileCategory, setProfileCategory] = useState('')
+  const [profileColor, setProfileColor] = useState('#3B82F6')
+  const [profileSummary, setProfileSummary] = useState('')
+  const [profileNote, setProfileNote] = useState('')
   const [featuredSkills, setFeaturedSkills] = useState<FeaturedSkillDto[]>([])
   const [featuredLoading, setFeaturedLoading] = useState(false)
   const [exploreFilter, setExploreFilter] = useState('')
@@ -255,9 +287,20 @@ function App() {
   const [bulkMode, setBulkMode] = useState(false)
   const [bulkSelectedIds, setBulkSelectedIds] = useState<string[]>([])
   const [showBulkSyncModal, setShowBulkSyncModal] = useState(false)
+  const [syncPresentation, setSyncPresentation] = useState<PresentationElements>(DEFAULT_PRESENTATION)
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false)
   const [showBulkTagsModal, setShowBulkTagsModal] = useState(false)
   const [bulkSyncToolIds, setBulkSyncToolIds] = useState<string[]>([])
+  const [showExportModal, setShowExportModal] = useState(false)
+  const [exportSkillIds, setExportSkillIds] = useState<string[]>([])
+  const [exportPresentation, setExportPresentation] =
+    useState<PresentationElements>(DEFAULT_PRESENTATION)
+  const [singleSyncSkill, setSingleSyncSkill] = useState<ManagedSkill | null>(null)
+  const [showSingleSyncModal, setShowSingleSyncModal] = useState(false)
+  const [singleSyncToolIds, setSingleSyncToolIds] = useState<string[]>([])
+  const [temporaryActivationEntries, setTemporaryActivationEntries] = useState<TemporaryActivationEntry[]>([])
+  const [temporaryActivationHydrated, setTemporaryActivationHydrated] = useState(false)
+  const [showTemporaryActivationModal, setShowTemporaryActivationModal] = useState(false)
 
   const isTauri =
     typeof window !== 'undefined' &&
@@ -276,11 +319,46 @@ function App() {
 
   useEffect(() => {
     try {
+      const raw = window.localStorage.getItem(temporaryActivationStorageKey)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as TemporaryActivationEntry[]
+      if (Array.isArray(parsed)) setTemporaryActivationEntries(parsed)
+    } catch {
+      // Ignore stale or malformed temporary activation state.
+    } finally {
+      setTemporaryActivationHydrated(true)
+    }
+  }, [temporaryActivationStorageKey])
+
+  useEffect(() => {
+    if (!temporaryActivationHydrated) return
+    try {
+      window.localStorage.setItem(
+        temporaryActivationStorageKey,
+        JSON.stringify(temporaryActivationEntries),
+      )
+    } catch {
+      // Ignore storage failures; the current session remains usable.
+    }
+  }, [temporaryActivationEntries, temporaryActivationHydrated, temporaryActivationStorageKey])
+
+
+  useEffect(() => {
+    try {
       window.localStorage.setItem(sidebarCollapsedStorageKey, String(sidebarCollapsed))
     } catch {
       // ignore storage failures
     }
   }, [sidebarCollapsed])
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 900px)')
+    const sync = () => setViewportCompact(media.matches)
+    sync()
+    media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [])
+  const sidebarIsCompact = sidebarCollapsed || viewportCompact
 
   useEffect(() => {
     if (!isTauri) return
@@ -656,6 +734,15 @@ function App() {
 
   useEffect(() => {
     if (!isTauri) return
+    invokeTauri<ProfileDraftStatus>('get_profile_draft_status')
+      .then((status) => setProfileDraftStatus(status))
+      .catch(() => {
+        setProfileDraftStatus(emptyProfileDraftStatus())
+      })
+  }, [isTauri, invokeTauri])
+
+  useEffect(() => {
+    if (!isTauri) return
     invokeTauri<GithubProxyConfigDto>('get_github_proxy_config')
       .then((config) => setGithubProxyConfig(config))
       .catch((err) => {
@@ -1012,6 +1099,10 @@ function App() {
     false,
     initialGithubTokenSettingsState,
   )
+  const [profileDraftStatus, setProfileDraftStatus] = useState<ProfileDraftStatus>(emptyProfileDraftStatus)
+  const [profileDraftKeyDraft, setProfileDraftKeyDraft] = useState('')
+  const [profileDraftModels, setProfileDraftModels] = useState<ProfileDraftModelItem[]>([])
+  const [profileDraftBusy, setProfileDraftBusy] = useState(false)
   const [githubProxyConfig, setGithubProxyConfig] =
     useState<GithubProxyConfigDto>({
       enabled: false,
@@ -1218,6 +1309,101 @@ function App() {
       setError(err instanceof Error ? err.message : String(err))
     }
   }, [invokeTauri, isTauri])
+
+  const refreshProfileDraftStatus = useCallback(async () => {
+    if (!isTauri) return
+    const status = await invokeTauri<ProfileDraftStatus>('get_profile_draft_status')
+    setProfileDraftStatus(status)
+  }, [invokeTauri, isTauri])
+
+  const handleProfileDraftConfigChange = useCallback((config: ProfileDraftConfig) => {
+    setProfileDraftStatus((prev) => ({ ...prev, config }))
+  }, [])
+
+  const handleProfileDraftSaveConfig = useCallback(async () => {
+    if (!isTauri) return
+    setProfileDraftBusy(true)
+    try {
+      const config = await invokeTauri<ProfileDraftConfig>('save_profile_draft_config', {
+        config: profileDraftStatus.config,
+      })
+      setProfileDraftStatus((prev) => ({ ...prev, config }))
+      await refreshProfileDraftStatus()
+      toast.success(t('profileDraft.configSaved'))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setProfileDraftBusy(false)
+    }
+  }, [invokeTauri, isTauri, profileDraftStatus.config, refreshProfileDraftStatus, t])
+
+  const handleProfileDraftSaveKey = useCallback(async () => {
+    const key = profileDraftKeyDraft.trim()
+    if (!key || !isTauri) return
+    setProfileDraftBusy(true)
+    try {
+      await invokeTauri('set_profile_draft_api_key', { apiKey: key })
+      setProfileDraftKeyDraft('')
+      await refreshProfileDraftStatus()
+      toast.success(t('profileDraft.keySaved'))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setProfileDraftBusy(false)
+    }
+  }, [invokeTauri, isTauri, profileDraftKeyDraft, refreshProfileDraftStatus, t])
+
+  const handleProfileDraftRemoveKey = useCallback(async () => {
+    if (!isTauri) return
+    if (!window.confirm(t('profileDraft.removeKeyConfirm'))) return
+    setProfileDraftBusy(true)
+    try {
+      await invokeTauri('set_profile_draft_api_key', { apiKey: '' })
+      setProfileDraftKeyDraft('')
+      await refreshProfileDraftStatus()
+      toast.success(t('profileDraft.keyRemoved'))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setProfileDraftBusy(false)
+    }
+  }, [invokeTauri, isTauri, refreshProfileDraftStatus, t])
+
+  const handleProfileDraftFetchModels = useCallback(async () => {
+    if (!isTauri) return
+    setProfileDraftBusy(true)
+    try {
+      await invokeTauri('save_profile_draft_config', { config: profileDraftStatus.config })
+      const models = await invokeTauri<ProfileDraftModelItem[]>('list_profile_draft_models')
+      setProfileDraftModels(models)
+      if (models[0] && !profileDraftStatus.config.model.trim()) {
+        const next = { ...profileDraftStatus.config, model: models[0].id }
+        setProfileDraftStatus((prev) => ({ ...prev, config: next }))
+        await invokeTauri('save_profile_draft_config', { config: next })
+      }
+      toast.success(t('profileDraft.modelsLoaded', { count: models.length }))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setProfileDraftBusy(false)
+    }
+  }, [invokeTauri, isTauri, profileDraftStatus.config, t])
+
+  const handleProfileDraftTest = useCallback(async () => {
+    if (!isTauri) return
+    setProfileDraftBusy(true)
+    try {
+      await invokeTauri('save_profile_draft_config', { config: profileDraftStatus.config })
+      const sample = await invokeTauri<string>('test_profile_draft_connection')
+      await refreshProfileDraftStatus()
+      toast.success(t('profileDraft.testOk', { sample }))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setProfileDraftBusy(false)
+    }
+  }, [invokeTauri, isTauri, profileDraftStatus.config, refreshProfileDraftStatus, t])
+
   const handleGithubProxyConfigChange = useCallback(
     async (enabled: boolean, port: number) => {
       const normalizedPort = Math.max(1, Math.min(Math.round(port), 65535))
@@ -1469,14 +1655,17 @@ function App() {
   }, [discoveryScanSaving])
 
   const handleSaveDiscoveryScanSettings = useCallback(
-    async (disabledSourceKeys: string[]) => {
+    async (disabledSourceKeys: string[], extraSourcePaths: string[] = []) => {
       if (!isTauri) return
       setDiscoveryScanSaving(true)
       try {
         const saved = await invokeTauri<DiscoveryScanSettingsDto>(
           'set_discovery_scan_config',
           {
-            config: { disabled_source_keys: disabledSourceKeys },
+            config: {
+              disabled_source_keys: disabledSourceKeys,
+              extra_source_paths: extraSourcePaths,
+            },
           },
         )
         setDiscoveryScanSettings(saved)
@@ -1536,6 +1725,49 @@ function App() {
     setActiveView('detail')
   }, [])
 
+  const handleAutofillSkillProfile = useCallback(
+    async (skill: ManagedSkill) => {
+      if (!isTauri) return
+      setLoading(true)
+      setActionMessage(t('profileDraft.autofilling'))
+      try {
+        await invokeTauri('autofill_skill_profile', { skillId: skill.id })
+        await loadManagedSkills()
+        toast.success(t('profileDraft.autofillDone'))
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err))
+      } finally {
+        setLoading(false)
+        setActionMessage(null)
+      }
+    },
+    [invokeTauri, isTauri, loadManagedSkills, t],
+  )
+
+  const handleBulkAutofillProfiles = useCallback(async () => {
+    if (!isTauri || bulkSelectedSkills.length === 0) return
+    setLoading(true)
+    let ok = 0
+    let failed = 0
+    try {
+      for (const skill of bulkSelectedSkills) {
+        setActionMessage(`${t('profileDraft.autofilling')} ${skill.name}`)
+        try {
+          await invokeTauri('autofill_skill_profile', { skillId: skill.id })
+          ok += 1
+        } catch (err) {
+          failed += 1
+          toast.error(`${skill.name}: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
+      await loadManagedSkills()
+      toast.success(t('profileDraft.bulkDone', { ok, failed }))
+    } finally {
+      setLoading(false)
+      setActionMessage(null)
+    }
+  }, [bulkSelectedSkills, invokeTauri, isTauri, loadManagedSkills, t])
+
   const handleBackToList = useCallback(() => {
     setDetailSkill(null)
     setActiveView('myskills')
@@ -1573,12 +1805,43 @@ function App() {
   )
 
 
-  const handleOpenAdd = useCallback((tab: 'git' | 'local' = 'git') => {
-    resetInstallScope()
-    setAddModalTab(tab)
-    setShowAddModal(true)
-    setAddModalTagIds([])
-  }, [resetInstallScope])
+  const resetAddModalProfile = useCallback(() => {
+    setProfileZhName('')
+    setProfileCategory('')
+    setProfileColor('#3B82F6')
+    setProfileSummary('')
+    setProfileNote('')
+  }, [])
+
+  const saveSelectedAddModalProfile = useCallback(
+    async (skillId: string, _skillName: string) => {
+      const summary = profileSummary.trim()
+      if (summary && !isAcceptableSummary(summary)) {
+        throw new Error(`简介最多 30 字（当前 ${Array.from(summary).length}）`)
+      }
+      const hasAny =
+        Boolean(profileZhName.trim()) ||
+        Boolean(profileCategory.trim()) ||
+        Boolean(summary) ||
+        Boolean(profileNote.trim()) ||
+        Boolean(normalizeHexColor(profileColor) && profileColor.trim() && profileColor.trim().toUpperCase() !== '#3B82F6')
+      if (!hasAny && !summary) {
+        return
+      }
+      const color = normalizeHexColor(profileColor)
+      await invokeTauri('upsert_skill_profile', {
+        skillId,
+        zhName: profileZhName.trim() || null,
+        category: profileCategory.trim() || null,
+        color,
+        summary: summary || null,
+        note: profileNote.trim() || null,
+        summarySource: summary ? 'manual' : 'auto',
+        sortOrder: 0,
+      })
+    },
+    [invokeTauri, profileCategory, profileColor, profileNote, profileSummary, profileZhName],
+  )
 
   const applySelectedAddModalTags = useCallback(
     async (skillId: string, skillName: string) => {
@@ -1595,6 +1858,14 @@ function App() {
     [addModalTagIds, invokeTauri, t],
   )
 
+  const handleOpenAdd = useCallback((tab: 'git' | 'local' = 'git') => {
+    resetInstallScope()
+    setAddModalTab(tab)
+    setShowAddModal(true)
+    setAddModalTagIds([])
+    resetAddModalProfile()
+  }, [resetAddModalProfile, resetInstallScope])
+
   const handleCancelLoading = useCallback(() => {
     void invokeTauri('cancel_current_operation').catch(() => {})
     setLoading(false)
@@ -1606,9 +1877,10 @@ function App() {
     if (!loading) {
       setShowAddModal(false)
       setAddModalTagIds([])
+      resetAddModalProfile()
       resetInstallScope()
     }
-  }, [loading, resetInstallScope])
+  }, [loading, resetAddModalProfile, resetInstallScope])
 
   const handleCloseImport = useCallback(() => {
     if (!loading) setShowImportModal(false)
@@ -1805,6 +2077,275 @@ function App() {
     if (!loading) setShowBulkSyncModal(false)
   }, [loading])
 
+  const exportTargetSkills = useMemo(() => {
+    if (exportSkillIds.length === 0) return [] as ManagedSkill[]
+    const selected = new Set(exportSkillIds)
+    return managedSkills.filter((skill) => selected.has(skill.id))
+  }, [exportSkillIds, managedSkills])
+
+  const handleOpenBulkExport = useCallback(() => {
+    if (bulkSelectedSkills.length === 0) return
+    setExportSkillIds(bulkSelectedSkills.map((skill) => skill.id))
+    setExportPresentation(syncPresentation)
+    setShowExportModal(true)
+  }, [bulkSelectedSkills, syncPresentation])
+
+  const handleOpenSingleExport = useCallback(
+    (skill: ManagedSkill) => {
+      setExportSkillIds([skill.id])
+      setExportPresentation(syncPresentation)
+      setShowExportModal(true)
+    },
+    [syncPresentation],
+  )
+
+  const handleCloseExportModal = useCallback(() => {
+    if (!loading) setShowExportModal(false)
+  }, [loading])
+
+  const handleConfirmExport = useCallback(async () => {
+    if (exportTargetSkills.length === 0) return
+    setLoading(true)
+    setLoadingStartAt(Date.now())
+    setError(null)
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: t('bulk.exportPickDir'),
+      })
+      const destinationDir = Array.isArray(selected) ? selected[0] : selected
+      if (!destinationDir || typeof destinationDir !== 'string') {
+        return
+      }
+      const items = exportTargetSkills.map((skill) => ({
+        skillId: skill.id,
+        externalDescription: buildExternalDescription({
+          name: skill.name,
+          profile: skill.profile,
+          fallbackDescription: skill.description,
+          elements: exportPresentation,
+        }),
+        includeColor: exportPresentation.color,
+      }))
+      setActionMessage(t('bulk.exportProgress', { count: items.length }))
+      const result = await invokeTauri<{
+        destinationDir: string
+        exportedCount: number
+      }>('export_skills_with_presentation', {
+        items,
+        destinationDir,
+      })
+      setShowExportModal(false)
+      setExportSkillIds([])
+      setSuccessToastMessage(
+        t('bulk.exportSuccess', {
+          count: result.exportedCount,
+          dir: result.destinationDir,
+        }),
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+      setLoadingStartAt(null)
+      setActionMessage(null)
+    }
+  }, [exportPresentation, exportTargetSkills, invokeTauri, t])
+
+  const handleOpenSingleSync = useCallback(
+    (skill: ManagedSkill) => {
+      if (skill.enabled === false) {
+        toast.error(t('bulk.enableBeforeSync'))
+        return
+      }
+      const skillScope = getSkillScope(skill)
+      const installedToolSet = new Set(installedToolIds)
+      const selectedToolSet = new Set<string>()
+      for (const target of skill.targets) {
+        if ((target.scope ?? 'global') !== skillScope) continue
+        if (!installedToolSet.has(target.tool)) continue
+        selectedToolSet.add(target.tool)
+      }
+      setSingleSyncSkill(skill)
+      setSingleSyncToolIds(
+        installedTools
+          .map((tool) => tool.id)
+          .filter((toolId) => selectedToolSet.has(toolId)),
+      )
+      setShowSingleSyncModal(true)
+    },
+    [getSkillScope, installedToolIds, installedTools, t],
+  )
+
+  const handleToggleSingleSyncTool = useCallback((toolId: string) => {
+    setSingleSyncToolIds((current) =>
+      current.includes(toolId)
+        ? current.filter((id) => id !== toolId)
+        : [...current, toolId],
+    )
+  }, [])
+
+  const handleCloseSingleSync = useCallback(() => {
+    if (!loading) {
+      setShowSingleSyncModal(false)
+      setSingleSyncSkill(null)
+    }
+  }, [loading])
+
+  const handleConfirmSingleSync = useCallback(async () => {
+    if (!singleSyncSkill) return
+    const skill = managedSkills.find((item) => item.id === singleSyncSkill.id) ?? singleSyncSkill
+    const skillScope = getSkillScope(skill)
+    const projects = getSkillProjects(skill)
+    const sharedByToolId =
+      skillScope === 'project' ? sharedProjectToolIdsByToolId : sharedToolIdsByToolId
+    const selectedBaseToolSet = new Set(singleSyncToolIds)
+    const selectedToolSet = new Set<string>()
+    for (const toolId of selectedBaseToolSet) {
+      const shared = sharedByToolId[toolId] ?? [toolId]
+      for (const id of shared) selectedToolSet.add(id)
+    }
+    const activeInstalledToolIds =
+      skillScope === 'project' ? installedProjectToolIds : installedToolIds
+    const errors: { title: string; message: string }[] = []
+    const metadataColor = syncPresentation.color
+      ? normalizeHexColor(skill.profile?.color)
+      : null
+
+    setLoading(true)
+    setLoadingStartAt(Date.now())
+    setError(null)
+    try {
+      const targetsToRemove = skill.targets.filter(
+        (target) =>
+          (target.scope ?? 'global') === skillScope &&
+          activeInstalledToolIds.includes(target.tool) &&
+          !selectedToolSet.has(target.tool),
+      )
+      const seenRemoveKeys = new Set<string>()
+      for (const target of targetsToRemove) {
+        const key = `${target.tool}|${target.scope}|${target.project_path ?? ''}`
+        if (seenRemoveKeys.has(key)) continue
+        seenRemoveKeys.add(key)
+        const toolLabel = toolLabelById[target.tool] ?? target.tool
+        setActionMessage(
+          t('bulk.unsyncProgress', {
+            current: 1,
+            total: 1,
+            name: skill.name,
+            tool: toolLabel,
+          }),
+        )
+        try {
+          await invokeTauri('unsync_skill_from_tool', {
+            skillId: skill.id,
+            tool: target.tool,
+            scope: skillScope,
+            projectPath: target.project_path ?? undefined,
+          })
+        } catch (err) {
+          errors.push({
+            title: t('errors.syncFailedTitle', { name: skill.name, tool: toolLabel }),
+            message: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
+
+      for (const toolId of Array.from(selectedToolSet).filter((id) =>
+        activeInstalledToolIds.includes(id),
+      )) {
+        const toolLabel = toolLabelById[toolId] ?? toolId
+        const externalDescription = buildToolExternalDescription(toolId, {
+          name: skill.name,
+          profile: skill.profile,
+          fallbackDescription: skill.description,
+          elements: syncPresentation,
+        })
+        setActionMessage(
+          t('bulk.syncProgress', {
+            current: 1,
+            total: 1,
+            name: skill.name,
+            tool: toolLabel,
+          }),
+        )
+        try {
+          if (skillScope === 'project') {
+            if (!toolSupportsProjectScope(toolId)) {
+              throw new Error(t('projectSync.unsupportedTool', { tool: toolLabel }))
+            }
+            if (projects.length === 0) {
+              throw new Error(t('projectSync.noProjectsForSync'))
+            }
+            for (const projectPath of projects) {
+              await invokeTauri('sync_skill_to_tool', {
+                sourcePath: skill.central_path,
+                skillId: skill.id,
+                tool: toolId,
+                name: skill.name,
+                overwriteIfSameContent: true,
+                scope: 'project',
+                projectPath,
+                externalDescription,
+                metadataColor,
+              })
+            }
+          } else {
+            await invokeTauri('sync_skill_to_tool', {
+              sourcePath: skill.central_path,
+              skillId: skill.id,
+              tool: toolId,
+              name: skill.name,
+              overwriteIfSameContent: true,
+              scope: 'global',
+              externalDescription,
+              metadataColor,
+            })
+          }
+        } catch (err) {
+          errors.push({
+            title: t('errors.syncFailedTitle', { name: skill.name, tool: toolLabel }),
+            message: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
+
+      await loadManagedSkills()
+      setShowSingleSyncModal(false)
+      setSingleSyncSkill(null)
+      if (errors.length > 0) {
+        showActionErrors(errors)
+      } else {
+        setSuccessToastMessage(t('bulk.syncSuccess', { count: 1, tools: singleSyncToolIds.length }))
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+      setLoadingStartAt(null)
+      setActionMessage(null)
+    }
+  }, [
+    getSkillProjects,
+    getSkillScope,
+    installedProjectToolIds,
+    installedToolIds,
+    invokeTauri,
+    loadManagedSkills,
+    managedSkills,
+    sharedProjectToolIdsByToolId,
+    sharedToolIdsByToolId,
+    showActionErrors,
+    singleSyncSkill,
+    singleSyncToolIds,
+    syncPresentation,
+    t,
+    toolLabelById,
+    toolSupportsProjectScope,
+  ])
+
   const handleOpenBulkDelete = useCallback(() => {
     if (bulkSelectedSkills.length === 0) return
     setShowBulkDeleteModal(true)
@@ -1955,6 +2496,268 @@ function App() {
       }
     },
     [invokeTauri, loadManagedSkills, restoreSkillSavedTargets, t],
+  )
+
+  const handleApplyTemporaryActivation = useCallback(
+    async (input: {
+      toolIds?: string[]
+      toolId?: string
+      scope: TemporaryActivationScope
+      projectPath?: string
+      tagIds?: Array<number | null>
+      tagId?: number | null
+    }) => {
+      const selectedToolIds = (input.toolIds?.length ? input.toolIds : input.toolId ? [input.toolId] : []).filter(Boolean)
+      const selectedTagIds = input.tagIds?.length ? input.tagIds : [input.tagId ?? null]
+      const { scope, projectPath } = input
+      if (loading) return
+      if (selectedToolIds.length === 0) return
+      if (scope === 'project' && !projectPath) {
+        setError(t('temporaryActivation.noProjects'))
+        return
+      }
+      const projectCapableIds = scope === 'project'
+        ? selectedToolIds.filter((id) => toolSupportsProjectScope(id))
+        : selectedToolIds
+      if (scope === 'project' && projectCapableIds.length === 0) {
+        const label = tools.find((tool) => tool.id === selectedToolIds[0])?.label ?? selectedToolIds[0]
+        setError(t('projectSync.unsupportedTool', { tool: label }))
+        return
+      }
+
+      const targetToolIds = Array.from(new Set(projectCapableIds.flatMap((id) => (
+        scope === 'global'
+          ? uniqueToolIdsBySkillsDir(sharedToolIdsByToolId[id] ?? [id])
+          : uniqueToolIdsByProjectSkillsDir(sharedProjectToolIdsByToolId[id] ?? [id])
+      ))))
+
+      setLoading(true)
+      setLoadingStartAt(Date.now())
+      setError(null)
+      try {
+        const applicableSkills = managedSkills.filter((skill) => skill.enabled !== false)
+        for (let index = 0; index < applicableSkills.length; index += 1) {
+          const skill = applicableSkills[index]
+          const shouldSync = hasAnyTag(skill.tags, selectedTagIds)
+          setActionMessage(t('temporaryActivation.progress', { current: index + 1, total: applicableSkills.length, name: skill.name }))
+          for (const targetToolId of targetToolIds) {
+            const isSynced = skill.targets.some(
+              (target) =>
+                target.tool === targetToolId &&
+                (target.scope ?? 'global') === scope &&
+                (scope !== 'project' || target.project_path === projectPath) &&
+                target.status !== 'disabled',
+            )
+            if (shouldSync === isSynced) continue
+            if (shouldSync) {
+              const externalDescription = buildToolExternalDescription(targetToolId, {
+                name: skill.name,
+                profile: skill.profile,
+                fallbackDescription: skill.description,
+                elements: syncPresentation,
+              })
+              const metadataColor = syncPresentation.color
+                ? normalizeHexColor(skill.profile?.color)
+                : null
+              await invokeTauri('sync_skill_to_tool', {
+                sourcePath: skill.central_path,
+                skillId: skill.id,
+                tool: targetToolId,
+                name: skill.name,
+                overwriteIfSameContent: true,
+                scope,
+                ...(scope === 'project' ? { projectPath } : {}),
+                externalDescription,
+                metadataColor,
+              })
+            } else {
+              await invokeTauri('unsync_skill_from_tool', {
+                skillId: skill.id,
+                tool: targetToolId,
+                scope,
+                ...(scope === 'project' ? { projectPath } : {}),
+              })
+            }
+          }
+        }
+        const nextEntries = projectCapableIds.map((id) => {
+          const previous = temporaryActivationEntries.find(
+            (entry) =>
+              temporaryActivationKey(entry.toolId, entry.scope, entry.projectPath) ===
+              temporaryActivationKey(id, scope, projectPath),
+          )
+          const currentSnapshot = buildTemporarySnapshot(managedSkills, id, scope, projectPath)
+          return {
+            toolId: id,
+            scope,
+            ...(scope === 'project' ? { projectPath } : {}),
+            tagId: selectedTagIds[0] ?? null,
+            tagIds: selectedTagIds,
+            toolIds: projectCapableIds,
+            snapshot: currentSnapshot,
+            baselineSnapshot: previous?.baselineSnapshot ?? previous?.snapshot ?? currentSnapshot,
+            updatedAt: Date.now(),
+          } satisfies TemporaryActivationEntry
+        })
+        setTemporaryActivationEntries((current) => [
+          ...current.filter((item) => !projectCapableIds.some((id) =>
+            temporaryActivationKey(item.toolId, item.scope, item.projectPath)
+              === temporaryActivationKey(id, scope, projectPath))),
+          ...nextEntries,
+        ])
+        await loadManagedSkills()
+        setShowTemporaryActivationModal(false)
+        setSuccessToastMessage(t('temporaryActivation.applied', {
+          tool: projectCapableIds
+            .map((id) => tools.find((tool) => tool.id === id)?.label ?? id)
+            .join('、'),
+        }))
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+        await loadManagedSkills()
+      } finally {
+        setLoading(false)
+        setLoadingStartAt(null)
+        setActionMessage(null)
+      }
+    },
+    [
+      invokeTauri,
+      loadManagedSkills,
+      loading,
+      managedSkills,
+      sharedProjectToolIdsByToolId,
+      sharedToolIdsByToolId,
+      syncPresentation,
+      t,
+      toolSupportsProjectScope,
+      tools,
+      temporaryActivationEntries,
+      uniqueToolIdsByProjectSkillsDir,
+      uniqueToolIdsBySkillsDir,
+    ],
+  )
+
+  const handleRestoreTemporaryActivation = useCallback(
+    async (entry: TemporaryActivationEntry) => {
+      if (loading) return
+      const restoreToolIds = entry.toolIds?.length ? entry.toolIds : [entry.toolId]
+      const targetToolIds = Array.from(new Set(restoreToolIds.flatMap((id) => (
+        entry.scope === 'global'
+          ? uniqueToolIdsBySkillsDir(sharedToolIdsByToolId[id] ?? [id])
+          : uniqueToolIdsByProjectSkillsDir(sharedProjectToolIdsByToolId[id] ?? [id])
+      ))))
+      setLoading(true)
+      setLoadingStartAt(Date.now())
+      setError(null)
+      try {
+        for (const skill of managedSkills) {
+          const shouldSync = entry.snapshot[skill.id] === true && skill.enabled !== false
+          for (const targetToolId of targetToolIds) {
+            const isSynced = skill.targets.some(
+              (target) =>
+                target.tool === targetToolId &&
+                (target.scope ?? 'global') === entry.scope &&
+                (entry.scope !== 'project' || target.project_path === entry.projectPath) &&
+                target.status !== 'disabled',
+            )
+            if (shouldSync === isSynced) continue
+            if (shouldSync) {
+              const externalDescription = buildToolExternalDescription(targetToolId, {
+                name: skill.name,
+                profile: skill.profile,
+                fallbackDescription: skill.description,
+                elements: syncPresentation,
+              })
+              const metadataColor = syncPresentation.color
+                ? normalizeHexColor(skill.profile?.color)
+                : null
+              await invokeTauri('sync_skill_to_tool', {
+                sourcePath: skill.central_path,
+                skillId: skill.id,
+                tool: targetToolId,
+                name: skill.name,
+                overwriteIfSameContent: true,
+                scope: entry.scope,
+                ...(entry.scope === 'project' ? { projectPath: entry.projectPath } : {}),
+                externalDescription,
+                metadataColor,
+              })
+            } else {
+              await invokeTauri('unsync_skill_from_tool', {
+                skillId: skill.id,
+                tool: targetToolId,
+                scope: entry.scope,
+                ...(entry.scope === 'project' ? { projectPath: entry.projectPath } : {}),
+              })
+            }
+          }
+        }
+        const restoreKeys = new Set(restoreToolIds.map((id) => temporaryActivationKey(id, entry.scope, entry.projectPath)))
+        setTemporaryActivationEntries((current) =>
+          current.filter((item) => !restoreKeys.has(temporaryActivationKey(item.toolId, item.scope, item.projectPath))),
+        )
+        await loadManagedSkills()
+        setShowTemporaryActivationModal(false)
+        setSuccessToastMessage(t('temporaryActivation.restored', {
+          tool: restoreToolIds
+            .map((id) => tools.find((tool) => tool.id === id)?.label ?? id)
+            .join('、'),
+        }))
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+        await loadManagedSkills()
+      } finally {
+        setLoading(false)
+        setLoadingStartAt(null)
+      }
+    },
+    [
+      invokeTauri,
+      loadManagedSkills,
+      loading,
+      managedSkills,
+      sharedProjectToolIdsByToolId,
+      sharedToolIdsByToolId,
+      t,
+      syncPresentation,
+      tools,
+      uniqueToolIdsByProjectSkillsDir,
+      uniqueToolIdsBySkillsDir,
+    ],
+  )
+
+  const handleResetTemporaryActivation = useCallback(
+    async (input: {
+      toolIds: string[]
+      scope: TemporaryActivationScope
+      projectPath?: string
+    }) => {
+      if (loading) return
+      const selectedToolIds = input.toolIds.filter(Boolean)
+      if (selectedToolIds.length === 0) return
+      if (input.scope === 'project' && !input.projectPath) {
+        setError(t('temporaryActivation.noProjects'))
+        return
+      }
+      const restoreKeys = new Set(
+        selectedToolIds.map((id) => temporaryActivationKey(id, input.scope, input.projectPath)),
+      )
+      const matching = temporaryActivationEntries.filter((entry) =>
+        restoreKeys.has(temporaryActivationKey(entry.toolId, entry.scope, entry.projectPath)),
+      )
+      if (matching.length === 0) {
+        setError(t('temporaryActivation.noActive'))
+        return
+      }
+      for (const entry of matching) {
+        await handleRestoreTemporaryActivation({
+          ...entry,
+          snapshot: entry.baselineSnapshot ?? entry.snapshot,
+        })
+      }
+    },
+    [handleRestoreTemporaryActivation, loading, t, temporaryActivationEntries],
   )
 
   const handleToggleBulkEnabled = useCallback(async () => {
@@ -2110,6 +2913,15 @@ function App() {
             }),
           )
           try {
+            const externalDescription = buildToolExternalDescription(toolId, {
+              name: skill.name,
+              profile: skill.profile,
+              fallbackDescription: skill.description,
+              elements: syncPresentation,
+            })
+            const metadataColor = syncPresentation.color
+              ? normalizeHexColor(skill.profile?.color)
+              : null
             if (skillScope === 'project') {
               if (!toolSupportsProjectScope(toolId)) {
                 throw new Error(t('projectSync.unsupportedTool', { tool: toolLabel }))
@@ -2126,6 +2938,8 @@ function App() {
                   overwriteIfSameContent: true,
                   scope: 'project',
                   projectPath,
+                  externalDescription,
+                  metadataColor,
                 })
               }
             } else {
@@ -2136,6 +2950,8 @@ function App() {
                 name: skill.name,
                 overwriteIfSameContent: true,
                 scope: 'global',
+                externalDescription,
+                metadataColor,
               })
             }
           } catch (err) {
@@ -2182,6 +2998,7 @@ function App() {
     loadManagedSkills,
     sharedProjectToolIdsByToolId,
     sharedToolIdsByToolId,
+    syncPresentation,
     showActionErrors,
     t,
     toolLabelById,
@@ -2710,6 +3527,7 @@ function App() {
           },
         )
         await applySelectedAddModalTags(created.skill_id, created.name)
+        await saveSelectedAddModalProfile(created.skill_id, created.name)
         const syncErrors = await syncInstalledSkill(created)
         if (syncErrors.length > 0) showActionErrors(syncErrors)
         setLocalPath('')
@@ -2787,6 +3605,7 @@ function App() {
           },
         )
         await applySelectedAddModalTags(created.skill_id, created.name)
+        await saveSelectedAddModalProfile(created.skill_id, created.name)
         const syncErrors = await syncInstalledSkill(created)
         if (syncErrors.length > 0) showActionErrors(syncErrors)
       } else {
@@ -2811,6 +3630,7 @@ function App() {
             },
           )
           await applySelectedAddModalTags(created.skill_id, created.name)
+        await saveSelectedAddModalProfile(created.skill_id, created.name)
           const syncErrors = await syncInstalledSkill(created)
           if (syncErrors.length > 0) showActionErrors(syncErrors)
         } else if (autoSelectSkillName) {
@@ -2840,6 +3660,7 @@ function App() {
               },
             )
             await applySelectedAddModalTags(created.skill_id, created.name)
+        await saveSelectedAddModalProfile(created.skill_id, created.name)
             const syncErrors = await syncInstalledSkill(created)
             if (syncErrors.length > 0) showActionErrors(syncErrors)
           } else {
@@ -2977,6 +3798,7 @@ function App() {
             },
           )
           await applySelectedAddModalTags(created.skill_id, created.name)
+        await saveSelectedAddModalProfile(created.skill_id, created.name)
           const syncErrors = await syncInstalledSkill(created)
           collectedErrors.push(...syncErrors)
         } catch (err) {
@@ -3051,6 +3873,7 @@ function App() {
             },
           )
           await applySelectedAddModalTags(created.skill_id, created.name)
+        await saveSelectedAddModalProfile(created.skill_id, created.name)
           const syncErrors = await syncInstalledSkill(created)
           collectedErrors.push(...syncErrors)
         } catch (err) {
@@ -3620,7 +4443,7 @@ function App() {
   }
 
   return (
-    <div className={`skills-app${isTauri ? ' is-tauri' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
+    <div className={`skills-app${isTauri ? ' is-tauri' : ''}${sidebarIsCompact ? ' sidebar-collapsed' : ''}`}>
       <Toaster
         position="top-right"
         richColors
@@ -3648,7 +4471,7 @@ function App() {
         updateChecking={updateChecking}
         updateInstalling={updateInstalling}
         updateDone={updateDone}
-        collapsed={sidebarCollapsed}
+        collapsed={sidebarIsCompact}
         onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)}
         onOpenSettings={handleOpenSettings}
         onOpenUpdate={handleOpenUpdate}
@@ -3682,10 +4505,13 @@ function App() {
             skill={detailSkill}
             onBack={handleBackToList}
             invokeTauri={invokeTauri}
+            onProfileSaved={() => { void loadManagedSkills() }}
             formatRelative={formatRelative}
             tools={installedTools}
             scope={getSkillScope(detailSkill)}
             projects={getSkillProjects(detailSkill)}
+            onExportSkill={handleOpenSingleExport}
+            onSyncSkill={handleOpenSingleSync}
             t={t}
           />
         ) : activeView === 'myskills' ? (
@@ -3737,6 +4563,8 @@ function App() {
               onToggleUntagged={handleToggleUntaggedFilter}
               onClearTags={handleClearTagFilters}
               onManageTags={handleOpenTagsPage}
+              onTemporaryActivation={() => setShowTemporaryActivationModal(true)}
+              temporaryActivationCount={temporaryActivationEntries.length}
               onToggleBulkMode={handleToggleBulkMode}
               onViewModeChange={setSkillViewMode}
               t={t}
@@ -3770,6 +4598,8 @@ function App() {
               onOpenScope={handleOpenScope}
               onOpenDetail={handleOpenDetail}
               onEditTags={handleOpenEditTags}
+              onEditProfile={handleOpenDetail}
+              onAutofillProfile={(skill) => void handleAutofillSkillProfile(skill)}
               onToggleBulkSelection={handleToggleBulkSelection}
               getSkillScope={getSkillScope}
               getSkillProjects={getSkillProjects}
@@ -3803,6 +4633,15 @@ function App() {
                   <button
                     className="btn btn-secondary"
                     type="button"
+                    onClick={() => void handleBulkAutofillProfiles()}
+                    disabled={loading || bulkSelectedSkills.length === 0}
+                    title={t('profileDraft.autofillHint')}
+                  >
+                    {t('profileDraft.autofill')}
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
                     onClick={handleOpenBulkSync}
                     disabled={
                       loading ||
@@ -3811,6 +4650,14 @@ function App() {
                     }
                   >
                     {t('bulk.sync')}
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
+                    onClick={handleOpenBulkExport}
+                    disabled={loading || bulkSelectedSkills.length === 0}
+                  >
+                    {t('bulk.export')}
                   </button>
                   <button
                     className="btn btn-secondary"
@@ -3930,6 +4777,17 @@ function App() {
             }
             discoveryScanSourceCount={discoveryScanSettings?.sources.length ?? 0}
             onOpenDiscoveryScanSettings={handleOpenDiscoveryScanSettings}
+            profileDraftStatus={profileDraftStatus}
+            profileDraftKeyDraft={profileDraftKeyDraft}
+            profileDraftModels={profileDraftModels}
+            profileDraftBusy={profileDraftBusy}
+            onProfileDraftKeyDraftChange={setProfileDraftKeyDraft}
+            onProfileDraftConfigChange={handleProfileDraftConfigChange}
+            onProfileDraftSaveConfig={() => void handleProfileDraftSaveConfig()}
+            onProfileDraftSaveKey={() => void handleProfileDraftSaveKey()}
+            onProfileDraftRemoveKey={() => void handleProfileDraftRemoveKey()}
+            onProfileDraftFetchModels={() => void handleProfileDraftFetchModels()}
+            onProfileDraftTest={() => void handleProfileDraftTest()}
             onBack={handleCloseSettings}
             t={t}
           />
@@ -3959,6 +4817,16 @@ function App() {
         gitUrl={gitUrl}
         tags={tags}
         selectedTagIds={addModalTagIds}
+        profileZhName={profileZhName}
+        profileCategory={profileCategory}
+        profileColor={profileColor}
+        profileSummary={profileSummary}
+        profileNote={profileNote}
+        onProfileZhNameChange={setProfileZhName}
+        onProfileCategoryChange={setProfileCategory}
+        onProfileColorChange={setProfileColor}
+        onProfileSummaryChange={setProfileSummary}
+        onProfileNoteChange={setProfileNote}
         syncTargets={syncTargets}
         installedTools={installedTools}
         toolStatus={toolStatus}
@@ -4004,9 +4872,50 @@ function App() {
         selectedCount={bulkSelectedSkills.length}
         installedTools={installedTools}
         selectedToolIds={bulkSyncToolIds}
+        presentation={syncPresentation}
+        onPresentationChange={setSyncPresentation}
         onToggleTool={handleToggleBulkSyncTool}
         onRequestClose={handleCloseBulkSync}
         onConfirm={handleConfirmBulkSync}
+        t={t}
+      />
+
+      <BulkSyncModal
+        open={showSingleSyncModal}
+        loading={loading}
+        selectedCount={singleSyncSkill ? 1 : 0}
+        installedTools={installedTools}
+        selectedToolIds={singleSyncToolIds}
+        presentation={syncPresentation}
+        title={t('bulk.syncTitleSingle')}
+        subtitle={
+          singleSyncSkill
+            ? t('bulk.syncSubtitleSingle', { name: singleSyncSkill.name })
+            : undefined
+        }
+        confirmLabel={t('bulk.syncConfirm')}
+        onPresentationChange={setSyncPresentation}
+        onToggleTool={handleToggleSingleSyncTool}
+        onRequestClose={handleCloseSingleSync}
+        onConfirm={() => {
+          void handleConfirmSingleSync()
+        }}
+        t={t}
+      />
+
+      <ExportSkillsModal
+        open={showExportModal}
+        loading={loading}
+        selectedCount={exportTargetSkills.length}
+        skillLabel={
+          exportTargetSkills.length === 1 ? exportTargetSkills[0]?.name : undefined
+        }
+        presentation={exportPresentation}
+        onPresentationChange={setExportPresentation}
+        onRequestClose={handleCloseExportModal}
+        onConfirm={() => {
+          void handleConfirmExport()
+        }}
         t={t}
       />
 
@@ -4029,7 +4938,25 @@ function App() {
         t={t}
       />
 
-      {showImportModal && plan ? (
+      
+      {showTemporaryActivationModal ? (
+        <TemporaryActivationModal
+          tools={installedTools}
+          tags={tags}
+          activeEntries={temporaryActivationEntries}
+          defaultToolId={installedTools[0]?.id}
+          defaultScope={scopeFilter === 'project' ? 'project' : 'global'}
+          recentProjects={recentProjects}
+          loading={loading}
+          onApply={handleApplyTemporaryActivation}
+          onRestore={handleRestoreTemporaryActivation}
+          onReset={handleResetTemporaryActivation}
+          onRequestClose={() => { if (!loading) setShowTemporaryActivationModal(false) }}
+          t={t}
+        />
+      ) : null}
+
+{showImportModal && plan ? (
         <ImportModal
           open={showImportModal}
           loading={loading}
@@ -4050,6 +4977,11 @@ function App() {
         settings={discoveryScanSettings}
         onRequestClose={handleCloseDiscoveryScanSettings}
         onSave={handleSaveDiscoveryScanSettings}
+        onAddExtraPath={async () => {
+          const { open } = await import('@tauri-apps/plugin-dialog')
+          const selected = await open({ directory: true, multiple: false, title: t('discoveryScan.addFolder') })
+          return typeof selected === 'string' ? selected : null
+        }}
         t={t}
       />
 

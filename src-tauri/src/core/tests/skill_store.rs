@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use crate::core::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
+use crate::core::skill_store::{
+    SkillProfileRecord, SkillRecord, SkillStore, SkillTargetRecord,
+};
 use crate::core::{
     device_sync::{
         credentials::MemoryCredentialStore,
@@ -1286,4 +1288,102 @@ fn a_finished_sync_window_does_not_prove_local_source_ownership() {
     assert!(!store
         .was_skill_imported_by_device_sync("locally-installed", 50)
         .unwrap());
+}
+
+#[test]
+fn skill_profiles_migrate_and_crud_with_cascade() {
+    let (dir, store) = make_store();
+    let table_count: i64 = {
+        let conn = Connection::open(dir.path().join("test.db")).unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='skill_profiles'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+    };
+    assert_eq!(table_count, 1);
+
+    let skill = SkillRecord {
+        id: "profile-skill".into(),
+        name: "profile-skill".into(),
+        description: Some("desc".into()),
+        source_type: "local".into(),
+        source_ref: Some("/tmp/profile-skill".into()),
+        source_subpath: None,
+        source_revision: None,
+        central_path: "/central/profile-skill".into(),
+        content_hash: None,
+        created_at: 1,
+        updated_at: 1,
+        last_sync_at: None,
+        last_seen_at: 1,
+        enabled: true,
+        status: "ok".into(),
+    };
+    store.upsert_skill(&skill).unwrap();
+
+    let saved = store
+        .upsert_skill_profile(&SkillProfileRecord {
+            skill_id: skill.id.clone(),
+            zh_name: Some("资料技能".into()),
+            category: Some("研究".into()),
+            color: Some("#22c55e".into()),
+            summary: Some("用于验证资料表读写与级联".into()),
+            note: Some("note".into()),
+            source_url: Some("https://github.com/example/skill".into()),
+            summary_source: "manual".into(),
+            sort_order: 3,
+            created_at: 0,
+            updated_at: 0,
+        })
+        .unwrap();
+    assert_eq!(saved.color.as_deref(), Some("#22C55E"));
+    assert_eq!(saved.summary_source, "manual");
+
+    let loaded = store.get_skill_profile(&skill.id).unwrap().unwrap();
+    assert_eq!(loaded.zh_name.as_deref(), Some("资料技能"));
+    assert_eq!(loaded.category.as_deref(), Some("研究"));
+    assert_eq!(store.list_skill_profiles().unwrap().len(), 1);
+
+    store.delete_skill(&skill.id).unwrap();
+    assert!(store.get_skill_profile("profile-skill").unwrap().is_none());
+}
+
+#[test]
+fn skill_profile_rejects_invalid_color_before_missing_skill_check_order() {
+    let (_dir, store) = make_store();
+    let err = store
+        .upsert_skill_profile(&SkillProfileRecord {
+            skill_id: "missing".into(),
+            zh_name: None,
+            category: None,
+            color: Some("#GG0000".into()),
+            summary: None,
+            note: None,
+            source_url: None,
+            summary_source: "auto".into(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        })
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("invalid color"));
+
+    let err = store
+        .upsert_skill_profile(&SkillProfileRecord {
+            skill_id: "missing".into(),
+            zh_name: Some("中文".into()),
+            category: None,
+            color: None,
+            summary: None,
+            note: None,
+            source_url: None,
+            summary_source: "auto".into(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        })
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("skill not found"));
 }

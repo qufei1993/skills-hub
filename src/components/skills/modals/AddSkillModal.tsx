@@ -10,6 +10,7 @@ import {
   type InstallScope,
 } from '../installScope'
 import type { TagWithCountDto, ToolOption, ToolStatusDto } from '../types'
+import { SUMMARY_TARGET_MAX_CHARS, SUMMARY_SOFT_MIN_CHARS, countCjkAwareLength, isAcceptableSummary, normalizeHexColor } from '../skillProfile'
 
 type AddSkillModalProps = {
   open: boolean
@@ -26,6 +27,16 @@ type AddSkillModalProps = {
   installScope: InstallScope
   installProjects: string[]
   recentProjects: string[]
+  profileZhName: string
+  profileCategory: string
+  profileColor: string
+  profileSummary: string
+  profileNote: string
+  onProfileZhNameChange: (value: string) => void
+  onProfileCategoryChange: (value: string) => void
+  onProfileColorChange: (value: string) => void
+  onProfileSummaryChange: (value: string) => void
+  onProfileNoteChange: (value: string) => void
   onRequestClose: () => void
   onTabChange: (tab: 'local' | 'git') => void
   onLocalPathChange: (value: string) => void
@@ -55,6 +66,16 @@ const AddSkillModal = ({
   installScope,
   installProjects,
   recentProjects,
+  profileZhName,
+  profileCategory,
+  profileColor,
+  profileSummary,
+  profileNote,
+  onProfileZhNameChange,
+  onProfileCategoryChange,
+  onProfileColorChange,
+  onProfileSummaryChange,
+  onProfileNoteChange,
   onRequestClose,
   onTabChange,
   onLocalPathChange,
@@ -299,6 +320,48 @@ const AddSkillModal = ({
               </aside>
             </div>
 
+              <section className="add-profile-card">
+                <div className="add-card-header">
+                  <div className="add-form-heading">
+                    <strong>管理资料</strong>
+                    <span>安装时填写颜色、分类、中文名与 12–30 字简介；英文调用名保持不变。</span>
+                  </div>
+                </div>
+                <div className="add-profile-grid">
+                  <label className="form-field">
+                    <span className="label">中文名称</span>
+                    <input className="input" value={profileZhName} onChange={(e) => onProfileZhNameChange(e.target.value)} placeholder="例如：Nature论文写作" />
+                  </label>
+                  <label className="form-field">
+                    <span className="label">分类</span>
+                    <input className="input" value={profileCategory} onChange={(e) => onProfileCategoryChange(e.target.value)} placeholder="例如：学术写作" list="skills-hub-profile-categories" />
+                    <datalist id="skills-hub-profile-categories">
+                      {Array.from(new Set(tags.map((tag) => tag.name))).map((name) => (
+                        <option key={name} value={name} />
+                      ))}
+                    </datalist>
+                  </label>
+                  <label className="form-field">
+                    <span className="label">颜色</span>
+                    <div className="input-row">
+                      <input type="color" value={normalizeHexColor(profileColor)?.slice(0,7) || '#3B82F6'} onChange={(e) => onProfileColorChange(e.target.value.toUpperCase())} aria-label="颜色选择器" />
+                      <input className="input" value={profileColor} onChange={(e) => onProfileColorChange(e.target.value)} placeholder="#3B82F6" />
+                    </div>
+                  </label>
+                  <label className="form-field">
+                    <span className="label">功能简介（{countCjkAwareLength(profileSummary)}/{SUMMARY_TARGET_MAX_CHARS}）</span>
+                    <input className="input" value={profileSummary} onChange={(e) => onProfileSummaryChange(e.target.value)} placeholder={`自动或手写 ${SUMMARY_SOFT_MIN_CHARS}-${SUMMARY_TARGET_MAX_CHARS} 字`} />
+                  </label>
+                  <label className="form-field add-profile-note">
+                    <span className="label">备注</span>
+                    <textarea className="input" rows={2} value={profileNote} onChange={(e) => onProfileNoteChange(e.target.value)} placeholder="仅工作台管理，不写入调用协议" />
+                  </label>
+                </div>
+                {profileSummary.trim() && !isAcceptableSummary(profileSummary) ? (
+                  <div className="helper-text" role="status">简介最多 {SUMMARY_TARGET_MAX_CHARS} 字；短于 {SUMMARY_SOFT_MIN_CHARS} 也可以。</div>
+                ) : null}
+              </section>
+
             <footer className="add-install-footer">
               <div className="add-install-summary">
                 <span>{t('installSummary')}</span>
@@ -328,7 +391,7 @@ const AddSkillModal = ({
                 <button
                   className="btn btn-primary"
                   onClick={onSubmit}
-                  disabled={loading || projectRequired || sourceRequired}
+                  disabled={loading || projectRequired || sourceRequired || (profileSummary.trim().length > 0 && !isAcceptableSummary(profileSummary)) || (profileColor.trim().length > 0 && !normalizeHexColor(profileColor))}
                 >
                   {addModalTab === 'local' ? t('create') : t('install')}
                 </button>

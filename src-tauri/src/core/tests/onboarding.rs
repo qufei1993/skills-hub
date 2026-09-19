@@ -112,6 +112,7 @@ fn skips_disabled_scan_directory() {
         None,
         None,
         &disabled,
+        &[],
     )
     .unwrap();
 
@@ -130,6 +131,7 @@ fn persists_and_sanitizes_scan_config() {
     let saved = super::save_discovery_scan_config(
         &store,
         super::DiscoveryScanConfig {
+            extra_source_paths: vec![],
             disabled_source_keys: vec![
                 cursor_key.clone(),
                 cursor_key.clone(),
@@ -148,6 +150,47 @@ fn persists_and_sanitizes_scan_config() {
 }
 
 #[test]
+fn persists_extra_source_paths_and_exposes_them_as_scan_sources() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = crate::core::skill_store::SkillStore::new(dir.path().join("test.db"));
+    store.ensure_schema().unwrap();
+    let extra = dir.path().join("custom-skills");
+    fs::create_dir_all(&extra).unwrap();
+
+    let saved = super::save_discovery_scan_config(
+        &store,
+        super::DiscoveryScanConfig {
+            extra_source_paths: vec![
+                extra.to_string_lossy().to_string(),
+                extra.to_string_lossy().to_string(),
+                "  ".to_string(),
+            ],
+            disabled_source_keys: vec![],
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        saved.extra_source_paths,
+        vec![extra.to_string_lossy().to_string()]
+    );
+    assert_eq!(super::load_discovery_scan_config(&store).unwrap(), saved);
+
+    let settings = super::get_discovery_scan_settings_in_home(
+        dir.path(),
+        &dir.path().join(".claude"),
+        saved,
+    );
+    assert!(settings.sources.iter().any(|source| {
+        source.key == "extra_dir:0" && source.path == extra && source.enabled
+    }));
+    assert_eq!(
+        settings.extra_source_paths,
+        vec![extra.to_string_lossy().to_string()]
+    );
+}
+
+#[test]
 fn scan_settings_deduplicate_shared_dirs_and_include_claude_plugins() {
     let home = tempfile::tempdir().unwrap();
     fs::create_dir_all(home.path().join(".config/agents")).unwrap();
@@ -160,6 +203,7 @@ fn scan_settings_deduplicate_shared_dirs_and_include_claude_plugins() {
         home.path(),
         &home.path().join(".claude"),
         super::DiscoveryScanConfig {
+            extra_source_paths: vec![],
             disabled_source_keys: vec![amp_key.clone()],
         },
     );
