@@ -1,0 +1,25 @@
+{
+  "name": "skillshub-cli",
+  "version": "0.10.1",
+  "description": "Official Skills Hub command-line interface",
+  "license": "MIT",
+  "bin": {
+    "skillshub-cli": "bin/skillshub-cli.cjs"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "optionalDependencies": {
+    "@skillshub-app/cli-darwin-arm64": "0.10.1",
+    "@skillshub-app/cli-darwin-x64": "0.10.1",
+    "@skillshub-app/cli-win32-x64": "0.10.1",
+    "@skillshub-app/cli-linux-x64": "0.10.1",
+    "@skillshub-app/cli-linux-arm64": "0.10.1"
+  }
+}

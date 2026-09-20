@@ -1,0 +1,23 @@
+{
+  "name": "@skillshub-app/cli-win32-x64",
+  "version": "0.10.1",
+  "description": "Skills Hub CLI native binary for Windows x64",
+  "license": "MIT",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "exports": {
+    "./skillshub-cli": "./skillshub-cli.exe"
+  },
+  "files": [
+    "skillshub-cli.exe",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

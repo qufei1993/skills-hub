@@ -1,0 +1,23 @@
+{
+  "name": "@skillshub-app/cli-darwin-arm64",
+  "version": "0.10.1",
+  "description": "Skills Hub CLI native binary for macOS ARM64",
+  "license": "MIT",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "exports": {
+    "./skillshub-cli": "./skillshub-cli"
+  },
+  "files": [
+    "skillshub-cli",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

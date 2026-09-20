@@ -1,0 +1,23 @@
+{
+  "name": "@skillshub-app/cli-linux-x64",
+  "version": "0.10.1",
+  "description": "Skills Hub CLI native binary for Linux x64",
+  "license": "MIT",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "exports": {
+    "./skillshub-cli": "./skillshub-cli"
+  },
+  "files": [
+    "skillshub-cli",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -30,3 +30,9 @@ plans/
 .env
 
 bun.lock
+
+# CLI package build artifacts
+*.tgz
+.skillshub-cli-staging-*
+packages/cli-*/skillshub-cli
+packages/cli-*/skillshub-cli.exe
