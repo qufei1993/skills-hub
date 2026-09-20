@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -21,6 +22,7 @@ const { describe, it } = process.env.VITEST ? await import('vitest') : await imp
 const {
   packageCli,
   parsePackageCliArgs,
+  runTrustedNpm,
 } = await import('./package-cli.mjs')
 
 const require = createRequire(import.meta.url)
@@ -34,6 +36,19 @@ const TARGETS = [
   { target: 'linux-x64', triple: 'x86_64-unknown-linux-gnu', os: 'linux', cpu: 'x64', extension: '' },
   { target: 'linux-arm64', triple: 'aarch64-unknown-linux-gnu', os: 'linux', cpu: 'arm64', extension: '' },
 ]
+const TEST_NPM_EXECPATH = [
+  process.env.npm_execpath,
+  path.resolve(path.dirname(process.execPath), '../lib/node_modules/npm/bin/npm-cli.js'),
+  path.resolve(path.dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js'),
+].find(candidate => {
+  if (!candidate) return false
+  try {
+    const metadata = lstatSync(candidate)
+    return metadata.isFile() && !metadata.isSymbolicLink()
+  } catch {
+    return false
+  }
+})
 const {
   launch,
   resolveBinaryPackage,
@@ -61,6 +76,21 @@ function createFixtureBinary(directory, target, version = VERSION, metadata = {}
     ...metadata,
   })}\n`)
   return { source, metadataPath, sha256 }
+}
+
+function writeInstalledPlatformPackage(packageDirectory, target, contents = 'native-binary') {
+  const definition = TARGETS.find(item => item.target === target)
+  assert.ok(definition)
+  mkdirSync(packageDirectory, { recursive: true })
+  const binary = path.join(packageDirectory, `skillshub-cli${definition.extension}`)
+  writeFileSync(binary, contents)
+  chmodSync(binary, 0o755)
+  writeFileSync(path.join(packageDirectory, 'package.json'), `${JSON.stringify({
+    name: `@skillshub-app/cli-${target}`,
+    version: VERSION,
+    exports: { './skillshub-cli': `./skillshub-cli${definition.extension}` },
+  })}\n`)
+  return binary
 }
 
 function createVersionFixture(directory, rootVersion = VERSION) {
@@ -106,31 +136,39 @@ describe('skillshub-cli npm launcher', () => {
 
   it('resolves only the fixed package export, including the Windows executable', () => {
     const calls = []
+    const searchRoot = 'C:\\npm\\node_modules'
+    const expectedBinary = 'C:\\npm\\node_modules\\@skillshub-app\\cli-win32-x64\\skillshub-cli.exe'
     const binary = resolveBinaryPath('win32', 'x64', {
+      searchPaths: () => [searchRoot],
       resolvePath(specifier, options) {
         calls.push({ specifier, options })
-        return 'C:\\npm\\node_modules\\@skillshub-app\\cli-win32-x64\\skillshub-cli.exe'
+        return expectedBinary
       },
-      lstatPath() {
-        return { isFile: () => true, isSymbolicLink: () => false }
+      lstatPath(value) {
+        return {
+          isDirectory: () => value !== expectedBinary,
+          isFile: () => value === expectedBinary,
+          isSymbolicLink: () => false,
+        }
       },
       realpathPath(value) {
         return value
       },
     })
 
-    assert.equal(binary, 'C:\\npm\\node_modules\\@skillshub-app\\cli-win32-x64\\skillshub-cli.exe')
+    assert.equal(binary, expectedBinary)
     assert.equal(calls.length, 1)
     assert.equal(calls[0].specifier, '@skillshub-app/cli-win32-x64/skillshub-cli')
     assert.deepEqual(calls[0].options.paths.length, 1)
   })
 
   it('reports a missing optional dependency without searching cwd or PATH', () => {
-    const error = new Error('Cannot find module')
-    error.code = 'MODULE_NOT_FOUND'
     assert.throws(
       () => resolveBinaryPath('linux', 'arm64', {
-        resolvePath() {
+        searchPaths: () => ['/missing/node_modules'],
+        lstatPath() {
+          const error = new Error('missing')
+          error.code = 'ENOENT'
           throw error
         },
       }),
@@ -139,40 +177,68 @@ describe('skillshub-cli npm launcher', () => {
   })
 
   it('rejects non-regular, symlinked, or redirected binary resolutions', () => {
+    const expectedBinary = '/safe/node_modules/@skillshub-app/cli-linux-x64/skillshub-cli'
     const base = {
-      resolvePath: () => '/safe/node_modules/@skillshub-app/cli-linux-x64/skillshub-cli',
+      searchPaths: () => ['/safe/node_modules'],
+      resolvePath: () => expectedBinary,
+      realpathPath: value => value,
     }
+    const lstatWithBinary = binary => value => ({
+      isDirectory: () => value !== expectedBinary,
+      isFile: () => value === expectedBinary && binary === 'file',
+      isSymbolicLink: () => value === expectedBinary && binary === 'symlink',
+    })
 
     assert.throws(
       () => resolveBinaryPath('linux', 'x64', {
         ...base,
-        lstatPath: () => ({ isFile: () => false, isSymbolicLink: () => false }),
+        lstatPath: lstatWithBinary('other'),
       }),
       /regular file/i,
     )
     assert.throws(
       () => resolveBinaryPath('linux', 'x64', {
         ...base,
-        lstatPath: () => ({ isFile: () => true, isSymbolicLink: () => true }),
+        lstatPath: lstatWithBinary('symlink'),
       }),
       /symbolic link/i,
     )
     assert.throws(
       () => resolveBinaryPath('linux', 'x64', {
         ...base,
-        lstatPath: () => ({ isFile: () => true, isSymbolicLink: () => false }),
-        realpathPath: () => '/redirected/skillshub-cli',
-      }),
-      /redirected/i,
-    )
-    assert.throws(
-      () => resolveBinaryPath('linux', 'x64', {
         resolvePath: () => '/tmp/attacker/skillshub-cli',
-        lstatPath: () => ({ isFile: () => true, isSymbolicLink: () => false }),
-        realpathPath: value => value,
+        lstatPath: lstatWithBinary('file'),
       }),
       /package boundary/i,
     )
+  })
+
+  it('rejects real node_modules package and binary symlink substitution before require.resolve canonicalizes them', { skip: process.platform === 'win32' }, () => {
+    for (const attack of ['package', 'binary']) {
+      const temporary = mkdtempSync(path.join(tmpdir(), `skillshub-cli-${attack}-link-`))
+      try {
+        const consumer = path.join(temporary, 'consumer')
+        const searchRoot = path.join(consumer, 'node_modules')
+        const candidatePackage = path.join(searchRoot, '@skillshub-app/cli-linux-x64')
+        const externalPackage = path.join(temporary, 'external/node_modules/@skillshub-app/cli-linux-x64')
+        const externalBinary = writeInstalledPlatformPackage(externalPackage, 'linux-x64', `${attack}-replacement`)
+        mkdirSync(path.dirname(candidatePackage), { recursive: true })
+        if (attack === 'package') {
+          symlinkSync(externalPackage, candidatePackage, 'dir')
+        } else {
+          const candidateBinary = writeInstalledPlatformPackage(candidatePackage, 'linux-x64', 'expected')
+          rmSync(candidateBinary)
+          symlinkSync(externalBinary, candidateBinary)
+        }
+        const consumerRequire = createRequire(path.join(consumer, 'consumer.cjs'))
+        assert.throws(() => resolveBinaryPath('linux', 'x64', {
+          searchPaths: () => [searchRoot],
+          resolvePath: specifier => consumerRequire.resolve(specifier),
+        }), /symbolic link/i)
+      } finally {
+        rmSync(temporary, { recursive: true, force: true })
+      }
+    }
   })
 
   it('passes arguments unchanged with inherited streams and shell disabled', () => {
@@ -294,9 +360,11 @@ describe('skillshub-cli package manifests', () => {
         )
       }
 
-      const installed = spawnSync('npm', [
+      assert.ok(TEST_NPM_EXECPATH, 'test environment must provide a trusted npm CLI entry')
+      const installed = runTrustedNpm([
         'install', '--package-lock-only', '--ignore-scripts', '--offline', '--no-audit', '--no-fund',
       ], {
+        npmExecPath: TEST_NPM_EXECPATH,
         cwd: temporary,
         encoding: 'utf8',
         env: { ...process.env, npm_config_offline: 'true' },
@@ -310,6 +378,48 @@ describe('skillshub-cli package manifests', () => {
 })
 
 describe('deterministic CLI package staging', () => {
+  it('runs npm through the trusted CLI entry with Node on win32', () => {
+    const temporary = mkdtempSync(path.join(tmpdir(), 'skillshub-cli-npm-entry-'))
+    try {
+      const npmExecPath = path.join(temporary, 'npm-cli.js')
+      writeFileSync(npmExecPath, '# npm CLI fixture\n')
+      const calls = []
+      const result = runTrustedNpm(['pack', 'C:\\package'], {
+        platform: 'win32',
+        nodePath: 'C:\\Program Files\\nodejs\\node.exe',
+        npmExecPath,
+        run(command, args, options) {
+          calls.push({ command, args, options })
+          return { status: 0 }
+        },
+        encoding: 'utf8',
+      })
+      assert.deepEqual(result, { status: 0 })
+      assert.equal(calls.length, 1)
+      assert.equal(calls[0].command, 'C:\\Program Files\\nodejs\\node.exe')
+      assert.deepEqual(calls[0].args, [npmExecPath, 'pack', 'C:\\package'])
+      assert.equal(calls[0].options.shell, false)
+      assert.equal(calls[0].options.encoding, 'utf8')
+    } finally {
+      rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('fails closed when npm_execpath is missing or not a trusted regular file', () => {
+    const temporary = mkdtempSync(path.join(tmpdir(), 'skillshub-cli-npm-untrusted-'))
+    try {
+      assert.throws(() => runTrustedNpm(['pack'], { npmExecPath: null }), /npm_execpath.*required/i)
+      const target = path.join(temporary, 'npm-cli-real.js')
+      const linked = path.join(temporary, 'npm-cli.js')
+      writeFileSync(target, '# npm CLI fixture\n')
+      symlinkSync(target, linked)
+      assert.throws(() => runTrustedNpm(['pack'], { npmExecPath: linked }), /symbolic link/i)
+      assert.throws(() => runTrustedNpm(['pack'], { npmExecPath: temporary }), /regular file/i)
+    } finally {
+      rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
   it('requires each explicit argument exactly once and only accepts supported targets', () => {
     assert.deepEqual(parsePackageCliArgs([
       '--version', VERSION,
@@ -340,6 +450,8 @@ describe('deterministic CLI package staging', () => {
     try {
       const output = path.join(temporary, 'output')
       const { source, sha256 } = createFixtureBinary(temporary, 'darwin-arm64')
+      const npmExecPath = path.join(temporary, 'npm-cli.js')
+      writeFileSync(npmExecPath, '# npm CLI fixture\n')
       const calls = []
       const result = packageCli({
         root: ROOT,
@@ -347,9 +459,11 @@ describe('deterministic CLI package staging', () => {
         target: 'darwin-arm64',
         source,
         output,
+        npmExecPath,
         run(command, args, options) {
           calls.push({ command, args, options })
-          if (command === source) {
+          if (command !== process.execPath) {
+            assert.equal(command, path.join(output, '.skillshub-cli-staging-darwin-arm64/skillshub-cli'))
             return {
               status: 0,
               signal: null,
@@ -357,13 +471,14 @@ describe('deterministic CLI package staging', () => {
               stderr: '',
             }
           }
-          assert.equal(command, 'npm')
-          assert.equal(args[0], 'pack')
+          assert.equal(command, process.execPath)
+          assert.equal(args[0], npmExecPath)
+          assert.equal(args[1], 'pack')
           assert.equal(args.includes('--ignore-scripts'), true)
           assert.equal(args.includes('--json'), true)
           assert.equal(options.shell, false)
           assert.equal(options.env.npm_config_offline, 'true')
-          const staging = args[1]
+          const staging = args[2]
           const manifest = JSON.parse(readFileSync(path.join(staging, 'package.json'), 'utf8'))
           assert.equal(manifest.name, '@skillshub-app/cli-darwin-arm64')
           assert.equal(manifest.version, VERSION)
@@ -378,6 +493,7 @@ describe('deterministic CLI package staging', () => {
       })
 
       assert.equal(calls.length, 2)
+      assert.notEqual(calls[0].command, source)
       assert.deepEqual(calls[0].args, ['version', '--json'])
       assert.deepEqual(calls[0].options.stdio, ['ignore', 'pipe', 'pipe'])
       assert.equal(calls[0].options.shell, false)
@@ -461,6 +577,37 @@ describe('deterministic CLI package staging', () => {
     }
   })
 
+  it('rejects replacement bytes copied into staging before version execution or packing', () => {
+    const temporary = mkdtempSync(path.join(tmpdir(), 'skillshub-cli-copy-race-'))
+    try {
+      const { source } = createFixtureBinary(temporary, 'darwin-arm64')
+      let spawned = false
+      assert.throws(() => packageCli({
+        root: ROOT,
+        version: VERSION,
+        target: 'darwin-arm64',
+        source,
+        output: path.join(temporary, 'output'),
+        copyFile(from, to) {
+          if (from === source) {
+            writeFileSync(to, '#!/bin/sh\necho replaced\n')
+            chmodSync(to, 0o755)
+          } else {
+            copyFileSync(from, to)
+          }
+        },
+        run() {
+          spawned = true
+          throw new Error('replacement bytes must not execute')
+        },
+      }), /staged.*hash|hash.*staged/i)
+      assert.equal(spawned, false)
+      assert.equal(existsSync(path.join(temporary, 'output/.skillshub-cli-staging-darwin-arm64')), false)
+    } finally {
+      rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
   it('produces byte-identical tarballs from the same verified input', { skip: process.platform === 'win32' }, () => {
     const temporary = mkdtempSync(path.join(tmpdir(), 'skillshub-cli-deterministic-'))
     try {
@@ -470,9 +617,10 @@ describe('deterministic CLI package staging', () => {
         ? path.resolve(process.env.SKILLSHUB_CLI_SMOKE_SOURCE)
         : createFixtureBinary(temporary, definition.target).source
       const output = path.join(temporary, 'output')
-      const first = packageCli({ root: ROOT, version: VERSION, target: definition.target, source, output })
+      assert.ok(TEST_NPM_EXECPATH, 'test environment must provide a trusted npm CLI entry')
+      const first = packageCli({ root: ROOT, version: VERSION, target: definition.target, source, output, npmExecPath: TEST_NPM_EXECPATH })
       const firstHash = createHash('sha256').update(readFileSync(first.tarball)).digest('hex')
-      const second = packageCli({ root: ROOT, version: VERSION, target: definition.target, source, output })
+      const second = packageCli({ root: ROOT, version: VERSION, target: definition.target, source, output, npmExecPath: TEST_NPM_EXECPATH })
       const secondHash = createHash('sha256').update(readFileSync(second.tarball)).digest('hex')
       assert.equal(secondHash, firstHash)
     } finally {
@@ -489,14 +637,22 @@ describe('deterministic CLI package staging', () => {
         ? path.resolve(process.env.SKILLSHUB_CLI_SMOKE_SOURCE)
         : createFixtureBinary(temporary, definition.target).source
       const tarballs = path.join(temporary, 'tarballs')
-      const platformPackage = packageCli({ root: ROOT, version: VERSION, target: definition.target, source, output: tarballs })
-      const packedMain = spawnSync('npm', [
+      assert.ok(TEST_NPM_EXECPATH, 'test environment must provide a trusted npm CLI entry')
+      const platformPackage = packageCli({
+        root: ROOT,
+        version: VERSION,
+        target: definition.target,
+        source,
+        output: tarballs,
+        npmExecPath: TEST_NPM_EXECPATH,
+      })
+      const packedMain = runTrustedNpm([
         'pack', path.join(ROOT, 'packages/skillshub-cli'),
         '--json', '--ignore-scripts', '--pack-destination', tarballs,
       ], {
+        npmExecPath: TEST_NPM_EXECPATH,
         encoding: 'utf8',
         env: { ...process.env, npm_config_offline: 'true' },
-        shell: false,
       })
       assert.equal(packedMain.status, 0, packedMain.stderr)
       const [{ filename }] = JSON.parse(packedMain.stdout)
@@ -505,10 +661,11 @@ describe('deterministic CLI package staging', () => {
       const installRoot = path.join(temporary, 'install')
       mkdirSync(installRoot)
       writeFileSync(path.join(installRoot, 'package.json'), '{"private":true}\n')
-      const installed = spawnSync('npm', [
+      const installed = runTrustedNpm([
         'install', '--ignore-scripts', '--offline', '--no-audit', '--no-fund', '--no-package-lock', '--no-save',
         mainPackage, platformPackage.tarball,
       ], {
+        npmExecPath: TEST_NPM_EXECPATH,
         cwd: installRoot,
         encoding: 'utf8',
         env: {
@@ -516,7 +673,6 @@ describe('deterministic CLI package staging', () => {
           npm_config_offline: 'true',
           npm_config_registry: 'http://127.0.0.1:9',
         },
-        shell: false,
       })
       assert.equal(installed.status, 0, installed.stderr)
 

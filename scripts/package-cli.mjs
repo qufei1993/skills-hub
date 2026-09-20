@@ -49,6 +49,26 @@ function requireRegularFile(filePath, description) {
   if (!metadata.isFile()) throw new Error(`${description} must be a regular file: ${filePath}`)
 }
 
+export function runTrustedNpm(args, {
+  run = spawnSync,
+  npmExecPath = process.env.npm_execpath,
+  nodePath = process.execPath,
+  platform = process.platform,
+  lstatPath = lstatSync,
+  ...options
+} = {}) {
+  if (typeof npmExecPath !== 'string' || !npmExecPath || !path.isAbsolute(npmExecPath)) {
+    throw new Error('An absolute npm_execpath is required; refusing to search PATH')
+  }
+  if (platform === 'win32' && !nodePath.toLowerCase().endsWith('.exe')) {
+    throw new Error('The Windows npm invocation requires a Node executable')
+  }
+  const metadata = lstatPath(npmExecPath)
+  if (metadata.isSymbolicLink()) throw new Error(`Trusted npm CLI entry must not be a symbolic link: ${npmExecPath}`)
+  if (!metadata.isFile()) throw new Error(`Trusted npm CLI entry must be a regular file: ${npmExecPath}`)
+  return run(nodePath, [npmExecPath, ...args], { ...options, shell: false })
+}
+
 function validateVersion(version) {
   if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {
     throw new Error(`Invalid package version: ${version}`)
@@ -114,7 +134,7 @@ function verifyBinaryVersion(source, version, run) {
   }
 }
 
-function prepareStaging({ root, version, target, source, output }) {
+function prepareStaging({ root, version, target, source, output, copyFile }) {
   const definition = targetDefinition(target)
   const triple = resolveSidecarTarget(target)
   const resolvedSource = path.resolve(source)
@@ -129,8 +149,6 @@ function prepareStaging({ root, version, target, source, output }) {
   if (metadata.version !== version) throw new Error('CLI metadata version mismatch')
   if (metadata.target !== triple) throw new Error('CLI metadata target mismatch')
   if (metadata.profile !== 'release') throw new Error('Only a release CLI artifact may be packaged')
-  const binarySha256 = sha256(resolvedSource)
-  if (metadata.sha256 !== binarySha256) throw new Error('CLI metadata hash mismatch')
 
   verifyRepositoryVersions(root, version, definition.directory)
   const resolvedOutput = path.resolve(output)
@@ -145,18 +163,26 @@ function prepareStaging({ root, version, target, source, output }) {
     rmSync(staging, { recursive: true, force: true })
   }
   mkdirSync(staging, { mode: 0o755 })
-  const template = path.join(root, 'packages', definition.directory)
-  for (const filename of ['package.json', 'README.md', 'LICENSE']) {
-    const destination = path.join(staging, filename)
-    copyFileSync(path.join(template, filename), destination)
-    chmodSync(destination, 0o644)
-    utimesSync(destination, NORMALIZED_TIME, NORMALIZED_TIME)
+  try {
+    const template = path.join(root, 'packages', definition.directory)
+    for (const filename of ['package.json', 'README.md', 'LICENSE']) {
+      const destination = path.join(staging, filename)
+      copyFile(path.join(template, filename), destination)
+      chmodSync(destination, 0o644)
+      utimesSync(destination, NORMALIZED_TIME, NORMALIZED_TIME)
+    }
+    const stagedBinary = path.join(staging, `skillshub-cli${definition.extension}`)
+    copyFile(resolvedSource, stagedBinary)
+    chmodSync(stagedBinary, 0o755)
+    utimesSync(stagedBinary, NORMALIZED_TIME, NORMALIZED_TIME)
+    requireRegularFile(stagedBinary, 'Staged CLI binary')
+    const binarySha256 = sha256(stagedBinary)
+    if (metadata.sha256 !== binarySha256) throw new Error('Staged CLI binary hash does not match release metadata')
+    return { binarySha256, definition, resolvedOutput, stagedBinary, staging, triple }
+  } catch (error) {
+    rmSync(staging, { recursive: true, force: true })
+    throw error
   }
-  const stagedBinary = path.join(staging, `skillshub-cli${definition.extension}`)
-  copyFileSync(resolvedSource, stagedBinary)
-  chmodSync(stagedBinary, 0o755)
-  utimesSync(stagedBinary, NORMALIZED_TIME, NORMALIZED_TIME)
-  return { binarySha256, definition, resolvedOutput, staging, triple }
 }
 
 export function packageCli({
@@ -166,17 +192,25 @@ export function packageCli({
   source,
   output,
   run = spawnSync,
+  npmExecPath = process.env.npm_execpath,
+  nodePath = process.execPath,
+  npmPlatform = process.platform,
+  copyFile = copyFileSync,
 }) {
   validateVersion(version)
-  const prepared = prepareStaging({ root: path.resolve(root), version, target, source, output })
+  const prepared = prepareStaging({ root: path.resolve(root), version, target, source, output, copyFile })
   try {
-    verifyBinaryVersion(path.resolve(source), version, run)
-    const result = run('npm', [
+    verifyBinaryVersion(prepared.stagedBinary, version, run)
+    const result = runTrustedNpm([
       'pack', prepared.staging,
       '--json',
       '--ignore-scripts',
       '--pack-destination', prepared.resolvedOutput,
     ], {
+      run,
+      npmExecPath,
+      nodePath,
+      platform: npmPlatform,
       encoding: 'utf8',
       env: {
         ...process.env,

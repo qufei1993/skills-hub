@@ -23,48 +23,91 @@ function resolveBinaryPackage(platform, arch) {
   return packageExport
 }
 
+function missingPlatformPackage(packageExport, platform, arch, cause) {
+  const message = `Missing optional platform package ${packageExport}; reinstall skillshub-cli for ${platform}-${arch}.`
+  const error = new Error(message)
+  error.cause = cause
+  return error
+}
+
+function requireDirectory(filePath, description, lstatPath) {
+  const metadata = lstatPath(filePath)
+  if (metadata.isSymbolicLink()) throw new Error(`${description} must not be a symbolic link: ${filePath}`)
+  if (!metadata.isDirectory()) throw new Error(`${description} must be a directory: ${filePath}`)
+}
+
+function locateBinaryCandidate(packageExport, platform, arch, {
+  searchPaths,
+  lstatPath,
+  realpathPath,
+}) {
+  const pathApi = platform === 'win32' ? path.win32 : path.posix
+  const packageName = packageExport.slice(0, packageExport.lastIndexOf('/'))
+  const [scope, unscopedName] = packageName.split('/')
+  const expectedBinaryName = platform === 'win32' ? 'skillshub-cli.exe' : 'skillshub-cli'
+  const roots = searchPaths(packageName)
+  if (!Array.isArray(roots)) throw missingPlatformPackage(packageExport, platform, arch)
+
+  for (const nodeModulesDirectory of roots) {
+    const scopeDirectory = pathApi.join(nodeModulesDirectory, scope)
+    const packageDirectory = pathApi.join(scopeDirectory, unscopedName)
+    let packageMetadata
+    try {
+      packageMetadata = lstatPath(packageDirectory)
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue
+      throw error
+    }
+    requireDirectory(nodeModulesDirectory, 'Node modules directory', lstatPath)
+    requireDirectory(scopeDirectory, 'Scoped package parent', lstatPath)
+    if (packageMetadata.isSymbolicLink()) throw new Error(`Platform package must not be a symbolic link: ${packageDirectory}`)
+    if (!packageMetadata.isDirectory()) throw new Error(`Platform package must be a directory: ${packageDirectory}`)
+
+    const binary = pathApi.join(packageDirectory, expectedBinaryName)
+    let binaryMetadata
+    try {
+      binaryMetadata = lstatPath(binary)
+    } catch (error) {
+      throw missingPlatformPackage(packageExport, platform, arch, error)
+    }
+    if (binaryMetadata.isSymbolicLink()) throw new Error(`CLI binary must not be a symbolic link: ${binary}`)
+    if (!binaryMetadata.isFile()) throw new Error(`CLI binary must be a regular file: ${binary}`)
+
+    const canonicalPackage = realpathPath(packageDirectory)
+    const canonicalBinary = realpathPath(binary)
+    if (pathApi.dirname(canonicalBinary) !== canonicalPackage) {
+      throw new Error(`CLI binary escaped its fixed package root: ${binary}`)
+    }
+    return { binary, canonicalBinary, canonicalPackage }
+  }
+  throw missingPlatformPackage(packageExport, platform, arch)
+}
+
 function resolveBinaryPath(platform, arch, {
   resolvePath = require.resolve,
+  searchPaths = require.resolve.paths,
   lstatPath = lstatSync,
   realpathPath = realpathSync,
 } = {}) {
   const packageExport = resolveBinaryPackage(platform, arch)
-  let binary
+  const candidate = locateBinaryCandidate(packageExport, platform, arch, {
+    searchPaths,
+    lstatPath,
+    realpathPath,
+  })
+  let resolvedBinary
   try {
-    binary = resolvePath(packageExport, { paths: [PACKAGE_ROOT] })
+    resolvedBinary = resolvePath(packageExport, { paths: [PACKAGE_ROOT] })
   } catch (error) {
-    const message = `Missing optional platform package ${packageExport}; reinstall skillshub-cli for ${platform}-${arch}.`
-    const wrapped = new Error(message)
-    wrapped.cause = error
-    throw wrapped
-  }
-
-  const metadata = lstatPath(binary)
-  if (metadata.isSymbolicLink()) {
-    throw new Error(`Refusing symbolic link for skillshub-cli binary: ${binary}`)
-  }
-  if (!metadata.isFile()) {
-    throw new Error(`Resolved skillshub-cli binary is not a regular file: ${binary}`)
+    throw missingPlatformPackage(packageExport, platform, arch, error)
   }
   const pathApi = platform === 'win32' ? path.win32 : path.posix
-  const packageName = packageExport.slice(0, packageExport.lastIndexOf('/'))
-  const [scope, unscopedName] = packageName.split('/')
-  const packageDirectory = pathApi.dirname(binary)
-  const scopeDirectory = pathApi.dirname(packageDirectory)
-  const nodeModulesDirectory = pathApi.dirname(scopeDirectory)
-  const expectedBinaryName = platform === 'win32' ? 'skillshub-cli.exe' : 'skillshub-cli'
-  const insideFixedPackage = pathApi.isAbsolute(binary)
-    && pathApi.basename(binary) === expectedBinaryName
-    && pathApi.basename(packageDirectory) === unscopedName
-    && pathApi.basename(scopeDirectory) === scope
-    && pathApi.basename(nodeModulesDirectory) === 'node_modules'
-  if (!insideFixedPackage) {
-    throw new Error(`Resolved skillshub-cli binary escaped its fixed package boundary: ${binary}`)
+  const canonicalResolved = realpathPath(resolvedBinary)
+  if (canonicalResolved !== candidate.canonicalBinary
+    || pathApi.dirname(canonicalResolved) !== candidate.canonicalPackage) {
+    throw new Error(`Resolved skillshub-cli binary escaped its fixed package boundary: ${resolvedBinary}`)
   }
-  if (pathApi.resolve(realpathPath(binary)) !== pathApi.resolve(binary)) {
-    throw new Error(`Refusing redirected skillshub-cli binary: ${binary}`)
-  }
-  return binary
+  return candidate.binary
 }
 
 function launch({
