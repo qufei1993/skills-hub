@@ -13,7 +13,79 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify:
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+    name: Verify release CLI (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - name: Install Windows native OpenSSL build dependency
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install -y strawberryperl
+          if ($LASTEXITCODE -ne 0) { throw "Perl installation failed" }
+          Add-Content $env:GITHUB_PATH 'C:\Strawberry\perl\bin'
+      - run: npm ci
+      - run: node --test scripts/release-workflow.test.mjs
+      - run: npm run version:check
+      - name: Verify native host matches target
+        shell: bash
+        run: |
+          test "$(rustc -vV | sed -n 's/^host: //p')" = "${{ matrix.target }}"
+      - run: npm run cli:prepare -- --target ${{ matrix.target }} --debug
+      - name: CLI and previous-stable compatibility tests (native debug executable)
+        working-directory: src-tauri
+        run: cargo test --locked --test cli_integration --test cli_desktop_compatibility
+      - name: Windows native bridge ancestor and junction race tests
+        if: runner.os == 'Windows'
+        working-directory: src-tauri
+        run: cargo test --locked --lib cli_bridge -- --nocapture
+      - run: npm run build
+      - run: npm run cli:prepare -- --target ${{ matrix.target }}
+      - name: Native release binary and offline npm tarball smoke
+        shell: bash
+        run: |
+          extension=""
+          if [ "$RUNNER_OS" = "Windows" ]; then extension=".exe"; fi
+          source="$GITHUB_WORKSPACE/src-tauri/binaries/skillshub-cli-${{ matrix.target }}$extension"
+          "$source" version --json
+          "$source" doctor --json
+          SKILLSHUB_CLI_SMOKE_SOURCE="$source" npm test -- scripts/package-cli.test.mjs -t 'installs explicit local main and host tarballs'
+
   release:
+    needs: verify
     if: startsWith(github.ref, 'refs/tags/v')
     environment: release
     runs-on: ${{ matrix.os }}
@@ -338,6 +410,38 @@ jobs:
           codesign --verify --deep --strict --verbose=4 "$APP_PATH"
           codesign --verify --strict --verbose=4 "$APP_PATH/Contents/MacOS/skillshub-cli"
 
+      - name: Notarize macOS desktop and CLI when configured
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APPLE_ID:-}${APPLE_PASSWORD:-}${APPLE_TEAM_ID:-}" ]; then
+            echo "::notice::Notarization credentials not configured; notarization skipped."
+            exit 0
+          fi
+          test -n "${APPLE_ID:-}" && test -n "${APPLE_PASSWORD:-}" && test -n "${APPLE_TEAM_ID:-}"
+          test -n "${APPLE_SIGNING_IDENTITY:-}"
+          app="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Skills Hub.app"
+          test -d "$app"
+          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/desktop-notarization.zip"
+          ditto -c -k "src-tauri/binaries/skillshub-cli-${{ matrix.target }}" "$RUNNER_TEMP/cli-notarization.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/desktop-notarization.zip" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait --output-format json 2>/dev/null | node scripts/assert-notarization.mjs
+          xcrun notarytool submit "$RUNNER_TEMP/cli-notarization.zip" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait --output-format json 2>/dev/null | node scripts/assert-notarization.mjs
+          # Both submissions must be Accepted before stapling. Raw Mach-O CLI files cannot be stapled.
+          xcrun stapler staple "$app" > /dev/null 2>&1
+          xcrun stapler validate "$app" > /dev/null 2>&1
+          codesign --verify --deep --strict "$app" > /dev/null 2>&1
+          codesign --verify --strict "$app/Contents/MacOS/skillshub-cli" > /dev/null 2>&1
+          cmp "$app/Contents/MacOS/skillshub-cli" "src-tauri/binaries/skillshub-cli-${{ matrix.target }}"
+          # Refresh the updater archive and signature so it contains the stapled app.
+          archive="$app.tar.gz"
+          tar -czf "$archive" -C "$(dirname "$app")" "$(basename "$app")"
+          TAURI_PRIVATE_KEY="$TAURI_SIGNING_PRIVATE_KEY" TAURI_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" node node_modules/@tauri-apps/cli/tauri.js signer sign "$archive" > /dev/null 2>&1
+
       - name: Prepare macOS Assets
         if: runner.os == 'macOS'
         shell: bash
@@ -439,28 +543,6 @@ jobs:
           cp "${EXE}" "release-assets/${NEW_EXE}"
           cp "${EXE}.sig" "release-assets/${NEW_EXE}.sig"
 
-      - name: Notarize macOS desktop and CLI when configured
-        if: runner.os == 'macOS'
-        shell: bash
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          set -euo pipefail
-          if [ -z "${APPLE_ID:-}${APPLE_PASSWORD:-}${APPLE_TEAM_ID:-}" ]; then
-            echo "::notice::Notarization credentials not configured; notarization skipped."
-            exit 0
-          fi
-          test -n "${APPLE_ID:-}" && test -n "${APPLE_PASSWORD:-}" && test -n "${APPLE_TEAM_ID:-}"
-          test -n "${APPLE_SIGNING_IDENTITY:-}"
-          app="$(find src-tauri/target/${{ matrix.target }}/release/bundle -type d -name '*.app' -maxdepth 3 | head -n 1)"
-          test -n "$app"
-          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/desktop-notarization.zip"
-          ditto -c -k "src-tauri/binaries/skillshub-cli-${{ matrix.target }}" "$RUNNER_TEMP/cli-notarization.zip"
-          xcrun notarytool submit "$RUNNER_TEMP/desktop-notarization.zip" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
-          xcrun notarytool submit "$RUNNER_TEMP/cli-notarization.zip" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
-
       - name: Native release and offline npm smoke
         shell: bash
         run: |
@@ -512,7 +594,7 @@ jobs:
           if-no-files-found: error
 
   publish-npm-platforms:
-    needs: release
+    needs: [verify, release]
     if: startsWith(github.ref, 'refs/tags/v')
     environment: release
     runs-on: ubuntu-24.04
@@ -543,7 +625,7 @@ jobs:
           done
 
   publish-npm-main:
-    needs: publish-npm-platforms
+    needs: [verify, release, publish-npm-platforms]
     if: startsWith(github.ref, 'refs/tags/v')
     environment: release
     runs-on: ubuntu-24.04
@@ -563,7 +645,7 @@ jobs:
   assemble-updater-json:
     name: Assemble updater.json
     runs-on: macos-14
-    needs: [release, publish-npm-main]
+    needs: [verify, release, publish-npm-main]
     if: startsWith(github.ref, 'refs/tags/v')
     environment: release
     permissions:
