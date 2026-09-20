@@ -61,6 +61,62 @@ fn init_git_repo(dir: &Path) {
         .unwrap();
 }
 
+fn assert_legacy_multi_skill_zero_match_is_safe(update: bool) {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("multi-source");
+    write_skill(&source.join("alpha"), "alpha");
+    write_skill(&source.join("beta"), "beta");
+    init_git_repo(&source);
+    let service = fixture.open();
+    let installed = service
+        .install(InstallRequest::local(source.join("alpha")))
+        .unwrap();
+    let mut record = service
+        .store()
+        .get_skill_by_id(&installed.id)
+        .unwrap()
+        .unwrap();
+    record.name = "retired-unmatched".into();
+    record.source_type = "git".into();
+    record.source_ref = Some(source.to_string_lossy().into_owned());
+    record.source_subpath = None;
+    service.store().upsert_skill(&record).unwrap();
+    let before = crate::core::content_hash::hash_dir(Path::new(&installed.central_path)).unwrap();
+
+    let error = if update {
+        service.update(installed.id.clone().into()).unwrap_err()
+    } else {
+        service
+            .check_updates(installed.id.clone().into())
+            .unwrap_err()
+    };
+    assert_eq!(error.code, ErrorCode::InvalidSource);
+    assert_eq!(error.details["reason"], "source_selection_required");
+    assert_eq!(
+        crate::core::content_hash::hash_dir(Path::new(&installed.central_path)).unwrap(),
+        before
+    );
+    assert_eq!(
+        service
+            .store()
+            .get_skill_by_id(&installed.id)
+            .unwrap()
+            .unwrap()
+            .source_subpath,
+        None
+    );
+}
+
+#[test]
+fn legacy_multi_skill_zero_match_check_returns_safe_error() {
+    assert_legacy_multi_skill_zero_match_is_safe(false);
+}
+
+#[test]
+fn legacy_multi_skill_zero_match_update_returns_safe_error() {
+    assert_legacy_multi_skill_zero_match_is_safe(true);
+}
+
 #[test]
 fn local_install_is_visible_after_reopen_and_never_deploys() {
     let fixture = Fixture::new();

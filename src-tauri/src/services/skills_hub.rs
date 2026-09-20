@@ -148,7 +148,8 @@ impl SkillsHubService {
                 is_custom: false,
                 skills_dir: skills_dir.to_string_lossy().into_owned(),
                 project_skills_dir: project_relative_skills_dir(&adapter).to_string(),
-                supports_project_scope: supports_project_scope(&adapter),
+                supports_project_scope: cfg!(any(target_os = "macos", target_os = "linux"))
+                    && supports_project_scope(&adapter),
                 sync_mode: Default::default(),
             });
         }
@@ -164,7 +165,8 @@ impl SkillsHubService {
                 is_custom: true,
                 skills_dir: skills_dir.to_string_lossy().into_owned(),
                 project_skills_dir: custom.project_skills_dir.clone().unwrap_or_default(),
-                supports_project_scope: custom.project_skills_dir.is_some(),
+                supports_project_scope: cfg!(any(target_os = "macos", target_os = "linux"))
+                    && custom.project_skills_dir.is_some(),
                 sync_mode: custom.sync_mode,
             });
         }

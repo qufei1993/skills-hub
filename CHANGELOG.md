@@ -13,9 +13,11 @@ All notable changes to this project will be documented in this file.
 - **Distribution**: Release pipelines target macOS arm64/x64, Windows x64, and Linux GNU arm64/x64, with standalone SHA-256 assets and platform npm packages behind `skillshub-cli`. All five native CI jobs must succeed before publication; local validation does not establish native support on the other four hosts.
 
 ### Safety and scope
+- Project deployment is available on macOS and Linux for supported Agents. Windows advertises global scope only; project requests return `PROJECT_SCOPE_UNSUPPORTED` without changing the library or Agent targets.
 - `--json` supplies structured results, `--dry-run` previews supported writes, and destructive operations require explicit confirmation. Install does not implicitly deploy. Ambiguous selections, unowned directories, concurrent writers, and unsafe updates stop without force-overwrite shortcuts.
 - Device sync, automatic tasks, credentials/OAuth, proxy/storage/tool configuration, app updates, restore, and permanent deletion remain desktop-only. The official Skill must not edit SQLite or Agent folders directly.
-- CLI changes appear on the desktop's next normal data read or restart; this version adds no live refresh. Shared schema version stays compatible with v0.10.1; unknown newer schemas reject writes.
+- CLI changes appear on the desktop's next normal data read or restart; this version adds no live refresh. Shared schema version stays compatible with v0.10.1; unknown newer schemas are rejected before legacy migration without changing the database, WAL/SHM, backups, or legacy files. Development and test profiles never import or clean production legacy state.
+- Legacy multi-Skill records without a uniquely matching source return `INVALID_SOURCE` during checks and updates, preserving the installed content and JSON error protocol.
 
 ## [0.10.1] - 2026-09-13
 

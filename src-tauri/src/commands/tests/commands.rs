@@ -1509,7 +1509,7 @@ fn saving_custom_tool_config_creates_enabled_skills_dir() {
                     label: "Existing".to_string(),
                     avatar: Some("data:image/png;base64,AA==".to_string()),
                     skills_dir: existing.to_string_lossy().to_string(),
-                    project_skills_dir: None,
+                    project_skills_dir: Some(".custom/skills".to_string()),
                     sync_mode: SyncMode::Auto,
                     enabled: true,
                 },
@@ -1545,6 +1545,15 @@ fn saving_custom_tool_config_creates_enabled_skills_dir() {
         Some("data:image/png;base64,AA==")
     );
     assert_eq!(existing_tool.sync_mode, SyncMode::Auto);
+    assert_eq!(
+        existing_tool.supports_project_scope,
+        cfg!(any(target_os = "macos", target_os = "linux"))
+    );
+    for tool in tools.iter().filter(|tool| !tool.is_custom) {
+        let expected = cfg!(any(target_os = "macos", target_os = "linux"))
+            && !matches!(tool.key.as_str(), "hermes_agent" | "workbuddy");
+        assert_eq!(tool.supports_project_scope, expected, "{}", tool.key);
+    }
     assert!(created_tool.enabled);
     assert!(created_tool.installed);
     assert_eq!(created_tool.sync_mode, SyncMode::Copy);

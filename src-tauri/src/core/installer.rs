@@ -1503,10 +1503,15 @@ fn stage_skill_source(
                                     || skill_name.contains(&candidate_name)
                             })
                             .collect::<Vec<_>>();
-                        (fuzzy.len() == 1).then_some(fuzzy[0])
+                        match fuzzy.as_slice() {
+                            [candidate] => Some(*candidate),
+                            _ => None,
+                        }
                     })
                 {
                     resolved_subpath = Some(matched.1.clone());
+                } else {
+                    anyhow::bail!("SKILL_SOURCE_SELECTION_REQUIRED");
                 }
             }
             let copy_source = resolved_subpath

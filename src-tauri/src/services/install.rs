@@ -730,6 +730,13 @@ fn map_update_error(error: anyhow::Error) -> ServiceError {
         );
     }
     let first = error.to_string();
+    if first == "SKILL_SOURCE_SELECTION_REQUIRED" {
+        return ServiceError::new(
+            ErrorCode::InvalidSource,
+            "the original skill cannot be uniquely selected from its source",
+            json!({ "reason": "source_selection_required" }),
+        );
+    }
     if first.starts_with("UPDATE_IN_PROGRESS|") {
         return ServiceError::new(
             ErrorCode::OperationBusy,

@@ -313,6 +313,36 @@ impl SkillStore {
         &self.db_path
     }
 
+    pub(crate) fn ensure_compatible_readonly(&self) -> Result<()> {
+        if !self.db_path.try_exists()? {
+            return Ok(());
+        }
+        // Even a read-only SQLite connection can change the source WAL index.
+        // Inspect a private snapshot so opening an unknown schema changes no files.
+        let snapshot = tempfile::tempdir().context("create schema inspection snapshot")?;
+        let database = snapshot.path().join(DB_FILE_NAME);
+        std::fs::copy(&self.db_path, &database)
+            .context("snapshot database for schema inspection")?;
+        let mut wal = self.db_path.as_os_str().to_os_string();
+        wal.push("-wal");
+        let wal = PathBuf::from(wal);
+        if wal.try_exists()? {
+            std::fs::copy(wal, snapshot.path().join("skills_hub.db-wal"))
+                .context("snapshot WAL for schema inspection")?;
+        }
+        let conn =
+            Connection::open_with_flags(database, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        if version > SCHEMA_VERSION && version != PRE_RELEASE_DEVICE_SYNC_SCHEMA_VERSION {
+            return Err(IncompatibleDatabaseError {
+                found_version: version,
+                supported_version: SCHEMA_VERSION,
+            }
+            .into());
+        }
+        Ok(())
+    }
+
     pub fn ensure_schema(&self) -> Result<()> {
         self.with_conn(|conn| {
             conn.execute_batch("PRAGMA foreign_keys = ON;")?;

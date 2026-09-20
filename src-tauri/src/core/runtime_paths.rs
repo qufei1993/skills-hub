@@ -118,14 +118,17 @@ impl RuntimePaths {
 }
 
 pub fn open_store(paths: &RuntimePaths) -> Result<SkillStore> {
+    let store = SkillStore::new(paths.database_path.clone());
+    store.ensure_compatible_readonly()?;
     std::fs::create_dir_all(&paths.app_data_dir)
         .with_context(|| format!("failed to create app data dir {:?}", paths.app_data_dir))?;
-    let data_root = paths
-        .app_data_dir
-        .parent()
-        .context("app data directory has no data root")?;
-    migrate_legacy_db_if_needed_in_data_dir(&paths.database_path, data_root)?;
-    let store = SkillStore::new(paths.database_path.clone());
+    if paths.profile == RuntimeProfile::Production {
+        let data_root = paths
+            .app_data_dir
+            .parent()
+            .context("app data directory has no data root")?;
+        migrate_legacy_db_if_needed_in_data_dir(&paths.database_path, data_root)?;
+    }
     store.ensure_schema()?;
     store.migrate_device_sync_startup_credential_consent()?;
     Ok(store)

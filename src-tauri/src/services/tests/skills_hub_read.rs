@@ -266,7 +266,15 @@ fn list_agents_reports_detected_custom_agent_state() {
 
     assert!(custom.detected);
     assert!(custom.enabled);
-    assert!(custom.supports_project_scope);
+    assert_eq!(
+        custom.supports_project_scope,
+        cfg!(any(target_os = "macos", target_os = "linux"))
+    );
+    for agent in agents.agents.iter().filter(|agent| !agent.is_custom) {
+        let expected = cfg!(any(target_os = "macos", target_os = "linux"))
+            && !matches!(agent.key.as_str(), "hermes_agent" | "workbuddy");
+        assert_eq!(agent.supports_project_scope, expected, "{}", agent.key);
+    }
     assert!(agents.installed.contains(&"custom_agent".to_string()));
 }
 

@@ -506,7 +506,8 @@ fn runtime_tools(store: &SkillStore, include_disabled: bool) -> anyhow::Result<V
             is_custom: false,
             skills_dir: resolve_default_path(&adapter)?,
             project_skills_dir: project_relative_skills_dir(&adapter).to_string(),
-            supports_project_scope: supports_project_scope(&adapter),
+            supports_project_scope: cfg!(any(target_os = "macos", target_os = "linux"))
+                && supports_project_scope(&adapter),
             sync_mode: SyncMode::Auto,
         });
     }
@@ -516,7 +517,8 @@ fn runtime_tools(store: &SkillStore, include_disabled: bool) -> anyhow::Result<V
             continue;
         }
         let skills_dir = expand_home_path(&custom.skills_dir)?;
-        let supports_project_scope = custom.project_skills_dir.is_some();
+        let supports_project_scope = cfg!(any(target_os = "macos", target_os = "linux"))
+            && custom.project_skills_dir.is_some();
         let detected = skills_dir.is_dir();
         tools.push(RuntimeTool {
             key: custom.key,

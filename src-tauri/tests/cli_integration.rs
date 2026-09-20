@@ -174,6 +174,47 @@ fn write_skill(path: &Path, name: &str) {
 }
 
 #[test]
+fn legacy_multi_skill_zero_match_preserves_json_check_and_update_errors() {
+    let fixture = Fixture::new();
+    let source = fixture.root.path().join("multi-source");
+    write_skill(&source.join("alpha"), "alpha");
+    write_skill(&source.join("beta"), "beta");
+    let repo = git2::Repository::init(&source).unwrap();
+    let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    repo.commit(Some("HEAD"), &signature, &signature, "fixture", &tree, &[])
+        .unwrap();
+    let installed = fixture
+        .service()
+        .install(InstallRequest::local(source.join("alpha")))
+        .unwrap();
+    let store = fixture.store();
+    let mut record = store.get_skill_by_id(&installed.id).unwrap().unwrap();
+    record.name = "retired-unmatched".into();
+    record.source_type = "git".into();
+    record.source_ref = Some(source.to_string_lossy().into_owned());
+    record.source_subpath = None;
+    store.upsert_skill(&record).unwrap();
+    let central = Path::new(&installed.central_path);
+    let before = app_lib::core::content_hash::hash_dir(central).unwrap();
+    for operation in ["check", "update"] {
+        let error = fixture.json(
+            &["skills", operation, &installed.id],
+            Some(("INVALID_SOURCE", 2)),
+        );
+        assert_eq!(error["details"]["reason"], "source_selection_required");
+        assert_eq!(
+            app_lib::core::content_hash::hash_dir(central).unwrap(),
+            before
+        );
+    }
+}
+
+#[test]
 fn cli_install_tag_deploy_reopens_the_same_desktop_service_state() {
     let fixture = Fixture::new();
     let installed = fixture.install("demo");
@@ -520,6 +561,7 @@ fn human_output_includes_results_and_localized_help_without_stream_noise() {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 fn project_deployment_uses_the_requested_project_without_global_side_effects() {
     let fixture = Fixture::new();
@@ -554,6 +596,80 @@ fn project_deployment_uses_the_requested_project_without_global_side_effects() {
         ],
         None,
     );
+    assert!(fixture
+        .service()
+        .show_skill("demo".into())
+        .unwrap()
+        .targets
+        .is_empty());
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn windows_project_scope_reports_unsupported_without_database_or_filesystem_mutation() {
+    use app_lib::core::tool_adapters::{save_tool_config, CustomToolConfig, ToolConfig};
+    let fixture = Fixture::new();
+    fixture.install("demo");
+    let custom = fixture.root.path().join("home/custom/skills");
+    save_tool_config(
+        &fixture.store(),
+        ToolConfig {
+            disabled_builtin_tools: vec![],
+            custom_tools: vec![CustomToolConfig {
+                key: "custom_test".into(),
+                label: "Custom".into(),
+                avatar: None,
+                skills_dir: custom.to_string_lossy().into_owned(),
+                project_skills_dir: Some(".custom/skills".into()),
+                sync_mode: Default::default(),
+                enabled: true,
+            }],
+        },
+    )
+    .unwrap();
+    let project = fixture.root.path().join("project");
+    fs::create_dir(&project).unwrap();
+    let snapshot = || -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+        walkdir::WalkDir::new(fixture.root.path())
+            .into_iter()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                let bytes = if entry.file_type().is_file() {
+                    fs::read(entry.path()).unwrap()
+                } else {
+                    Vec::new()
+                };
+                (entry.path().to_path_buf(), bytes)
+            })
+            .collect()
+    };
+    let before = snapshot();
+    let agents = fixture.json(&["agents", "list"], None);
+    assert!(agents["data"]["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|agent| agent["supports_project_scope"] == false));
+    for agent in ["codex", "custom_test"] {
+        for operation in ["deploy", "undeploy"] {
+            for preview in [false, true] {
+                let mut args = vec![
+                    "skills",
+                    operation,
+                    "demo",
+                    "--agent",
+                    agent,
+                    "--project",
+                    project.to_str().unwrap(),
+                ];
+                if preview {
+                    args.push("--dry-run");
+                }
+                fixture.json(&args, Some(("PROJECT_SCOPE_UNSUPPORTED", 4)));
+                assert_eq!(snapshot(), before);
+            }
+        }
+    }
     assert!(fixture
         .service()
         .show_skill("demo".into())
