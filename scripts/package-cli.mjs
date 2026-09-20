@@ -14,6 +14,7 @@ import {
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { gunzipSync } from 'node:zlib'
 import { resolveSidecarTarget } from './prepare-cli-sidecar.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -36,6 +37,114 @@ function readJson(filePath, description) {
 
 function sha256(filePath) {
   return createHash('sha256').update(readFileSync(filePath)).digest('hex')
+}
+
+function tarString(header, offset, length, description) {
+  const field = header.subarray(offset, offset + length)
+  const terminator = field.indexOf(0)
+  const value = terminator === -1 ? field : field.subarray(0, terminator)
+  const padding = terminator === -1 ? Buffer.alloc(0) : field.subarray(terminator)
+  if (padding.some(byte => byte !== 0)) throw new Error(`Invalid tar ${description} padding`)
+  if (value.some(byte => byte < 0x20 || byte > 0x7e)) throw new Error(`Invalid tar ${description}`)
+  return value.toString('ascii')
+}
+
+function tarOctal(header, offset, length, description) {
+  const field = header.subarray(offset, offset + length)
+  if (field[0] & 0x80) throw new Error(`Unsupported binary tar ${description}`)
+  const text = field.toString('ascii')
+  const match = /^ *([0-7]+)?[\0 ]*$/.exec(text)
+  if (!match) throw new Error(`Invalid tar ${description}`)
+  const value = match[1] ? Number.parseInt(match[1], 8) : 0
+  if (!Number.isSafeInteger(value)) throw new Error(`Tar ${description} exceeds safe bounds`)
+  return value
+}
+
+function isZeroTarBlock(archive, offset) {
+  if (offset + 512 > archive.length) return false
+  return archive.subarray(offset, offset + 512).every(byte => byte === 0)
+}
+
+function requireSafeTarPath(entryName) {
+  if (!entryName
+    || entryName.startsWith('/')
+    || entryName.includes('\\')
+    || /^[A-Za-z]:/.test(entryName)
+    || entryName.split('/').some(component => !component || component === '.' || component === '..')) {
+    throw new Error(`Unsafe tar entry path: ${entryName}`)
+  }
+}
+
+export function readPackedBinarySha256(tarball, expectedEntry) {
+  requireSafeTarPath(expectedEntry)
+  let archive
+  try {
+    archive = gunzipSync(readFileSync(tarball))
+  } catch (error) {
+    throw new Error(`Invalid gzip tarball: ${tarball}`, { cause: error })
+  }
+  if (archive.length === 0 || archive.length % 512 !== 0) {
+    throw new Error('Tarball has invalid block bounds')
+  }
+
+  let binarySha256
+  let offset = 0
+  let reachedEnd = false
+  while (offset < archive.length) {
+    if (isZeroTarBlock(archive, offset)) {
+      if (!isZeroTarBlock(archive, offset + 512)) throw new Error('Tarball has a truncated end marker')
+      if (archive.subarray(offset + 1024).some(byte => byte !== 0)) {
+        throw new Error('Tarball has non-zero data after its end marker')
+      }
+      reachedEnd = true
+      break
+    }
+    if (offset + 512 > archive.length) throw new Error('Tar header exceeds archive bounds')
+    const header = archive.subarray(offset, offset + 512)
+    const magic = header.subarray(257, 263)
+    const version = header.subarray(263, 265)
+    if (!(magic.equals(Buffer.from('ustar\0', 'binary')) || magic.equals(Buffer.from('ustar ', 'ascii')))
+      || !version.equals(Buffer.from('00', 'ascii'))) {
+      throw new Error('Tarball entry is not strict ustar')
+    }
+
+    const storedChecksum = tarOctal(header, 148, 8, 'checksum')
+    let actualChecksum = 0
+    for (let index = 0; index < header.length; index += 1) {
+      actualChecksum += index >= 148 && index < 156 ? 0x20 : header[index]
+    }
+    if (storedChecksum !== actualChecksum) throw new Error('Tar header checksum mismatch')
+
+    const name = tarString(header, 0, 100, 'name')
+    const prefix = tarString(header, 345, 155, 'prefix')
+    const entryName = prefix ? `${prefix}/${name}` : name
+    requireSafeTarPath(entryName)
+    const typeByte = header[156]
+    const type = typeByte === 0 ? '0' : String.fromCharCode(typeByte)
+    if (type !== '0' && type !== '5') {
+      throw new Error(`Unsupported tar entry type ${JSON.stringify(type)}; links and extended headers are forbidden`)
+    }
+    const linkName = tarString(header, 157, 100, 'link name')
+    if (linkName) throw new Error(`Tar links are forbidden: ${entryName}`)
+
+    const size = tarOctal(header, 124, 12, 'entry size')
+    if (type === '5' && size !== 0) throw new Error(`Tar directory has non-zero size: ${entryName}`)
+    const contentsStart = offset + 512
+    const contentsEnd = contentsStart + size
+    const nextOffset = contentsStart + Math.ceil(size / 512) * 512
+    if (!Number.isSafeInteger(contentsEnd) || contentsEnd > archive.length || nextOffset > archive.length) {
+      throw new Error(`Tar entry size exceeds archive bounds: ${entryName}`)
+    }
+    if (entryName === expectedEntry) {
+      if (type !== '0') throw new Error(`Packed CLI binary must be a regular file: ${entryName}`)
+      if (binarySha256 !== undefined) throw new Error(`Tarball contains a duplicate CLI binary entry: ${entryName}`)
+      binarySha256 = createHash('sha256').update(archive.subarray(contentsStart, contentsEnd)).digest('hex')
+    }
+    offset = nextOffset
+  }
+  if (!reachedEnd) throw new Error('Tarball is missing its end marker')
+  if (binarySha256 === undefined) throw new Error(`Tarball must contain exactly one CLI binary entry: ${expectedEntry}`)
+  return binarySha256
 }
 
 function requireRegularFile(filePath, description) {
@@ -178,7 +287,14 @@ function prepareStaging({ root, version, target, source, output, copyFile }) {
     requireRegularFile(stagedBinary, 'Staged CLI binary')
     const binarySha256 = sha256(stagedBinary)
     if (metadata.sha256 !== binarySha256) throw new Error('Staged CLI binary hash does not match release metadata')
-    return { binarySha256, definition, resolvedOutput, stagedBinary, staging, triple }
+    return {
+      definition,
+      expectedBinarySha256: metadata.sha256,
+      resolvedOutput,
+      stagedBinary,
+      staging,
+      triple,
+    }
   } catch (error) {
     rmSync(staging, { recursive: true, force: true })
     throw error
@@ -199,6 +315,7 @@ export function packageCli({
 }) {
   validateVersion(version)
   const prepared = prepareStaging({ root: path.resolve(root), version, target, source, output, copyFile })
+  let tarball
   try {
     verifyBinaryVersion(prepared.stagedBinary, version, run)
     const result = runTrustedNpm([
@@ -234,16 +351,24 @@ export function packageCli({
     }
     const filename = entries[0].filename
     if (filename !== path.basename(filename)) throw new Error('npm pack returned an unsafe filename')
-    const tarball = path.join(prepared.resolvedOutput, filename)
+    tarball = path.join(prepared.resolvedOutput, filename)
     requireRegularFile(tarball, 'npm tarball')
+    const packedBinaryName = `package/skillshub-cli${prepared.definition.extension}`
+    const packedBinarySha256 = readPackedBinarySha256(tarball, packedBinaryName)
+    if (packedBinarySha256 !== prepared.expectedBinarySha256) {
+      throw new Error('Packed tarball binary hash does not match release metadata')
+    }
     return {
-      binarySha256: prepared.binarySha256,
+      binarySha256: packedBinarySha256,
       packageSha256: sha256(tarball),
       profile: 'release',
       target: prepared.triple,
       tarball,
       version,
     }
+  } catch (error) {
+    if (tarball) rmSync(tarball, { force: true })
+    throw error
   } finally {
     rmSync(prepared.staging, { recursive: true, force: true })
   }

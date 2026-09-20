@@ -9,6 +9,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -17,11 +18,13 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { gzipSync } from 'node:zlib'
 
 const { describe, it } = process.env.VITEST ? await import('vitest') : await import('node:test')
 const {
   packageCli,
   parsePackageCliArgs,
+  readPackedBinarySha256,
   runTrustedNpm,
 } = await import('./package-cli.mjs')
 
@@ -76,6 +79,49 @@ function createFixtureBinary(directory, target, version = VERSION, metadata = {}
     ...metadata,
   })}\n`)
   return { source, metadataPath, sha256 }
+}
+
+function writeTarString(header, offset, length, value) {
+  const bytes = Buffer.from(value, 'utf8')
+  assert.ok(bytes.length < length)
+  bytes.copy(header, offset)
+}
+
+function writeTarOctal(header, offset, length, value) {
+  const valueBytes = Buffer.from(value.toString(8).padStart(length - 1, '0') + '\0', 'ascii')
+  assert.equal(valueBytes.length, length)
+  valueBytes.copy(header, offset)
+}
+
+function createTarHeader({ name, contents = Buffer.alloc(0), declaredSize = contents.length, type = '0', linkName = '' }) {
+  const header = Buffer.alloc(512)
+  writeTarString(header, 0, 100, name)
+  writeTarOctal(header, 100, 8, type === '5' ? 0o755 : 0o644)
+  writeTarOctal(header, 108, 8, 0)
+  writeTarOctal(header, 116, 8, 0)
+  writeTarOctal(header, 124, 12, declaredSize)
+  writeTarOctal(header, 136, 12, 0)
+  header.fill(0x20, 148, 156)
+  header.write(type, 156, 1, 'ascii')
+  writeTarString(header, 157, 100, linkName)
+  header.write('ustar\0', 257, 6, 'binary')
+  header.write('00', 263, 2, 'ascii')
+  const checksum = header.reduce((total, byte) => total + byte, 0)
+  const checksumBytes = Buffer.from(`${checksum.toString(8).padStart(6, '0')}\0 `, 'ascii')
+  checksumBytes.copy(header, 148)
+  return header
+}
+
+function writeTarball(tarball, entries, { omitEnd = false } = {}) {
+  const chunks = []
+  for (const entry of entries) {
+    const contents = Buffer.from(entry.contents ?? '')
+    chunks.push(createTarHeader({ ...entry, contents }), contents)
+    const remainder = contents.length % 512
+    if (remainder) chunks.push(Buffer.alloc(512 - remainder))
+  }
+  if (!omitEnd) chunks.push(Buffer.alloc(1024))
+  writeFileSync(tarball, gzipSync(Buffer.concat(chunks), { mtime: 0 }))
 }
 
 function writeInstalledPlatformPackage(packageDirectory, target, contents = 'native-binary') {
@@ -378,6 +424,81 @@ describe('skillshub-cli package manifests', () => {
 })
 
 describe('deterministic CLI package staging', () => {
+  it('reads the exact regular binary entry hash from a strict gzip ustar archive', () => {
+    const temporary = mkdtempSync(path.join(tmpdir(), 'skillshub-cli-tar-hash-'))
+    try {
+      const binary = Buffer.from('release-binary-bytes')
+      for (const [index, target] of ['package/skillshub-cli', 'package/skillshub-cli.exe'].entries()) {
+        const tarball = path.join(temporary, `platform-${index}.tgz`)
+        writeTarball(tarball, [
+          { name: 'package/package.json', contents: '{}' },
+          { name: target, contents: binary },
+        ])
+        assert.equal(
+          readPackedBinarySha256(tarball, target),
+          createHash('sha256').update(binary).digest('hex'),
+        )
+      }
+    } finally {
+      rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects ambiguous, linked, traversing, extended, or truncated tar entries', () => {
+    const temporary = mkdtempSync(path.join(tmpdir(), 'skillshub-cli-tar-invalid-'))
+    try {
+      const target = 'package/skillshub-cli'
+      const cases = [
+        {
+          name: 'duplicate',
+          entries: [{ name: target, contents: 'one' }, { name: target, contents: 'two' }],
+          message: /exactly one|duplicate/i,
+        },
+        {
+          name: 'link',
+          entries: [
+            { name: 'package/linked-readme', type: '2', linkName: '/tmp/other' },
+            { name: target, contents: 'good' },
+          ],
+          message: /link|regular/i,
+        },
+        {
+          name: 'missing',
+          entries: [{ name: 'package/not-the-cli', contents: 'wrong' }],
+          message: /exactly one/i,
+        },
+        {
+          name: 'traversal',
+          entries: [{ name: 'package/../escape', contents: 'bad' }, { name: target, contents: 'good' }],
+          message: /path|traversal/i,
+        },
+        {
+          name: 'pax',
+          entries: [{ name: 'pax', type: 'x', contents: '31 path=package/skillshub-cli\n' }, { name: target, contents: 'good' }],
+          message: /extended|type|pax/i,
+        },
+        {
+          name: 'longname',
+          entries: [{ name: '././@LongLink', type: 'L', contents: `${target}\0` }, { name: target, contents: 'good' }],
+          message: /extended|type|longname|path/i,
+        },
+        {
+          name: 'truncated',
+          entries: [{ name: target, contents: 'short', declaredSize: 2048 }],
+          options: { omitEnd: true },
+          message: /bounds|truncated|size/i,
+        },
+      ]
+      for (const testCase of cases) {
+        const tarball = path.join(temporary, `${testCase.name}.tgz`)
+        writeTarball(tarball, testCase.entries, testCase.options)
+        assert.throws(() => readPackedBinarySha256(tarball, target), testCase.message)
+      }
+    } finally {
+      rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
   it('runs npm through the trusted CLI entry with Node on win32', () => {
     const temporary = mkdtempSync(path.join(tmpdir(), 'skillshub-cli-npm-entry-'))
     try {
@@ -487,7 +608,10 @@ describe('deterministic CLI package staging', () => {
           assert.equal(lstatSync(path.join(staging, 'skillshub-cli')).mode & 0o777, 0o755)
           mkdirSync(output, { recursive: true })
           const filename = `skillshub-app-cli-darwin-arm64-${VERSION}.tgz`
-          writeFileSync(path.join(output, filename), 'tarball')
+          writeTarball(path.join(output, filename), [
+            { name: 'package/package.json', contents: JSON.stringify(manifest) },
+            { name: 'package/skillshub-cli', contents: readFileSync(source) },
+          ])
           return { status: 0, signal: null, stdout: JSON.stringify([{ filename }]), stderr: '' }
         },
       })
@@ -603,6 +727,42 @@ describe('deterministic CLI package staging', () => {
       }), /staged.*hash|hash.*staged/i)
       assert.equal(spawned, false)
       assert.equal(existsSync(path.join(temporary, 'output/.skillshub-cli-staging-darwin-arm64')), false)
+    } finally {
+      rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects and removes a real tarball when staged bytes change after version verification', { skip: process.platform === 'win32' }, () => {
+    const temporary = mkdtempSync(path.join(tmpdir(), 'skillshub-cli-pack-race-'))
+    try {
+      const output = path.join(temporary, 'output')
+      const { source } = createFixtureBinary(temporary, 'darwin-arm64')
+      assert.ok(TEST_NPM_EXECPATH, 'test environment must provide a trusted npm CLI entry')
+      let versionVerified = false
+      assert.throws(() => packageCli({
+        root: ROOT,
+        version: VERSION,
+        target: 'darwin-arm64',
+        source,
+        output,
+        npmExecPath: TEST_NPM_EXECPATH,
+        run(command, args, options) {
+          if (command === process.execPath && args[0] === TEST_NPM_EXECPATH) {
+            assert.equal(versionVerified, true)
+            const stagedBinary = path.join(args[2], 'skillshub-cli')
+            writeFileSync(stagedBinary, `${readFileSync(stagedBinary, 'utf8')}\n// same version, different build bytes\n`)
+            chmodSync(stagedBinary, 0o755)
+          }
+          const result = spawnSync(command, args, options)
+          if (command !== process.execPath) {
+            assert.equal(result.status, 0, result.stderr)
+            versionVerified = true
+          }
+          return result
+        },
+      }), /tarball.*hash|hash.*tarball/i)
+      assert.equal(versionVerified, true)
+      assert.deepEqual(readdirSync(output), [])
     } finally {
       rmSync(temporary, { recursive: true, force: true })
     }
