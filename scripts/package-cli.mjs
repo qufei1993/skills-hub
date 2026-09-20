@@ -3,14 +3,18 @@ import { spawnSync } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import {
   chmodSync,
+  closeSync,
   copyFileSync,
   existsSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   renameSync,
   rmSync,
+  rmdirSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs'
@@ -69,13 +73,19 @@ function isZeroTarBlock(archive, offset) {
   return archive.subarray(offset, offset + 512).every(byte => byte === 0)
 }
 
-function windowsTarPathKey(entryName) {
+function safeTarPath(entryName) {
   if (!entryName
     || entryName.startsWith('/')
     || entryName.includes('\\')
-    || /^[A-Za-z]:/.test(entryName)) {
+    || /^[A-Za-z]:/.test(entryName)
+    || entryName.split('/').some(component => !component || component === '.' || component === '..')) {
     throw new Error(`Unsafe tar entry path: ${entryName}`)
   }
+  return entryName
+}
+
+function windowsTarPathKey(entryName) {
+  safeTarPath(entryName)
   const canonical = []
   for (const rawComponent of entryName.normalize('NFC').split('/')) {
     const component = rawComponent.replace(/[. ]+$/u, '')
@@ -93,9 +103,10 @@ function windowsTarPathKey(entryName) {
   return canonical.join('/')
 }
 
-export function readPackedBinarySha256(tarballSnapshot, expectedEntry) {
+export function readPackedBinarySha256(tarballSnapshot, expectedEntry, platform = expectedEntry.endsWith('.exe') ? 'win32' : 'linux') {
   if (!Buffer.isBuffer(tarballSnapshot)) throw new Error('Packed tarball snapshot must be a Buffer')
-  const expectedWindowsKey = windowsTarPathKey(expectedEntry)
+  const pathKey = platform === 'win32' ? windowsTarPathKey : safeTarPath
+  const expectedKey = pathKey(expectedEntry)
   let archive
   try {
     archive = gunzipSync(tarballSnapshot)
@@ -138,7 +149,7 @@ export function readPackedBinarySha256(tarballSnapshot, expectedEntry) {
     const name = tarString(header, 0, 100, 'name')
     const prefix = tarString(header, 345, 155, 'prefix')
     const entryName = prefix ? `${prefix}/${name}` : name
-    const windowsKey = windowsTarPathKey(entryName)
+    const entryKey = pathKey(entryName)
     const typeByte = header[156]
     const type = typeByte === 0 ? '0' : String.fromCharCode(typeByte)
     if (type !== '0' && type !== '5') {
@@ -155,7 +166,7 @@ export function readPackedBinarySha256(tarballSnapshot, expectedEntry) {
     if (!Number.isSafeInteger(contentsEnd) || contentsEnd > archive.length || nextOffset > archive.length) {
       throw new Error(`Tar entry size exceeds archive bounds: ${entryName}`)
     }
-    if (windowsKey === expectedWindowsKey) {
+    if (entryKey === expectedKey) {
       binaryAliases += 1
       if (entryName !== expectedEntry) {
         throw new Error(`Tarball contains an ambiguous Windows CLI binary alias: ${entryName}`)
@@ -191,28 +202,69 @@ function requireRegularDirectory(directory, description) {
   }
 }
 
-function prepareOutputDirectory(output) {
-  const resolvedOutput = path.resolve(output)
-  mkdirSync(resolvedOutput, { recursive: true })
-  requireRegularDirectory(resolvedOutput, 'Package output')
-  return resolvedOutput
+function prepareOutputDirectory(output, created) {
+  try {
+    requireRegularDirectory(output, 'Package output')
+    return
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+  }
+  prepareOutputDirectory(path.dirname(output), created)
+  try {
+    mkdirSync(output)
+    created.push({ directory: output, metadata: lstatSync(output) })
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error
+  }
+  requireRegularDirectory(output, 'Package output')
+}
+
+function rollbackOutputDirectories(created) {
+  for (const { directory, metadata } of created.reverse()) {
+    try {
+      const current = lstatSync(directory)
+      if (current.dev !== metadata.dev || current.ino !== metadata.ino || !current.isDirectory()) continue
+      rmdirSync(directory)
+    } catch (error) {
+      if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error
+    }
+  }
 }
 
 function createPrivatePackDirectory() {
   return mkdtempSync(path.join(tmpdir(), 'skillshub-cli-pack-'))
 }
 
-function writeVerifiedTarballAtomically(tarballSnapshot, destination) {
+function writeVerifiedTarballAtomically(tarballSnapshot, destination, { writeFile, syncFile, renameFile }) {
+  const created = []
+  let descriptor
+  let ownsTemporary = false
   const temporary = path.join(
     path.dirname(destination),
     `.${path.basename(destination)}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`,
   )
   try {
-    writeFileSync(temporary, tarballSnapshot, { flag: 'wx', mode: 0o600 })
+    prepareOutputDirectory(path.dirname(destination), created)
+    descriptor = openSync(temporary, 'wx', 0o600)
+    ownsTemporary = true
+    writeFile(descriptor, tarballSnapshot)
     chmodSync(temporary, 0o644)
-    renameSync(temporary, destination)
-  } finally {
-    rmSync(temporary, { force: true })
+    syncFile(descriptor)
+    closeSync(descriptor)
+    descriptor = undefined
+    renameFile(temporary, destination)
+    ownsTemporary = false
+  } catch (error) {
+    try {
+      if (descriptor !== undefined) closeSync(descriptor)
+    } finally {
+      try {
+        if (ownsTemporary) rmSync(temporary, { force: true })
+      } finally {
+        rollbackOutputDirectories(created)
+      }
+    }
+    throw error
   }
 }
 
@@ -363,10 +415,14 @@ export function packageCli({
   copyFile = copyFileSync,
   createPackDirectory = createPrivatePackDirectory,
   readTarball = readFileSync,
+  writeFile = writeFileSync,
+  syncFile = fsyncSync,
+  renameFile = renameSync,
 }) {
   validateVersion(version)
-  const resolvedOutput = prepareOutputDirectory(output)
+  const resolvedOutput = path.resolve(output)
   const packDirectory = path.resolve(createPackDirectory())
+  let verified
   try {
     requireRegularDirectory(packDirectory, 'Private pack directory')
     const staging = path.join(packDirectory, 'staging')
@@ -423,24 +479,25 @@ export function packageCli({
     requireRegularFile(privateTarball, 'npm tarball')
     const tarballSnapshot = readTarball(privateTarball)
     const packedBinaryName = `package/skillshub-cli${prepared.definition.extension}`
-    const packedBinarySha256 = readPackedBinarySha256(tarballSnapshot, packedBinaryName)
+    const packedBinarySha256 = readPackedBinarySha256(tarballSnapshot, packedBinaryName, target.split('-')[0])
     if (packedBinarySha256 !== prepared.expectedBinarySha256) {
       throw new Error('Packed tarball binary hash does not match release metadata')
     }
     const packageSha256 = createHash('sha256').update(tarballSnapshot).digest('hex')
     const tarball = path.join(resolvedOutput, filename)
-    writeVerifiedTarballAtomically(tarballSnapshot, tarball)
-    return {
+    verified = { tarballSnapshot, result: {
       binarySha256: packedBinarySha256,
       packageSha256,
       profile: 'release',
       target: prepared.triple,
       tarball,
       version,
-    }
+    } }
   } finally {
     rmSync(packDirectory, { recursive: true, force: true })
   }
+  writeVerifiedTarballAtomically(verified.tarballSnapshot, verified.result.tarball, { writeFile, syncFile, renameFile })
+  return verified.result
 }
 
 function main() {
