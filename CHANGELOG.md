@@ -4,10 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [0.10.1] - 2026-09-13
+## [0.11.0] - 2026-09-20
 
 ### Added
+- **Agent-first CLI**: `skillshub-cli` shares the desktop's local library, tags, source metadata, deployment targets, and write lock. It supports search, install/import, explicit Agent deployment, safe updates, tags, recoverable deletion, status, and diagnostics without running the desktop.
+- **Official Skill and Agent Access**: `setup --agent <id>` installs the bundled `skills-hub` Skill for selected Agents. The desktop Agent Access page shows the verified CLI bridge and setup/status controls in English, Chinese, and Korean.
 - **Verified desktop CLI bridge**: Desktop builds bundle the matching native CLI and publish it atomically with version and SHA-256 stamps at startup. Interrupted or damaged bridges remain distinguishable from missing installations. Development builds use a separate bridge directory, reject redirected destination ancestors, and require matching CLI/desktop build profiles.
+- **Distribution**: Release pipelines target macOS arm64/x64, Windows x64, and Linux GNU arm64/x64, with standalone SHA-256 assets and platform npm packages behind `skillshub-cli`. All five native CI jobs must succeed before publication; local validation does not establish native support on the other four hosts.
+
+### Safety and scope
+- `--json` supplies structured results, `--dry-run` previews supported writes, and destructive operations require explicit confirmation. Install does not implicitly deploy. Ambiguous selections, unowned directories, concurrent writers, and unsafe updates stop without force-overwrite shortcuts.
+- Device sync, automatic tasks, credentials/OAuth, proxy/storage/tool configuration, app updates, restore, and permanent deletion remain desktop-only. The official Skill must not edit SQLite or Agent folders directly.
+- CLI changes appear on the desktop's next normal data read or restart; this version adds no live refresh. Shared schema version stays compatible with v0.10.1; unknown newer schemas reject writes.
+
+## [0.10.1] - 2026-09-13
 
 ### Fixed
 - **Windows command-window flashing**: Automatic-update progress refreshes now read runtime data without querying the operating-system scheduler every five seconds. Windows scheduler and system Git child processes also start without a console window, preventing repeated command-window flashes while preserving background progress updates (fixes [#150](https://github.com/qufei1993/skills-hub/issues/150)).

@@ -68,6 +68,20 @@ function setPackageJsonVersion(newVersion) {
   return replaceJsonStringProp("package.json", "version", newVersion);
 }
 
+function syncLockfiles(version) {
+  const lock = JSON.parse(read("package-lock.json"));
+  lock.version = version;
+  lock.packages[""].version = version;
+  const main = JSON.parse(read(CLI_MAIN_PACKAGE));
+  lock.packages["packages/skillshub-cli"].version = version;
+  lock.packages["packages/skillshub-cli"].optionalDependencies = main.optionalDependencies;
+  write("package-lock.json", `${JSON.stringify(lock, null, 2)}\n`);
+  const cargo = read("src-tauri/Cargo.lock");
+  const pattern = /(\[\[package\]\]\r?\nname = "app"\r?\nversion = ")[^"]+(")/;
+  if (!pattern.test(cargo)) throw new Error("src-tauri/Cargo.lock missing app package");
+  write("src-tauri/Cargo.lock", cargo.replace(pattern, `$1${version}$2`));
+}
+
 function syncFromPackageJson() {
   const version = getPackageJsonVersion();
   const results = [];
@@ -79,6 +93,7 @@ function syncFromPackageJson() {
     results.push({ file: filePath, ...(replaceJsonStringProp(filePath, "version", version)) });
     results.push({ file: CLI_MAIN_PACKAGE, ...(replaceJsonStringProp(CLI_MAIN_PACKAGE, packageName, version)) });
   }
+  syncLockfiles(version);
   return { version, results };
 }
 
@@ -141,6 +156,17 @@ function checkInSync() {
   }
 
   checkCliPackageVersions(version, mismatches);
+
+  const lock = JSON.parse(read("package-lock.json"));
+  if (lock.version !== version || lock.packages?.[""]?.version !== version
+      || lock.packages?.["packages/skillshub-cli"]?.version !== version
+      || CLI_PLATFORM_PACKAGES.some(([, name]) => lock.packages?.["packages/skillshub-cli"]?.optionalDependencies?.[name] !== version)) {
+    mismatches.push(`package-lock.json product versions do not match ${version}`);
+  }
+  const lockedCargoVersion = read("src-tauri/Cargo.lock").match(/\[\[package\]\]\r?\nname = "app"\r?\nversion = "([^"]+)"/)?.[1];
+  if (lockedCargoVersion !== version) {
+    mismatches.push(`src-tauri/Cargo.lock version=${lockedCargoVersion} (expected ${version})`);
+  }
 
   return { version, mismatches };
 }

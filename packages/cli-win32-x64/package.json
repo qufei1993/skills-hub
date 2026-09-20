@@ -1,8 +1,13 @@
 {
   "name": "@skillshub-app/cli-win32-x64",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "description": "Skills Hub CLI native binary for Windows x64",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/qufei1993/skills-hub.git",
+    "directory": "packages/cli-win32-x64"
+  },
   "os": [
     "win32"
   ],

@@ -141,6 +141,8 @@ function writeInstalledPlatformPackage(packageDirectory, target, contents = 'nat
 
 function createVersionFixture(directory, rootVersion = VERSION) {
   mkdirSync(path.join(directory, 'src-tauri'), { recursive: true })
+  copyFileSync(path.join(ROOT, 'package-lock.json'), path.join(directory, 'package-lock.json'))
+  copyFileSync(path.join(ROOT, 'src-tauri/Cargo.lock'), path.join(directory, 'src-tauri/Cargo.lock'))
   writeFileSync(path.join(directory, 'package.json'), `${JSON.stringify({
     name: 'skills-hub',
     private: true,
@@ -1040,7 +1042,7 @@ describe('deterministic CLI package staging', () => {
     }
   })
 
-  it('installs explicit local main and host tarballs offline and executes version JSON', { skip: process.platform === 'win32' }, () => {
+  it('installs explicit local main and host tarballs offline and executes version JSON', { skip: process.platform === 'win32' && !process.env.SKILLSHUB_CLI_SMOKE_SOURCE }, () => {
     const temporary = mkdtempSync(path.join(tmpdir(), 'skillshub-cli-smoke-'))
     try {
       const definition = TARGETS.find(item => item.os === process.platform && item.cpu === process.arch)
@@ -1088,7 +1090,7 @@ describe('deterministic CLI package staging', () => {
       })
       assert.equal(installed.status, 0, installed.stderr)
 
-      const invoked = spawnSync(path.join(installRoot, 'node_modules/.bin/skillshub-cli'), ['version', '--json'], {
+      const invoked = spawnSync(process.execPath, [path.join(installRoot, 'node_modules/skillshub-cli/bin/skillshub-cli.cjs'), 'version', '--json'], {
         cwd: installRoot,
         encoding: 'utf8',
         shell: false,
