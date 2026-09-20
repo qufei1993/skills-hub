@@ -80,6 +80,145 @@ use crate::services::types::{Agent as ServiceAgent, Skill as ServiceSkill};
 use uuid::Uuid;
 
 const RECENT_PROJECTS_SETTING: &str = "recent_projects_v1";
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentAccessAgentDto {
+    key: String,
+    label: String,
+    detected: bool,
+    enabled: bool,
+    deployed: bool,
+    needs_repair: bool,
+    reason: Option<crate::services::agent_access::AgentAccessReason>,
+    path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentAccessStatusDto {
+    bridge: crate::core::cli_bridge::CliBridgeStatus,
+    bundled_version: String,
+    installed_version: Option<String>,
+    installed: bool,
+    central_reason: Option<crate::services::agent_access::AgentAccessReason>,
+    agents: Vec<AgentAccessAgentDto>,
+}
+
+fn agent_access_bridge_status(
+    directory: &std::path::Path,
+    startup: &crate::core::cli_bridge::CliBridgeStartupState,
+) -> crate::core::cli_bridge::CliBridgeStatus {
+    use crate::core::cli_bridge::{bundled_cli_bridge_status, CliBridgeHealth};
+    let current = bundled_cli_bridge_status(directory);
+    if current.status != CliBridgeHealth::Valid && startup.0.status == CliBridgeHealth::Damaged {
+        startup.0.clone()
+    } else {
+        current
+    }
+}
+
+fn agent_access_dto(
+    status: crate::services::agent_access::AgentAccessStatus,
+    bridge: crate::core::cli_bridge::CliBridgeStatus,
+) -> AgentAccessStatusDto {
+    let agents = status
+        .agents
+        .agents
+        .into_iter()
+        .map(|agent| {
+            let health = status
+                .health
+                .iter()
+                .find(|health| health.agent == agent.key);
+            AgentAccessAgentDto {
+                deployed: health.is_some_and(|health| health.deployed),
+                needs_repair: health.is_some_and(|health| health.needs_repair),
+                reason: health.and_then(|health| health.reason),
+                key: agent.key,
+                label: agent.label,
+                detected: agent.detected,
+                enabled: agent.enabled,
+                path: agent.skills_dir,
+            }
+        })
+        .collect();
+    AgentAccessStatusDto {
+        bridge,
+        bundled_version: status.bundled_version,
+        installed_version: status.installed_version,
+        installed: status.installed,
+        central_reason: status.central_reason,
+        agents,
+    }
+}
+
+#[tauri::command]
+pub async fn get_agent_access_status(
+    service: State<'_, SkillsHubService>,
+    startup: State<'_, crate::core::cli_bridge::CliBridgeStartupState>,
+) -> Result<AgentAccessStatusDto, String> {
+    let service = service.inner().clone();
+    let startup = startup.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let status = service
+            .agent_access_status()
+            .map_err(format_service_error)?;
+        Ok(agent_access_dto(
+            status,
+            agent_access_bridge_status(&service.paths().cli_bridge_dir, &startup),
+        ))
+    })
+    .await
+    .map_err(|_| "INTERNAL_ERROR".to_string())?
+}
+
+fn set_agent_access_impl(
+    service: &SkillsHubService,
+    agent: String,
+    action: String,
+    confirmed: bool,
+) -> Result<crate::services::agent_access::AgentAccessStatus, String> {
+    use crate::services::agent_access::SetupAgentRequest;
+    let request = match action.as_str() {
+        "install" | "repair" => SetupAgentRequest::install(agent),
+        "remove" => SetupAgentRequest {
+            agents: vec![agent],
+            remove: true,
+            confirmed,
+            dry_run: false,
+        },
+        _ => return Err("INVALID_ARGUMENT".to_string()),
+    };
+    service.setup_agent_access(request).map_err(|error| {
+        if error.details["reason"].as_str() == Some("target_modified") {
+            "TARGET_MODIFIED".to_string()
+        } else {
+            error.code.as_str().to_string()
+        }
+    })
+}
+
+#[tauri::command]
+pub async fn set_agent_access(
+    service: State<'_, SkillsHubService>,
+    startup: State<'_, crate::core::cli_bridge::CliBridgeStartupState>,
+    agent: String,
+    action: String,
+    confirmed: Option<bool>,
+) -> Result<AgentAccessStatusDto, String> {
+    let service = service.inner().clone();
+    let startup = startup.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let status = set_agent_access_impl(&service, agent, action, confirmed.unwrap_or(false))?;
+        Ok(agent_access_dto(
+            status,
+            agent_access_bridge_status(&service.paths().cli_bridge_dir, &startup),
+        ))
+    })
+    .await
+    .map_err(|_| "INTERNAL_ERROR".to_string())?
+}
 const DEVICE_SYNC_PENDING_OAUTH_SETTING: &str = "device_sync_pending_oauth_v1";
 const DEVICE_SYNC_CREDENTIAL_CLEANUP_QUEUE_SETTING: &str =
     "device_sync_credential_cleanup_queue_v1";

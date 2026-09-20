@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import App from '../../App'
 import type { AutoUpdateConfigDto } from './types'
@@ -60,6 +60,10 @@ beforeEach(() => {
     }
     if (command === 'get_recent_projects') return []
     if (command === 'get_recycle_bin_items') return []
+    if (command === 'get_agent_access_status') return {
+      bridge: { status: 'missing', reason: 'DIRECTORY_MISSING', path: '/test/bin/skillshub-cli', version: null },
+      installed: false, bundledVersion: '0.10.1', installedVersion: null, centralReason: null, agents: [],
+    }
     throw new Error(`Unavailable in test: ${command}`)
   })
 })
@@ -94,4 +98,22 @@ it('keeps recurring progress polling off the system task configuration command',
 
   expect(invoke.mock.calls.filter(([command]) => command === 'get_auto_update_config')).toHaveLength(1)
   expect(invoke.mock.calls.filter(([command]) => command === 'get_auto_update_runtime')).toHaveLength(3)
+})
+
+it('reads Agent access only after entering its management tab and never on timers or other tabs', async () => {
+  render(<App />)
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  expect(invoke.mock.calls.filter(([command]) => command === 'get_agent_access_status')).toHaveLength(0)
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'manageTabs.agents' })) })
+  expect(screen.getByRole('tab', { name: 'manageTabs.agents' }).getAttribute('aria-selected')).toBe('true')
+  expect(invoke.mock.calls.filter(([command]) => command === 'get_agent_access_status')).toHaveLength(1)
+  await act(async () => { await vi.advanceTimersByTimeAsync(60000); window.dispatchEvent(new Event('focus')) })
+  expect(invoke.mock.calls.filter(([command]) => command === 'get_agent_access_status')).toHaveLength(1)
+  await act(async () => { fireEvent.click(screen.getByRole('tab', { name: 'manageTabs.tags' })) })
+  expect(screen.queryByRole('button', { name: 'agentAccess.refresh' })).toBeNull()
+  await act(async () => { await vi.advanceTimersByTimeAsync(60000) })
+  expect(invoke.mock.calls.filter(([command]) => command === 'get_agent_access_status')).toHaveLength(1)
+  await act(async () => { fireEvent.click(screen.getByRole('tab', { name: 'manageTabs.agents' })) })
+  expect(invoke.mock.calls.filter(([command]) => command === 'get_agent_access_status')).toHaveLength(2)
+  expect(invoke.mock.calls.some(([command]) => /credential|execute_cli|run_cli/.test(command))).toBe(false)
 })

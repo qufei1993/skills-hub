@@ -2,6 +2,9 @@ use serde::Serialize;
 use serde_json::json;
 use std::path::Path;
 
+use crate::core::content_hash::{hash_dir_for_sync_conflict, hash_dir_strict};
+use crate::core::sync_engine::path_for_comparison;
+
 use super::deployment::{DeploymentPlan, DeploymentRequest};
 use super::error::{ErrorCode, ServiceError};
 use super::operation_lock::OperationKind;
@@ -30,6 +33,26 @@ impl SetupAgentRequest {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AgentAccessReason {
+    CentralMissing,
+    CentralModified,
+    RecordError,
+    TargetMissing,
+    TargetModified,
+    TargetOwnership,
+    VersionMismatch,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AgentAccessHealth {
+    pub agent: String,
+    pub deployed: bool,
+    pub needs_repair: bool,
+    pub reason: Option<AgentAccessReason>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct AgentAccessStatus {
     pub installed: bool,
@@ -39,6 +62,8 @@ pub struct AgentAccessStatus {
     pub installed_version: Option<String>,
     pub skill: Option<Skill>,
     pub agents: AgentList,
+    pub central_reason: Option<AgentAccessReason>,
+    pub health: Vec<AgentAccessHealth>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plan: Option<DeploymentPlan>,
 }
@@ -46,6 +71,34 @@ pub struct AgentAccessStatus {
 impl SkillsHubService {
     pub fn agent_access_status(&self) -> Result<AgentAccessStatus, ServiceError> {
         let skill = self.official_skill()?;
+        let agents = self.list_agents()?;
+        let central_reason = skill.as_ref().and_then(central_health);
+        let records = skill
+            .as_ref()
+            .map(|skill| self.store().list_skill_targets(&skill.id))
+            .transpose()
+            .map_err(|_| ServiceError::internal("failed to inspect official Skill targets"))?
+            .unwrap_or_default();
+        let health = agents
+            .agents
+            .iter()
+            .map(|agent| {
+                let target = records
+                    .iter()
+                    .find(|target| target.tool == agent.key && target.scope == "global");
+                let reason = central_reason.or_else(|| {
+                    let skill = skill.as_ref()?;
+                    let target = target?;
+                    target_health(skill, target, Path::new(&agent.skills_dir))
+                });
+                AgentAccessHealth {
+                    agent: agent.key.clone(),
+                    deployed: target.is_some(),
+                    needs_repair: reason.is_some(),
+                    reason,
+                }
+            })
+            .collect();
         Ok(AgentAccessStatus {
             installed: skill.is_some(),
             deployed: skill
@@ -57,7 +110,9 @@ impl SkillsHubService {
                 .as_ref()
                 .and_then(|skill| skill.source.revision.clone()),
             skill,
-            agents: self.list_agents()?,
+            agents,
+            central_reason,
+            health,
             plan: None,
         })
     }
@@ -145,4 +200,84 @@ impl SkillsHubService {
             Err(error) => Err(error),
         }
     }
+}
+
+fn central_health(skill: &Skill) -> Option<AgentAccessReason> {
+    let path = Path::new(&skill.central_path);
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Some(AgentAccessReason::CentralMissing)
+        }
+        Err(_) => return Some(AgentAccessReason::CentralModified),
+    };
+    if !metadata.is_dir()
+        || metadata.file_type().is_symlink()
+        || hash_dir_strict(path)
+            .ok()
+            .as_ref()
+            .zip(skill.content_hash.as_ref())
+            .map_or(true, |(actual, expected)| actual != expected)
+    {
+        return Some(AgentAccessReason::CentralModified);
+    }
+    if skill.content_status != "ok" {
+        return Some(AgentAccessReason::RecordError);
+    }
+    None
+}
+
+fn target_health(
+    skill: &Skill,
+    target: &crate::core::skill_store::SkillTargetRecord,
+    root: &Path,
+) -> Option<AgentAccessReason> {
+    let path = Path::new(&target.target_path);
+    let expected = root.join(OFFICIAL_SKILL_NAME);
+    let owned_location = path.file_name() == expected.file_name()
+        && path
+            .parent()
+            .and_then(|parent| path_for_comparison(parent).ok())
+            .zip(
+                expected
+                    .parent()
+                    .and_then(|parent| path_for_comparison(parent).ok()),
+            )
+            .is_some_and(|(actual, expected)| actual == expected);
+    if !owned_location {
+        return Some(AgentAccessReason::TargetOwnership);
+    }
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Some(AgentAccessReason::TargetMissing)
+        }
+        Err(_) => return Some(AgentAccessReason::TargetModified),
+    };
+    if !path.is_dir() {
+        return Some(AgentAccessReason::TargetMissing);
+    }
+    let central = Path::new(&skill.central_path);
+    if metadata.file_type().is_symlink() || target.mode == "junction" {
+        if !path_for_comparison(path)
+            .ok()
+            .zip(path_for_comparison(central).ok())
+            .is_some_and(|(actual, expected)| actual == expected)
+        {
+            return Some(AgentAccessReason::TargetOwnership);
+        }
+    } else if !hash_dir_for_sync_conflict(path)
+        .ok()
+        .zip(hash_dir_for_sync_conflict(central).ok())
+        .is_some_and(|(actual, expected)| actual == expected)
+    {
+        return Some(AgentAccessReason::TargetModified);
+    }
+    if target.status != "ok" {
+        return Some(AgentAccessReason::RecordError);
+    }
+    if skill.source.revision.as_deref() != Some(env!("CARGO_PKG_VERSION")) {
+        return Some(AgentAccessReason::VersionMismatch);
+    }
+    None
 }

@@ -18,6 +18,7 @@ import { Toaster, toast } from 'sonner'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import ExplorePage from './components/skills/ExplorePage'
+import AgentAccessPage from './components/skills/AgentAccessPage'
 import DeviceSyncPage from './components/skills/DeviceSyncPage'
 import RecycleBinPage from './components/skills/RecycleBinPage'
 import ConfirmActionModal from './components/skills/modals/ConfirmActionModal'
@@ -117,7 +118,7 @@ type ActiveView =
   | 'manage'
   | 'device-sync'
   | 'recycle-bin'
-type ManagementTab = 'tags' | 'tools' | 'updates'
+type ManagementTab = 'tags' | 'tools' | 'updates' | 'agents'
 type UpdaterProxyOptions = { proxy?: string }
 type UpdaterDownloadOptions = DownloadOptions & UpdaterProxyOptions
 
@@ -3867,6 +3868,15 @@ function App() {
                 >
                   {t('manageTabs.updates')}
                 </button>
+                <button
+                  className={`management-tab${managementTab === 'agents' ? ' active' : ''}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={managementTab === 'agents'}
+                  onClick={() => setManagementTab('agents')}
+                >
+                  {t('manageTabs.agents')}
+                </button>
               </div>
             </div>
             <div className="management-panel">
@@ -3892,6 +3902,8 @@ function App() {
                   onToolConfigChange={handleToolConfigChange}
                   t={t}
                 />
+              ) : managementTab === 'agents' ? (
+                <AgentAccessPage isTauri={isTauri} invokeTauri={invokeTauri} t={t} />
               ) : (
                 <UpdatesPage
                   skills={managedSkills}

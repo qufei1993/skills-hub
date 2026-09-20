@@ -7,6 +7,164 @@ use crate::services::error::ErrorCode;
 use crate::services::operation_lock::{OperationKind, OperationLock};
 use crate::services::skills_hub::SkillsHubService;
 
+#[test]
+fn agent_access_status_reads_actual_copy_health_without_changing_files_or_records() {
+    let f = Fixture::new();
+    f.service
+        .setup_agent_access(SetupAgentRequest::install("cursor"))
+        .unwrap();
+    let before = f.service.show_skill("skills-hub".into()).unwrap();
+    fs::write(f.target("cursor").join("SKILL.md"), "user edit").unwrap();
+    let status = f.service.agent_access_status().unwrap();
+    let health = status
+        .health
+        .iter()
+        .find(|agent| agent.agent == "cursor")
+        .unwrap();
+    assert!(health.needs_repair);
+    assert_eq!(
+        health.reason,
+        Some(super::super::agent_access::AgentAccessReason::TargetModified)
+    );
+    assert_eq!(f.service.show_skill("skills-hub".into()).unwrap(), before);
+    assert_eq!(
+        fs::read_to_string(f.target("cursor").join("SKILL.md")).unwrap(),
+        "user edit"
+    );
+    fs::remove_dir_all(f.target("cursor")).unwrap();
+    let status = f.service.agent_access_status().unwrap();
+    assert_eq!(
+        status
+            .health
+            .iter()
+            .find(|a| a.agent == "cursor")
+            .unwrap()
+            .reason,
+        Some(super::super::agent_access::AgentAccessReason::TargetMissing)
+    );
+}
+
+#[test]
+fn agent_access_status_reports_central_damage() {
+    let f = Fixture::new();
+    f.service
+        .setup_agent_access(SetupAgentRequest::install("codex"))
+        .unwrap();
+    let central = f
+        .service
+        .show_skill("skills-hub".into())
+        .unwrap()
+        .central_path;
+    fs::write(PathBuf::from(&central).join("SKILL.md"), "modified bundle").unwrap();
+    assert_eq!(
+        f.service.agent_access_status().unwrap().central_reason,
+        Some(super::super::agent_access::AgentAccessReason::CentralModified)
+    );
+    fs::remove_dir_all(central).unwrap();
+    assert_eq!(
+        f.service.agent_access_status().unwrap().central_reason,
+        Some(super::super::agent_access::AgentAccessReason::CentralMissing)
+    );
+}
+
+#[test]
+fn agent_access_status_reports_saved_errors_and_target_path_ownership_without_writes() {
+    use super::super::agent_access::AgentAccessReason;
+    let f = Fixture::new();
+    f.service
+        .setup_agent_access(SetupAgentRequest::install("cursor"))
+        .unwrap();
+    let db = rusqlite::Connection::open(&f.service.paths().database_path).unwrap();
+    db.execute(
+        "UPDATE skill_targets SET status='error' WHERE tool='cursor'",
+        [],
+    )
+    .unwrap();
+    let status = f.service.agent_access_status().unwrap();
+    assert_eq!(
+        status
+            .health
+            .iter()
+            .find(|a| a.agent == "cursor")
+            .unwrap()
+            .reason,
+        Some(AgentAccessReason::RecordError)
+    );
+    db.execute(
+        "UPDATE skill_targets SET status='ok', target_path=?1 WHERE tool='cursor'",
+        [f.home.path().join("outside/skills-hub").to_str().unwrap()],
+    )
+    .unwrap();
+    let status = f.service.agent_access_status().unwrap();
+    assert_eq!(
+        status
+            .health
+            .iter()
+            .find(|a| a.agent == "cursor")
+            .unwrap()
+            .reason,
+        Some(AgentAccessReason::TargetOwnership)
+    );
+    assert!(f.target("cursor").is_dir());
+}
+
+#[cfg(unix)]
+#[test]
+fn agent_access_status_accepts_owned_symlinks_but_rejects_redirected_and_broken_links() {
+    let f = Fixture::new();
+    f.service
+        .setup_agent_access(SetupAgentRequest::install("codex"))
+        .unwrap();
+    let central = f
+        .service
+        .show_skill("skills-hub".into())
+        .unwrap()
+        .central_path;
+    fs::remove_dir_all(f.target("codex")).unwrap();
+    std::os::unix::fs::symlink(&central, f.target("codex")).unwrap();
+    assert!(
+        !f.service
+            .agent_access_status()
+            .unwrap()
+            .health
+            .iter()
+            .find(|a| a.agent == "codex")
+            .unwrap()
+            .needs_repair
+    );
+    fs::remove_file(f.target("codex")).unwrap();
+    let outside = f.home.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+    fs::copy(
+        PathBuf::from(&central).join("SKILL.md"),
+        outside.join("SKILL.md"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&outside, f.target("codex")).unwrap();
+    assert_eq!(
+        f.service
+            .agent_access_status()
+            .unwrap()
+            .health
+            .iter()
+            .find(|a| a.agent == "codex")
+            .unwrap()
+            .reason,
+        Some(super::super::agent_access::AgentAccessReason::TargetOwnership)
+    );
+    fs::remove_dir_all(outside).unwrap();
+    assert!(
+        f.service
+            .agent_access_status()
+            .unwrap()
+            .health
+            .iter()
+            .find(|a| a.agent == "codex")
+            .unwrap()
+            .needs_repair
+    );
+}
+
 struct Fixture {
     home: TempDir,
     _data: TempDir,

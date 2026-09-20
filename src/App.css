@@ -2819,6 +2819,102 @@
   min-width: 0;
 }
 
+.agent-access-page {
+  min-width: 0;
+  padding: 20px;
+  color: var(--text-primary);
+}
+
+.agent-access-heading,
+.agent-access-command {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.agent-access-heading h2,
+.agent-access-cli-only h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.agent-access-heading p,
+.agent-access-note,
+.agent-access-health-reason {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.agent-access-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px 24px;
+  margin: 20px 0;
+  padding: 16px 0;
+  border-block: 1px solid var(--border-subtle);
+}
+
+.agent-access-summary dt {
+  margin-bottom: 5px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.agent-access-summary dd {
+  margin: 0;
+  font-size: 13px;
+}
+
+.agent-access-wide { grid-column: 1 / -1; }
+.agent-access-page code { font-family: var(--font-mono); overflow-wrap: anywhere; }
+.agent-access-state { display: inline-flex; align-items: center; gap: 6px; }
+.agent-access-state svg,
+.agent-access-feedback svg { flex-shrink: 0; }
+.agent-access-state.valid,
+.agent-access-feedback.success { color: var(--status-success); }
+.agent-access-state.damaged,
+.agent-access-state.missing { color: var(--status-warning); }
+
+.agent-access-feedback {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+}
+.agent-access-feedback.error { color: var(--status-error); background: var(--danger-soft-bg); }
+.agent-access-feedback.success { background: var(--success-soft-bg); }
+.agent-access-table-scroll { overflow: auto; max-height: 440px; }
+.agent-access-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+.agent-access-table caption { text-align: left; margin-bottom: 12px; font-size: 13px; font-weight: 600; }
+.agent-access-table th,
+.agent-access-table td { padding: 12px 10px; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+.agent-access-table thead th { color: var(--text-secondary); font-weight: 500; background: var(--bg-element); }
+.agent-access-table tbody th { min-width: 160px; max-width: 260px; font-weight: 500; }
+.agent-access-table tbody th code { display: block; margin-top: 5px; color: var(--text-secondary); font-size: 11px; font-weight: 400; }
+.agent-access-table tbody tr:hover { background: var(--bg-element); }
+.agent-access-table td { min-width: 90px; }
+.agent-access-health-reason { display: block; max-width: 240px; }
+.agent-access-actions { display: flex; flex-wrap: wrap; gap: 6px; min-width: 130px; }
+.agent-access-page .btn { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.agent-access-cli-only { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--border-subtle); }
+.agent-access-command { margin-top: 10px; padding: 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-element); }
+.agent-access-command code { font-size: 12px; user-select: all; }
+.agent-access-page :focus-visible,
+.sidebar-nav button:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 3px; }
+
+@media (max-width: 800px) {
+  .agent-access-page { padding: 14px; }
+  .agent-access-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .agent-access-command { flex-wrap: wrap; }
+  .management-tab-list { flex-wrap: wrap; }
+}
+
 .management-tab-list {
   display: flex;
   align-items: center;

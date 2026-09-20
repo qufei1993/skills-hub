@@ -2,6 +2,7 @@ import { memo, type PointerEvent } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import {
   ChevronLeft,
+  Bot,
   Cloud,
   Compass,
   Download,
@@ -15,7 +16,7 @@ import {
 } from 'lucide-react'
 import type { TFunction } from 'i18next'
 
-type ManagementTab = 'tags' | 'tools' | 'updates'
+type ManagementTab = 'tags' | 'tools' | 'updates' | 'agents'
 
 type HeaderProps = {
   activeView: 'myskills' | 'explore' | 'detail' | 'settings' | 'manage' | 'device-sync' | 'recycle-bin'
@@ -219,6 +220,16 @@ const Header = ({
           <RefreshCw size={18} />
           <span>{t('manageTabs.updates')}</span>
           <em>{updateCount}</em>
+        </button>
+        <button
+          className={activeView === 'manage' && managementTab === 'agents' ? 'active' : ''}
+          type="button"
+          onClick={() => onManagementTabChange('agents')}
+          aria-label={t('manageTabs.agents')}
+          title={collapsed ? t('manageTabs.agents') : undefined}
+        >
+          <Bot size={18} />
+          <span>{t('manageTabs.agents')}</span>
         </button>
         <button
           className={activeView === 'recycle-bin' ? 'active' : ''}

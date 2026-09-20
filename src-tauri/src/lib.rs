@@ -267,6 +267,8 @@ pub fn run() {
             commands::get_tool_config,
             commands::set_tool_config,
             commands::get_tool_status,
+            commands::get_agent_access_status,
+            commands::set_agent_access,
             commands::get_git_cache_cleanup_days,
             commands::get_git_cache_ttl_secs,
             commands::set_git_cache_cleanup_days,

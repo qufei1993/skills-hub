@@ -15,6 +15,49 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
+#[test]
+fn agent_access_startup_failure_is_not_hidden_by_a_missing_directory() {
+    use crate::core::cli_bridge::{
+        CliBridgeHealth, CliBridgeReason, CliBridgeStartupState, CliBridgeStatus,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let bridge = directory.path().join("missing");
+    let startup = CliBridgeStartupState(CliBridgeStatus::damaged(
+        &bridge,
+        CliBridgeReason::SourceMissing,
+    ));
+    let status = agent_access_bridge_status(&bridge, &startup);
+    assert_eq!(status.status, CliBridgeHealth::Damaged);
+    assert_eq!(status.reason, Some(CliBridgeReason::SourceMissing));
+}
+
+#[test]
+fn agent_access_commands_require_explicit_single_agent_actions_and_removal_confirmation() {
+    use crate::core::runtime_paths::{RuntimePaths, RuntimeProfile};
+    let home = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(home.path().join(".codex")).unwrap();
+    std::fs::create_dir_all(home.path().join(".cursor")).unwrap();
+    let service = SkillsHubService::open(RuntimePaths::from_roots(
+        RuntimeProfile::Test,
+        home.path(),
+        data.path(),
+    ))
+    .unwrap();
+    assert!(set_agent_access_impl(&service, "codex".into(), "execute".into(), false).is_err());
+    assert!(!service.agent_access_status().unwrap().installed);
+    let installed =
+        set_agent_access_impl(&service, "codex".into(), "install".into(), false).unwrap();
+    assert_eq!(installed.skill.unwrap().targets.len(), 1);
+    assert!(!home.path().join(".cursor/skills/skills-hub").exists());
+    assert!(set_agent_access_impl(&service, "codex".into(), "remove".into(), false).is_err());
+    assert!(home.path().join(".codex/skills/skills-hub").exists());
+    set_agent_access_impl(&service, "codex".into(), "repair".into(), false).unwrap();
+    let removed = set_agent_access_impl(&service, "codex".into(), "remove".into(), true).unwrap();
+    assert!(removed.installed);
+    assert!(!removed.deployed);
+}
+
 fn make_store() -> (tempfile::TempDir, SkillStore) {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = SkillStore::new(dir.path().join("test.db"));
