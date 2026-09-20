@@ -1,16 +1,20 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import {
   chmodSync,
   copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   utimesSync,
+  writeFileSync,
 } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -65,29 +69,45 @@ function isZeroTarBlock(archive, offset) {
   return archive.subarray(offset, offset + 512).every(byte => byte === 0)
 }
 
-function requireSafeTarPath(entryName) {
+function windowsTarPathKey(entryName) {
   if (!entryName
     || entryName.startsWith('/')
     || entryName.includes('\\')
-    || /^[A-Za-z]:/.test(entryName)
-    || entryName.split('/').some(component => !component || component === '.' || component === '..')) {
+    || /^[A-Za-z]:/.test(entryName)) {
     throw new Error(`Unsafe tar entry path: ${entryName}`)
   }
+  const canonical = []
+  for (const rawComponent of entryName.normalize('NFC').split('/')) {
+    const component = rawComponent.replace(/[. ]+$/u, '')
+    const folded = component.replace(/[A-Z]/g, character => character.toLowerCase())
+    const deviceBase = folded.split('.')[0]
+    if (!component
+      || component === '.'
+      || component === '..'
+      || component.includes(':')
+      || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/.test(deviceBase)) {
+      throw new Error(`Unsafe Windows tar entry path: ${entryName}`)
+    }
+    canonical.push(folded)
+  }
+  return canonical.join('/')
 }
 
-export function readPackedBinarySha256(tarball, expectedEntry) {
-  requireSafeTarPath(expectedEntry)
+export function readPackedBinarySha256(tarballSnapshot, expectedEntry) {
+  if (!Buffer.isBuffer(tarballSnapshot)) throw new Error('Packed tarball snapshot must be a Buffer')
+  const expectedWindowsKey = windowsTarPathKey(expectedEntry)
   let archive
   try {
-    archive = gunzipSync(readFileSync(tarball))
+    archive = gunzipSync(tarballSnapshot)
   } catch (error) {
-    throw new Error(`Invalid gzip tarball: ${tarball}`, { cause: error })
+    throw new Error('Invalid gzip tarball snapshot', { cause: error })
   }
   if (archive.length === 0 || archive.length % 512 !== 0) {
     throw new Error('Tarball has invalid block bounds')
   }
 
   let binarySha256
+  let binaryAliases = 0
   let offset = 0
   let reachedEnd = false
   while (offset < archive.length) {
@@ -118,7 +138,7 @@ export function readPackedBinarySha256(tarball, expectedEntry) {
     const name = tarString(header, 0, 100, 'name')
     const prefix = tarString(header, 345, 155, 'prefix')
     const entryName = prefix ? `${prefix}/${name}` : name
-    requireSafeTarPath(entryName)
+    const windowsKey = windowsTarPathKey(entryName)
     const typeByte = header[156]
     const type = typeByte === 0 ? '0' : String.fromCharCode(typeByte)
     if (type !== '0' && type !== '5') {
@@ -135,7 +155,11 @@ export function readPackedBinarySha256(tarball, expectedEntry) {
     if (!Number.isSafeInteger(contentsEnd) || contentsEnd > archive.length || nextOffset > archive.length) {
       throw new Error(`Tar entry size exceeds archive bounds: ${entryName}`)
     }
-    if (entryName === expectedEntry) {
+    if (windowsKey === expectedWindowsKey) {
+      binaryAliases += 1
+      if (entryName !== expectedEntry) {
+        throw new Error(`Tarball contains an ambiguous Windows CLI binary alias: ${entryName}`)
+      }
       if (type !== '0') throw new Error(`Packed CLI binary must be a regular file: ${entryName}`)
       if (binarySha256 !== undefined) throw new Error(`Tarball contains a duplicate CLI binary entry: ${entryName}`)
       binarySha256 = createHash('sha256').update(archive.subarray(contentsStart, contentsEnd)).digest('hex')
@@ -143,7 +167,9 @@ export function readPackedBinarySha256(tarball, expectedEntry) {
     offset = nextOffset
   }
   if (!reachedEnd) throw new Error('Tarball is missing its end marker')
-  if (binarySha256 === undefined) throw new Error(`Tarball must contain exactly one CLI binary entry: ${expectedEntry}`)
+  if (binaryAliases !== 1 || binarySha256 === undefined) {
+    throw new Error(`Tarball must contain exactly one CLI binary entry: ${expectedEntry}`)
+  }
   return binarySha256
 }
 
@@ -156,6 +182,38 @@ function requireRegularFile(filePath, description) {
   }
   if (metadata.isSymbolicLink()) throw new Error(`${description} must not be a symbolic link: ${filePath}`)
   if (!metadata.isFile()) throw new Error(`${description} must be a regular file: ${filePath}`)
+}
+
+function requireRegularDirectory(directory, description) {
+  const metadata = lstatSync(directory)
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+    throw new Error(`${description} must be a regular directory: ${directory}`)
+  }
+}
+
+function prepareOutputDirectory(output) {
+  const resolvedOutput = path.resolve(output)
+  mkdirSync(resolvedOutput, { recursive: true })
+  requireRegularDirectory(resolvedOutput, 'Package output')
+  return resolvedOutput
+}
+
+function createPrivatePackDirectory() {
+  return mkdtempSync(path.join(tmpdir(), 'skillshub-cli-pack-'))
+}
+
+function writeVerifiedTarballAtomically(tarballSnapshot, destination) {
+  const temporary = path.join(
+    path.dirname(destination),
+    `.${path.basename(destination)}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`,
+  )
+  try {
+    writeFileSync(temporary, tarballSnapshot, { flag: 'wx', mode: 0o600 })
+    chmodSync(temporary, 0o644)
+    renameSync(temporary, destination)
+  } finally {
+    rmSync(temporary, { force: true })
+  }
 }
 
 export function runTrustedNpm(args, {
@@ -243,7 +301,7 @@ function verifyBinaryVersion(source, version, run) {
   }
 }
 
-function prepareStaging({ root, version, target, source, output, copyFile }) {
+function prepareStaging({ root, version, target, source, staging, copyFile }) {
   const definition = targetDefinition(target)
   const triple = resolveSidecarTarget(target)
   const resolvedSource = path.resolve(source)
@@ -260,16 +318,8 @@ function prepareStaging({ root, version, target, source, output, copyFile }) {
   if (metadata.profile !== 'release') throw new Error('Only a release CLI artifact may be packaged')
 
   verifyRepositoryVersions(root, version, definition.directory)
-  const resolvedOutput = path.resolve(output)
-  mkdirSync(resolvedOutput, { recursive: true })
-  const outputMetadata = lstatSync(resolvedOutput)
-  if (outputMetadata.isSymbolicLink() || !outputMetadata.isDirectory()) {
-    throw new Error(`Package output must be a regular directory: ${resolvedOutput}`)
-  }
-  const staging = path.join(resolvedOutput, `.skillshub-cli-staging-${target}`)
   if (existsSync(staging)) {
-    if (lstatSync(staging).isSymbolicLink()) throw new Error(`Refusing symlinked staging directory: ${staging}`)
-    rmSync(staging, { recursive: true, force: true })
+    throw new Error(`Refusing pre-existing staging path: ${staging}`)
   }
   mkdirSync(staging, { mode: 0o755 })
   try {
@@ -290,7 +340,6 @@ function prepareStaging({ root, version, target, source, output, copyFile }) {
     return {
       definition,
       expectedBinarySha256: metadata.sha256,
-      resolvedOutput,
       stagedBinary,
       staging,
       triple,
@@ -312,17 +361,32 @@ export function packageCli({
   nodePath = process.execPath,
   npmPlatform = process.platform,
   copyFile = copyFileSync,
+  createPackDirectory = createPrivatePackDirectory,
+  readTarball = readFileSync,
 }) {
   validateVersion(version)
-  const prepared = prepareStaging({ root: path.resolve(root), version, target, source, output, copyFile })
-  let tarball
+  const resolvedOutput = prepareOutputDirectory(output)
+  const packDirectory = path.resolve(createPackDirectory())
   try {
+    requireRegularDirectory(packDirectory, 'Private pack directory')
+    const staging = path.join(packDirectory, 'staging')
+    const packOutput = path.join(packDirectory, 'packed')
+    mkdirSync(packOutput, { mode: 0o700 })
+    requireRegularDirectory(packOutput, 'Private npm pack output')
+    const prepared = prepareStaging({
+      root: path.resolve(root),
+      version,
+      target,
+      source,
+      staging,
+      copyFile,
+    })
     verifyBinaryVersion(prepared.stagedBinary, version, run)
     const result = runTrustedNpm([
       'pack', prepared.staging,
       '--json',
       '--ignore-scripts',
-      '--pack-destination', prepared.resolvedOutput,
+      '--pack-destination', packOutput,
     ], {
       run,
       npmExecPath,
@@ -350,27 +414,32 @@ export function packageCli({
       throw new Error('npm pack returned an unexpected result')
     }
     const filename = entries[0].filename
-    if (filename !== path.basename(filename)) throw new Error('npm pack returned an unsafe filename')
-    tarball = path.join(prepared.resolvedOutput, filename)
-    requireRegularFile(tarball, 'npm tarball')
+    if (!filename
+      || filename !== path.posix.basename(filename)
+      || filename !== path.win32.basename(filename)) {
+      throw new Error('npm pack returned an unsafe filename')
+    }
+    const privateTarball = path.join(packOutput, filename)
+    requireRegularFile(privateTarball, 'npm tarball')
+    const tarballSnapshot = readTarball(privateTarball)
     const packedBinaryName = `package/skillshub-cli${prepared.definition.extension}`
-    const packedBinarySha256 = readPackedBinarySha256(tarball, packedBinaryName)
+    const packedBinarySha256 = readPackedBinarySha256(tarballSnapshot, packedBinaryName)
     if (packedBinarySha256 !== prepared.expectedBinarySha256) {
       throw new Error('Packed tarball binary hash does not match release metadata')
     }
+    const packageSha256 = createHash('sha256').update(tarballSnapshot).digest('hex')
+    const tarball = path.join(resolvedOutput, filename)
+    writeVerifiedTarballAtomically(tarballSnapshot, tarball)
     return {
       binarySha256: packedBinarySha256,
-      packageSha256: sha256(tarball),
+      packageSha256,
       profile: 'release',
       target: prepared.triple,
       tarball,
       version,
     }
-  } catch (error) {
-    if (tarball) rmSync(tarball, { force: true })
-    throw error
   } finally {
-    rmSync(prepared.staging, { recursive: true, force: true })
+    rmSync(packDirectory, { recursive: true, force: true })
   }
 }
 

@@ -435,7 +435,7 @@ describe('deterministic CLI package staging', () => {
           { name: target, contents: binary },
         ])
         assert.equal(
-          readPackedBinarySha256(tarball, target),
+          readPackedBinarySha256(readFileSync(tarball), target),
           createHash('sha256').update(binary).digest('hex'),
         )
       }
@@ -492,7 +492,31 @@ describe('deterministic CLI package staging', () => {
       for (const testCase of cases) {
         const tarball = path.join(temporary, `${testCase.name}.tgz`)
         writeTarball(tarball, testCase.entries, testCase.options)
-        assert.throws(() => readPackedBinarySha256(tarball, target), testCase.message)
+        assert.throws(() => readPackedBinarySha256(readFileSync(tarball), target), testCase.message)
+      }
+    } finally {
+      rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects every Windows extraction alias of the exact executable entry', () => {
+    const temporary = mkdtempSync(path.join(tmpdir(), 'skillshub-cli-windows-alias-'))
+    try {
+      const target = 'package/skillshub-cli.exe'
+      for (const [index, alias] of [
+        'package/SKILLSHUB-CLI.EXE',
+        'package/skillshub-cli.exe.',
+        'package/skillshub-cli.exe ',
+      ].entries()) {
+        const tarball = path.join(temporary, `alias-${index}.tgz`)
+        writeTarball(tarball, [
+          { name: target, contents: 'release' },
+          { name: alias, contents: 'substitute' },
+        ])
+        assert.throws(
+          () => readPackedBinarySha256(readFileSync(tarball), target),
+          /alias|ambiguous|duplicate/i,
+        )
       }
     } finally {
       rmSync(temporary, { recursive: true, force: true })
@@ -570,6 +594,7 @@ describe('deterministic CLI package staging', () => {
     const temporary = mkdtempSync(path.join(tmpdir(), 'skillshub-cli-stage-'))
     try {
       const output = path.join(temporary, 'output')
+      const packDirectory = path.join(temporary, 'private-pack')
       const { source, sha256 } = createFixtureBinary(temporary, 'darwin-arm64')
       const npmExecPath = path.join(temporary, 'npm-cli.js')
       writeFileSync(npmExecPath, '# npm CLI fixture\n')
@@ -581,10 +606,14 @@ describe('deterministic CLI package staging', () => {
         source,
         output,
         npmExecPath,
+        createPackDirectory() {
+          mkdirSync(packDirectory, { mode: 0o700 })
+          return packDirectory
+        },
         run(command, args, options) {
           calls.push({ command, args, options })
           if (command !== process.execPath) {
-            assert.equal(command, path.join(output, '.skillshub-cli-staging-darwin-arm64/skillshub-cli'))
+            assert.equal(command, path.join(packDirectory, 'staging/skillshub-cli'))
             return {
               status: 0,
               signal: null,
@@ -606,9 +635,10 @@ describe('deterministic CLI package staging', () => {
           assert.equal(readFileSync(path.join(staging, 'skillshub-cli'), 'utf8'), readFileSync(source, 'utf8'))
           assert.equal(lstatSync(path.join(staging, 'skillshub-cli')).isSymbolicLink(), false)
           assert.equal(lstatSync(path.join(staging, 'skillshub-cli')).mode & 0o777, 0o755)
-          mkdirSync(output, { recursive: true })
+          const packDestination = args[args.indexOf('--pack-destination') + 1]
+          mkdirSync(packDestination, { recursive: true })
           const filename = `skillshub-app-cli-darwin-arm64-${VERSION}.tgz`
-          writeTarball(path.join(output, filename), [
+          writeTarball(path.join(packDestination, filename), [
             { name: 'package/package.json', contents: JSON.stringify(manifest) },
             { name: 'package/skillshub-cli', contents: readFileSync(source) },
           ])
@@ -625,7 +655,138 @@ describe('deterministic CLI package staging', () => {
       assert.equal(result.target, 'aarch64-apple-darwin')
       assert.equal(result.profile, 'release')
       assert.equal(existsSync(result.tarball), true)
-      assert.equal(existsSync(path.join(output, '.skillshub-cli-staging-darwin-arm64')), false)
+      assert.equal(existsSync(packDirectory), false)
+    } finally {
+      rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('publishes the single verified tarball Buffer snapshot and hashes that same snapshot', () => {
+    const temporary = mkdtempSync(path.join(tmpdir(), 'skillshub-cli-tar-snapshot-'))
+    try {
+      const output = path.join(temporary, 'output')
+      const packDirectory = path.join(temporary, 'private-pack')
+      const { source, sha256 } = createFixtureBinary(temporary, 'darwin-arm64')
+      const npmExecPath = path.join(temporary, 'npm-cli.js')
+      writeFileSync(npmExecPath, '# npm CLI fixture\n')
+      const fixtureTarball = path.join(temporary, 'verified.tgz')
+      writeTarball(fixtureTarball, [
+        { name: 'package/package.json', contents: '{}' },
+        { name: 'package/skillshub-cli', contents: readFileSync(source) },
+      ])
+      const verifiedSnapshot = readFileSync(fixtureTarball)
+      const filename = `skillshub-app-cli-darwin-arm64-${VERSION}.tgz`
+      let reads = 0
+      const result = packageCli({
+        root: ROOT,
+        version: VERSION,
+        target: 'darwin-arm64',
+        source,
+        output,
+        npmExecPath,
+        createPackDirectory() {
+          mkdirSync(packDirectory, { mode: 0o700 })
+          return packDirectory
+        },
+        readTarball(tarball) {
+          reads += 1
+          const snapshot = readFileSync(tarball)
+          writeFileSync(tarball, 'replaced after snapshot')
+          return snapshot
+        },
+        run(command, args) {
+          if (command !== process.execPath) {
+            return {
+              status: 0,
+              signal: null,
+              stdout: `${JSON.stringify({ ok: true, command: 'version', data: { version: VERSION } })}\n`,
+              stderr: '',
+            }
+          }
+          const destination = args[args.indexOf('--pack-destination') + 1]
+          mkdirSync(destination, { recursive: true })
+          writeFileSync(path.join(destination, filename), verifiedSnapshot)
+          return { status: 0, signal: null, stdout: JSON.stringify([{ filename }]), stderr: '' }
+        },
+      })
+
+      assert.equal(reads, 1)
+      assert.equal(result.binarySha256, sha256)
+      assert.equal(result.packageSha256, createHash('sha256').update(verifiedSnapshot).digest('hex'))
+      assert.deepEqual(readFileSync(result.tarball), verifiedSnapshot)
+      assert.equal(existsSync(packDirectory), false)
+    } finally {
+      rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps output unchanged and removes the private pack directory for every npm result failure', () => {
+    const temporary = mkdtempSync(path.join(tmpdir(), 'skillshub-cli-pack-failure-'))
+    try {
+      const failures = [
+        {
+          name: 'exit-error',
+          result: filename => ({ status: 1, signal: null, stdout: JSON.stringify([{ filename }]), stderr: 'failed' }),
+          message: /npm pack failed/i,
+        },
+        {
+          name: 'invalid-json',
+          result: () => ({ status: 0, signal: null, stdout: 'not-json', stderr: '' }),
+          message: /valid JSON/i,
+        },
+        {
+          name: 'unsafe-path',
+          result: () => ({ status: 0, signal: null, stdout: JSON.stringify([{ filename: '../escape.tgz' }]), stderr: '' }),
+          message: /unsafe filename/i,
+        },
+      ]
+      for (const failure of failures) {
+        const caseDirectory = path.join(temporary, failure.name)
+        const output = path.join(caseDirectory, 'output')
+        const packDirectory = path.join(caseDirectory, 'private-pack')
+        const filename = `generated-${failure.name}.tgz`
+        mkdirSync(output, { recursive: true })
+        writeFileSync(path.join(output, 'keep.txt'), 'original')
+        writeFileSync(path.join(output, filename), 'original tarball')
+        const { source } = createFixtureBinary(caseDirectory, 'darwin-arm64')
+        const npmExecPath = path.join(caseDirectory, 'npm-cli.js')
+        writeFileSync(npmExecPath, '# npm CLI fixture\n')
+        let packDirectoriesCreated = 0
+        assert.throws(() => packageCli({
+          root: ROOT,
+          version: VERSION,
+          target: 'darwin-arm64',
+          source,
+          output,
+          npmExecPath,
+          createPackDirectory() {
+            packDirectoriesCreated += 1
+            mkdirSync(packDirectory, { mode: 0o700 })
+            return packDirectory
+          },
+          run(command, args) {
+            if (command !== process.execPath) {
+              return {
+                status: 0,
+                signal: null,
+                stdout: `${JSON.stringify({ ok: true, command: 'version', data: { version: VERSION } })}\n`,
+                stderr: '',
+              }
+            }
+            const destination = args[args.indexOf('--pack-destination') + 1]
+            mkdirSync(destination, { recursive: true })
+            writeTarball(path.join(destination, filename), [
+              { name: 'package/skillshub-cli', contents: readFileSync(source) },
+            ])
+            return failure.result(filename)
+          },
+        }), failure.message)
+        assert.equal(packDirectoriesCreated, 1)
+        assert.deepEqual(readdirSync(output).sort(), [filename, 'keep.txt'].sort())
+        assert.equal(readFileSync(path.join(output, 'keep.txt'), 'utf8'), 'original')
+        assert.equal(readFileSync(path.join(output, filename), 'utf8'), 'original tarball')
+        assert.equal(existsSync(packDirectory), false)
+      }
     } finally {
       rmSync(temporary, { recursive: true, force: true })
     }
