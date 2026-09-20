@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useId, useRef, useState } from 'react'
 import { CheckCircle2, CircleMinus, Copy, LoaderCircle, RefreshCw, TriangleAlert } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import ConfirmActionModal from './modals/ConfirmActionModal'
@@ -23,6 +23,8 @@ const AgentAccessPage = ({ isTauri, invokeTauri, t }: Props) => {
   const busy = useRef(false)
   const refreshRef = useRef<HTMLButtonElement>(null)
   const mounted = useRef(false)
+  const conflictHelpId = useId()
+  const nameConflict = status?.officialState === 'name_conflict'
 
   const refresh = useCallback(async () => {
     if (!isTauri || busy.current) return
@@ -48,7 +50,7 @@ const AgentAccessPage = ({ isTauri, invokeTauri, t }: Props) => {
   }, [refresh])
 
   const changeAccess = async (agent: AgentAccessAgentDto, action: Action) => {
-    if (!isTauri || busy.current) return
+    if (!isTauri || busy.current || nameConflict) return
     busy.current = true
     setPending({ key: agent.key, action })
     setError(null)
@@ -100,6 +102,17 @@ const AgentAccessPage = ({ isTauri, invokeTauri, t }: Props) => {
     {error ? <p role="alert" className="agent-access-feedback error"><TriangleAlert size={16} aria-hidden="true" />{t(`agentAccess.errors.${error}`)}</p> : null}
     {success ? <p role="status" className="agent-access-feedback success"><CheckCircle2 size={16} aria-hidden="true" />{t(`agentAccess.success.${success.action}`, { agent: success.agent })}</p> : null}
     {status ? <>
+      {nameConflict ? <div className="agent-access-feedback warning" role="status">
+        <TriangleAlert size={16} aria-hidden="true" />
+        <div>
+          <strong>{t('agentAccess.nameConflict.title')}</strong>
+          <p id={conflictHelpId}>{t('agentAccess.nameConflict.help')}</p>
+          {status.conflict ? <dl className="agent-access-conflict-details">
+            <div><dt>{t('agentAccess.nameConflict.source')}</dt><dd>{t(`agentAccess.nameConflict.sourceKind.${status.conflict.sourceKind}`)}</dd></div>
+            <div><dt>{t('agentAccess.nameConflict.location')}</dt><dd><code>{status.conflict.centralPath}</code></dd></div>
+          </dl> : null}
+        </div>
+      </div> : null}
       <dl className="agent-access-summary">
         <div><dt>{t('agentAccess.cliStatus')}</dt><dd className={`agent-access-state ${status.bridge.status}`}>
           {status.bridge.status === 'valid' ? <CheckCircle2 size={16} aria-hidden="true" /> : <TriangleAlert size={16} aria-hidden="true" />}
@@ -108,7 +121,7 @@ const AgentAccessPage = ({ isTauri, invokeTauri, t }: Props) => {
         <div><dt>{t('agentAccess.cliVersion')}</dt><dd><code>{status.bridge.version ?? t('agentAccess.unknown')}</code></dd></div>
         <div className="agent-access-wide"><dt>{t('agentAccess.cliPath')}</dt><dd><code>{status.bridge.path}</code></dd></div>
         {status.bridge.reason ? <div className="agent-access-wide"><dt>{t('agentAccess.checkReason')}</dt><dd>{t(`agentAccess.reason.${status.bridge.reason}`)}</dd></div> : null}
-        <div><dt>{t('agentAccess.officialSkill')}</dt><dd>{t(status.installed ? 'agentAccess.installed' : 'agentAccess.notInstalled')}</dd></div>
+        <div><dt>{t('agentAccess.officialSkill')}</dt><dd>{t(nameConflict ? 'agentAccess.nameConflict.state' : status.installed ? 'agentAccess.installed' : 'agentAccess.notInstalled')}</dd></div>
         {status.centralReason ? <div className="agent-access-wide"><dt>{t('agentAccess.checkReason')}</dt><dd className="agent-access-state damaged"><TriangleAlert size={16} aria-hidden="true" />{t(`agentAccess.healthReason.${status.centralReason}`)}</dd></div> : null}
         <div><dt>{t('agentAccess.bundledVersion')}</dt><dd><code>{status.bundledVersion}</code></dd></div>
         <div><dt>{t('agentAccess.installedVersion')}</dt><dd><code>{status.installedVersion ?? t('agentAccess.unknown')}</code></dd></div>
@@ -129,11 +142,11 @@ const AgentAccessPage = ({ isTauri, invokeTauri, t }: Props) => {
                 {t(agent.needsRepair ? 'agentAccess.needsRepair' : agent.deployed ? 'agentAccess.deployed' : 'agentAccess.notDeployed')}
               </span>{agent.reason ? <small className="agent-access-health-reason">{t(`agentAccess.healthReason.${agent.reason}`)}</small> : null}</td>
               <td><div className="agent-access-actions">
-                <button className={`btn ${agent.deployed ? 'btn-secondary' : 'btn-primary'}`} type="button" disabled={working || !agent.detected || !agent.enabled} onClick={() => void changeAccess(agent, agent.deployed ? 'repair' : 'install')}>
+                <button className={`btn ${agent.deployed ? 'btn-secondary' : 'btn-primary'}`} type="button" disabled={working || nameConflict || !agent.detected || !agent.enabled} aria-describedby={nameConflict ? conflictHelpId : undefined} onClick={() => void changeAccess(agent, agent.deployed ? 'repair' : 'install')}>
                   {operation && operation !== 'remove' ? <LoaderCircle size={14} aria-hidden="true" /> : null}
                   {operation && operation !== 'remove' ? progress : t(agent.deployed ? 'agentAccess.repair' : 'agentAccess.install')}
                 </button>
-                {agent.deployed ? <button className="btn btn-danger" type="button" disabled={working} onClick={() => setRemoving(agent)}>{operation === 'remove' ? progress : t('agentAccess.remove')}</button> : null}
+                {agent.deployed && status.installed && !nameConflict ? <button className="btn btn-danger" type="button" disabled={working} onClick={() => setRemoving(agent)}>{operation === 'remove' ? progress : t('agentAccess.remove')}</button> : null}
               </div></td>
             </tr>
           })}</tbody>

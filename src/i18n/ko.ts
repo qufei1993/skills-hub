@@ -109,6 +109,18 @@ export const ko = {
     "manageCenterHelp": "태그, 동기화 대상 도구, 스킬 업데이트를 한 곳에서 관리하세요.",
     agentAccess: {
       "help": "공식 Skill을 통해 Agent가 Skills Hub를 사용하도록 설정하세요.",
+      "nameConflict": {
+        "state": "이름 충돌",
+        "title": "공식 Skill 이름이 이미 사용 중입니다",
+        "help": "skills-hub라는 기존 Skill이 있지만 공식 내장 Skill이 아닙니다. 연결을 설치하거나 복구할 수 없습니다. 내 스킬에서 확인한 뒤 직접 이름을 변경하거나 제거하고 공식 연결을 설치하세요.",
+        "source": "기존 출처",
+        "location": "관리 라이브러리 위치",
+        "sourceKind": {
+          "local": "로컬 Skill",
+          "git": "Git Skill",
+          "other": "기타 출처"
+        }
+      },
       "refresh": "새로고침",
       "loading": "Agent 연결 상태 확인 중…",
       "desktopOnly": "Agent 연결은 데스크톱 앱에서 관리하세요.",

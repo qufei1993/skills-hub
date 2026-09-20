@@ -54,7 +54,33 @@ pub struct AgentAccessHealth {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OfficialSkillState {
+    Missing,
+    Healthy,
+    NeedsRepair,
+    NameConflict,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ConflictingSkillSource {
+    Local,
+    Git,
+    Other,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficialSkillConflict {
+    pub source_kind: ConflictingSkillSource,
+    pub central_path: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct AgentAccessStatus {
+    pub official_state: OfficialSkillState,
+    pub conflict: Option<OfficialSkillConflict>,
     pub installed: bool,
     pub deployed: bool,
     pub skill_id: Option<String>,
@@ -70,7 +96,22 @@ pub struct AgentAccessStatus {
 
 impl SkillsHubService {
     pub fn agent_access_status(&self) -> Result<AgentAccessStatus, ServiceError> {
-        let skill = self.official_skill()?;
+        let (skill, conflict) = match self.show_skill(OFFICIAL_SKILL_NAME.into()) {
+            Ok(skill) if skill.source.kind == "bundled" => (Some(skill), None),
+            Ok(skill) => (
+                None,
+                Some(OfficialSkillConflict {
+                    source_kind: match skill.source.kind.as_str() {
+                        "local" => ConflictingSkillSource::Local,
+                        "git" => ConflictingSkillSource::Git,
+                        _ => ConflictingSkillSource::Other,
+                    },
+                    central_path: skill.central_path,
+                }),
+            ),
+            Err(error) if error.code == ErrorCode::SkillNotFound => (None, None),
+            Err(error) => return Err(error),
+        };
         let agents = self.list_agents()?;
         let central_reason = skill.as_ref().and_then(central_health);
         let records = skill
@@ -79,7 +120,7 @@ impl SkillsHubService {
             .transpose()
             .map_err(|_| ServiceError::internal("failed to inspect official Skill targets"))?
             .unwrap_or_default();
-        let health = agents
+        let health: Vec<AgentAccessHealth> = agents
             .agents
             .iter()
             .map(|agent| {
@@ -100,6 +141,16 @@ impl SkillsHubService {
             })
             .collect();
         Ok(AgentAccessStatus {
+            official_state: if conflict.is_some() {
+                OfficialSkillState::NameConflict
+            } else if skill.is_none() {
+                OfficialSkillState::Missing
+            } else if central_reason.is_some() || health.iter().any(|agent| agent.needs_repair) {
+                OfficialSkillState::NeedsRepair
+            } else {
+                OfficialSkillState::Healthy
+            },
+            conflict,
             installed: skill.is_some(),
             deployed: skill
                 .as_ref()

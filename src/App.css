@@ -2888,6 +2888,11 @@
   border-radius: var(--radius-sm);
 }
 .agent-access-feedback.error { color: var(--status-error); background: var(--danger-soft-bg); }
+.agent-access-feedback.warning { color: var(--text-primary); background: var(--warning-soft-bg); border: 1px solid var(--warning-soft-border); }
+.agent-access-feedback.warning > svg { color: var(--status-warning); }
+.agent-access-conflict-details { margin: 10px 0 0; }
+.agent-access-conflict-details dt { color: var(--text-secondary); font-size: 12px; margin-top: 8px; }
+.agent-access-conflict-details dd { margin: 4px 0 0; }
 .agent-access-feedback.success { background: var(--success-soft-bg); }
 .agent-access-table-scroll { overflow: auto; max-height: 440px; }
 .agent-access-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }

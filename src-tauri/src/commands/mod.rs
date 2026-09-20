@@ -97,6 +97,8 @@ pub struct AgentAccessAgentDto {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentAccessStatusDto {
+    official_state: crate::services::agent_access::OfficialSkillState,
+    conflict: Option<crate::services::agent_access::OfficialSkillConflict>,
     bridge: crate::core::cli_bridge::CliBridgeStatus,
     bundled_version: String,
     installed_version: Option<String>,
@@ -144,6 +146,8 @@ fn agent_access_dto(
         })
         .collect();
     AgentAccessStatusDto {
+        official_state: status.official_state,
+        conflict: status.conflict,
         bridge,
         bundled_version: status.bundled_version,
         installed_version: status.installed_version,

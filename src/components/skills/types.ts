@@ -12,6 +12,8 @@ export type AgentAccessAgentDto = {
 }
 
 export type AgentAccessStatusDto = {
+  officialState: 'missing' | 'healthy' | 'needs_repair' | 'name_conflict'
+  conflict: { sourceKind: 'local' | 'git' | 'other'; centralPath: string } | null
   bridge: {
     status: 'missing' | 'valid' | 'damaged'
     reason: 'DIRECTORY_MISSING' | 'BINARY_MISSING' | 'STAMP_MISSING' | 'VERSION_MISMATCH' | 'HASH_MISMATCH' | 'NOT_EXECUTABLE' | 'INVALID_METADATA' | 'SOURCE_MISSING' | 'IO_ERROR' | 'PUBLICATION_IN_PROGRESS' | null

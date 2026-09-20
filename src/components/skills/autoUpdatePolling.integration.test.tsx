@@ -61,6 +61,7 @@ beforeEach(() => {
     if (command === 'get_recent_projects') return []
     if (command === 'get_recycle_bin_items') return []
     if (command === 'get_agent_access_status') return {
+      officialState: 'missing', conflict: null,
       bridge: { status: 'missing', reason: 'DIRECTORY_MISSING', path: '/test/bin/skillshub-cli', version: null },
       installed: false, bundledVersion: '0.10.1', installedVersion: null, centralReason: null, agents: [],
     }

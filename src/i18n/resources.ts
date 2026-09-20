@@ -108,6 +108,18 @@ export const resources = {
       manageCenterHelp: 'Manage tags, tool targets, and skill updates in one place.',
       agentAccess: {
         "help": "Give your Agents access to Skills Hub through the official Skill.",
+        "nameConflict": {
+          "state": "Name conflict",
+          "title": "The official Skill name is already in use",
+          "help": "An existing skills-hub Skill is not the official bundled Skill. Installation and repair are unavailable. Review it in My Skills, then rename or remove it yourself before installing official access.",
+          "source": "Existing source",
+          "location": "Managed library location",
+          "sourceKind": {
+            "local": "Local Skill",
+            "git": "Git Skill",
+            "other": "Other source"
+          }
+        },
         "refresh": "Refresh",
         "loading": "Checking Agent access…",
         "desktopOnly": "Open the desktop app to manage Agent access.",
@@ -1301,6 +1313,18 @@ export const resources = {
       manageCenterHelp: '集中管理标签、工具和更新。',
       agentAccess: {
         "help": "通过官方 Skill，让 Agent 使用 Skills Hub。",
+        "nameConflict": {
+          "state": "名称冲突",
+          "title": "官方 Skill 名称已被占用",
+          "help": "已有名为 skills-hub 的 Skill，但它并非官方内置 Skill，暂时无法安装或修复接入。请先在「我的 Skills」中确认该 Skill，再自行重命名或移除，然后安装官方接入。",
+          "source": "现有来源",
+          "location": "中央库位置",
+          "sourceKind": {
+            "local": "本地 Skill",
+            "git": "Git Skill",
+            "other": "其他来源"
+          }
+        },
         "refresh": "刷新",
         "loading": "正在检查 Agent 接入状态…",
         "desktopOnly": "请在桌面应用中管理 Agent 接入。",

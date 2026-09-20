@@ -463,6 +463,65 @@ fn agent_access_upgrade_reports_restored_files_and_recovery_after_deployment_fai
 }
 
 #[test]
+fn agent_access_name_conflicts_return_safe_status_without_claiming_user_skills() {
+    for kind in ["local", "git"] {
+        let f = Fixture::new();
+        f.service
+            .setup_agent_access(SetupAgentRequest::install("cursor"))
+            .unwrap();
+        let db = rusqlite::Connection::open(&f.service.paths().database_path).unwrap();
+        let source = if kind == "git" {
+            "https://user:private-token@example.test/skills.git?token=private-query#private-fragment"
+        } else {
+            "/local/user-skill"
+        };
+        db.execute(
+            "UPDATE skills SET source_type=?1, source_ref=?2 WHERE name='skills-hub'",
+            rusqlite::params![kind, source],
+        )
+        .unwrap();
+        let before = f.service.show_skill("skills-hub".into()).unwrap();
+        let status = f
+            .service
+            .agent_access_status()
+            .expect("name conflicts must not fail status reads");
+        let json = serde_json::to_value(&status).unwrap();
+        assert_eq!(json["official_state"], "name_conflict");
+        assert_eq!(json["conflict"]["sourceKind"], kind);
+        assert_eq!(json["conflict"]["centralPath"], before.central_path);
+        assert!(!status.installed);
+        assert!(!status.deployed);
+        assert!(status.skill.is_none());
+        assert!(status
+            .agents
+            .agents
+            .iter()
+            .any(|agent| agent.key == "cursor" && agent.detected));
+        assert!(status.health.iter().all(|agent| !agent.deployed));
+        let serialized = serde_json::to_string(&status).unwrap();
+        for secret in [
+            "private-token",
+            "private-query",
+            "private-fragment",
+            "example.test",
+        ] {
+            assert!(!serialized.contains(secret));
+        }
+        for remove in [false, true] {
+            let mut request = SetupAgentRequest::install("cursor");
+            request.remove = remove;
+            request.confirmed = true;
+            assert_eq!(
+                f.service.setup_agent_access(request).unwrap_err().code,
+                ErrorCode::TargetConflict
+            );
+        }
+        assert_eq!(f.service.show_skill("skills-hub".into()).unwrap(), before);
+        assert!(f.target("cursor").join("SKILL.md").is_file());
+    }
+}
+
+#[test]
 fn agent_access_existing_library_content_cannot_be_claimed_as_bundled() {
     let f = Fixture::new();
     let central = f.service.paths().default_central_repo.join("skills-hub");

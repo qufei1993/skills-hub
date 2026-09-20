@@ -9,6 +9,7 @@ import type { AgentAccessStatusDto } from './types'
 
 const t = ((key: string, values?: Record<string, unknown>) => values?.agent ? `${key}:${values.agent}` : key) as TFunction
 const fixture = (): AgentAccessStatusDto => ({
+  officialState: 'missing', conflict: null,
   bridge: { status: 'damaged', reason: 'SOURCE_MISSING', path: '/test/bin/skillshub-cli', version: null },
   bundledVersion: '0.10.1', installedVersion: null, installed: false, centralReason: null,
   agents: [
@@ -18,6 +19,38 @@ const fixture = (): AgentAccessStatusDto => ({
   ],
 })
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
+
+it.each(['local', 'git'])('keeps status usable for a %s name conflict and blocks official actions', async sourceKind => {
+  const state = {
+    ...fixture(), officialState: 'name_conflict',
+    conflict: { sourceKind, centralPath: '/test/library/skills-hub' },
+  }
+  state.agents[0].deployed = true
+  const invoke = vi.fn(async () => state)
+  const writeText = vi.fn().mockResolvedValue(undefined)
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+  render(<AgentAccessPage isTauri invokeTauri={invoke} t={t} />)
+  await screen.findByRole('row', { name: /Codex/ })
+  expect(screen.getByText('agentAccess.nameConflict.title')).toBeTruthy()
+  expect(screen.getByText('agentAccess.nameConflict.help')).toBeTruthy()
+  expect(screen.getByText(`agentAccess.nameConflict.sourceKind.${sourceKind}`)).toBeTruthy()
+  expect(screen.getByText('/test/library/skills-hub')).toBeTruthy()
+  expect(screen.getByText('/test/bin/skillshub-cli')).toBeTruthy()
+  expect(screen.getByText('agentAccess.bridgeState.damaged')).toBeTruthy()
+  for (const label of ['agentAccess.install', 'agentAccess.repair']) {
+    const button = screen.getByRole<HTMLButtonElement>('button', { name: label })
+    expect(button.disabled).toBe(true)
+    expect(button.getAttribute('aria-describedby')).toBeTruthy()
+    fireEvent.click(button)
+  }
+  expect(screen.queryByRole('button', { name: 'agentAccess.remove' })).toBeNull()
+  expect(screen.queryByRole('dialog')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'agentAccess.copyCommand' }))
+  await screen.findByText('agentAccess.copied')
+  expect(writeText).toHaveBeenCalledWith('npm install -g skillshub-cli')
+  expect(invoke).toHaveBeenCalledTimes(1)
+  expect(invoke).toHaveBeenCalledWith('get_agent_access_status')
+})
 
 it.each(['en', 'zh', 'ko'])('renders status, damage details and removal confirmation in %s', async language => {
   const i18n = createInstance()
@@ -34,6 +67,22 @@ it.each(['en', 'zh', 'ko'])('renders status, damage details and removal confirma
   expect(screen.getByRole('dialog', { name: i18n.t('agentAccess.removeTitle') })).toBeTruthy()
   expect(document.body.textContent).not.toMatch(/agentAccess\.|manageTabs\./)
   expect(document.body.textContent).not.toContain('{{agent}}')
+})
+
+it.each(['en', 'zh', 'ko'])('explains the name conflict and recovery without untranslated text in %s', async language => {
+  const i18n = createInstance()
+  await i18n.init({ resources, lng: language, fallbackLng: false })
+  const state: AgentAccessStatusDto = {
+    ...fixture(), officialState: 'name_conflict',
+    conflict: { sourceKind: 'git', centralPath: '/test/library/skills-hub' },
+  }
+  render(<AgentAccessPage isTauri invokeTauri={async () => state} t={i18n.t.bind(i18n)} />)
+  await screen.findByText('/test/library/skills-hub')
+  expect(screen.getByText(i18n.t('agentAccess.nameConflict.help'))).toBeTruthy()
+  expect(document.body.textContent).not.toMatch(/agentAccess\.|manageTabs\./)
+  for (const button of screen.getAllByRole<HTMLButtonElement>('button', { name: i18n.t('agentAccess.install') })) {
+    expect(button.disabled).toBe(true)
+  }
 })
 
 it('lists detected Agents and retains unavailable Agents with managed deployments', async () => {
