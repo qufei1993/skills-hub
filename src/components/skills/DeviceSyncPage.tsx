@@ -4,7 +4,9 @@ import { listen } from '@tauri-apps/api/event'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import {
   AlertTriangle,
+  ArrowDownToLine,
   ArrowLeftRight,
+  ArrowUpFromLine,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -573,6 +575,29 @@ const DeviceSyncPage = ({
       }
     })
 
+  const pull = () =>
+    runAction('pull', async () => {
+      const result = await invoke<DeviceSyncRunResult>('pull_device_sync')
+      setPreview(null)
+      await Promise.all([load({ refreshRepositories: false }), onSkillsChanged()])
+      if (result.changes.added + result.changes.updated === 0) {
+        toast.info(t('deviceSync.nothingToPull'))
+      } else {
+        toast.success(t('deviceSync.pullComplete'))
+      }
+    })
+
+  const push = () =>
+    runAction('push', async () => {
+      const result = await invoke<DeviceSyncRunResult>('push_device_sync')
+      await Promise.all([load({ refreshRepositories: false }), onSkillsChanged()])
+      if (result.changes.added + result.changes.updated === 0) {
+        toast.info(t('deviceSync.nothingToPush'))
+      } else {
+        toast.success(t('deviceSync.pushComplete'))
+      }
+    })
+
   const resolve = (id: string, resolution: ConflictResolution) =>
     runAction(id, async () => {
       await invoke('resolve_device_sync_conflict', { conflictId: id, resolution })
@@ -823,7 +848,7 @@ const DeviceSyncPage = ({
               </span>
             </div>
             {recoveryFailure ? <div role="alert">{!latestFailure ? <p>{t(`deviceSync.failureReasons.${recoveryFailure}`)}</p> : null}<button className="btn btn-secondary" type="button" disabled={working} onClick={recoverCredentials}>{t('deviceSync.configureCredentials')}</button></div> : null}
-            <div className="device-sync-status-actions"><button className="btn btn-secondary" type="button" disabled={!controls.canCheck} onClick={check}>{busy === 'check' ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}{t('deviceSync.check')}</button><button className="btn btn-primary" type="button" disabled={!controls.canSync || conflicts.length > 0} onClick={sync}>{synchronizationInProgress ? <LoaderCircle className="spin" size={15} /> : <Cloud size={15} />}{conflicts.length ? t('deviceSync.waitingForConflicts') : t(synchronizationInProgress ? 'deviceSync.exchangingContent' : 'deviceSync.syncLocalRepository')}</button></div>
+            <div className="device-sync-status-actions"><button className="btn btn-secondary" type="button" disabled={!controls.canCheck} onClick={check}>{busy === 'check' ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}{t('deviceSync.check')}</button><button className="btn btn-primary" type="button" disabled={!controls.canSync || conflicts.length > 0} onClick={sync}>{synchronizationInProgress ? <LoaderCircle className="spin" size={15} /> : <Cloud size={15} />}{conflicts.length ? t('deviceSync.waitingForConflicts') : t(synchronizationInProgress ? 'deviceSync.exchangingContent' : 'deviceSync.syncLocalRepository')}</button><button className="btn btn-secondary" type="button" disabled={!controls.canSync} title={t('deviceSync.pullHelp')} onClick={pull}>{busy === 'pull' ? <LoaderCircle className="spin" size={15} /> : <ArrowDownToLine size={15} />}{t('deviceSync.pullFromRepository')}</button><button className="btn btn-secondary" type="button" disabled={!controls.canSync} title={t('deviceSync.pushHelp')} onClick={push}>{busy === 'push' ? <LoaderCircle className="spin" size={15} /> : <ArrowUpFromLine size={15} />}{t('deviceSync.pushToRepository')}</button></div>
             <ToolSyncNotice issues={status?.tool_issues ?? []} toolLabels={toolLabels} onOpen={onOpenToolIssues} t={t} />
             <section className={`device-sync-schedule-summary ${scheduleState}`} aria-label={t('deviceSync.scheduleSummary')}>
               <span className="device-sync-schedule-label"><Clock3 size={18} /><strong>{t('deviceSync.autoSync')}</strong><span className="device-sync-schedule-badge">{t(`deviceSync.scheduleState.${scheduleState}`)}</span></span>

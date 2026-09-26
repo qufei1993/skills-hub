@@ -14,13 +14,33 @@ pub struct MergePlan {
     pub merged_text: BTreeMap<String, BTreeMap<String, Vec<u8>>>,
 }
 
+/// Test convenience for plans that do not model unreadable local content. Production
+/// callers always pass the ids they could not export.
+#[cfg(test)]
 pub fn plan_merge_with_text(
     base: &SyncManifest,
     local: &SyncManifest,
     remote: &SyncManifest,
+    merge_file: impl FnMut(&str, &str) -> anyhow::Result<Option<Vec<u8>>>,
+) -> anyhow::Result<MergePlan> {
+    plan_merge_with_text_and_unreadable(base, local, remote, &BTreeSet::new(), merge_file)
+}
+
+/// [`plan_merge_with_text`] with the ids of Skills the local library holds but could not
+/// export, because their central folder is gone.
+///
+/// Without that information the merge sees such a Skill as missing locally, reads it as a
+/// user deletion, and deletes the copy in the repository — so a library that lost its
+/// content also empties the repository. Naming them makes the merge restore them from the
+/// repository instead.
+pub fn plan_merge_with_text_and_unreadable(
+    base: &SyncManifest,
+    local: &SyncManifest,
+    remote: &SyncManifest,
+    unreadable_local: &BTreeSet<String>,
     mut merge_file: impl FnMut(&str, &str) -> anyhow::Result<Option<Vec<u8>>>,
 ) -> anyhow::Result<MergePlan> {
-    let mut plan = plan_merge(base, local, remote);
+    let mut plan = plan_merge_with_unreadable(base, local, remote, unreadable_local);
     for (id, conflicts) in plan.conflicts.clone() {
         let (Some(base_skill), Some(local_skill), Some(remote_skill)) = (
             base.skills.get(&id),
@@ -75,7 +95,21 @@ pub fn plan_merge_with_text(
     Ok(plan)
 }
 
+/// Test convenience for plans that do not model unreadable local content. Production
+/// callers always pass the ids they could not export.
+#[cfg(test)]
 pub fn plan_merge(base: &SyncManifest, local: &SyncManifest, remote: &SyncManifest) -> MergePlan {
+    plan_merge_with_unreadable(base, local, remote, &BTreeSet::new())
+}
+
+/// [`plan_merge`] with the ids of Skills whose local content could not be read. See
+/// [`plan_merge_with_text_and_unreadable`] for why that matters.
+pub fn plan_merge_with_unreadable(
+    base: &SyncManifest,
+    local: &SyncManifest,
+    remote: &SyncManifest,
+    unreadable_local: &BTreeSet<String>,
+) -> MergePlan {
     let mut plan = MergePlan::default();
     let ids: BTreeSet<_> = base
         .skills
@@ -115,6 +149,12 @@ pub fn plan_merge(base: &SyncManifest, local: &SyncManifest, remote: &SyncManife
                 } else {
                     plan.conflicts.insert(id, vec!["*".to_string()]);
                 }
+            }
+            (Some(_base), None, Some(_remote)) if unreadable_local.contains(&id) => {
+                // The Skill is still in the library, only its content is unavailable, so it
+                // was never exported. Restore it from the repository. Reading this as a
+                // deletion is what let a library losing its content empty the repository.
+                plan.take_remote.insert(id);
             }
             (Some(base), None, Some(remote)) => {
                 if remote.content_hash == base.content_hash {
@@ -280,6 +320,29 @@ mod tests {
             content_hash: super::super::manifest::aggregate_hash(&files),
             files,
         }
+    }
+
+    #[test]
+    fn local_content_that_could_not_be_exported_is_restored_instead_of_deleted() {
+        let base = manifest(skill("one", &[("SKILL.md", "shared")]));
+        let remote = manifest(skill("one", &[("SKILL.md", "shared")]));
+        // The Skill is still in the library, but its folder is gone, so the export could
+        // not include it and the plan sees it as missing locally.
+        let local = SyncManifest::empty();
+
+        let plan = plan_merge(&base, &local, &remote);
+        assert!(
+            plan.delete_remote.contains("one"),
+            "without the information the merge reads a missing local copy as a user deletion"
+        );
+
+        let unreadable = BTreeSet::from(["one".to_string()]);
+        let plan = plan_merge_with_unreadable(&base, &local, &remote, &unreadable);
+        assert!(
+            plan.take_remote.contains("one"),
+            "the repository copy is restored instead"
+        );
+        assert!(plan.delete_remote.is_empty());
     }
 
     #[test]
