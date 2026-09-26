@@ -1,7 +1,9 @@
 // Persist diagnostic categories only, never raw URLs, tokens or command output.
 pub fn safe_code(raw: &str) -> &'static str {
     let text = raw.to_lowercase();
-    if text.contains("source path not found") {
+    if text.contains("central path not found") {
+        "centralMissing"
+    } else if text.contains("source path not found") {
         "sourceMissing"
     } else if text.contains("path not found in repo") {
         "repoPathMissing"
@@ -24,3 +26,7 @@ pub fn safe_code(raw: &str) -> &'static str {
         "unknown"
     }
 }
+
+#[cfg(test)]
+#[path = "tests/skill_issues.rs"]
+mod tests;

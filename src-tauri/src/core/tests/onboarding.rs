@@ -444,3 +444,106 @@ fn excludes_already_imported_claude_plugin_skill_source() {
     assert_eq!(plan.total_skills_found, 0);
     assert!(plan.groups.is_empty());
 }
+
+fn central_store(dir: &std::path::Path) -> crate::core::skill_store::SkillStore {
+    let store = crate::core::skill_store::SkillStore::new(dir.join("test.db"));
+    store.ensure_schema().unwrap();
+    store
+}
+
+fn registered_skill(
+    name: &str,
+    central: &std::path::Path,
+) -> crate::core::skill_store::SkillRecord {
+    crate::core::skill_store::SkillRecord {
+        id: format!("id-{name}"),
+        name: name.to_string(),
+        description: None,
+        source_type: "local".to_string(),
+        source_ref: None,
+        source_subpath: None,
+        source_revision: None,
+        central_path: central.join(name).to_string_lossy().to_string(),
+        content_hash: None,
+        created_at: 0,
+        updated_at: 0,
+        last_sync_at: None,
+        last_seen_at: 0,
+        enabled: true,
+        status: "ok".to_string(),
+    }
+}
+
+#[test]
+fn central_repo_candidates_recover_skills_the_library_lost_track_of() {
+    let db_dir = tempfile::tempdir().unwrap();
+    let store = central_store(db_dir.path());
+
+    let central = tempfile::tempdir().unwrap();
+    for name in ["orphan-a", "orphan-b", "known"] {
+        fs::create_dir_all(central.path().join(name)).unwrap();
+        fs::write(central.path().join(name).join("SKILL.md"), b"---\n").unwrap();
+    }
+    // A folder without SKILL.md is not a Skill.
+    fs::create_dir_all(central.path().join("no-skill-md")).unwrap();
+
+    // One of them is still registered, so it must not be offered again.
+    store
+        .commit_skill_update(&registered_skill("known", central.path()), &[])
+        .unwrap();
+
+    let mut plan = super::OnboardingPlan {
+        total_tools_scanned: 0,
+        total_skills_found: 0,
+        groups: Vec::new(),
+    };
+    super::merge_central_repo_candidates(
+        &mut plan,
+        central.path(),
+        &store,
+        &std::collections::HashSet::new(),
+    );
+
+    let mut names = plan
+        .groups
+        .iter()
+        .map(|group| group.name.clone())
+        .collect::<Vec<_>>();
+    names.sort();
+    assert_eq!(names, vec!["orphan-a".to_string(), "orphan-b".to_string()]);
+    assert_eq!(plan.total_skills_found, 2);
+    assert_eq!(plan.total_tools_scanned, 1);
+
+    let group = plan
+        .groups
+        .iter()
+        .find(|group| group.name == "orphan-a")
+        .unwrap();
+    assert!(!group.has_conflict);
+    assert_eq!(group.variants.len(), 1);
+    assert_eq!(group.variants[0].tool, "central_repo");
+    assert_eq!(group.variants[0].path, central.path().join("orphan-a"));
+    assert!(group.variants[0].fingerprint.is_some());
+}
+
+#[test]
+fn central_repo_candidates_can_be_switched_off_as_a_discovery_source() {
+    let db_dir = tempfile::tempdir().unwrap();
+    let store = central_store(db_dir.path());
+
+    let central = tempfile::tempdir().unwrap();
+    fs::create_dir_all(central.path().join("orphan")).unwrap();
+    fs::write(central.path().join("orphan").join("SKILL.md"), b"---\n").unwrap();
+
+    let disabled = std::collections::HashSet::from([super::CENTRAL_REPO_SOURCE_KEY.to_string()]);
+    let mut plan = super::OnboardingPlan {
+        total_tools_scanned: 0,
+        total_skills_found: 0,
+        groups: Vec::new(),
+    };
+    super::merge_central_repo_candidates(&mut plan, central.path(), &store, &disabled);
+
+    assert!(plan.groups.is_empty());
+    assert_eq!(plan.total_skills_found, 0);
+    assert_eq!(plan.total_tools_scanned, 0);
+}
