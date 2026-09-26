@@ -87,6 +87,9 @@ pub fn get_auto_update_task_status() -> SchedulerTaskStatus {
     }
 }
 
+/// Retained for platform parity, but no longer called: the "update now" action runs the
+/// update inside the app process instead of asking the scheduler to start a second one.
+#[allow(dead_code)]
 pub fn trigger_auto_update_task_now() -> Result<()> {
     #[cfg(target_os = "macos")]
     {
@@ -381,6 +384,7 @@ fn get_macos_launch_agent_status() -> SchedulerTaskStatus {
 }
 
 #[cfg(target_os = "macos")]
+#[allow(dead_code)]
 fn trigger_macos_launch_agent_now() -> Result<()> {
     let status = get_macos_launch_agent_status();
     if !status.registered {
@@ -467,6 +471,7 @@ fn get_windows_task_status() -> SchedulerTaskStatus {
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn trigger_windows_task_now() -> Result<()> {
     let status = get_windows_task_status();
     if !status.registered {
@@ -558,6 +563,7 @@ fn get_linux_systemd_timer_status() -> SchedulerTaskStatus {
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
+#[allow(dead_code)]
 fn trigger_linux_systemd_service_now() -> Result<()> {
     let status = get_linux_systemd_timer_status();
     if !status.registered {
