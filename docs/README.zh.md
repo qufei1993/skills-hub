@@ -29,26 +29,6 @@ Skills Hub 的做法是：把 Skill 统一安装到中心仓库，再按你的�
 
 ## 界面预览
 
-### AI 管理 — 通过对话管理 Skills
-
-1. 在 Skills Hub 中打开 **设置 → AI 管理**，点击 **一键启用**，安装内置 CLI，并将官方 `manage-skills-hub` Skill 安装到已检测、已启用的工具。
-2. 在 AI 编程工具中，请 AI 使用 `manage-skills-hub`，例如：“列出我已安装的 Skills”或“检查我的 Skills 是否有更新”。
-3. 回到 Skills Hub 查看结果。AI 和桌面端操作的是同一份本地技能库。
-
-如果没有可用工具，请先到 **工具** 页面检查工具是否已安装并启用，再重试。
-
-桌面端附带编译好的 Rust CLI，仅在启用 AI 管理时安装。桌面端升级后，如果 CLI 状态提示版本不匹配，请在 AI 管理中主动更新。使用这项功能无需安装 Node.js、npm 或单独的 CLI 包；启用后，关闭桌面端也可以继续使用。下文中的 npm 命令用于从源码开发和构建 Skills Hub。
-
-在设置页一键启用 AI 管理：
-
-![在设置页启用 AI 管理](./assets/ai-management-setup.png)
-
-启用后，在「我的 Skills」中查看 `manage-skills-hub` 及其同步工具：
-
-![官方管理 Skill 已安装并同步到工具](./assets/ai-management-installed.png)
-
-仅在终端使用？查看[独立安装 CLI](#独立安装-cli)。
-
 ### My Skills — 托管技能与批量管理
 
 My Skills 通过卡片和列表两种视图展示已托管 Skill 的来源、标签、同步范围、目标工具和启用状态。顶部可以筛选范围、排序、按标签筛选、搜索或执行批量操作。
@@ -112,6 +92,18 @@ Explore 汇总精选仓库中的 Skill，并支持在线搜索。点击 Install 
 设置页集中管理界面语言、外观、AI 管理、存储与缓存、GitHub Token、网络代理和应用版本更新。
 
 ![应用偏好设置](./assets/app-settings.png)
+
+### AI 管理 — 通过对话管理 Skills（v0.11.0 新增）
+
+在 **设置 → AI 管理** 点击 **一键启用**，按需安装内置 CLI 和官方 Skill，无需 Node.js 或 npm。
+
+![在设置页启用 AI 管理](./assets/ai-management-setup.png)
+
+启用后，「我的 Skills」中会出现 `manage-skills-hub`。让 AI 使用它安装、更新或整理 Skills，与桌面端共用同一份技能库。
+
+![官方管理 Skill 已安装并同步到工具](./assets/ai-management-installed.png)
+
+仅在终端使用？查看[独立安装 CLI](#独立安装-cli)。
 
 ## 工作方式
 
@@ -181,7 +173,7 @@ Explore 汇总精选仓库中的 Skill，并支持在线搜索。点击 Install 
 
 ## 独立安装 CLI
 
-使用桌面端？在「设置 → AI 管理」点击「一键启用」即可安装内置 CLI，无需另行下载。启动应用或打开设置不会安装、更新 CLI。如果只想在终端使用，复制对应系统的一条命令即可，无需 Node.js、npm 或管理员权限。
+桌面端用户可在「设置 → AI 管理」点击「一键启用」，按需安装内置 CLI，无需另行下载。启动应用或打开设置不会安装、更新 CLI。如果只想在终端使用，复制对应系统的一条命令即可，无需 Node.js、npm 或管理员权限。
 
 **macOS / Linux**（Intel/AMD x64 或 ARM64）：
 

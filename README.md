@@ -32,26 +32,6 @@ Skills Hub installs skills into one central repository, then syncs them to tools
 
 ## Interface Preview
 
-### AI Management — Manage Skills Through Conversations
-
-1. Open **Settings → AI Management** in Skills Hub and enable it. This prepares the bundled CLI and installs the official `manage-skills-hub` Skill for detected, enabled tools.
-2. In your AI coding tool, ask it to use `manage-skills-hub`, for example: “List my installed Skills” or “Check my Skills for updates.”
-3. Return to Skills Hub to view the results. The AI and desktop app share the same local library.
-
-If no tools are available, check their installation and enabled state on the **Tools** page, then try again.
-
-The desktop app includes a compiled Rust CLI, which is installed only when you enable AI management. After updating the app, use AI management to update the installed CLI if its status indicates a version mismatch. You do not need to install Node.js, npm, or a separate CLI package to use this feature. Once enabled, it also works while the desktop app is closed. The npm commands below are for developing and building Skills Hub from source.
-
-Enable AI management in Settings:
-
-![Enable AI management in Settings](docs/assets/ai-management-setup.png)
-
-After enabling it, find `manage-skills-hub` in My Skills and view its synced tools:
-
-![Official management Skill installed and synced to tools](docs/assets/ai-management-installed.png)
-
-Only using the terminal? See [Standalone CLI Installation](#standalone-cli-installation).
-
 ### My Skills — Managed Skills and Bulk Actions
 
 My Skills provides card and list views for each managed skill's source, tags, sync scope, target tools, and enabled state. The toolbar supports scope filtering, sorting, tag filtering, search, and bulk actions.
@@ -115,6 +95,18 @@ Updates can register a system-level schedule that keeps Git and local-source ski
 Settings keeps app-level preferences such as interface language, appearance, AI management, storage and cache, GitHub token, network proxy, and app updates.
 
 ![Application preferences](docs/assets/app-settings.png)
+
+### AI Management — Manage Skills Through Conversations (New in v0.11.0)
+
+Click **Settings → AI Management → Enable in one click** to install the bundled CLI and official Skill. No Node.js or npm is required.
+
+![Enable AI management in Settings](docs/assets/ai-management-setup.png)
+
+Find `manage-skills-hub` in My Skills, then ask your AI tool to install, update, or organize Skills using the same library as the desktop app.
+
+![Official management Skill installed and synced to tools](docs/assets/ai-management-installed.png)
+
+For terminal-only use, see [Standalone CLI Installation](#standalone-cli-installation).
 
 ## Workflow
 
@@ -184,7 +176,7 @@ See [`src-tauri/src/core/tool_adapters/mod.rs`](src-tauri/src/core/tool_adapters
 
 ## Standalone CLI Installation
 
-Using the desktop app? Enable AI management in Settings to install its bundled CLI; you do not need a separate download. Starting the app or opening Settings does not install or update the CLI. For terminal-only use, copy the command for your system below. No Node.js, npm, or administrator access is required.
+Desktop users can enable AI management in Settings to install the bundled CLI on demand, without a separate download. Starting the app or opening Settings does not install or update the CLI. For terminal-only use, copy the command for your system below. No Node.js, npm, or administrator access is required.
 
 **macOS / Linux** (Intel/AMD x64 or ARM64):
 
