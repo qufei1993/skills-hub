@@ -27,16 +27,6 @@ Skills Hub 的做法是：把 Skill 统一安装到中心仓库，再按你的�
 - **发现控制**：选择哪些已安装工具目录参与可导入 Skill 扫描。
 - **多语言界面**：支持英文、简体中文和韩文界面。
 
-## 通过 AI 管理 Skills
-
-1. 在 Skills Hub 中打开 **设置 → AI 管理**，点击 **一键启用**，将官方 `manage-skills-hub` Skill 安装到已检测、已启用的工具。
-2. 在 AI 编程工具中，请 AI 使用 `manage-skills-hub`，例如：“列出我已安装的 Skills”或“检查我的 Skills 是否有更新”。
-3. 回到 Skills Hub 查看结果。AI 和桌面端操作的是同一份本地技能库。
-
-如果没有可用工具，请先到 **工具** 页面检查工具是否已安装并启用，再重试。
-
-桌面端内置编译好的 Rust CLI，随应用一起更新。使用这项功能无需安装 Node.js、npm 或单独的 CLI 包；启用后，关闭桌面端也可以继续使用。下文中的 npm 命令用于从源码开发和构建 Skills Hub。
-
 ## 界面预览
 
 ### My Skills — 托管技能与批量管理
@@ -103,6 +93,18 @@ Explore 汇总精选仓库中的 Skill，并支持在线搜索。点击 Install 
 
 ![应用偏好设置](./assets/app-settings.png)
 
+### AI 管理 — 通过对话管理 Skills（v0.11.0 新增）
+
+在 **设置 → AI 管理** 点击 **一键启用**，即可安装内置 CLI、配置终端命令并安装官方 Skill。重新打开终端即可使用 `skillshub-cli`；如未生效，请退出并重启终端应用。无需 Node.js 或 npm。终端配置支持 macOS/Linux 的 Bash、Zsh，以及 Windows 用户 PATH。
+
+![在设置页启用 AI 管理](./assets/ai-management-setup.png)
+
+启用后，「我的 Skills」中会出现 `manage-skills-hub`。让 AI 使用它安装、更新或整理 Skills，与桌面端共用同一份技能库。
+
+![官方管理 Skill 已安装并同步到工具](./assets/ai-management-installed.png)
+
+不使用桌面端的用户可选择[独立安装 CLI](#独立安装-cli)（不推荐）。
+
 ## 工作方式
 
 1. 从 Explore、本地目录或 Git 仓库安装 Skill。
@@ -168,6 +170,44 @@ Explore 汇总精选仓库中的 Skill，并支持在线搜索。点击 Install 
 | `hermes_agent` | Hermes Agent | `.hermes/skills` | 不支持 | `.hermes` |
 
 完整路径规则与检测逻辑见 [`src-tauri/src/core/tool_adapters/mod.rs`](../src-tauri/src/core/tool_adapters/mod.rs)。
+
+## 独立安装 CLI
+
+推荐通过桌面端安装和管理 CLI。以下方式仅供不使用桌面端的用户选择。
+
+<details>
+<summary>仅命令行用户手动安装（不推荐）</summary>
+
+不使用桌面端时，可复制对应系统的一条命令安装，无需 Node.js、npm 或管理员权限。
+
+**macOS / Linux**（Intel/AMD x64 或 ARM64）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/qufei1993/skills-hub/main/scripts/install-cli.sh | bash
+```
+
+**Windows x64**（PowerShell）：
+
+```powershell
+irm https://raw.githubusercontent.com/qufei1993/skills-hub/main/scripts/install-cli.ps1 | iex
+```
+
+脚本自动下载最新正式版，校验 SHA-256，并安装到 macOS/Linux 的 `~/.local/bin` 或 Windows 的 `%LOCALAPPDATA%\SkillsHub\bin`。下载或校验失败会保留已有 CLI。CLI 下载文件从 v0.11.0 开始提供，该版本发布前安装命令暂不可用。
+
+macOS/Linux 安装后请重新打开终端，脚本会自动配置 Bash 和 Zsh；其他 Shell 需自行将 `~/.local/bin` 加入 PATH。Windows 会更新当前 PowerShell 会话和用户 PATH。
+
+验证安装：
+
+```bash
+skillshub-cli version --json
+skillshub-cli --help
+```
+
+升级时重新执行同一条安装命令即可。这份独立 CLI 与桌面端内置的 CLI 分开维护，不会随桌面端自动升级。卸载时删除安装目录中的 `skillshub-cli`（Windows 为 `skillshub-cli.exe`）即可，技能库会保留。
+
+CLI 与桌面端共用本地技能库，但单独安装 CLI 不会自动安装官方 AI 管理 Skill。设备同步、定时任务、账号授权和应用设置仍需使用桌面端。Linux 下载文件面向 GNU/glibc 系统，不适用于 Alpine/musl。
+
+</details>
 
 ## 开发
 

@@ -7,10 +7,13 @@ All notable changes to this project will be documented in this file.
 ## [0.11.0]
 
 ### Added
+- **Standalone CLI installer**: Install or upgrade the CLI with one command on macOS, Linux, or Windows x64, with release checksum verification and user-level PATH setup.
 - **AI Skill management**: Enable AI management in Settings to install the official `manage-skills-hub` Skill. Use AI conversations to search, install, import, update, deploy, tag, and safely remove Skills from the same library used by the desktop app.
 - **Bundled CLI**: The native `skillshub-cli` is included with the desktop app and follows its version. Once prepared, it works even when the desktop is closed. Users do not need Node.js, npm, or a separate CLI installation.
 
 ### Improved
+- **Terminal command setup**: Desktop AI setup also configures the user command path. Open a new terminal to run `skillshub-cli`; existing AI setups can complete this configuration with the same enable button.
+- **On-demand AI setup**: The bundled CLI is installed, updated, or repaired only when you explicitly enable AI management. App startup and Settings status checks leave existing CLI files untouched.
 - **AI management discovery**: A dismissible notice in My Skills introduces AI management before the official Skill is installed. Go to setup opens and highlights the Settings card; dismissed notices stay hidden.
 - **Default tool sync**: AI installations sync to detected, enabled tools by default. Explicit tool choices, library-only requests, and project scope take precedence. Incomplete sync is reported separately from a successful installation.
 - **Shared library refresh**: Skills and tags refresh when returning to the app, entering library or tag pages, or opening tag filters. Existing filters are preserved, so AI changes appear without restarting.

@@ -48,19 +48,27 @@ fn ai_management_does_not_install_when_bundled_cli_is_unavailable() {
 }
 
 #[test]
-fn agent_access_startup_failure_is_not_hidden_by_a_missing_directory() {
-    use crate::core::cli_bridge::{
-        CliBridgeHealth, CliBridgeReason, CliBridgeStartupState, CliBridgeStatus,
-    };
-    let directory = tempfile::tempdir().unwrap();
+fn agent_access_status_does_not_install_or_repair_the_cli() {
+    use crate::core::cli_bridge::{bundled_cli_bridge_status, CliBridgeHealth, BINARY_NAME};
+    let directory = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
     let bridge = directory.path().join("missing");
-    let startup = CliBridgeStartupState(CliBridgeStatus::damaged(
-        &bridge,
-        CliBridgeReason::SourceMissing,
-    ));
-    let status = agent_access_bridge_status(&bridge, &startup);
-    assert_eq!(status.status, CliBridgeHealth::Damaged);
-    assert_eq!(status.reason, Some(CliBridgeReason::SourceMissing));
+    assert_eq!(
+        bundled_cli_bridge_status(&bridge).status,
+        CliBridgeHealth::Missing
+    );
+    assert!(!bridge.exists());
+    std::fs::create_dir(&bridge).unwrap();
+    let binary = bridge.join(BINARY_NAME);
+    std::fs::write(&binary, b"existing user installation").unwrap();
+    assert_eq!(
+        bundled_cli_bridge_status(&bridge).status,
+        CliBridgeHealth::Damaged
+    );
+    assert_eq!(
+        std::fs::read(&binary).unwrap(),
+        b"existing user installation"
+    );
+    assert_eq!(std::fs::read_dir(&bridge).unwrap().count(), 1);
 }
 
 #[test]

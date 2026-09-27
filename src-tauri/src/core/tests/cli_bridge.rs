@@ -175,15 +175,15 @@ fn cli_bridge_late_failure_removes_both_stamps() {
 }
 
 #[test]
-fn cli_bridge_startup_failure_is_recoverable_damaged_state_with_fixed_reason() {
+fn cli_bridge_publication_failure_is_recoverable_damaged_state_with_fixed_reason() {
     let f = Fixture::new();
     let missing = f.root.path().join("private-user-path/missing");
-    let failed = publish_cli_bridge_on_startup(&missing, &f.destination, VERSION, HASH);
-    assert_eq!(failed.0.status, CliBridgeHealth::Damaged);
-    assert_eq!(failed.0.reason, Some(CliBridgeReason::SourceMissing));
+    let failed = publish_cli_bridge_status(&missing, &f.destination, VERSION, HASH);
+    assert_eq!(failed.status, CliBridgeHealth::Damaged);
+    assert_eq!(failed.reason, Some(CliBridgeReason::SourceMissing));
     f.no_stamps();
-    let recovered = publish_cli_bridge_on_startup(&f.source, &f.destination, VERSION, HASH);
-    assert_eq!(recovered.0.status, CliBridgeHealth::Valid);
+    let recovered = publish_cli_bridge_status(&f.source, &f.destination, VERSION, HASH);
+    assert_eq!(recovered.status, CliBridgeHealth::Valid);
 }
 
 #[test]
@@ -236,8 +236,8 @@ fn cli_bridge_symlinked_dev_root_does_not_create_missing_production_bin() {
     std::os::unix::fs::symlink(&prod, &dev).unwrap();
     #[cfg(windows)]
     junction::create(&prod, &dev).unwrap();
-    let state = publish_cli_bridge_on_startup(&f.source, &dev.join("bin"), VERSION, HASH);
-    assert_eq!(state.0.status, CliBridgeHealth::Damaged);
+    let state = publish_cli_bridge_status(&f.source, &dev.join("bin"), VERSION, HASH);
+    assert_eq!(state.status, CliBridgeHealth::Damaged);
     assert!(!prod.join("bin").exists());
     assert_eq!(fs::read_dir(&prod).unwrap().count(), 0);
 }

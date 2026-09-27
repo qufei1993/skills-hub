@@ -2,7 +2,7 @@
 
 [中文](README.zh.md)
 
-v0.11.0 lets you manage Skills through AI conversations using the official `manage-skills-hub` Skill and `skillshub-cli`. Enable AI management in Settings with one click. AI installations sync to detected, enabled tools by default, and desktop lists refresh on navigation and window focus. The CLI shares the desktop library and is bundled with the desktop, follows its version, and works after the desktop is closed. See [Agent-first CLI](agent-first-cli.md) and [verified desktop bridge](verified-cli-bridge.md).
+v0.11.0 lets you manage Skills through AI conversations using the official `manage-skills-hub` Skill and `skillshub-cli`. Enable AI management in Settings with one click. AI installations sync to detected, enabled tools by default, and desktop lists refresh on navigation and window focus. The CLI shares the desktop library and is bundled with the desktop, follows its version, and works after the desktop is closed. Installation and updates happen only through the explicit AI management enable action, never during ordinary startup. See [Agent-first CLI](agent-first-cli.md) and [verified desktop bridge](verified-cli-bridge.md).
 
 ## Release status
 
@@ -23,3 +23,5 @@ Both macOS notarization responses must report `Accepted` before stapling and val
 The compatibility test starts with a frozen v0.10.1 shared-schema fixture, performs CLI install/tag/deploy, reopens the desktop service with identical runtime paths, and reads the result with v0.10.1-compatible SQL. It verifies schema 6 stays unchanged and unknown newer schemas fail closed without writes. Full frontend/Rust checks, native bundled CLI smoke, and desktop development startup are recorded in the task report.
 
 References: [GitHub native runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+
+[Standalone CLI installation](cli-installation.md): one-command setup and upgrades without npm.

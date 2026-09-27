@@ -145,6 +145,14 @@ jobs:
         run: exit 1
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Verify desktop terminal command setup
+        run: cargo test --locked --manifest-path scripts/cli-terminal-probe/Cargo.toml
+      - name: Verify standalone CLI installer
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -File ./scripts/install-cli.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell installer tests failed" }
+          ./scripts/install-cli.Tests.ps1
       - name: Verify background child processes have no console window
         shell: pwsh
         run: |

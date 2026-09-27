@@ -11,7 +11,7 @@ import { resolve } from 'node:path'
 
 const t = ((key: string) => key) as TFunction
 const fixture = (): AgentAccessStatusDto => ({
-  officialState: 'missing', conflict: null, skillId: null, skillEnabled: true,
+  officialState: 'missing', conflict: null, skillId: null, skillEnabled: true, terminalReady: true,
   bridge: { status: 'valid', reason: null, path: '/test/bin/skillshub-cli', version: '0.11.0' },
   bundledVersion: '0.11.0', installedVersion: null, installed: false, centralReason: null,
   agents: [{ key: 'codex', label: 'Codex', detected: true, enabled: true, deployed: false, needsRepair: false, reason: null, path: '/test/.codex/skills' }],
@@ -172,4 +172,40 @@ it('focuses and scrolls to AI management when opened from the library notice', a
     expect(scroll).toHaveBeenCalledWith({ block: 'center', behavior: 'instant' })
     await screen.findByRole('button', { name: 'aiManagement.enable' })
   } finally { HTMLElement.prototype.scrollIntoView = original }
+})
+
+it.each(['missing', 'damaged'] as const)('only installs the CLI after an explicit click when bridge is %s', async bridgeState => {
+  const status = fixture()
+  status.bridge.status = bridgeState
+  status.bridge.reason = bridgeState === 'damaged' ? 'VERSION_MISMATCH' : 'DIRECTORY_MISSING'
+  const invoke = vi.fn(async (command: string) => {
+    expect(['get_agent_access_status', 'enable_ai_management']).toContain(command)
+    return status
+  })
+  render(<AiManagementSettings isTauri invokeTauri={invoke} onChanged={() => {}} onOpenSkill={() => {}} t={t} />)
+  const button = await screen.findByRole('button', { name: 'aiManagement.enable' })
+  expect(invoke.mock.calls.every(args => args[0] === 'get_agent_access_status')).toBe(true)
+  fireEvent.click(button)
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('enable_ai_management'))
+})
+
+it('offers setup for an already enabled Skill whose terminal command is not configured', async () => {
+  const status = fixture()
+  Object.assign(status, { officialState: 'healthy', installed: true, terminalReady: false })
+  status.agents[0].deployed = true
+  const invoke = vi.fn().mockResolvedValue(status)
+  render(<AiManagementSettings isTauri invokeTauri={invoke} onChanged={() => {}} onOpenSkill={() => {}} t={t} />)
+  expect(await screen.findByRole('button', { name: 'aiManagement.enable' })).toBeTruthy()
+})
+
+it('reports terminal setup failure and leaves the enable action available for retry', async () => {
+  const status = { ...fixture(), terminalReady: false }
+  const invoke = vi.fn(async (command: string) => {
+    if (command === 'enable_ai_management') throw new Error('CLI_TERMINAL_UNAVAILABLE')
+    return status
+  })
+  render(<AiManagementSettings isTauri invokeTauri={invoke} onChanged={() => {}} onOpenSkill={() => {}} t={t} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'aiManagement.enable' }))
+  expect((await screen.findByRole('alert')).textContent).toContain('aiManagement.errors.terminal')
+  expect((screen.getByRole('button', { name: 'aiManagement.enable' }) as HTMLButtonElement).disabled).toBe(false)
 })

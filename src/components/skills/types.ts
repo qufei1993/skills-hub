@@ -14,6 +14,7 @@ export type AgentAccessAgentDto = {
 export type AgentAccessStatusDto = {
   skillId: string | null
   skillEnabled: boolean
+  terminalReady: boolean
   officialState: 'missing' | 'healthy' | 'needs_repair' | 'name_conflict'
   conflict: { sourceKind: 'local' | 'git' | 'other'; centralPath: string } | null
   bridge: {
