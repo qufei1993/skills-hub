@@ -1,5 +1,7 @@
 # Skills Hub Agent-first CLI 设计
 
+> 2026-09-26 UI revision: the Settings AI management card replaces the separate Agent Access page. One action prepares the native CLI and installs `manage-skills-hub` using the shared installer for detected, enabled tools. Normal Skill controls handle subsequent management. Earlier per-Agent page descriptions below are superseded; CLI explicit-agent setup remains supported.
+
 - 状态：已确认
 - 日期：2026-09-19
 - 目标版本：v0.11.0
@@ -139,13 +141,13 @@ Agent                │
 
 CLI 安装完成后不执行“导入到桌面”的第二步。桌面端之后调用现有查询入口时，直接从同一数据库读取结果。
 
-开发版继续使用独立命名空间。调试构建的 CLI 只能访问开发数据库，发布构建只能访问生产数据库，避免开发操作污染用户正式数据。测试通过注入临时路径运行，不提供面向普通用户的任意数据库路径参数。
+开发版桌面、调试构建 CLI 与正式版共用上述数据目录、数据库、中央库、配置、缓存、回收站和写锁；开发操作会影响真实 Skills 和 Agent 部署目录。开发凭据命名空间与 CLI bridge 可执行文件目录仍独立，避免使用正式凭据或覆盖正式命令。旧开发库及中央目录保留，不自动导入或合并进正式库；正式历史数据库迁移规则对开发和正式构建一致。自动化测试通过注入临时数据和 Agent 目录运行，不提供面向普通用户的任意数据库路径参数。
 
 ### 桌面关闭不是前提
 
 CLI 不通过 IPC 连接桌面应用，也不尝试启动桌面应用。只要当前平台存在受支持的 CLI 二进制，它就可以初始化或打开 Skills Hub 数据，执行允许的本机操作。
 
-桌面已经打开时不增加文件监听、后台轮询、窗口聚焦刷新或 CLI 事件桥。正在显示的 React 状态可以暂时保持不变；下一次正常数据读取时获得最新状态。
+桌面已经打开时不增加文件监听、后台轮询或 CLI 事件桥。窗口重新获得焦点、进入技能列表/标签管理及打开标签筛选时刷新 Skills 与标签，保留筛选条件并忽略过期响应。
 
 ## 后端模块设计
 
@@ -428,7 +430,7 @@ INTERNAL_ERROR
 
 1. 先定位可信 CLI。
 2. Agent 解析结果时始终使用 `--json`。
-3. 安装与部署是两个独立状态，安装后只有用户指定 Agent 时才 deploy。
+3. 安装与部署是两个独立状态。AI 安装默认查询 agents list，安装后向 detected=true 且 enabled=true 的工具继续 deploy；明确指定工具、只入库及项目范围优先。不得自动启用工具或默认创建未检测工具的目录。底层 install 命令仍只入库、deploy 仍显式传 Agent；同步失败和无可用工具须与安装结果分别报告。
 4. 查询命令可直接执行。
 5. 用户明确请求的单个安装、部署和标签操作可执行，完成后回读验证。
 6. 删除、批量更新、adopt、批量 undeploy 和标签删除必须先 dry-run，再获得确认。
@@ -532,7 +534,7 @@ CLI 启动时先检查：
 
 - 主 schema 版本是否在当前二进制支持范围内；
 - CLI 所需的 feature schema marker 是否存在或可安全幂等创建；
-- 数据库是否来自 production/development 的正确命名空间。
+- 开发和正式构建是否使用同一数据库路径，测试是否使用临时路径；CLI bridge 是否匹配当前构建模式。
 
 遇到高于当前二进制支持范围的共享 schema 时，CLI 可以执行不会误读结构的 `version` 和有限诊断，但拒绝所有业务写入并返回 `INCOMPATIBLE_DATABASE`。不得用旧 CLI 自动降级数据库。
 
@@ -636,7 +638,7 @@ src-tauri/src/
 src/components/skills/
 └── AgentAccessPage.tsx           # 管理中心 Agent 接入页
 
-skills/skills-hub/
+skills/manage-skills-hub/
 └── SKILL.md                      # 官方 Agent Skill
 
 packages/

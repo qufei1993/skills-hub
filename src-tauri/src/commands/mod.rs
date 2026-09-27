@@ -97,6 +97,8 @@ pub struct AgentAccessAgentDto {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentAccessStatusDto {
+    skill_id: Option<String>,
+    skill_enabled: bool,
     official_state: crate::services::agent_access::OfficialSkillState,
     conflict: Option<crate::services::agent_access::OfficialSkillConflict>,
     bridge: crate::core::cli_bridge::CliBridgeStatus,
@@ -146,6 +148,8 @@ fn agent_access_dto(
         })
         .collect();
     AgentAccessStatusDto {
+        skill_enabled: status.skill.as_ref().is_some_and(|skill| skill.enabled),
+        skill_id: status.skill_id,
         official_state: status.official_state,
         conflict: status.conflict,
         bridge,
@@ -155,6 +159,40 @@ fn agent_access_dto(
         central_reason: status.central_reason,
         agents,
     }
+}
+
+fn enable_ai_management_impl(
+    service: &SkillsHubService,
+    source: &std::path::Path,
+) -> Result<AgentAccessStatusDto, String> {
+    use crate::core::cli_bridge::{publish_bundled_cli_bridge, CliBridgeHealth};
+    let bridge = publish_bundled_cli_bridge(source, &service.paths().cli_bridge_dir).0;
+    if bridge.status != CliBridgeHealth::Valid {
+        return Err("CLI_UNAVAILABLE".into());
+    }
+    let status = service
+        .enable_ai_management()
+        .map_err(format_service_error)?;
+    Ok(agent_access_dto(status, bridge))
+}
+
+#[tauri::command]
+pub async fn enable_ai_management(
+    service: State<'_, SkillsHubService>,
+) -> Result<AgentAccessStatusDto, String> {
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let source = tauri::utils::platform::current_exe()
+            .ok()
+            .and_then(|exe| {
+                exe.parent()
+                    .map(|dir| dir.join(crate::core::cli_bridge::BINARY_NAME))
+            })
+            .ok_or_else(|| "CLI_UNAVAILABLE".to_string())?;
+        enable_ai_management_impl(&service, &source)
+    })
+    .await
+    .map_err(|_| "INTERNAL_ERROR".to_string())?
 }
 
 #[tauri::command]
@@ -338,6 +376,9 @@ fn format_service_error(error: crate::services::error::ServiceError) -> String {
                 error.details["reason"].as_str(),
                 error.details["path"].as_str(),
             ) {
+                (Some("shared_directory_scope_expansion"), _) => {
+                    "SHARED_DIRECTORY_SCOPE_EXPANSION".into()
+                }
                 (Some("target_modified"), Some(path)) => format!("TARGET_MODIFIED|{path}"),
                 (_, Some(path)) => format!("TARGET_EXISTS|{path}"),
                 _ => format_anyhow_error(anyhow::anyhow!(error.message)),

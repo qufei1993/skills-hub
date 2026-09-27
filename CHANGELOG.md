@@ -4,19 +4,29 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [0.11.0] - 2026-09-20
+## [0.11.0]
+
+### Fixed
+- Deployment previews disclose every tool sharing the physical target directory without registering disabled tools as sync targets. One-click AI management stops before installation when shared directories would affect tools outside the selected scope and explains how to review the configuration.
+- Refresh Skills and tags together when opening tag filters, entering library/tag pages, or returning to the app. Preserve filters and ignore stale read responses so Agent-created tags appear without restarting.
+- AI installation now completes deployment to detected, enabled tools by default. Explicit tool selection, library-only requests, and project scope take precedence; incomplete sync is reported separately from successful installation.
+- Remove the redundant installation-status refresh button; keep automatic checks and retry after an initial check failure.
+- Keep View Skill available during background status checks, avoiding disabled-state flicker.
+- Preserve the last AI management status when reopening Settings while refreshing locally in the background; only the first check shows a loading label.
 
 ### Added
+- **AI management copy**: Explain shared AI/desktop Skill management in both states, remove the example-copy action, and rename technical details to Installation status.
+- **Compact AI management card**: Keep actions beside the title and description, remove the empty divided body, and show enabled status inline. Narrow cards wrap actions without clipping controls.
 - **Agent-first CLI**: `skillshub-cli` shares the desktop's local library, tags, source metadata, deployment targets, and write lock. It supports search, install/import, explicit Agent deployment, safe updates, tags, recoverable deletion, status, and diagnostics without running the desktop.
-- **Official Skill and Agent Access**: `setup --agent <id>` installs the bundled `skills-hub` Skill for selected Agents. The desktop Agent Access page shows the verified CLI bridge and setup/status controls in English, Chinese, and Korean.
+- **AI management in Settings**: One click prepares the bundled native CLI and installs `manage-skills-hub` into the shared library, syncing it to detected, enabled tools. The former Agent Access page is removed; ordinary Skill controls manage it afterward. Long network and storage settings now collapse with visible summaries.
 - **Verified desktop CLI bridge**: Desktop builds bundle the matching native CLI and publish it atomically with version and SHA-256 stamps at startup. Interrupted or damaged bridges remain distinguishable from missing installations. Development builds use a separate bridge directory, reject redirected destination ancestors, and require matching CLI/desktop build profiles.
 - **Distribution**: Release pipelines target macOS arm64/x64, Windows x64, and Linux GNU arm64/x64, with standalone SHA-256 assets and platform npm packages behind `skillshub-cli`. All five native CI jobs must succeed before publication; local validation does not establish native support on the other four hosts.
 
 ### Safety and scope
 - Project deployment is available on macOS and Linux for supported Agents. Windows advertises global scope only; project requests return `PROJECT_SCOPE_UNSUPPORTED` without changing the library or Agent targets.
-- `--json` supplies structured results, `--dry-run` previews supported writes, and destructive operations require explicit confirmation. Install does not implicitly deploy. Ambiguous selections, unowned directories, concurrent writers, and unsafe updates stop without force-overwrite shortcuts.
+- `--json` supplies structured results, `--dry-run` previews supported writes, and destructive operations require explicit confirmation. Raw CLI installation only adds to the library; the official Skill then deploys to detected, enabled tools unless the user specifies another scope. Ambiguous selections, unowned directories, concurrent writers, and unsafe updates stop without force-overwrite shortcuts.
 - Device sync, automatic tasks, credentials/OAuth, proxy/storage/tool configuration, app updates, restore, and permanent deletion remain desktop-only. The official Skill must not edit SQLite or Agent folders directly.
-- CLI changes appear on the desktop's next normal data read or restart; this version adds no live refresh. Shared schema version stays compatible with v0.10.1; unknown newer schemas are rejected before legacy migration without changing the database, WAL/SHM, backups, or legacy files. Development and test profiles never import or clean production legacy state.
+- CLI changes appear when returning to the desktop, entering library/tag pages, or opening tag filters; no continuous polling is added. Shared schema version stays compatible with v0.10.1; unknown newer schemas are rejected before legacy migration without changing the database, WAL/SHM, backups, or legacy files. Development desktop/CLI now share production data and the write lock; credentials and CLI bridge binaries remain separate. Old development data is preserved without automatic merging. Tests retain isolated temporary data and Agent directories.
 - Legacy multi-Skill records without a uniquely matching source return `INVALID_SOURCE` during checks and updates, preserving the installed content and JSON error protocol.
 
 ## [0.10.1] - 2026-09-13

@@ -2425,7 +2425,7 @@
 }
 
 .pick-item-reason {
-  color: var(--danger);
+  color: var(--status-error);
   font-size: 12px;
 }
 
@@ -6623,3 +6623,39 @@
 .recycle-bin-locations dl { display: grid; gap: 10px; margin: 12px 0 0; }
 .recycle-bin-locations dt { font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; }
 .recycle-bin-locations dd { margin: 0; padding: 7px 9px; background: var(--bg-element); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 11px; color: var(--text-primary); overflow-wrap: anywhere; user-select: text; cursor: text; }
+.ai-management-card { container-type: inline-size; }
+.ai-management-card > .settings-card-head {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.ai-management-copy { min-width: 0; }
+.ai-management-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.ai-management-body { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 0 46px; }
+.ai-management-body:empty { display: none; }
+.ai-management-body > p { margin: 0; }
+.ai-management-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; align-self: center; }
+.ai-management-actions:empty { display: none; }
+.ai-management-actions .btn { min-height: 32px; padding: 6px 12px; font-size: 12px; box-shadow: none; }
+.ai-management-ready { display: inline-flex; align-items: center; gap: 4px; color: var(--status-success); font-size: 12px; font-weight: 500; }
+.ai-management-error { color: var(--status-error); }
+.ai-management-details { color: var(--text-secondary); font-size: 13px; }
+.ai-management-details summary { cursor: pointer; }
+.ai-management-details dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; margin: 16px 0; }
+.ai-management-details dd { margin: 0; overflow-wrap: anywhere; min-width: 0; }
+@container (max-width: 320px) {
+  .ai-management-card > .settings-card-head { grid-template-columns: 34px minmax(0, 1fr); gap: 8px 12px; }
+  .ai-management-actions { grid-column: 2; justify-content: flex-start; }
+}
+.settings-collapsible > summary { cursor: pointer; list-style: none; }
+.settings-collapsible > summary::-webkit-details-marker { display: none; }
+.settings-collapsible > summary > div { min-width: 0; }
+.settings-path-summary { overflow-wrap: anywhere; }
+.settings-collapsible > summary:focus-visible,
+.ai-management-details > summary:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 4px; }
+.settings-collapse-chevron { margin-left: auto; flex-shrink: 0; transition: transform 120ms; }
+.settings-collapsible[open] .settings-collapse-chevron { transform: rotate(180deg); }
+.settings-collapsible:not([open]) > .settings-card-head { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }

@@ -11,7 +11,7 @@ use super::operation_lock::OperationKind;
 use super::skills_hub::SkillsHubService;
 use super::types::{AgentList, Skill};
 
-pub const OFFICIAL_SKILL_NAME: &str = "skills-hub";
+pub const OFFICIAL_SKILL_NAME: &str = "manage-skills-hub";
 pub use crate::core::installer::OFFICIAL_SKILL_MD;
 
 #[derive(Clone, Debug)]
@@ -95,6 +95,32 @@ pub struct AgentAccessStatus {
 }
 
 impl SkillsHubService {
+    pub fn enable_ai_management(&self) -> Result<AgentAccessStatus, ServiceError> {
+        let agents: Vec<String> = self
+            .list_agents()?
+            .agents
+            .into_iter()
+            .filter(|agent| agent.enabled && agent.detected)
+            .map(|agent| agent.key)
+            .collect();
+        if agents.is_empty() {
+            return Err(ServiceError::new(
+                ErrorCode::AgentNotFound,
+                "No enabled local tools found",
+                serde_json::Value::Null,
+            ));
+        }
+        self.setup_agent_access_with_scope(
+            SetupAgentRequest {
+                agents,
+                remove: false,
+                dry_run: false,
+                confirmed: false,
+            },
+            true,
+        )
+    }
+
     pub fn agent_access_status(&self) -> Result<AgentAccessStatus, ServiceError> {
         let (skill, conflict) = match self.show_skill(OFFICIAL_SKILL_NAME.into()) {
             Ok(skill) if skill.source.kind == "bundled" => (Some(skill), None),
@@ -172,6 +198,14 @@ impl SkillsHubService {
         &self,
         request: SetupAgentRequest,
     ) -> Result<AgentAccessStatus, ServiceError> {
+        self.setup_agent_access_with_scope(request, false)
+    }
+
+    fn setup_agent_access_with_scope(
+        &self,
+        request: SetupAgentRequest,
+        restrict_to_selected: bool,
+    ) -> Result<AgentAccessStatus, ServiceError> {
         self.ensure_database_compatible()?;
         if request.agents.is_empty() || request.agents.iter().any(|agent| agent.trim().is_empty()) {
             return Err(ServiceError::new(
@@ -214,8 +248,23 @@ impl SkillsHubService {
                 env!("CARGO_PKG_VERSION"),
             )?;
             let preview = self.skill_from_record(bundled.preview_record(), None)?;
-            let deployment = DeploymentRequest::global(bundled.record.id.clone(), request.agents);
+            let deployment =
+                DeploymentRequest::global(bundled.record.id.clone(), request.agents.clone());
             let plan = self.plan_deployment_for_skill(deployment, false, preview)?;
+            if restrict_to_selected {
+                if let Some(target) = plan.targets.iter().find(|target| {
+                    target
+                        .affected_agents
+                        .iter()
+                        .any(|agent| !request.agents.contains(agent))
+                }) {
+                    return Err(ServiceError::new(
+                        ErrorCode::TargetConflict,
+                        "shared directory affects tools outside the selected scope",
+                        json!({"reason":"shared_directory_scope_expansion", "path":target.path, "affected_agents":target.affected_agents}),
+                    ));
+                }
+            }
             let central = crate::core::sync_engine::path_for_comparison(Path::new(
                 &bundled.record.central_path,
             ))

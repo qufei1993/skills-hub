@@ -23,16 +23,7 @@ use tauri::Manager;
 use tauri_plugin_log::{Target, TargetKind};
 
 fn runtime_context() -> tauri::Context<tauri::Wry> {
-    let context = tauri::generate_context!();
-    #[cfg(debug_assertions)]
-    let context = {
-        let mut context: tauri::Context<tauri::Wry> = context;
-        if !context.config().identifier.ends_with(".dev") {
-            context.config_mut().identifier.push_str(".dev");
-        }
-        context
-    };
-    context
+    tauri::generate_context!()
 }
 
 fn runtime_paths<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> anyhow::Result<RuntimePaths> {
@@ -269,6 +260,7 @@ pub fn run() {
             commands::get_tool_status,
             commands::get_agent_access_status,
             commands::set_agent_access,
+            commands::enable_ai_management,
             commands::get_git_cache_cleanup_days,
             commands::get_git_cache_ttl_secs,
             commands::set_git_cache_cleanup_days,
@@ -357,16 +349,12 @@ pub fn run() {
 #[cfg(test)]
 mod environment_tests {
     #[test]
-    fn development_data_is_separate_from_packaged_data() {
+    fn development_and_packaged_desktop_use_the_cli_data_identifier() {
         let packaged: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         let identifier = packaged["identifier"].as_str().unwrap();
         let runtime = super::runtime_context();
-        if cfg!(debug_assertions) {
-            assert_ne!(runtime.config().identifier, identifier);
-            assert_eq!(runtime.config().identifier, format!("{identifier}.dev"));
-        } else {
-            assert_eq!(runtime.config().identifier, identifier);
-        }
+        assert_eq!(runtime.config().identifier, identifier);
+        assert_eq!(identifier, super::core::runtime_paths::PRODUCT_IDENTIFIER);
     }
 }

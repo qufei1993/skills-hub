@@ -196,11 +196,7 @@ mod tests {
         let paths =
             RuntimePaths::from_roots(default_runtime_profile(), "/fixture/home", "/fixture/data");
         let (identifier, central, bridge) = if cfg!(debug_assertions) {
-            (
-                "com.qufei1993.skillshub.dev",
-                ".skillshub-dev",
-                ".skills-hub-dev",
-            )
+            ("com.qufei1993.skillshub", ".skillshub", ".skills-hub-dev")
         } else {
             ("com.qufei1993.skillshub", ".skillshub", ".skills-hub")
         };

@@ -6,8 +6,6 @@ use super::skill_store::{migrate_legacy_db_if_needed_in_data_dir, SkillStore};
 
 #[allow(dead_code)]
 pub const PRODUCT_IDENTIFIER: &str = "com.qufei1993.skillshub";
-#[allow(dead_code)]
-pub const DEVELOPMENT_PRODUCT_IDENTIFIER: &str = "com.qufei1993.skillshub.dev";
 const TEST_PRODUCT_IDENTIFIER: &str = "com.qufei1993.skillshub.test";
 const DATABASE_FILE_NAME: &str = "skills_hub.db";
 const GIT_CACHE_DIR_NAME: &str = "skills-hub-git-cache";
@@ -36,16 +34,14 @@ impl RuntimeProfile {
     #[allow(dead_code)]
     const fn identifier(self) -> &'static str {
         match self {
-            Self::Production => PRODUCT_IDENTIFIER,
-            Self::Development => DEVELOPMENT_PRODUCT_IDENTIFIER,
+            Self::Production | Self::Development => PRODUCT_IDENTIFIER,
             Self::Test => TEST_PRODUCT_IDENTIFIER,
         }
     }
 
     const fn central_repo_name(self) -> &'static str {
         match self {
-            Self::Production => ".skillshub",
-            Self::Development => ".skillshub-dev",
+            Self::Production | Self::Development => ".skillshub",
             Self::Test => ".skillshub-test",
         }
     }
@@ -122,7 +118,7 @@ pub fn open_store(paths: &RuntimePaths) -> Result<SkillStore> {
     store.ensure_compatible_readonly()?;
     std::fs::create_dir_all(&paths.app_data_dir)
         .with_context(|| format!("failed to create app data dir {:?}", paths.app_data_dir))?;
-    if paths.profile == RuntimeProfile::Production {
+    if paths.profile != RuntimeProfile::Test {
         let data_root = paths
             .app_data_dir
             .parent()

@@ -19,6 +19,7 @@ type FilterBarProps = {
   onToggleUntagged: () => void
   onClearTags: () => void
   onManageTags: () => void
+  onOpenTags?: () => void
   onToggleBulkMode: () => void
   onViewModeChange: (value: 'list' | 'cards') => void
   t: TFunction
@@ -40,6 +41,7 @@ const FilterBar = ({
   onToggleUntagged,
   onClearTags,
   onManageTags,
+  onOpenTags,
   onToggleBulkMode,
   onViewModeChange,
   t,
@@ -95,7 +97,10 @@ const FilterBar = ({
           <button
             className={`btn btn-secondary tag-filter-btn${selectedCount > 0 ? ' active' : ''}`}
             type="button"
-            onClick={() => setTagMenuOpen((open) => !open)}
+            onClick={() => {
+              if (!tagMenuOpen) onOpenTags?.()
+              setTagMenuOpen(!tagMenuOpen)
+            }}
           >
             <Tags size={14} />
             {selectedCount > 0

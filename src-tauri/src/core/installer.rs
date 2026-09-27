@@ -28,7 +28,7 @@ use super::tool_adapters::{
 
 pub const OFFICIAL_SKILL_MD: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../skills/skills-hub/SKILL.md"
+    "/../skills/manage-skills-hub/SKILL.md"
 ));
 
 pub struct InstallResult {
@@ -1436,7 +1436,7 @@ fn stage_skill_source(
             reason,
         };
         anyhow::ensure!(
-            record.name == "skills-hub",
+            record.name == "manage-skills-hub",
             conflict("unknown_bundled_skill")
         );
         let metadata = std::fs::symlink_metadata(&central_path)?;

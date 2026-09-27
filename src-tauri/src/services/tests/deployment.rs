@@ -93,6 +93,55 @@ fn deployment_requires_explicit_agents() {
 }
 
 #[test]
+fn shared_directory_preview_discloses_disabled_tools_without_registering_them() {
+    use crate::core::sync_engine::SyncMode;
+    use crate::core::tool_adapters::{save_tool_config, CustomToolConfig, ToolConfig};
+    let f = Fixture::new();
+    let root = f.home.path().join("shared-tools");
+    fs::create_dir_all(&root).unwrap();
+    save_tool_config(
+        f.service.store(),
+        ToolConfig {
+            disabled_builtin_tools: vec![],
+            custom_tools: [("custom_active", true), ("custom_disabled", false)]
+                .into_iter()
+                .map(|(key, enabled)| CustomToolConfig {
+                    key: key.into(),
+                    label: key.into(),
+                    avatar: None,
+                    skills_dir: root.to_string_lossy().into_owned(),
+                    project_skills_dir: None,
+                    sync_mode: SyncMode::Copy,
+                    enabled,
+                })
+                .collect(),
+        },
+    )
+    .unwrap();
+    let request = DeploymentRequest::global("demo", ["custom_active"]);
+    let plan = f.service.plan_deploy(request.clone()).unwrap();
+    let json = serde_json::to_value(&plan).unwrap();
+    assert_eq!(
+        json["targets"][0]["affected_agents"],
+        serde_json::json!(["custom_active", "custom_disabled"])
+    );
+    assert_eq!(plan.targets[0].agents, ["custom_active"]);
+    assert!(!root.join("demo").exists());
+    assert_eq!(f.rows(), 0);
+    f.service.apply_deployment_plan(plan).unwrap();
+    assert_eq!(f.rows(), 1);
+    assert_eq!(
+        f.service.show_skill("demo".into()).unwrap().targets[0].tool,
+        "custom_active"
+    );
+    let removal = f.service.plan_undeploy(request).unwrap();
+    assert_eq!(
+        serde_json::to_value(&removal).unwrap()["targets"][0]["affected_agents"],
+        serde_json::json!(["custom_active", "custom_disabled"])
+    );
+}
+
+#[test]
 fn stale_plan_cannot_overwrite_new_target() {
     let f = Fixture::new();
     let plan = f

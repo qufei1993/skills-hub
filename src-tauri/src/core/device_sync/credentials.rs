@@ -498,6 +498,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn shared_application_data_does_not_share_development_credentials() {
+        let expected = if cfg!(debug_assertions) {
+            "com.skills-hub.device-sync.dev"
+        } else {
+            "com.skills-hub.device-sync"
+        };
+        assert_eq!(DEVICE_SYNC_KEYRING_SERVICE, expected);
+    }
+
+    #[test]
     fn memory_store_roundtrips_and_deletes_secret() {
         let store = MemoryCredentialStore::default();
         assert_eq!(store.get("account").unwrap(), None);

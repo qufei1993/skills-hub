@@ -1,10 +1,11 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Database, ExternalLink, Github, Palette, Radar, RefreshCw } from 'lucide-react'
+import { ArrowLeft, ChevronDown, Database, ExternalLink, Github, Palette, Radar, RefreshCw } from 'lucide-react'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import type { TFunction } from 'i18next'
 import type { DownloadOptions, Update } from '@tauri-apps/plugin-updater'
 import { toast } from 'sonner'
-import type { GithubProxyConfigDto } from './types'
+import type { AgentAccessStatusDto, GithubProxyConfigDto } from './types'
+import AiManagementSettings from './AiManagementSettings'
 import ConfirmActionModal from './modals/ConfirmActionModal'
 
 const PROJECT_REPOSITORY_URL = 'https://github.com/qufei1993/skills-hub'
@@ -22,7 +23,12 @@ const buildUpdaterProxyOptions = (
 }
 
 type SettingsPageProps = {
+  aiManagementStatus?: AgentAccessStatusDto | null
+  onAiManagementStatusChanged?: (status: AgentAccessStatusDto) => void
   isTauri: boolean
+  invokeTauri: (command: string, args?: Record<string, unknown>) => Promise<unknown>
+  onAiManagementChanged: () => void | Promise<void>
+  onOpenOfficialSkill: (id: string) => void
   language: string
   storagePath: string
   gitCacheCleanupDays: number
@@ -49,7 +55,12 @@ type SettingsPageProps = {
 }
 
 const SettingsPage = ({
+  aiManagementStatus,
+  onAiManagementStatusChanged,
   isTauri,
+  invokeTauri,
+  onAiManagementChanged,
+  onOpenOfficialSkill,
   language,
   storagePath,
   gitCacheCleanupDays,
@@ -327,16 +338,17 @@ const SettingsPage = ({
               </div>
             </section>
 
-            <section className="settings-card">
-            <div className="settings-card-head">
+            <details className="settings-card settings-collapsible">
+            <summary className="settings-card-head">
               <span className="settings-card-icon">
                 <Database size={18} />
               </span>
               <div>
                 <h2>{t('settingsSectionStorage')}</h2>
-                <p>{t('settingsSectionStorageDesc')}</p>
+                <p>{t('settingsSectionStorageDesc')}</p><p className="settings-path-summary">{storagePath}</p>
               </div>
-            </div>
+              <ChevronDown size={16} className="settings-collapse-chevron" aria-hidden="true" />
+            </summary>
             <div className="settings-card-body">
               <div className="settings-field">
                 <label className="settings-label" htmlFor="settings-storage">
@@ -415,20 +427,22 @@ const SettingsPage = ({
                 <div className="settings-helper">{t('gitCacheTtlHint')}</div>
               </div>
             </div>
-            </section>
+            </details>
           </div>
 
           <div className="settings-column">
-            <section className="settings-card">
-            <div className="settings-card-head">
+            <AiManagementSettings initialStatus={aiManagementStatus} onStatusChanged={onAiManagementStatusChanged} isTauri={isTauri} invokeTauri={invokeTauri} onChanged={onAiManagementChanged} onOpenSkill={onOpenOfficialSkill} t={t} />
+            <details className="settings-card settings-collapsible">
+            <summary className="settings-card-head">
               <span className="settings-card-icon">
                 <Github size={18} />
               </span>
               <div>
                 <h2>{t('settingsSectionNetwork')}</h2>
-                <p>{t('settingsSectionNetworkDesc')}</p>
+                <p>{t('settingsSectionNetworkDesc')}</p><p>{t('aiManagement.networkSummary', { token: t(githubTokenConfigured ? 'aiManagement.configured' : 'aiManagement.notConfigured'), proxy: t(githubProxyConfig.enabled ? 'aiManagement.on' : 'aiManagement.off') })}</p>
               </div>
-            </div>
+              <ChevronDown size={16} className="settings-collapse-chevron" aria-hidden="true" />
+            </summary>
             <div className="settings-card-body">
               <div className="settings-project-row">
                 <div className="settings-item-info">
@@ -545,7 +559,7 @@ const SettingsPage = ({
                 </div>
               </div>
             </div>
-            </section>
+            </details>
 
             <section className="settings-card">
             <div className="settings-card-head">

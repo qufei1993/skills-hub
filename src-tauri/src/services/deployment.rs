@@ -56,6 +56,7 @@ impl DeploymentRequest {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct DeploymentTarget {
     pub agents: Vec<String>,
+    pub affected_agents: Vec<String>,
     pub path: PathBuf,
     pub mode: SyncMode,
     pub exists: bool,
@@ -449,8 +450,22 @@ impl SkillsHubService {
             let mut keys = group.into_iter().map(|agent| agent.key).collect::<Vec<_>>();
             keys.sort();
             keys.dedup();
+            let mut affected_agents = keys.clone();
+            for agent in &agents {
+                if project.is_some() && !agent.supports_project_scope {
+                    continue;
+                }
+                if agent_root(agent, project.as_deref())
+                    .is_ok_and(|root| root.join(&skill.name) == physical)
+                {
+                    affected_agents.push(agent.key.clone());
+                }
+            }
+            affected_agents.sort();
+            affected_agents.dedup();
             targets.push(DeploymentTarget {
                 agents: keys,
+                affected_agents,
                 path,
                 mode,
                 exists: fingerprint.is_some(),

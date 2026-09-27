@@ -107,6 +107,26 @@ export const ko = {
     },
     "manageCenterTitle": "관리센터",
     "manageCenterHelp": "태그, 동기화 대상 도구, 스킬 업데이트를 한 곳에서 관리하세요.",
+    aiManagement: {
+  "title": "AI 관리",
+"networkSummary": "GitHub: {{token}} · 프록시: {{proxy}}", "configured": "설정됨", "notConfigured": "미설정", "on": "켜짐", "off": "꺼짐",
+  "description": "AI와 대화하며 Skills를 설치, 업데이트, 정리하고 데스크톱 앱과 함께 관리하세요.",
+  "enable": "한 번에 활성화",
+  "enabling": "활성화 중…",
+  "ready": "활성화됨",
+  "inactive": "공식 Skill이 설치되어 있지만 로컬 도구에서 활성화되지 않았습니다. 내 Skills에서 활성화 상태와 동기화 도구를 관리하세요.",
+  "viewSkill": "Skill 보기",
+  "details": "설치 상태",
+  "errors": {
+    "read": "상태를 읽을 수 없습니다. 새로 고침 후 다시 시도하세요.",
+    "cli": "관리 구성 요소를 준비하지 못했습니다. 다시 시도하거나 데스크톱 앱을 재설치하세요.",
+    "noTools": "활성화된 로컬 도구를 찾지 못했습니다. 도구 설정을 확인하세요.",
+    "sharedDirectory": "일부 도구가 Skills 폴더를 공유합니다. 선택하지 않은 도구에도 영향을 줄 수 있어 설치를 중단했습니다. 도구에서 공유 폴더와 활성화 상태를 확인한 후 다시 시도하세요.",
+    "busy": "다른 작업이 진행 중입니다. 완료 후 다시 시도하세요.",
+    "conflict": "기존 Skill 콘텐츠와 충돌합니다. 내 Skills에서 확인하세요. 기존 콘텐츠는 덮어쓰지 않습니다.",
+    "action": "활성화를 완료하지 못했습니다. 상태를 새로 고친 후 다시 시도하세요."
+  }
+},
     agentAccess: {
       "help": "공식 Skill을 통해 Agent가 Skills Hub를 사용하도록 설정하세요.",
       "nameConflict": {
@@ -121,9 +141,9 @@ export const ko = {
           "other": "기타 출처"
         }
       },
-      "refresh": "새로고침",
-      "loading": "Agent 연결 상태 확인 중…",
-      "desktopOnly": "Agent 연결은 데스크톱 앱에서 관리하세요.",
+      "retry": "다시 시도",
+      "loading": "설치 상태 확인 중…",
+      "desktopOnly": "AI 관리는 데스크톱 앱에서 사용하세요.",
       "cliStatus": "CLI 확인",
       "cliVersion": "CLI 버전",
       "cliPath": "CLI 경로",

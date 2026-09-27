@@ -1,5 +1,7 @@
 # Skills Hub Agent-first CLI Implementation Plan
 
+> 2026-09-26 UI revision: the Settings AI management card replaces the separate Agent Access page. One action prepares the native CLI and installs `manage-skills-hub` using the shared installer for detected, enabled tools. Normal Skill controls handle subsequent management. Earlier per-Agent page descriptions below are superseded; CLI explicit-agent setup remains supported.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a native Rust `skillshub-cli` and official `skills-hub` Agent Skill that manage the same local library as the desktop app, then distribute that CLI with the desktop app, standalone releases, and npm.
@@ -17,7 +19,7 @@
 - Target v0.11.0; keep root, Cargo, Tauri, npm platform packages, lockfiles, changelogs, and release records synchronized.
 - Install is library-only. Deploy requires one or more explicit Agents. Do not expose a CLI command named `sync`.
 - No CLI for device sync, schedules, credential configuration, proxy changes, storage migration, app updates, custom tools, permanent trash deletion, or force overwrite.
-- Production, development, and test data roots remain isolated. Desktop and production CLI share one production DB and central library.
+- Development and production desktop/CLI share the same DB, central library, settings, cache, recycle bin, and operation lock. Credentials and CLI bridge binaries keep separate development namespaces. Tests use temporary data and Agent directories; old development data is not automatically merged.
 - Credentials remain in system secure storage and never appear in CLI arguments, files, logs, URLs, or JSON.
 - All outbound HTTP/Git traffic continues through `src-tauri/src/core/network_proxy.rs`; run `npm run network:check` after network changes.
 - User-visible desktop and CLI text requires English, Simplified Chinese, and Korean.
@@ -40,15 +42,17 @@
 - Produces `RuntimeProfile`, `RuntimePaths::{from_roots,for_cli,from_tauri}`, and `open_store(&RuntimePaths)`.
 - Later tasks consume one explicit path object instead of `AppHandle`.
 
-- [ ] **Step 1: Write the failing isolation test**
+- [ ] **Step 1: Write the shared-data path regression test**
 
 ```rust
 #[test]
-fn production_and_development_paths_do_not_overlap() {
+fn production_and_development_share_data() {
     let prod = RuntimePaths::from_roots(RuntimeProfile::Production, "/home/may", "/data");
     let dev = RuntimePaths::from_roots(RuntimeProfile::Development, "/home/may", "/data");
     assert_eq!(prod.database_path, PathBuf::from("/data/com.qufei1993.skillshub/skills_hub.db"));
-    assert_eq!(dev.database_path, PathBuf::from("/data/com.qufei1993.skillshub.dev/skills_hub.db"));
+    assert_eq!(dev.database_path, prod.database_path);
+    assert_eq!(dev.default_central_repo, prod.default_central_repo);
+    assert_ne!(dev.cli_bridge_dir, prod.cli_bridge_dir);
     assert_eq!(prod.default_central_repo, PathBuf::from("/home/may/.skillshub"));
     assert_eq!(prod.cli_bridge_dir, PathBuf::from("/home/may/.skills-hub/bin"));
 }

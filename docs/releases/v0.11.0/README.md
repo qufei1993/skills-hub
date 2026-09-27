@@ -1,8 +1,8 @@
 # Skills Hub v0.11.0
 
-v0.11.0 adds an Agent-first CLI, the official `skills-hub` Skill, and the desktop Agent Access page. Agents can manage the same local library as the desktop; the desktop need not be running or installed. See [Agent-first CLI](agent-first-cli.md) and [verified desktop bridge](verified-cli-bridge.md).
+v0.11.0 lets you manage Skills through AI conversations using the official `manage-skills-hub` Skill and `skillshub-cli`. Enable AI management in Settings with one click. AI installations sync to detected, enabled tools by default, and desktop lists refresh on navigation and window focus. The CLI shares the desktop library and works without the desktop running or installed. See [Agent-first CLI](agent-first-cli.md) and [verified desktop bridge](verified-cli-bridge.md).
 
-v0.11.0 新增 Agent-first CLI、官方 `skills-hub` Skill 和桌面「Agent 接入」页面。Agent 与桌面共用本地库，CLI 可在桌面未启动或未安装时工作。详细说明见 [Agent-first CLI](agent-first-cli.md) 和 [桌面桥接](verified-cli-bridge.md)。
+v0.11.0 支持通过 AI 对话管理 Skills，由官方 `manage-skills-hub` Skill 和 `skillshub-cli` 执行。在「设置 → AI 管理」一键启用后，AI 安装默认同步到已检测、已启用的工具；切换相关页面或切回应用即可刷新列表。CLI 与桌面共用本地库，可在桌面未启动或未安装时工作。详细说明见 [Agent-first CLI](agent-first-cli.md) 和 [桌面桥接](verified-cli-bridge.md)。
 
 ## Release status / 发布状态
 

@@ -89,41 +89,39 @@ fn future_schema_is_rejected_before_legacy_migration_without_touching_any_files(
 }
 
 #[test]
-fn development_and_test_never_import_or_scrub_production_legacy_state() {
+fn test_profile_never_imports_or_scrubs_production_legacy_state() {
     let root = tempfile::tempdir().unwrap();
     let data = root.path().join("data");
     let home = root.path().join("home");
     let legacy = production_legacy_fixture(&data, &home);
     let legacy_before = file_snapshot(legacy.parent().unwrap());
     let home_before = file_snapshot(&home);
-    for profile in [RuntimeProfile::Development, RuntimeProfile::Test] {
-        let paths = RuntimePaths::from_roots(profile, &home, &data);
-        let store = open_store(&paths).unwrap();
-        assert!(store.list_skills().unwrap().is_empty());
-        assert!(store.list_skill_targets("legacy").unwrap().is_empty());
-        assert_eq!(store.get_setting("central_repo_path").unwrap(), None);
-        assert_eq!(
-            crate::core::central_repo::resolve_central_repo_path(&paths, &store).unwrap(),
-            paths.default_central_repo
-        );
-        assert_eq!(file_snapshot(legacy.parent().unwrap()), legacy_before);
-        assert_eq!(file_snapshot(&home), home_before);
-        // Explicit state already stored in this profile remains available on reopen.
-        store
-            .set_setting(
-                "central_repo_path",
-                paths.default_central_repo.to_str().unwrap(),
-            )
-            .unwrap();
-        let reopened = open_store(&paths).unwrap();
-        assert_eq!(
-            reopened
-                .get_setting("central_repo_path")
-                .unwrap()
-                .as_deref(),
-            paths.default_central_repo.to_str()
-        );
-    }
+    let paths = RuntimePaths::from_roots(RuntimeProfile::Test, &home, &data);
+    let store = open_store(&paths).unwrap();
+    assert!(store.list_skills().unwrap().is_empty());
+    assert!(store.list_skill_targets("legacy").unwrap().is_empty());
+    assert_eq!(store.get_setting("central_repo_path").unwrap(), None);
+    assert_eq!(
+        crate::core::central_repo::resolve_central_repo_path(&paths, &store).unwrap(),
+        paths.default_central_repo
+    );
+    assert_eq!(file_snapshot(legacy.parent().unwrap()), legacy_before);
+    assert_eq!(file_snapshot(&home), home_before);
+    // Explicit state already stored in this profile remains available on reopen.
+    store
+        .set_setting(
+            "central_repo_path",
+            paths.default_central_repo.to_str().unwrap(),
+        )
+        .unwrap();
+    let reopened = open_store(&paths).unwrap();
+    assert_eq!(
+        reopened
+            .get_setting("central_repo_path")
+            .unwrap()
+            .as_deref(),
+        paths.default_central_repo.to_str()
+    );
 }
 
 #[test]
@@ -143,13 +141,13 @@ fn production_still_migrates_previous_stable_legacy_paths_and_targets() {
 }
 
 #[test]
-fn build_profile_branches_select_isolated_database_and_bridge_namespaces() {
+fn build_profiles_share_data_but_keep_distinct_bridge_namespaces() {
     for (debug, profile, identifier, central, bridge) in [
         (
             true,
             RuntimeProfile::Development,
-            "com.qufei1993.skillshub.dev",
-            ".skillshub-dev",
+            "com.qufei1993.skillshub",
+            ".skillshub",
             ".skills-hub-dev",
         ),
         (
@@ -185,17 +183,22 @@ fn build_profile_branches_select_isolated_database_and_bridge_namespaces() {
 }
 
 #[test]
-fn production_and_development_paths_do_not_overlap() {
+fn production_and_development_share_data_and_test_paths_remain_separate() {
     let prod = RuntimePaths::from_roots(RuntimeProfile::Production, "/home/may", "/data");
     let dev = RuntimePaths::from_roots(RuntimeProfile::Development, "/home/may", "/data");
     assert_eq!(
         prod.database_path,
         PathBuf::from("/data/com.qufei1993.skillshub/skills_hub.db")
     );
-    assert_eq!(
-        dev.database_path,
-        PathBuf::from("/data/com.qufei1993.skillshub.dev/skills_hub.db")
-    );
+    assert_eq!(dev.database_path, prod.database_path);
+    assert_eq!(dev.app_data_dir, prod.app_data_dir);
+    assert_eq!(dev.default_central_repo, prod.default_central_repo);
+    assert_eq!(dev.git_cache_dir, prod.git_cache_dir);
+    assert_eq!(dev.recycle_bin_dir, prod.recycle_bin_dir);
+    assert_ne!(dev.cli_bridge_dir, prod.cli_bridge_dir);
+    let test = RuntimePaths::from_roots(RuntimeProfile::Test, "/home/may", "/data");
+    assert_ne!(test.database_path, prod.database_path);
+    assert_ne!(test.default_central_repo, prod.default_central_repo);
     assert_eq!(
         prod.default_central_repo,
         PathBuf::from("/home/may/.skillshub")
@@ -204,4 +207,44 @@ fn production_and_development_paths_do_not_overlap() {
         prod.cli_bridge_dir,
         PathBuf::from("/home/may/.skills-hub/bin")
     );
+}
+
+#[test]
+fn development_reopens_production_data_without_importing_the_old_development_database() {
+    let root = tempfile::tempdir().unwrap();
+    let data = root.path().join("data");
+    let home = root.path().join("home");
+    production_legacy_fixture(&data, &home);
+    let old_dev = data.join("com.qufei1993.skillshub.dev/skills_hub.db");
+    std::fs::create_dir_all(old_dev.parent().unwrap()).unwrap();
+    std::fs::write(&old_dev, b"old development database must remain untouched").unwrap();
+    let before = file_snapshot(old_dev.parent().unwrap());
+    let dev = RuntimePaths::from_roots(RuntimeProfile::Development, &home, &data);
+    let prod = RuntimePaths::from_roots(RuntimeProfile::Production, &home, &data);
+    let dev_store = open_store(&dev).unwrap();
+    assert_eq!(dev_store.list_skills().unwrap().len(), 1);
+    assert_eq!(dev_store.list_skill_targets("legacy").unwrap().len(), 1);
+    dev_store
+        .set_setting("shared-test-setting", "from-development")
+        .unwrap();
+    let prod_store = open_store(&prod).unwrap();
+    assert_eq!(
+        prod_store
+            .get_setting("shared-test-setting")
+            .unwrap()
+            .as_deref(),
+        Some("from-development")
+    );
+    prod_store
+        .set_setting("shared-test-setting", "from-production")
+        .unwrap();
+    assert_eq!(
+        open_store(&dev)
+            .unwrap()
+            .get_setting("shared-test-setting")
+            .unwrap()
+            .as_deref(),
+        Some("from-production")
+    );
+    assert_eq!(file_snapshot(old_dev.parent().unwrap()), before);
 }

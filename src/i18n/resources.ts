@@ -106,6 +106,26 @@ export const resources = {
       },
       manageCenterTitle: 'Management Center',
       manageCenterHelp: 'Manage tags, tool targets, and skill updates in one place.',
+      aiManagement: {
+  "title": "AI management",
+"networkSummary": "GitHub: {{token}} · Proxy: {{proxy}}", "configured": "configured", "notConfigured": "not configured", "on": "on", "off": "off",
+  "description": "Install, update, and organize Skills through AI conversations, with the same library as the desktop app.",
+  "enable": "Enable in one click",
+  "enabling": "Enabling…",
+  "ready": "Enabled",
+  "inactive": "The official Skill is installed but not active in a local tool. Manage its switch and sync targets in My Skills.",
+  "viewSkill": "View Skill",
+  "details": "Installation status",
+  "errors": {
+    "read": "Could not read the status. Refresh to try again.",
+    "cli": "The management component could not be prepared. Retry, or reinstall the desktop app if the problem persists.",
+    "noTools": "No enabled local tools were found. Check your tools in Tools, then try again.",
+    "sharedDirectory": "Some tools share a Skills directory. Enabling would also affect tools outside the selected scope, so installation was stopped. Review shared directories and enabled tools in Tools, then try again.",
+    "busy": "Another operation is running. Wait for it to finish and try again.",
+    "conflict": "Existing Skill content conflicts with installation. Review it in My Skills; your content will not be overwritten.",
+    "action": "Could not finish enabling. Refresh the status and try again."
+  }
+},
       agentAccess: {
         "help": "Give your Agents access to Skills Hub through the official Skill.",
         "nameConflict": {
@@ -120,9 +140,9 @@ export const resources = {
             "other": "Other source"
           }
         },
-        "refresh": "Refresh",
-        "loading": "Checking Agent access…",
-        "desktopOnly": "Open the desktop app to manage Agent access.",
+        "retry": "Retry",
+        "loading": "Checking installation status…",
+        "desktopOnly": "Open the desktop app to use AI management.",
         "cliStatus": "CLI check",
         "cliVersion": "CLI version",
         "cliPath": "CLI path",
@@ -1311,6 +1331,26 @@ export const resources = {
       },
       manageCenterTitle: '管理中心',
       manageCenterHelp: '集中管理标签、工具和更新。',
+      aiManagement: {
+  "title": "AI 管理",
+"networkSummary": "GitHub：{{token}} · 代理：{{proxy}}", "configured": "已配置", "notConfigured": "未配置", "on": "已开启", "off": "已关闭",
+  "description": "通过与 AI 对话，安装、更新和整理 Skills，与桌面端统一管理。",
+  "enable": "一键启用",
+  "enabling": "正在启用…",
+  "ready": "已启用",
+  "inactive": "官方 Skill 已安装，但尚未在本机工具中启用。请在「我的 Skills」中管理开关和同步工具。",
+  "viewSkill": "查看 Skill",
+  "details": "安装状态",
+  "errors": {
+    "read": "暂时无法读取状态，请刷新重试。",
+    "cli": "管理组件未能准备完成，请重试；若仍失败，请重新安装桌面应用。",
+    "noTools": "没有找到已启用的本机工具，请在「工具」中检查后重试。",
+    "sharedDirectory": "部分工具共用 Skills 目录，启用会同时影响未选中的工具，已停止安装。请到「工具」检查共享目录和启用状态后重试。",
+    "busy": "其他操作正在进行，请完成后重试。",
+    "conflict": "现有 Skill 内容与安装冲突，请到「我的 Skills」中检查；不会覆盖你的内容。",
+    "action": "启用未完成，请刷新状态后重试。"
+  }
+},
       agentAccess: {
         "help": "通过官方 Skill，让 Agent 使用 Skills Hub。",
         "nameConflict": {
@@ -1325,9 +1365,9 @@ export const resources = {
             "other": "其他来源"
           }
         },
-        "refresh": "刷新",
-        "loading": "正在检查 Agent 接入状态…",
-        "desktopOnly": "请在桌面应用中管理 Agent 接入。",
+        "retry": "重试",
+        "loading": "正在检查安装状态…",
+        "desktopOnly": "请在桌面应用中使用 AI 管理。",
         "cliStatus": "CLI 校验",
         "cliVersion": "CLI 版本",
         "cliPath": "CLI 路径",

@@ -8,12 +8,103 @@ use crate::services::operation_lock::{OperationKind, OperationLock};
 use crate::services::skills_hub::SkillsHubService;
 
 #[test]
+fn one_click_management_installs_once_and_syncs_detected_enabled_tools() {
+    let f = Fixture::new();
+    let status = f.service.enable_ai_management().unwrap();
+    assert!(status.installed);
+    assert!(f.target("codex").join("SKILL.md").exists());
+    assert!(f.target("cursor").join("SKILL.md").exists());
+    assert_eq!(f.service.list_skills().unwrap().len(), 1);
+    f.service.enable_ai_management().unwrap();
+    assert_eq!(f.service.list_skills().unwrap().len(), 1);
+}
+
+#[test]
+fn one_click_management_without_detected_tools_does_not_install() {
+    let f = Fixture::new();
+    fs::remove_dir(f.home.path().join(".codex")).unwrap();
+    fs::remove_dir(f.home.path().join(".cursor")).unwrap();
+    assert!(f.service.enable_ai_management().is_err());
+    assert!(f.service.list_skills().unwrap().is_empty());
+}
+
+#[test]
+fn one_click_management_rejects_shared_directory_scope_expansion_before_install() {
+    use crate::core::sync_engine::SyncMode;
+    use crate::core::tool_adapters::{save_tool_config, CustomToolConfig, ToolConfig};
+    let f = Fixture::new();
+    let root = f.home.path().join("shared-tools");
+    fs::create_dir_all(&root).unwrap();
+    save_tool_config(
+        f.service.store(),
+        ToolConfig {
+            disabled_builtin_tools: vec![],
+            custom_tools: [("custom_active", true), ("custom_disabled", false)]
+                .into_iter()
+                .map(|(key, enabled)| CustomToolConfig {
+                    key: key.into(),
+                    label: key.into(),
+                    avatar: None,
+                    skills_dir: root.to_string_lossy().into_owned(),
+                    project_skills_dir: None,
+                    sync_mode: SyncMode::Copy,
+                    enabled,
+                })
+                .collect(),
+        },
+    )
+    .unwrap();
+    let error = f.service.enable_ai_management().unwrap_err();
+    assert_eq!(error.code, ErrorCode::TargetConflict);
+    assert_eq!(error.details["reason"], "shared_directory_scope_expansion");
+    assert_eq!(
+        error.details["affected_agents"],
+        serde_json::json!(["custom_active", "custom_disabled"])
+    );
+    assert!(f.service.list_skills().unwrap().is_empty());
+    assert!(!root.join("manage-skills-hub").exists());
+    assert!(!f.target("codex").exists());
+    assert!(!f.target("cursor").exists());
+}
+
+#[test]
+fn one_click_management_respects_disabled_tools_and_preserves_conflicting_content() {
+    use crate::core::tool_adapters::{ToolConfig, TOOL_CONFIG_SETTING};
+    let f = Fixture::new();
+    f.service
+        .store()
+        .set_setting(
+            TOOL_CONFIG_SETTING,
+            &serde_json::to_string(&ToolConfig {
+                disabled_builtin_tools: vec!["cursor".into()],
+                custom_tools: vec![],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    f.service.enable_ai_management().unwrap();
+    assert!(f.target("codex").exists());
+    assert!(!f.target("cursor").exists());
+
+    let conflict = Fixture::new();
+    fs::create_dir_all(conflict.target("cursor")).unwrap();
+    fs::write(conflict.target("cursor").join("SKILL.md"), "user owned").unwrap();
+    assert!(conflict.service.enable_ai_management().is_err());
+    assert!(conflict.service.list_skills().unwrap().is_empty());
+    assert!(!conflict.target("codex").exists());
+    assert_eq!(
+        fs::read_to_string(conflict.target("cursor").join("SKILL.md")).unwrap(),
+        "user owned"
+    );
+}
+
+#[test]
 fn agent_access_status_reads_actual_copy_health_without_changing_files_or_records() {
     let f = Fixture::new();
     f.service
         .setup_agent_access(SetupAgentRequest::install("cursor"))
         .unwrap();
-    let before = f.service.show_skill("skills-hub".into()).unwrap();
+    let before = f.service.show_skill("manage-skills-hub".into()).unwrap();
     fs::write(f.target("cursor").join("SKILL.md"), "user edit").unwrap();
     let status = f.service.agent_access_status().unwrap();
     let health = status
@@ -26,7 +117,10 @@ fn agent_access_status_reads_actual_copy_health_without_changing_files_or_record
         health.reason,
         Some(super::super::agent_access::AgentAccessReason::TargetModified)
     );
-    assert_eq!(f.service.show_skill("skills-hub".into()).unwrap(), before);
+    assert_eq!(
+        f.service.show_skill("manage-skills-hub".into()).unwrap(),
+        before
+    );
     assert_eq!(
         fs::read_to_string(f.target("cursor").join("SKILL.md")).unwrap(),
         "user edit"
@@ -52,7 +146,7 @@ fn agent_access_status_reports_central_damage() {
         .unwrap();
     let central = f
         .service
-        .show_skill("skills-hub".into())
+        .show_skill("manage-skills-hub".into())
         .unwrap()
         .central_path;
     fs::write(PathBuf::from(&central).join("SKILL.md"), "modified bundle").unwrap();
@@ -92,7 +186,11 @@ fn agent_access_status_reports_saved_errors_and_target_path_ownership_without_wr
     );
     db.execute(
         "UPDATE skill_targets SET status='ok', target_path=?1 WHERE tool='cursor'",
-        [f.home.path().join("outside/skills-hub").to_str().unwrap()],
+        [f.home
+            .path()
+            .join("outside/manage-skills-hub")
+            .to_str()
+            .unwrap()],
     )
     .unwrap();
     let status = f.service.agent_access_status().unwrap();
@@ -117,7 +215,7 @@ fn agent_access_status_accepts_owned_symlinks_but_rejects_redirected_and_broken_
         .unwrap();
     let central = f
         .service
-        .show_skill("skills-hub".into())
+        .show_skill("manage-skills-hub".into())
         .unwrap()
         .central_path;
     fs::remove_dir_all(f.target("codex")).unwrap();
@@ -186,15 +284,17 @@ impl Fixture {
     }
 
     fn target(&self, agent: &str) -> PathBuf {
-        self.home.path().join(format!(".{agent}/skills/skills-hub"))
+        self.home
+            .path()
+            .join(format!(".{agent}/skills/manage-skills-hub"))
     }
 
     fn old_bundle(&self) {
         let bundled = self
             .service
             .prepare_bundled_install(
-                "skills-hub",
-                "---\nname: skills-hub\ndescription: Previous official skill\n---\nOld release\n",
+                "manage-skills-hub",
+                "---\nname: manage-skills-hub\ndescription: Previous official skill\n---\nOld release\n",
                 "0.0.1",
             )
             .unwrap();
@@ -203,7 +303,7 @@ impl Fixture {
             .unwrap();
         self.service
             .deploy(crate::services::deployment::DeploymentRequest::global(
-                "skills-hub",
+                "manage-skills-hub",
                 ["cursor"],
             ))
             .unwrap();
@@ -219,13 +319,16 @@ fn agent_access_new_bundle_never_reclassifies_a_modified_target_as_trusted() {
         super::super::agent_access::OFFICIAL_SKILL_MD,
     )
     .unwrap();
-    let before = f.service.show_skill("skills-hub".into()).unwrap();
+    let before = f.service.show_skill("manage-skills-hub".into()).unwrap();
     let error = f
         .service
         .setup_agent_access(SetupAgentRequest::install("cursor"))
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::TargetConflict);
-    assert_eq!(f.service.show_skill("skills-hub".into()).unwrap(), before);
+    assert_eq!(
+        f.service.show_skill("manage-skills-hub".into()).unwrap(),
+        before
+    );
 }
 
 #[test]
@@ -250,9 +353,9 @@ fn agent_access_upgrades_intact_library_without_redeploying_other_agents() {
 fn agent_access_official_bundle_works_with_normal_check_and_update_workflows() {
     let f = Fixture::new();
     f.old_bundle();
-    let check = f.service.check_updates("skills-hub".into()).unwrap();
+    let check = f.service.check_updates("manage-skills-hub".into()).unwrap();
     assert!(check.update_available);
-    let updated = f.service.update("skills-hub".into()).unwrap();
+    let updated = f.service.update("manage-skills-hub".into()).unwrap();
     assert!(updated.changed);
     assert_eq!(
         fs::read_to_string(f.target("cursor").join("SKILL.md")).unwrap(),
@@ -260,11 +363,16 @@ fn agent_access_official_bundle_works_with_normal_check_and_update_workflows() {
     );
     assert!(
         !f.service
-            .check_updates("skills-hub".into())
+            .check_updates("manage-skills-hub".into())
             .unwrap()
             .update_available
     );
-    assert!(!f.service.update("skills-hub".into()).unwrap().changed);
+    assert!(
+        !f.service
+            .update("manage-skills-hub".into())
+            .unwrap()
+            .changed
+    );
 }
 
 #[test]
@@ -300,7 +408,7 @@ fn agent_access_failed_deployment_commit_rolls_back_new_library_and_all_agents()
         .service
         .paths()
         .default_central_repo
-        .join("skills-hub")
+        .join("manage-skills-hub")
         .exists());
     assert!(!f.target("codex").exists());
     assert!(!f.target("cursor").exists());
@@ -310,7 +418,7 @@ fn agent_access_failed_deployment_commit_rolls_back_new_library_and_all_agents()
 fn agent_access_failed_upgrade_restores_old_bundle_and_deployment() {
     let f = Fixture::new();
     f.old_bundle();
-    let before = f.service.show_skill("skills-hub".into()).unwrap();
+    let before = f.service.show_skill("manage-skills-hub".into()).unwrap();
     let old_content = fs::read(f.target("cursor").join("SKILL.md")).unwrap();
     rusqlite::Connection::open(&f.service.paths().database_path).unwrap().execute_batch(
         "CREATE TRIGGER fail_setup_targets BEFORE INSERT ON skill_targets BEGIN SELECT RAISE(FAIL, 'fixture failure'); END;"
@@ -330,7 +438,7 @@ fn agent_access_failed_upgrade_restores_old_bundle_and_deployment() {
     );
     assert_eq!(
         f.service
-            .show_skill("skills-hub".into())
+            .show_skill("manage-skills-hub".into())
             .unwrap()
             .content_hash,
         before.content_hash
@@ -343,7 +451,11 @@ fn assert_bundle_rollback_recovery(upgrade: bool, database_failure: bool) {
     if upgrade {
         f.old_bundle();
     }
-    let central = f.service.paths().default_central_repo.join("skills-hub");
+    let central = f
+        .service
+        .paths()
+        .default_central_repo
+        .join("manage-skills-hub");
     let old_content = upgrade.then(|| fs::read(central.join("SKILL.md")).unwrap());
     if database_failure {
         rusqlite::Connection::open(&f.service.paths().database_path).unwrap().execute_batch(
@@ -399,7 +511,7 @@ fn assert_bundle_rollback_recovery(upgrade: bool, database_failure: bool) {
         assert!(!central.join("user-created.txt").exists());
         assert_eq!(
             f.service
-                .show_skill("skills-hub".into())
+                .show_skill("manage-skills-hub".into())
                 .unwrap()
                 .source
                 .revision
@@ -476,11 +588,11 @@ fn agent_access_name_conflicts_return_safe_status_without_claiming_user_skills()
             "/local/user-skill"
         };
         db.execute(
-            "UPDATE skills SET source_type=?1, source_ref=?2 WHERE name='skills-hub'",
+            "UPDATE skills SET source_type=?1, source_ref=?2 WHERE name='manage-skills-hub'",
             rusqlite::params![kind, source],
         )
         .unwrap();
-        let before = f.service.show_skill("skills-hub".into()).unwrap();
+        let before = f.service.show_skill("manage-skills-hub".into()).unwrap();
         let status = f
             .service
             .agent_access_status()
@@ -516,7 +628,10 @@ fn agent_access_name_conflicts_return_safe_status_without_claiming_user_skills()
                 ErrorCode::TargetConflict
             );
         }
-        assert_eq!(f.service.show_skill("skills-hub".into()).unwrap(), before);
+        assert_eq!(
+            f.service.show_skill("manage-skills-hub".into()).unwrap(),
+            before
+        );
         assert!(f.target("cursor").join("SKILL.md").is_file());
     }
 }
@@ -524,7 +639,11 @@ fn agent_access_name_conflicts_return_safe_status_without_claiming_user_skills()
 #[test]
 fn agent_access_existing_library_content_cannot_be_claimed_as_bundled() {
     let f = Fixture::new();
-    let central = f.service.paths().default_central_repo.join("skills-hub");
+    let central = f
+        .service
+        .paths()
+        .default_central_repo
+        .join("manage-skills-hub");
     fs::create_dir_all(&central).unwrap();
     fs::write(central.join("SKILL.md"), "user library content").unwrap();
     let error = f
@@ -547,7 +666,7 @@ fn agent_access_regular_updates_also_protect_modified_bundled_content() {
         let target = if central {
             PathBuf::from(
                 f.service
-                    .show_skill("skills-hub".into())
+                    .show_skill("manage-skills-hub".into())
                     .unwrap()
                     .central_path,
             )
@@ -556,7 +675,10 @@ fn agent_access_regular_updates_also_protect_modified_bundled_content() {
         };
         fs::write(target.join("SKILL.md"), "user edits").unwrap();
         assert_eq!(
-            f.service.update("skills-hub".into()).unwrap_err().code,
+            f.service
+                .update("manage-skills-hub".into())
+                .unwrap_err()
+                .code,
             ErrorCode::TargetConflict
         );
         assert_eq!(
@@ -576,7 +698,7 @@ fn agent_access_installs_bundled_source_only_to_explicit_agent_and_is_idempotent
     assert!(first.deployed);
     assert!(f.target("codex").join("SKILL.md").is_file());
     assert!(!f.target("cursor").exists());
-    let skill = f.service.show_skill("skills-hub".into()).unwrap();
+    let skill = f.service.show_skill("manage-skills-hub".into()).unwrap();
     assert_eq!(skill.source.kind, "bundled");
     assert_eq!(
         skill.source.revision.as_deref(),
@@ -590,7 +712,7 @@ fn agent_access_installs_bundled_source_only_to_explicit_agent_and_is_idempotent
     assert_eq!(f.service.list_skills().unwrap().len(), 1);
     assert_eq!(
         f.service
-            .show_skill("skills-hub".into())
+            .show_skill("manage-skills-hub".into())
             .unwrap()
             .targets
             .len(),
@@ -621,7 +743,7 @@ fn agent_access_modified_central_copy_is_never_overwritten() {
     f.service
         .setup_agent_access(SetupAgentRequest::install("codex"))
         .unwrap();
-    let skill = f.service.show_skill("skills-hub".into()).unwrap();
+    let skill = f.service.show_skill("manage-skills-hub".into()).unwrap();
     let manifest = PathBuf::from(skill.central_path).join("SKILL.md");
     fs::write(&manifest, "user changed this").unwrap();
     assert_eq!(
@@ -673,7 +795,7 @@ fn agent_access_preview_and_unconfirmed_remove_do_not_mutate() {
     remove.confirmed = true;
     f.service.setup_agent_access(remove).unwrap();
     assert!(!f.target("codex").exists());
-    assert!(f.service.show_skill("skills-hub".into()).is_ok());
+    assert!(f.service.show_skill("manage-skills-hub".into()).is_ok());
 }
 
 #[test]
@@ -724,10 +846,10 @@ fn agent_access_status_is_read_only_and_reports_managed_deployments() {
 fn agent_access_official_skill_covers_the_automation_safety_contract() {
     let content = fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../skills/skills-hub/SKILL.md"
+        "/../skills/manage-skills-hub/SKILL.md"
     ))
     .unwrap_or_default();
-    assert!(content.starts_with("---\nname: skills-hub\ndescription:"));
+    assert!(content.starts_with("---\nname: manage-skills-hub\ndescription:"));
     for requirement in [
         "--json",
         "SHA-256",

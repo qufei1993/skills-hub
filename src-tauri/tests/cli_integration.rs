@@ -30,7 +30,7 @@ fn cli_setup_installs_previews_and_removes_only_requested_agent() {
     assert!(!f
         .root
         .path()
-        .join("home/.cursor/skills/skills-hub")
+        .join("home/.cursor/skills/manage-skills-hub")
         .exists());
     let confirmation = f.json(
         &["setup", "--agent", "codex", "--remove"],
@@ -38,7 +38,11 @@ fn cli_setup_installs_previews_and_removes_only_requested_agent() {
     );
     assert!(confirmation["details"]["plan"].is_object());
     f.json(&["setup", "--agent", "codex", "--remove", "--yes"], None);
-    assert!(!f.root.path().join("home/.codex/skills/skills-hub").exists());
+    assert!(!f
+        .root
+        .path()
+        .join("home/.codex/skills/manage-skills-hub")
+        .exists());
     assert_eq!(f.service().list_skills().unwrap().len(), 1);
 }
 
@@ -51,12 +55,12 @@ fn cli_setup_multiple_agents_requires_explicit_scope() {
     assert!(f
         .root
         .path()
-        .join("home/.codex/skills/skills-hub/SKILL.md")
+        .join("home/.codex/skills/manage-skills-hub/SKILL.md")
         .exists());
     assert!(f
         .root
         .path()
-        .join("home/.cursor/skills/skills-hub/SKILL.md")
+        .join("home/.cursor/skills/manage-skills-hub/SKILL.md")
         .exists());
 }
 

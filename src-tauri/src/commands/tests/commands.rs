@@ -16,6 +16,38 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 #[test]
+fn shared_directory_scope_error_reaches_desktop_as_a_distinct_recovery_hint() {
+    let error = crate::services::error::ServiceError::new(
+        crate::services::error::ErrorCode::TargetConflict,
+        "shared directory affects tools outside the selected scope",
+        serde_json::json!({"reason":"shared_directory_scope_expansion", "path":"/tools/shared"}),
+    );
+    assert_eq!(
+        format_service_error(error),
+        "SHARED_DIRECTORY_SCOPE_EXPANSION"
+    );
+}
+
+#[test]
+fn ai_management_does_not_install_when_bundled_cli_is_unavailable() {
+    use crate::core::runtime_paths::{RuntimePaths, RuntimeProfile};
+    let home = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(home.path().join(".codex")).unwrap();
+    let service = SkillsHubService::open(RuntimePaths::from_roots(
+        RuntimeProfile::Test,
+        home.path(),
+        data.path(),
+    ))
+    .unwrap();
+    assert_eq!(
+        enable_ai_management_impl(&service, &home.path().join("absent")).unwrap_err(),
+        "CLI_UNAVAILABLE"
+    );
+    assert!(service.list_skills().unwrap().is_empty());
+}
+
+#[test]
 fn agent_access_startup_failure_is_not_hidden_by_a_missing_directory() {
     use crate::core::cli_bridge::{
         CliBridgeHealth, CliBridgeReason, CliBridgeStartupState, CliBridgeStatus,
@@ -49,9 +81,12 @@ fn agent_access_commands_require_explicit_single_agent_actions_and_removal_confi
     let installed =
         set_agent_access_impl(&service, "codex".into(), "install".into(), false).unwrap();
     assert_eq!(installed.skill.unwrap().targets.len(), 1);
-    assert!(!home.path().join(".cursor/skills/skills-hub").exists());
+    assert!(!home
+        .path()
+        .join(".cursor/skills/manage-skills-hub")
+        .exists());
     assert!(set_agent_access_impl(&service, "codex".into(), "remove".into(), false).is_err());
-    assert!(home.path().join(".codex/skills/skills-hub").exists());
+    assert!(home.path().join(".codex/skills/manage-skills-hub").exists());
     set_agent_access_impl(&service, "codex".into(), "repair".into(), false).unwrap();
     let removed = set_agent_access_impl(&service, "codex".into(), "remove".into(), true).unwrap();
     assert!(removed.installed);
