@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **Skills whose library record outlived their content**: A Skill whose folder in the central repository has disappeared is no longer reported as healthy. The status check short-circuited for a local Skill with no external source, so a missing folder passed as fine and was logged as an unknown reason; the central folder is now checked for every local Skill and the report names `centralMissing` as the reason.
+- **Recovering Skills from the central repository**: Onboarding scans the central repository as a discovery source, so a Skill that is still on disk but no longer in the library is listed for adoption under its folder name, in the same way as Skills found in a tool directory.
+- **Adopting a folder that already has a record**: Importing existing Skills created a second record for the same Skill when the folder name matched a record whose content was gone. The existing record is repaired instead, pointing at the folder that exists while keeping its id, tags, enabled state, and tool targets.
+- **Deleting a Skill whose content is already gone**: Deletion required the source folder to be a directory, so a hollow record could not be removed from the library at all. It is now deleted, its tool links are cleared only where they still point at real content, and no empty item is left in the recycle bin.
+
 ## [0.10.1] - 2026-09-13
 
 ### Fixed

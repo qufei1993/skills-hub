@@ -1,7 +1,7 @@
 import type { ManagedSkill } from './types'
 import { getSkillSyncState } from './skillSyncStatus'
 
-const kinds = ['sourceMissing', 'repoPathMissing', 'modified', 'unsafeTarget', 'disk', 'permission', 'auth', 'network', 'recheck']
+const kinds = ['sourceMissing', 'centralMissing', 'repoPathMissing', 'modified', 'unsafeTarget', 'disk', 'permission', 'auth', 'network', 'recheck']
 export function issueReasonKey(code?: string | null) {
   const kind = code?.replace(/^SKILL_ISSUE\|/, '')
   return `deviceSync.issueReason.${kind && kinds.includes(kind) ? kind : 'unknown'}`

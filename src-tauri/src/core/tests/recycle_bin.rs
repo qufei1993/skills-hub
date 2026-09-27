@@ -397,3 +397,50 @@ fn archive_database_failure_keeps_original_and_tool_files() {
         "saved"
     );
 }
+
+#[test]
+fn deleting_a_skill_whose_content_is_already_gone_removes_the_record() {
+    let root = tempfile::tempdir().unwrap();
+    let store = SkillStore::new(root.path().join("store.db"));
+    store.ensure_schema().unwrap();
+    let record = skill(root.path());
+    // The central folder is deliberately never created: this is a record the library kept
+    // after its content disappeared, and deleting it used to fail every time with
+    // "Skill content is missing".
+    store.upsert_skill(&record).unwrap();
+    store
+        .upsert_skill_target(&SkillTargetRecord {
+            id: "target-1".into(),
+            skill_id: record.id.clone(),
+            tool: "codex".into(),
+            scope: "global".into(),
+            project_path: None,
+            target_path: root
+                .path()
+                .join("tools/codex/wechat-article")
+                .to_string_lossy()
+                .into(),
+            mode: "junction".into(),
+            status: "ok".into(),
+            last_error: None,
+            synced_at: Some(50),
+        })
+        .unwrap();
+    let service = RecycleBinService::new(&store, root.path().join("trash"));
+
+    let item = service
+        .archive(&record.id, DeletionSource::Manual, 1_000)
+        .unwrap();
+
+    assert_eq!(item.skill_name, record.name);
+    assert_eq!(item.trash_path, "", "no content was kept");
+    assert!(store.get_skill_by_id(&record.id).unwrap().is_none());
+    assert!(
+        store.list_skill_targets(&record.id).unwrap().is_empty(),
+        "tool rows are removed with the record"
+    );
+    assert!(
+        service.list().unwrap().is_empty(),
+        "a Skill with no content leaves nothing to restore, so nothing enters the recycle bin"
+    );
+}

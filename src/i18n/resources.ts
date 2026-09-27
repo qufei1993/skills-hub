@@ -247,7 +247,7 @@ export const resources = {
         toolUpdatesPending: 'Tool updates needing attention: {{count}}',
         toolUpdatesSummary: 'Central library and cloud sync are not affected.',
         currentIssuesFilter: 'Current issues only',
-        issueReason: { sourceMissing: 'The local source directory is missing.', repoPathMissing: 'The Skill path does not exist in the source repository.', modified: 'Independent changes were detected; automatic replacement was stopped.', unsafeTarget: 'The target path overlaps protected content or is shared unsafely.', disk: 'There is not enough disk space.', permission: 'The destination is not writable.', auth: 'Source authentication failed.', network: 'The source could not be reached.', recheck: 'A previous source failure has no verified recovery. Please check the source again.', unknown: 'The operation could not complete safely; review the source or tool configuration.' },
+        issueReason: { sourceMissing: 'The local source directory is missing.', centralMissing: 'The Skill folder in the central library is missing.', repoPathMissing: 'The Skill path does not exist in the source repository.', modified: 'Independent changes were detected; automatic replacement was stopped.', unsafeTarget: 'The target path overlaps protected content or is shared unsafely.', disk: 'There is not enough disk space.', permission: 'The destination is not writable.', auth: 'Source authentication failed.', network: 'The source could not be reached.', recheck: 'A previous source failure has no verified recovery. Please check the source again.', unknown: 'The operation could not complete safely; review the source or tool configuration.' },
         issueHistory: { pending: 'Still needs attention', recovered: 'Verified after this run', unverified: 'Recovery not yet verified', disabled: 'Disabled', removed: 'No longer managed' },
         sourceNeedsAttention: 'Skill update needs attention',
         viewIssueReason: 'View reason',
@@ -930,6 +930,7 @@ export const resources = {
       toolsScanned: 'Tools scanned: {{count}}',
       skillsFound: 'Skills found: {{count}}',
       foundIn: 'Found in',
+      centralRepoSource: 'Found in the central library',
       claudePluginSource: 'Claude Code plugin · {{plugin}} · User',
       claudePluginSourceWithVersion:
         'Claude Code plugin · {{plugin}} · v{{version}} · User',
@@ -1352,7 +1353,7 @@ export const resources = {
         toolUpdatesPending: '{{count}} 项工具更新待处理',
         toolUpdatesSummary: '不影响中央库与云端同步',
         currentIssuesFilter: '仅显示当前异常',
-        issueReason: { sourceMissing: '本地源目录不存在。', repoPathMissing: '源仓库中找不到此 Skill 的目录。', modified: '检测到独立改动，已停止自动覆盖。', unsafeTarget: '目标路径与受保护内容重叠，或被其他 Skill 共用。', disk: '磁盘空间不足。', permission: '没有目标目录的写入权限。', auth: '访问来源时认证失败。', network: '无法连接来源，请检查网络。', recheck: '历史来源更新失败，尚无恢复确认，请重新检查来源。', unknown: '未能安全完成操作，请检查来源或工具配置。' },
+        issueReason: { sourceMissing: '本地源目录不存在。', centralMissing: '中央技能库中的该技能目录不存在。', repoPathMissing: '源仓库中找不到此 Skill 的目录。', modified: '检测到独立改动，已停止自动覆盖。', unsafeTarget: '目标路径与受保护内容重叠，或被其他 Skill 共用。', disk: '磁盘空间不足。', permission: '没有目标目录的写入权限。', auth: '访问来源时认证失败。', network: '无法连接来源，请检查网络。', recheck: '历史来源更新失败，尚无恢复确认，请重新检查来源。', unknown: '未能安全完成操作，请检查来源或工具配置。' },
         issueHistory: { pending: '当前仍待处理', recovered: '此后已确认恢复', unverified: '尚未确认恢复', disabled: '已停用', removed: '已不再托管' },
         sourceNeedsAttention: 'Skill 更新异常',
         viewIssueReason: '查看原因',
@@ -2016,6 +2017,7 @@ export const resources = {
       toolsScanned: '已扫描工具数：{{count}}',
       skillsFound: '发现 Skills 数：{{count}}',
       foundIn: '发现于',
+      centralRepoSource: '已存在于中央技能库',
       claudePluginSource: 'Claude Code 插件 · {{plugin}} · 用户级',
       claudePluginSourceWithVersion:
         'Claude Code 插件 · {{plugin}} · v{{version}} · 用户级',

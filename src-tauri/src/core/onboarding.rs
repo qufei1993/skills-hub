@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use super::central_repo::resolve_central_repo_path;
+use super::central_repo::{central_repo_path_without_app, resolve_central_repo_path};
 use super::content_hash::hash_dir;
 use super::skill_store::SkillStore;
 use super::tool_adapters::{
@@ -14,6 +14,10 @@ use super::tool_adapters::{
 
 const DISCOVERY_SCAN_CONFIG_SETTING: &str = "discovery_scan_config_v1";
 const CLAUDE_PLUGIN_SOURCE_KEY: &str = "claude_plugins";
+/// Discovery source for Skills that already sit in the central repository but have no
+/// library record, so a cleared or lost database can be rebuilt from the content on disk.
+const CENTRAL_REPO_SOURCE_KEY: &str = "central_repo";
+const CENTRAL_REPO_SOURCE_LABEL: &str = "Central repository";
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct DiscoveryScanConfig {
@@ -95,6 +99,97 @@ pub fn build_onboarding_plan<R: tauri::Runtime>(
         Some(&managed_targets),
         &disabled_source_keys,
     )
+    .map(|mut plan| {
+        merge_central_repo_candidates(&mut plan, &central, store, &disabled_source_keys);
+        plan
+    })
+}
+
+/// Adds Skills that exist in the central repository but are missing from the library.
+///
+/// `filter_detected` deliberately drops anything under the central repository, and any
+/// entry whose link target is under it, which stops tool scans from re-importing Skills
+/// that are already managed. The same rule means a cleared or lost database cannot be
+/// rebuilt from the tool directories, because every mirror there is a link into the
+/// central repository. Scanning the repository itself closes that gap.
+fn merge_central_repo_candidates(
+    plan: &mut OnboardingPlan,
+    central: &Path,
+    store: &SkillStore,
+    disabled_source_keys: &HashSet<String>,
+) {
+    if disabled_source_keys.contains(CENTRAL_REPO_SOURCE_KEY) || !central.is_dir() {
+        return;
+    }
+
+    let registered = store
+        .list_skills()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|skill| fs::canonicalize(&skill.central_path).ok())
+        .collect::<HashSet<_>>();
+    let Ok(entries) = fs::read_dir(central) else {
+        return;
+    };
+
+    plan.total_tools_scanned += 1;
+
+    let mut candidates = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() || !path.join("SKILL.md").is_file() {
+            continue;
+        }
+        let canonical = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        if registered.contains(&canonical) {
+            continue;
+        }
+        // The folder name is the Skill's identity in the central repository, and an
+        // install resolves its target as <central>/<name>, so it has to be used verbatim.
+        let Some(name) = path
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+        else {
+            continue;
+        };
+        candidates.push(OnboardingVariant {
+            tool: CENTRAL_REPO_SOURCE_KEY.to_string(),
+            name,
+            fingerprint: hash_dir(&path).ok(),
+            path,
+            is_link: false,
+            link_target: None,
+            plugin_name: None,
+            plugin_version: None,
+            plugin_scope: None,
+        });
+    }
+
+    plan.total_skills_found += candidates.len();
+    for variant in candidates {
+        match plan
+            .groups
+            .iter_mut()
+            .find(|group| group.name == variant.name)
+        {
+            Some(group) => {
+                group.variants.push(variant);
+                let distinct = group
+                    .variants
+                    .iter()
+                    .filter_map(|item| item.fingerprint.as_ref())
+                    .collect::<HashSet<_>>()
+                    .len()
+                    .max(1);
+                group.has_conflict = distinct > 1;
+            }
+            None => plan.groups.push(OnboardingGroup {
+                name: variant.name.clone(),
+                variants: vec![variant],
+                has_conflict: false,
+            }),
+        }
+    }
 }
 
 pub fn get_discovery_scan_settings(store: &SkillStore) -> Result<DiscoveryScanSettings> {
@@ -102,11 +197,22 @@ pub fn get_discovery_scan_settings(store: &SkillStore) -> Result<DiscoveryScanSe
         dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to resolve home directory"))?;
     let claude_config_dir = resolve_claude_config_dir(&home);
     let config = load_discovery_scan_config(store)?;
-    Ok(get_discovery_scan_settings_in_home(
-        &home,
-        &claude_config_dir,
-        config,
-    ))
+    let mut settings = get_discovery_scan_settings_in_home(&home, &claude_config_dir, config);
+    if let Some(central) = central_repo_path_without_app(store) {
+        if central.is_dir() {
+            let disabled = settings
+                .disabled_source_keys
+                .iter()
+                .any(|key| key == CENTRAL_REPO_SOURCE_KEY);
+            settings.sources.push(DiscoveryScanSource {
+                key: CENTRAL_REPO_SOURCE_KEY.to_string(),
+                label: CENTRAL_REPO_SOURCE_LABEL.to_string(),
+                path: central,
+                enabled: !disabled,
+            });
+        }
+    }
+    Ok(settings)
 }
 
 fn get_discovery_scan_settings_in_home(

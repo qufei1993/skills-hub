@@ -245,7 +245,7 @@ export const ko = {
       "toolUpdatesPending": "확인이 필요한 도구 업데이트 {{count}}개",
       "toolUpdatesSummary": "중앙 라이브러리와 클라우드 동기화에는 영향을 주지 않습니다.",
       "currentIssuesFilter": "현재 문제만 표시",
-      "issueReason": { "sourceMissing": "로컬 소스 디렉터리가 없습니다.", "repoPathMissing": "소스 저장소에서 Skill 경로를 찾을 수 없습니다.", "modified": "별도 수정 사항이 있어 덮어쓰기를 중지했습니다.", "unsafeTarget": "대상 경로가 보호된 콘텐츠와 겹치거나 안전하지 않게 공유됩니다.", "disk": "디스크 공간이 부족합니다.", "permission": "대상에 쓰기 권한이 없습니다.", "auth": "소스 인증에 실패했습니다.", "network": "소스에 연결할 수 없습니다.", "recheck": "이전 소스 오류의 복구가 확인되지 않았습니다. 다시 확인하세요.", "unknown": "작업을 안전하게 완료하지 못했습니다. 소스나 도구 설정을 확인하세요." },
+      "issueReason": { "sourceMissing": "로컬 소스 디렉터리가 없습니다.", "centralMissing": "중앙 라이브러리의 스킬 폴더가 없습니다.", "repoPathMissing": "소스 저장소에서 Skill 경로를 찾을 수 없습니다.", "modified": "별도 수정 사항이 있어 덮어쓰기를 중지했습니다.", "unsafeTarget": "대상 경로가 보호된 콘텐츠와 겹치거나 안전하지 않게 공유됩니다.", "disk": "디스크 공간이 부족합니다.", "permission": "대상에 쓰기 권한이 없습니다.", "auth": "소스 인증에 실패했습니다.", "network": "소스에 연결할 수 없습니다.", "recheck": "이전 소스 오류의 복구가 확인되지 않았습니다. 다시 확인하세요.", "unknown": "작업을 안전하게 완료하지 못했습니다. 소스나 도구 설정을 확인하세요." },
       "issueHistory": { "pending": "확인 필요", "recovered": "이후 복구 확인됨", "unverified": "복구 미확인", "disabled": "비활성화됨", "removed": "관리 대상에서 제거됨" },
       "sourceNeedsAttention": "Skill 업데이트 확인 필요",
       "viewIssueReason": "원인 보기",
@@ -917,6 +917,7 @@ export const ko = {
     "toolsScanned": "스캔된 도구: {{count}}",
     "skillsFound": "발견된 스킬: {{count}}개",
     "foundIn": "다음에서 발견됨",
+    "centralRepoSource": "중앙 라이브러리에 있음",
     "claudePluginSource": "Claude Code 플러그인 · {{plugin}} · 사용자",
     "claudePluginSourceWithVersion": "클로드 코드 플러그인 · {{plugin}} · v{{version}} · 사용자",
     "errors": {

@@ -1446,6 +1446,11 @@ fn get_managed_skills_impl_maps_targets() {
 #[test]
 fn managed_skill_status_keeps_existing_local_sources_healthy() {
     let source = tempfile::tempdir().unwrap();
+    let central = tempfile::tempdir().unwrap();
+    // A managed Skill always has its folder in the central repository, so the fixture has
+    // to create one: a record whose folder is gone is a hollow record, not a healthy one.
+    let central_path = central.path().join("S1");
+    std::fs::create_dir_all(&central_path).unwrap();
     let skill = SkillRecord {
         id: "s1".to_string(),
         name: "S1".to_string(),
@@ -1454,7 +1459,7 @@ fn managed_skill_status_keeps_existing_local_sources_healthy() {
         source_ref: Some(source.path().to_string_lossy().to_string()),
         source_subpath: None,
         source_revision: None,
-        central_path: "/tmp/central".to_string(),
+        central_path: central_path.to_string_lossy().to_string(),
         content_hash: None,
         created_at: 1,
         updated_at: 1,
@@ -1465,11 +1470,19 @@ fn managed_skill_status_keeps_existing_local_sources_healthy() {
     };
 
     assert_eq!(managed_skill_status(&skill), "ok");
-    let mut unbound = skill;
+
+    let mut unbound = skill.clone();
     unbound.source_ref = None;
     assert_eq!(managed_skill_status(&unbound), "ok");
     unbound.source_ref = Some("/definitely-missing-source".into());
     assert_eq!(managed_skill_status(&unbound), "error");
+
+    // The central folder is what a Skill actually is, so a record that outlived its folder
+    // is an error even when no external source is bound to it.
+    let mut hollow = skill;
+    hollow.source_ref = None;
+    hollow.central_path = central.path().join("gone").to_string_lossy().to_string();
+    assert_eq!(managed_skill_status(&hollow), "error");
 }
 
 #[test]

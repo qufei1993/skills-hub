@@ -793,6 +793,163 @@ fn imports_identical_existing_local_skill_but_rejects_different_content() {
     assert!(format!("{err:#}").contains("skill already exists"));
 }
 
+fn central_dir_count(central: &Path) -> usize {
+    fs::read_dir(central)
+        .unwrap()
+        .filter(|entry| entry.as_ref().unwrap().path().is_dir())
+        .count()
+}
+
+#[test]
+fn adopts_a_central_folder_the_library_has_no_record_for() {
+    let app = tauri::test::mock_app();
+    let (_dir, store) = make_store();
+    let central_root = tempfile::tempdir().unwrap();
+    set_central_path(&store, central_root.path());
+
+    // Content that only exists on disk. This is exactly what a cleared or lost database
+    // leaves behind, because every tool mirror is a link into the central repository and
+    // tool scans skip those.
+    let orphan = central_root.path().join("orphan");
+    fs::create_dir_all(&orphan).unwrap();
+    fs::write(
+        orphan.join("SKILL.md"),
+        b"---\nname: orphan\ndescription: kept from disk\n---\n",
+    )
+    .unwrap();
+    fs::write(orphan.join("payload.txt"), b"payload").unwrap();
+
+    let adopted =
+        super::install_local_skill(app.handle(), &store, &orphan, Some("orphan".to_string()))
+            .unwrap();
+
+    assert_eq!(adopted.name, "orphan");
+    assert_eq!(adopted.central_path, orphan);
+    assert!(adopted.content_hash.is_some());
+    // Adopted in place: nothing was copied and no duplicate folder appeared.
+    assert_eq!(fs::read(orphan.join("payload.txt")).unwrap(), b"payload");
+    assert_eq!(central_dir_count(central_root.path()), 1);
+
+    let record = store
+        .list_skills()
+        .unwrap()
+        .into_iter()
+        .find(|skill| skill.name == "orphan")
+        .expect("the adopted Skill is registered");
+    assert_eq!(record.central_path, orphan.to_string_lossy());
+    assert_eq!(record.status, "ok");
+    assert_eq!(record.description.as_deref(), Some("kept from disk"));
+    // A folder adopted from the library itself has no external source.
+    assert_eq!(record.source_ref, None);
+}
+
+#[test]
+fn adopting_repairs_a_record_whose_central_folder_is_gone() {
+    let app = tauri::test::mock_app();
+    let (_dir, store) = make_store();
+    let central_root = tempfile::tempdir().unwrap();
+    set_central_path(&store, central_root.path());
+
+    // The folder exists and holds the content.
+    let folder = central_root.path().join("kept");
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(folder.join("SKILL.md"), b"---\nname: kept\n---\n").unwrap();
+
+    // The library, however, points at a path that no longer exists.
+    let stranded = SkillRecord {
+        id: "stranded-id".to_string(),
+        name: "kept".to_string(),
+        description: None,
+        source_type: "local".to_string(),
+        source_ref: None,
+        source_subpath: None,
+        source_revision: None,
+        central_path: central_root
+            .path()
+            .join("kept-9f3a1b2c")
+            .to_string_lossy()
+            .to_string(),
+        content_hash: None,
+        created_at: 1,
+        updated_at: 1,
+        last_sync_at: None,
+        last_seen_at: 1,
+        enabled: true,
+        status: "ok".to_string(),
+    };
+    store.commit_skill_update(&stranded, &[]).unwrap();
+    store
+        .upsert_skill_target(&SkillTargetRecord {
+            id: "target-1".to_string(),
+            skill_id: "stranded-id".to_string(),
+            tool: "codex".to_string(),
+            scope: "global".to_string(),
+            project_path: None,
+            target_path: central_root.path().join("t").to_string_lossy().to_string(),
+            mode: "junction".to_string(),
+            status: "disabled".to_string(),
+            last_error: None,
+            synced_at: None,
+        })
+        .unwrap();
+
+    let adopted =
+        super::install_local_skill(app.handle(), &store, &folder, Some("kept".to_string()))
+            .unwrap();
+
+    // The existing record is repaired rather than duplicated.
+    assert_eq!(adopted.skill_id, "stranded-id");
+    assert_eq!(adopted.central_path, folder);
+    let skills = store.list_skills().unwrap();
+    assert_eq!(skills.len(), 1, "no second record for the same Skill");
+    let record = &skills[0];
+    assert_eq!(record.central_path, folder.to_string_lossy());
+    assert_eq!(record.status, "ok");
+    assert!(record.content_hash.is_some());
+    assert_eq!(record.created_at, 1, "the record keeps its identity");
+    assert_eq!(
+        store.list_skill_targets("stranded-id").unwrap().len(),
+        1,
+        "saved tool targets survive the repair"
+    );
+}
+
+#[test]
+fn still_rejects_a_central_folder_whose_content_differs_from_the_source() {
+    let app = tauri::test::mock_app();
+    let (_dir, store) = make_store();
+    let central_root = tempfile::tempdir().unwrap();
+    set_central_path(&store, central_root.path());
+
+    let library_copy = central_root.path().join("clash");
+    fs::create_dir_all(&library_copy).unwrap();
+    fs::write(library_copy.join("SKILL.md"), b"---\nname: clash\n---\n").unwrap();
+    fs::write(library_copy.join("a.txt"), b"library copy").unwrap();
+
+    // A different folder that happens to share the name must not silently adopt the
+    // library copy and discard what the user actually selected.
+    let external = tempfile::tempdir().unwrap();
+    fs::write(external.path().join("SKILL.md"), b"---\nname: clash\n---\n").unwrap();
+    fs::write(external.path().join("a.txt"), b"user copy").unwrap();
+
+    let err = match super::install_local_skill(
+        app.handle(),
+        &store,
+        external.path(),
+        Some("clash".to_string()),
+    ) {
+        Ok(_) => panic!("expected error"),
+        Err(err) => err,
+    };
+    assert!(format!("{err:#}").contains("skill already exists"));
+    assert!(store.list_skills().unwrap().is_empty());
+    assert_eq!(
+        fs::read(library_copy.join("a.txt")).unwrap(),
+        b"library copy",
+        "the existing content stays untouched"
+    );
+}
+
 #[test]
 fn auto_update_migrates_legacy_kimi_target_without_removing_old_path() {
     let app = tauri::test::mock_app();
