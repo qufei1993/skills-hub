@@ -17,6 +17,7 @@ fn guarded_directory_supports_native_rename_and_replacement() {
     for value in [b"first".as_slice(), b"replacement".as_slice()] {
         let source = root.join("source");
         let mut file = OpenOptions::new()
+            .write(true)
             .access_mode(0x80000000 | 0x40000000 | 0x10000)
             .share_mode(1)
             .create_new(true)
@@ -48,6 +49,7 @@ fn guarded_directory_supports_native_rename_and_replacement() {
     }
     let source = root.join("failed");
     let file = OpenOptions::new()
+        .write(true)
         .access_mode(0x80000000 | 0x40000000 | 0x10000)
         .share_mode(1)
         .create_new(true)
