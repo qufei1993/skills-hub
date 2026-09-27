@@ -1778,6 +1778,13 @@ pub async fn get_github_proxy_url(store: State<'_, SkillStore>) -> Result<String
         .map_err(format_anyhow_error)
 }
 
+/// The tray menu labels are native text and live in `lib.rs`; the web app reports which
+/// interface language is active so they can match the rest of the UI.
+#[tauri::command]
+pub fn set_tray_language(app: tauri::AppHandle, language: String) -> Result<(), String> {
+    crate::apply_tray_language(&app, &language)
+}
+
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn set_github_proxy_url(

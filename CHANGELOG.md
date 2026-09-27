@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Notification-area icon**: Skills Hub now keeps a tray icon with a menu that shows the main window or quits the app, and closing the main window hides it to the notification area instead of ending the process, so scheduled updates and device sync keep running. If the tray icon cannot be created, closing still quits rather than leaving the app unreachable, and the tray menu follows the active interface language.
+
 ## [0.10.1] - 2026-09-13
 
 ### Fixed
