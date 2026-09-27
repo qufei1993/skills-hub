@@ -2,6 +2,8 @@
 
 [中文](agent-first-cli.zh.md) · [Release overview](README.md)
 
+Before the official Skill is installed, My Skills shows a dismissible AI management notice. Go to setup opens Settings, focuses the AI management card, and briefly highlights it. Dismissal is remembered on this device; installed, inactive, or damaged Skills do not show this first-use notice.
+
 Deployment previews expose `affected_agents` for all tools sharing a physical target directory, separately from the managed deployment targets. Disabled tools do not gain new deployment records. One-click AI management rejects scope expansion before installing the official Skill and prompts the user to review tool configuration.
 
 Desktop refreshes Skills and tags together on opening tag filters, entering library/tag pages, and window focus. Existing search/tag filters remain selected and stale read responses are ignored. This is interaction-triggered refresh, not continuous CLI-change polling.

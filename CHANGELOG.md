@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - **Bundled CLI**: The native `skillshub-cli` is included with the desktop app and follows its version. Once prepared, it works even when the desktop is closed. Users do not need Node.js, npm, or a separate CLI installation.
 
 ### Improved
+- **AI management discovery**: A dismissible notice in My Skills introduces AI management before the official Skill is installed. Go to setup opens and highlights the Settings card; dismissed notices stay hidden.
 - **Default tool sync**: AI installations sync to detected, enabled tools by default. Explicit tool choices, library-only requests, and project scope take precedence. Incomplete sync is reported separately from a successful installation.
 - **Shared library refresh**: Skills and tags refresh when returning to the app, entering library or tag pages, or opening tag filters. Existing filters are preserved, so AI changes appear without restarting.
 - **Clearer Settings**: AI management uses a compact card with installation details available on demand. Background checks preserve the current status and keep View Skill available. Network and storage settings can collapse while keeping their summaries visible.

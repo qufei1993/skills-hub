@@ -6659,3 +6659,52 @@
 .settings-collapse-chevron { margin-left: auto; flex-shrink: 0; transition: transform 120ms; }
 .settings-collapsible[open] .settings-collapse-chevron { transform: rotate(180deg); }
 .settings-collapsible:not([open]) > .settings-card-head { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+
+.ai-management-notice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 20px;
+  border: 1px solid var(--accent-soft-border);
+  border-radius: var(--radius-lg);
+  background: var(--accent-soft-bg);
+}
+.ai-management-notice-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  color: var(--accent-primary);
+  background: var(--bg-panel);
+  border-radius: var(--radius-md);
+}
+.ai-management-notice-copy { flex: 1 1 240px; min-width: 0; }
+.ai-management-notice-copy strong { font-size: 14px; color: var(--text-primary); }
+.ai-management-notice-copy p { margin: 4px 0 0; font-size: 12px; color: var(--text-secondary); }
+.ai-management-notice > .btn { flex: 0 0 auto; }
+.ai-management-notice-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.ai-management-notice-close:hover { background: var(--bg-element-hover); color: var(--text-primary); }
+.ai-management-notice-close:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+.ai-management-card-highlight { animation: ai-management-highlight 2s ease-out; }
+.ai-management-card:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 3px; }
+@keyframes ai-management-highlight {
+  from { border-color: var(--accent-primary); box-shadow: 0 0 0 3px var(--accent-soft-bg); }
+  to { border-color: var(--border-subtle); box-shadow: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-management-card-highlight { animation: none; border-color: var(--accent-primary); }
+}

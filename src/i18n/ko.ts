@@ -109,6 +109,7 @@ export const ko = {
     "manageCenterHelp": "태그, 동기화 대상 도구, 스킬 업데이트를 한 곳에서 관리하세요.",
     aiManagement: {
   "title": "AI 관리",
+  "notice": {"title": "AI로 Skills를 관리하세요", "description": "AI와 대화하며 Skills를 설치, 업데이트, 정리하세요. 데스크톱 앱과 같은 라이브러리를 사용합니다.", "action": "설정으로 이동", "dismiss": "AI 관리 안내 닫기"},
 "networkSummary": "GitHub: {{token}} · 프록시: {{proxy}}", "configured": "설정됨", "notConfigured": "미설정", "on": "켜짐", "off": "꺼짐",
   "description": "AI와 대화하며 Skills를 설치, 업데이트, 정리하고 데스크톱 앱과 함께 관리하세요.",
   "enable": "한 번에 활성화",

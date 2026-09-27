@@ -4,6 +4,7 @@ import type { TFunction } from 'i18next'
 import type { AgentAccessStatusDto } from './types'
 
 type Props = {
+  focusOnMount?: boolean
   initialStatus?: AgentAccessStatusDto | null
   onStatusChanged?: (status: AgentAccessStatusDto) => void
   isTauri: boolean
@@ -13,7 +14,13 @@ type Props = {
   t: TFunction
 }
 
-const AiManagementSettings = ({ initialStatus = null, onStatusChanged, isTauri, invokeTauri, onChanged, onOpenSkill, t }: Props) => {
+const AiManagementSettings = ({ focusOnMount = false, initialStatus = null, onStatusChanged, isTauri, invokeTauri, onChanged, onOpenSkill, t }: Props) => {
+  const cardRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!focusOnMount) return
+    cardRef.current?.scrollIntoView?.({ block: 'center', behavior: 'instant' })
+    cardRef.current?.focus({ preventScroll: true })
+  }, [focusOnMount])
   const [status, setStatus] = useState<AgentAccessStatusDto | null>(initialStatus)
   const [pending, setPending] = useState(false)
   const [enabling, setEnabling] = useState(false)
@@ -76,7 +83,7 @@ const AiManagementSettings = ({ initialStatus = null, onStatusChanged, isTauri, 
     && status.agents.some(agent => agent.deployed && !agent.needsRepair && agent.enabled && agent.detected)
   const conflict = status?.officialState === 'name_conflict'
   const inactive = status?.installed && status.officialState === 'healthy' && status.bridge.status === 'valid' && !ready
-  return <section className={`settings-card ai-management-card${ready ? ' ai-management-card-ready' : ''}`} aria-label={t('aiManagement.title')} aria-busy={pending}>
+  return <section ref={cardRef} tabIndex={-1} className={`settings-card ai-management-card${focusOnMount ? ' ai-management-card-highlight' : ''}${ready ? ' ai-management-card-ready' : ''}`} aria-label={t('aiManagement.title')} aria-busy={pending}>
     <div className="settings-card-head">
       <span className="settings-card-icon"><Bot size={18} aria-hidden="true" /></span>
       <div className="ai-management-copy">

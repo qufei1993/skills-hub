@@ -160,3 +160,16 @@ it.each(['en', 'zh', 'ko'])('has translated primary copy and collapsed technical
   expect(document.querySelector('details')?.open).toBe(false)
   expect(document.body.textContent).not.toMatch(/aiManagement\.|npm|Node\.js/)
 })
+
+it('focuses and scrolls to AI management when opened from the library notice', async () => {
+  const scroll = vi.fn()
+  const original = HTMLElement.prototype.scrollIntoView
+  HTMLElement.prototype.scrollIntoView = scroll
+  try {
+    render(<AiManagementSettings focusOnMount isTauri invokeTauri={async () => fixture()} onChanged={() => {}} onOpenSkill={() => {}} t={t} />)
+    const card = screen.getByRole('region', { name: 'aiManagement.title' })
+    expect(document.activeElement).toBe(card)
+    expect(scroll).toHaveBeenCalledWith({ block: 'center', behavior: 'instant' })
+    await screen.findByRole('button', { name: 'aiManagement.enable' })
+  } finally { HTMLElement.prototype.scrollIntoView = original }
+})

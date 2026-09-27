@@ -23,6 +23,7 @@ const buildUpdaterProxyOptions = (
 }
 
 type SettingsPageProps = {
+  focusAiManagement?: boolean
   aiManagementStatus?: AgentAccessStatusDto | null
   onAiManagementStatusChanged?: (status: AgentAccessStatusDto) => void
   isTauri: boolean
@@ -55,6 +56,7 @@ type SettingsPageProps = {
 }
 
 const SettingsPage = ({
+  focusAiManagement = false,
   aiManagementStatus,
   onAiManagementStatusChanged,
   isTauri,
@@ -431,7 +433,7 @@ const SettingsPage = ({
           </div>
 
           <div className="settings-column">
-            <AiManagementSettings initialStatus={aiManagementStatus} onStatusChanged={onAiManagementStatusChanged} isTauri={isTauri} invokeTauri={invokeTauri} onChanged={onAiManagementChanged} onOpenSkill={onOpenOfficialSkill} t={t} />
+            <AiManagementSettings focusOnMount={focusAiManagement} initialStatus={aiManagementStatus} onStatusChanged={onAiManagementStatusChanged} isTauri={isTauri} invokeTauri={invokeTauri} onChanged={onAiManagementChanged} onOpenSkill={onOpenOfficialSkill} t={t} />
             <details className="settings-card settings-collapsible">
             <summary className="settings-card-head">
               <span className="settings-card-icon">

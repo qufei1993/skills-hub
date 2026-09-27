@@ -27,6 +27,7 @@ import SkillDetailView from './components/skills/SkillDetailView'
 import Header from './components/skills/Header'
 import LoadingOverlay from './components/skills/LoadingOverlay'
 import SkillsList from './components/skills/SkillsList'
+import AiManagementNotice from './components/skills/AiManagementNotice'
 import TagsPage from './components/skills/TagsPage'
 import AddSkillModal from './components/skills/modals/AddSkillModal'
 import BulkDeleteModal from './components/skills/modals/BulkDeleteModal'
@@ -131,6 +132,7 @@ const buildUpdaterProxyOptions = (
 }
 
 function App() {
+  const [focusAiManagement, setFocusAiManagement] = useState(false)
   const [aiManagementStatus, setAiManagementStatus] = useState<AgentAccessStatusDto | null>(null)
   const { t, i18n } = useTranslation()
   const language = i18n.resolvedLanguage ?? i18n.language ?? 'en'
@@ -1469,6 +1471,7 @@ function App() {
   }, [toolStatus, tools])
 
   const handleOpenSettings = useCallback(() => {
+    setFocusAiManagement(false)
     setShowAddModal(false)
     setActiveView('settings')
   }, [])
@@ -3766,6 +3769,10 @@ function App() {
               </div>
             ) : null}
             <SkillsList
+              notice={<AiManagementNotice isTauri={isTauri} invokeTauri={invokeTauri} skills={managedSkills} onStatusChanged={setAiManagementStatus} onOpen={() => {
+                setFocusAiManagement(true)
+                setActiveView('settings')
+              }} t={t} />}
               hasManagedSkills={managedSkills.length > 0}
               hasFilters={hasListFilters}
               onClearFilters={handleClearListFilters}
@@ -3924,6 +3931,7 @@ function App() {
           </div>
         ) : activeView === 'settings' ? (
           <SettingsPage
+            focusAiManagement={focusAiManagement}
             aiManagementStatus={aiManagementStatus}
             onAiManagementStatusChanged={setAiManagementStatus}
             isTauri={isTauri}

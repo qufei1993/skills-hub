@@ -1,15 +1,14 @@
 # Skills Hub Agent-first CLI 设计
 
-> 2026-09-27 分发调整：取消本文中的 npm 主包、五个平台包及 npm 发布方案。CLI 随桌面端构建、打包和更新，用户从「设置 → AI 管理」启用，无需安装 Node.js 或 npm。GitHub Release 保留同次构建的原生 CLI 和 SHA-256 文件；下文 npm 内容仅为历史设计。
+> 2026-09-27 分发调整：取消本文中的 npm 主包、五个平台包及 npm 发布方案。CLI 随桌面端构建、打包和更新，用户从「设置 → AI 管理」启用，无需安装 Node.js 或 npm。GitHub Release 保留同次构建的原生 CLI 和 SHA-256 文件；正文已同步为当前分发方案。
 
 > 2026-09-26 UI revision: the Settings AI management card replaces the separate Agent Access page. One action prepares the native CLI and installs `manage-skills-hub` using the shared installer for detected, enabled tools. Normal Skill controls handle subsequent management. Earlier per-Agent page descriptions below are superseded; CLI explicit-agent setup remains supported.
 
 - 状态：已确认
 - 日期：2026-09-19
 - 目标版本：v0.11.0
-- npm 主包：`skillshub-cli`
 - 终端命令：`skillshub-cli`
-- 官方 Agent Skill：`skills-hub`
+- 官方 Agent Skill：`manage-skills-hub`
 
 ## 本版本功能清单
 
@@ -92,8 +91,8 @@ Skills Hub 当前是一个 Tauri 2 + React 19 桌面应用。Skill 的安装、�
 1. 提供原生 Rust CLI，使 Agent 能查询、安装、更新、导入、部署、卸载、删除和标记本机 Skills。
 2. 桌面端与 CLI 调用同一套 Rust Service，不复制安装、同步或数据库业务逻辑。
 3. CLI 在桌面关闭或未安装时独立运行；通过 CLI 写入的数据在桌面下次读取时直接可见。
-4. 通过 npm 提供简单安装入口，同时发布可独立下载的原生二进制。
-5. 提供官方 `skills-hub` Skill，规定 Agent 如何安全调用 CLI。
+4. CLI 随桌面端构建、打包和更新，通过「设置 → AI 管理」启用；GitHub Release 保留同版本原生二进制。
+5. 提供官方 `manage-skills-hub` Skill，规定 Agent 如何安全调用 CLI。
 6. 对危险操作提供预览、显式确认、冲突拒绝和稳定的机器可读错误。
 7. 防止桌面端、CLI、自动更新和设备同步同时写入中央目录造成竞态。
 8. 保持现有生产数据库、中央目录和工具部署状态兼容，不要求用户迁移或重新导入。
@@ -447,7 +446,7 @@ INTERNAL_ERROR
 
 1. 桌面应用发布并校验过的 `~/.skills-hub/bin/skillshub-cli`（Windows 为 `.exe`）；
 2. 仅当桌面发布目录完全不存在时，查找 PATH 中的 `skillshub-cli`；
-3. 都不存在时提示安装桌面应用、全局 npm 包或独立二进制。
+3. 都不存在时提示安装桌面应用，并在「设置 → AI 管理」启用。
 
 桌面发布目录存在但校验戳缺失、版本不匹配或二进制缺失时返回“桥接损坏”，不得静默回退到可能更旧的 PATH 版本。用户打开桌面应用一次即可重新发布。
 
@@ -468,65 +467,22 @@ INTERNAL_ERROR
 
 bridge 使用独立于中央 Skills 目录的固定位置，避免与用户 Skill 名称或自定义中央目录冲突。开发版发布到独立的 `~/.skills-hub-dev/bin`，不得覆盖正式 bridge。
 
-### Agent 接入页面
+### 设置中的 AI 管理
 
-在“管理中心”增加 `Agent 接入` 标签页，不新增营销式首页，也不提供命令控制台。页面保持现有紧凑管理界面，包含：
+在「设置 → AI 管理」提供统一启用入口，一次操作校验并准备内置 CLI，再通过共用安装流程将 `manage-skills-hub` 安装并同步到已检测、已启用的工具。安装后沿用普通 Skill 管理，技术状态默认折叠。
 
-- CLI 状态：版本、路径、校验状态；
-- 官方 Skill 版本；
-- 已检测 Agent 的结构化列表；
-- 每个 Agent 的“安装”“修复”“移除”操作；
-- CLI-only 用户可复制的 npm 安装命令；
-- 明确说明设备同步、自动任务和凭据仍由桌面端管理。
+「我的 Skills」在尚未安装官方 Skill 时显示可关闭的引导，点击后定位到设置中的 AI 管理卡片；关闭选择保存在本机。状态读取不访问凭据。所有新增文案提供英文、简体中文和韩文翻译。
 
-页面只在进入或用户点击刷新时读取状态，不监听 CLI 操作。所有新增文案提供英文、简体中文和韩文翻译；路径、版本和命令使用等宽字体；状态不能只依赖颜色表达。
+## 桌面内置 CLI 与原生发布
 
-## npm 与原生发布
-
-### 对外命名
-
-```text
-产品：Skills Hub
-npm 主包：skillshub-cli
-终端命令：skillshub-cli
-官方 Skill：skills-hub
-```
-
-内部平台包：
-
-```text
-@skillshub-app/cli-darwin-arm64
-@skillshub-app/cli-darwin-x64
-@skillshub-app/cli-win32-x64
-@skillshub-app/cli-linux-x64
-@skillshub-app/cli-linux-arm64
-```
-
-发布前必须注册并保护 `skillshub-app` npm 组织/作用域；若无法取得该作用域，必须先重新确认统一的组织名，不能临时改用个人用户名发布正式包。
-
-### 包结构
-
-`skillshub-cli` 是很薄的跨平台入口：
-
-- 使用 npm `bin` 暴露 `skillshub-cli` 命令；
-- 通过 `optionalDependencies` 声明平台包；
-- 根据 `process.platform` 和 `process.arch` 定位二进制；
-- 使用 `spawnSync`/`spawn` 且 `shell: false` 原样传递参数和退出码；
-- 不实现 Skill 业务，不读取数据库，不解释 JSON；
-- 不使用安装后脚本从任意 URL 下载文件。
-
-平台包只包含该平台编译好的 Rust 二进制、许可证和最小元数据，并通过 `os`、`cpu` 限制安装。用户只安装 `skillshub-cli`，npm 自动下载当前平台包。
-
-首个版本支持 macOS arm64/x64、Windows x64、Linux x64/arm64。其他平台返回明确的不支持提示；无 Node/npm 的用户可从 GitHub Release 下载相同版本的独立二进制。
-
-### 供应链与版本
-
-- 主包、所有平台包、桌面版本和 CLI `--version` 使用同一产品版本。
-- 平台包先发布，主包最后发布；任一平台包失败则不发布主包。
-- 使用 npm Trusted Publishing/OIDC、provenance 和强制 2FA，不保存长期 npm Token。
-- GitHub Release 为每个二进制提供 SHA-256；npm 平台包中的二进制必须与对应 Release 资产哈希一致。
-- macOS 二进制进入现有签名/公证发布链；Windows 按桌面发布能力签名。
-- 发布工作流先在临时 registry 或打包产物上完成安装和执行冒烟测试。
+- 终端命令为 `skillshub-cli`，官方 Skill 为 `manage-skills-hub`。
+- CLI 是编译好的 Rust 可执行程序，随桌面端版本构建、打包和更新，运行时不依赖 Node.js 或 npm。
+- 不维护或发布单独的 npm 包，无需 npm 组织、包权限、Token 或 Trusted Publishing 配置。
+- GitHub Release 保留同次构建的原生 CLI 和 SHA-256 文件，覆盖 macOS arm64/x64、Windows x64、Linux GNU x64/arm64。
+- 桌面版本、内置 CLI 与对应 Release 资产版本一致，二进制与校验元数据匹配。
+- macOS 二进制进入现有签名/公证发布链；Windows 按桌面发布能力签名。桌面代码签名、公证与自动更新签名仍按应用发布流程配置。
+- 发布工作流对原生二进制执行冒烟测试和哈希校验。
+- 仓库开发、测试和构建仍使用 npm 脚本；这不构成用户运行 CLI 的依赖。
 
 ## 数据库兼容
 
@@ -540,7 +496,7 @@ CLI 启动时先检查：
 
 遇到高于当前二进制支持范围的共享 schema 时，CLI 可以执行不会误读结构的 `version` 和有限诊断，但拒绝所有业务写入并返回 `INCOMPATIBLE_DATABASE`。不得用旧 CLI 自动降级数据库。
 
-桌面内置 CLI 与桌面版本完全一致。npm CLI 可能与桌面版本不同，因此官方 Skill 优先使用校验过的桌面 bridge；CLI-only 环境使用 PATH 版本。
+桌面内置 CLI 与桌面版本完全一致。官方 Skill 优先使用校验过的桌面 bridge；仅当桥接目录不存在时才使用 PATH 版本，并检查兼容性。
 
 所有未来迁移继续遵守项目兼容规则：可被旧稳定版安全忽略的功能表使用独立 marker；不兼容共享结构必须先提供明确兼容设计、升级测试和上一稳定版兼容测试。
 
@@ -619,8 +575,8 @@ CLI 启动时先检查：
 ### 发布与平台测试
 
 - macOS arm64/x64、Windows x64、Linux x64/arm64 构建。
-- 每个平台验证直接下载的二进制和 npm 安装的二进制哈希一致。
-- `npm install -g skillshub-cli` 后执行 `version`、`doctor` 和临时目录安装冒烟测试。
+- 每个平台校验 Release 原生二进制的 SHA-256。
+- 对构建出的原生 CLI 执行 `version`、`doctor` 和临时目录安装冒烟测试。
 - 桌面安装包启动后 bridge 二进制、版本戳和 SHA-256 校验正确。
 - bridge 半完成、旧版本或二进制缺失时官方 Skill 拒绝回退。
 - `npm run network:check`、`npm run version:check` 和完整 `npm run check` 通过。
@@ -638,14 +594,10 @@ src-tauri/src/
 └── lib.rs                        # 桌面 Runtime、CLI bridge 初始化
 
 src/components/skills/
-└── AgentAccessPage.tsx           # 管理中心 Agent 接入页
+└── AiManagementSettings.tsx      # 设置中的 AI 管理卡片
 
 skills/manage-skills-hub/
 └── SKILL.md                      # 官方 Agent Skill
-
-packages/
-├── skillshub-cli/                # npm 总入口
-└── cli-*/                        # 平台包定义
 
 scripts/
 └── CLI 构建、打包、校验和发布脚本
@@ -655,15 +607,15 @@ scripts/
 
 ## 验收标准
 
-1. 未安装或未启动桌面应用时，npm/独立 CLI 可以在支持平台初始化并管理 Skills Hub。
+1. 桌面端准备内置 CLI 后，关闭桌面应用仍可通过 CLI 管理 Skills Hub。
 2. CLI 安装、标签和部署的 Skill 能被之后启动的桌面端完整读取，无导入步骤。
 3. 桌面端执行相同操作继续使用共享 Service，行为与当前版本一致。
 4. Agent 可以通过官方 Skill 完成查询、安装、部署、更新、导入、标签和安全删除。
 5. install 不隐式部署，deploy 必须明确 Agent，CLI 不包含设备同步命令。
 6. 危险更新、未托管目标、缺少确认和数据库不兼容都被可靠阻止。
 7. 桌面与 CLI 并发写不会造成部分文件、脏数据库或静默覆盖。
-8. npm 用户只需安装 `skillshub-cli`；平台包选择透明完成。
-9. npm、GitHub Release、桌面内置 CLI 和产品版本一致且可验证。
+8. 用户通过「设置 → AI 管理」启用，无需单独安装 CLI、Node.js 或 npm。
+9. GitHub Release、桌面内置 CLI 和产品版本一致且可验证。
 10. 所有新增用户文案具备英文、简体中文和韩文翻译，完整检查通过。
 
 ## 已确认的产品边界
@@ -671,7 +623,6 @@ scripts/
 - 当前优先级是 Agent-first 管理入口，不是 Skills 合集网站。
 - Preset/Packs 暂不开发。
 - CLI 管理本机 Skill 生命周期；设备、账号和自动化归桌面端。
-- CLI 使用 Rust 并复用现有 Core；npm 只是分发渠道。
-- 对外 npm 包和命令都使用 `skillshub-cli`。
-- 内部平台包使用 `@skillshub-app/cli-*`，普通用户不直接接触。
+- CLI 使用 Rust 并复用现有 Core，随桌面端分发和更新。
+- 对外命令使用 `skillshub-cli`，不维护独立 npm 包。
 - 桌面已打开时不要求实时显示 CLI 修改。

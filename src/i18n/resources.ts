@@ -108,6 +108,7 @@ export const resources = {
       manageCenterHelp: 'Manage tags, tool targets, and skill updates in one place.',
       aiManagement: {
   "title": "AI management",
+  "notice": {"title": "Let AI manage your Skills", "description": "Install, update, and organize Skills through conversations, using the same library as the desktop app.", "action": "Go to setup", "dismiss": "Dismiss AI management tip"},
 "networkSummary": "GitHub: {{token}} · Proxy: {{proxy}}", "configured": "configured", "notConfigured": "not configured", "on": "on", "off": "off",
   "description": "Install, update, and organize Skills through AI conversations, with the same library as the desktop app.",
   "enable": "Enable in one click",
@@ -1333,6 +1334,7 @@ export const resources = {
       manageCenterHelp: '集中管理标签、工具和更新。',
       aiManagement: {
   "title": "AI 管理",
+  "notice": {"title": "让 AI 帮你管理 Skills", "description": "通过对话安装、更新和整理 Skills，与桌面端共用同一份技能库。", "action": "去启用", "dismiss": "关闭 AI 管理提示"},
 "networkSummary": "GitHub：{{token}} · 代理：{{proxy}}", "configured": "已配置", "notConfigured": "未配置", "on": "已开启", "off": "已关闭",
   "description": "通过与 AI 对话，安装、更新和整理 Skills，与桌面端统一管理。",
   "enable": "一键启用",

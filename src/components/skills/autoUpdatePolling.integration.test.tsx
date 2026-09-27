@@ -162,25 +162,29 @@ it('keeps recurring progress polling off the system task configuration command',
   expect(invoke.mock.calls.filter(([command]) => command === 'get_auto_update_runtime')).toHaveLength(3)
 })
 
-it('reads AI management only in settings and never on timers or other pages', async () => {
+it('reads AI management for discovery and settings without polling or accessing credentials', async () => {
   render(<App />)
   await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-  expect(invoke.mock.calls.filter(([command]) => command === 'get_agent_access_status')).toHaveLength(0)
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'settings' })) })
+  const initialReads = invoke.mock.calls.filter(([command]) => command === 'get_agent_access_status').length
+  expect(initialReads).toBeGreaterThan(0)
+  await act(async () => { await vi.advanceTimersByTimeAsync(60000) })
+  expect(invoke.mock.calls.filter(([command]) => command === 'get_agent_access_status')).toHaveLength(initialReads)
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'aiManagement.notice.action' })) })
+  expect(document.activeElement).toBe(screen.getByRole('region', { name: 'aiManagement.title' }))
   expect(screen.queryByRole('button', { name: 'manageTabs.agents' })).toBeNull()
-  expect(invoke.mock.calls.filter(([command]) => command === 'get_agent_access_status')).toHaveLength(1)
+  expect(invoke.mock.calls.filter(([command]) => command === 'get_agent_access_status')).toHaveLength(initialReads + 1)
   await act(async () => { await vi.advanceTimersByTimeAsync(60000); window.dispatchEvent(new Event('focus')) })
-  expect(invoke.mock.calls.filter(([command]) => command === 'get_agent_access_status')).toHaveLength(1)
+  expect(invoke.mock.calls.filter(([command]) => command === 'get_agent_access_status')).toHaveLength(initialReads + 1)
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: /manageTabs.tags/ })) })
   expect(screen.queryByRole('button', { name: 'agentAccess.refresh' })).toBeNull()
   await act(async () => { await vi.advanceTimersByTimeAsync(60000) })
-  expect(invoke.mock.calls.filter(([command]) => command === 'get_agent_access_status')).toHaveLength(1)
+  expect(invoke.mock.calls.filter(([command]) => command === 'get_agent_access_status')).toHaveLength(initialReads + 1)
   const originalInvoke = invoke.getMockImplementation()!
   let finishRefresh!: (value: unknown) => void
   invoke.mockImplementation((command: string, ...args: unknown[]) => command === 'get_agent_access_status'
     ? new Promise(resolve => { finishRefresh = resolve }) : originalInvoke(command, ...args))
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'settings' })) })
-  expect(invoke.mock.calls.filter(([command]) => command === 'get_agent_access_status')).toHaveLength(2)
+  expect(invoke.mock.calls.filter(([command]) => command === 'get_agent_access_status')).toHaveLength(initialReads + 2)
   expect(screen.queryByText('agentAccess.loading')).toBeNull()
   expect(screen.getByRole('button', { name: 'aiManagement.enable' })).toBeTruthy()
   expect(screen.queryByText('aiManagement.enabling')).toBeNull()
