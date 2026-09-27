@@ -23,3 +23,5 @@ Both macOS notarization responses must report `Accepted` before stapling and val
 The compatibility test starts with a frozen v0.10.1 shared-schema fixture, performs CLI install/tag/deploy, reopens the desktop service with identical runtime paths, and reads the result with v0.10.1-compatible SQL. It verifies schema 6 stays unchanged and unknown newer schemas fail closed without writes. Full frontend/Rust checks, native bundled CLI smoke, and desktop development startup are recorded in the task report.
 
 References: [GitHub native runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+
+[Standalone CLI installation](cli-installation.md): one-command setup and upgrades without npm.

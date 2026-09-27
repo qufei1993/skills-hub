@@ -27,3 +27,5 @@ macOS 两份公证响应都必须为 `Accepted`，才能给应用附加并验证
 完整前端与 Rust 检查、本机内置 CLI 冒烟测试和桌面开发版启动证据记录在任务报告中。
 
 参考：[GitHub 原生运行环境](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)。
+
+[独立 CLI 安装](cli-installation.md)：通过一条命令安装和升级，无需 npm。

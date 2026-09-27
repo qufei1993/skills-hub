@@ -37,6 +37,37 @@ Skills Hub 的做法是：把 Skill 统一安装到中心仓库，再按你的�
 
 桌面端内置编译好的 Rust CLI，随应用一起更新。使用这项功能无需安装 Node.js、npm 或单独的 CLI 包；启用后，关闭桌面端也可以继续使用。下文中的 npm 命令用于从源码开发和构建 Skills Hub。
 
+## 独立安装 CLI
+
+已经使用桌面端？启动应用就会准备好内置 CLI，无需重复安装。如果只想在终端使用，复制对应系统的一条命令即可，无需 Node.js、npm 或管理员权限。
+
+**macOS / Linux**（Intel/AMD x64 或 ARM64）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/qufei1993/skills-hub/main/scripts/install-cli.sh | bash
+```
+
+**Windows x64**（PowerShell）：
+
+```powershell
+irm https://raw.githubusercontent.com/qufei1993/skills-hub/main/scripts/install-cli.ps1 | iex
+```
+
+脚本自动下载最新正式版，校验 SHA-256，并安装到 macOS/Linux 的 `~/.local/bin` 或 Windows 的 `%LOCALAPPDATA%\SkillsHub\bin`。下载或校验失败会保留已有 CLI。CLI 下载文件从 v0.11.0 开始提供，该版本发布前安装命令暂不可用。
+
+macOS/Linux 安装后请重新打开终端，脚本会自动配置 Bash 和 Zsh；其他 Shell 需自行将 `~/.local/bin` 加入 PATH。Windows 会更新当前 PowerShell 会话和用户 PATH。
+
+验证安装：
+
+```bash
+skillshub-cli version --json
+skillshub-cli --help
+```
+
+升级时重新执行同一条安装命令即可。这份独立 CLI 与桌面端内置的 CLI 分开维护，不会随桌面端自动升级。卸载时删除安装目录中的 `skillshub-cli`（Windows 为 `skillshub-cli.exe`）即可，技能库会保留。
+
+CLI 与桌面端共用本地技能库，但单独安装 CLI 不会自动安装官方 AI 管理 Skill。设备同步、定时任务、账号授权和应用设置仍需使用桌面端。Linux 下载文件面向 GNU/glibc 系统，不适用于 Alpine/musl。
+
 ## 界面预览
 
 ### My Skills — 托管技能与批量管理
