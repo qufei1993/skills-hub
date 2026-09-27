@@ -2,7 +2,7 @@
 
 [中文](verified-cli-bridge.zh.md) · [Release overview](README.md)
 
-Desktop builds include the same-version native `skillshub-cli`. Normal startup verifies the bundled binary against embedded build metadata, invalidates old stamps, copies to a sibling temporary file, and atomically replaces the bridge binary before publishing SHA-256 and version stamps. Failures do not prevent desktop startup and retain a recoverable damaged status. Status inspection only reads bridge files; it never executes the CLI or accesses credentials.
+Desktop builds include the same-version native `skillshub-cli`. Only an explicit AI management enable action verifies the bundled binary against embedded build metadata, invalidates old stamps, copies to a sibling temporary file, and atomically replaces the bridge binary before publishing SHA-256 and version stamps. Ordinary startup does not install, update, or repair the bridge. Installation failures are reported by the enable action and can be retried there. Status inspection only reads bridge files; it never executes the CLI or accesses credentials.
 
 Production publishes to `~/.skills-hub/bin`; debug builds publish to `~/.skills-hub-dev/bin`. The binary is `skillshub-cli` (`skillshub-cli.exe` on Windows), while stamps are always `skillshub-cli.version` and `skillshub-cli.sha256`.
 

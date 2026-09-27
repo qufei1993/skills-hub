@@ -109,19 +109,6 @@ pub struct AgentAccessStatusDto {
     agents: Vec<AgentAccessAgentDto>,
 }
 
-fn agent_access_bridge_status(
-    directory: &std::path::Path,
-    startup: &crate::core::cli_bridge::CliBridgeStartupState,
-) -> crate::core::cli_bridge::CliBridgeStatus {
-    use crate::core::cli_bridge::{bundled_cli_bridge_status, CliBridgeHealth};
-    let current = bundled_cli_bridge_status(directory);
-    if current.status != CliBridgeHealth::Valid && startup.0.status == CliBridgeHealth::Damaged {
-        startup.0.clone()
-    } else {
-        current
-    }
-}
-
 fn agent_access_dto(
     status: crate::services::agent_access::AgentAccessStatus,
     bridge: crate::core::cli_bridge::CliBridgeStatus,
@@ -166,7 +153,7 @@ fn enable_ai_management_impl(
     source: &std::path::Path,
 ) -> Result<AgentAccessStatusDto, String> {
     use crate::core::cli_bridge::{publish_bundled_cli_bridge, CliBridgeHealth};
-    let bridge = publish_bundled_cli_bridge(source, &service.paths().cli_bridge_dir).0;
+    let bridge = publish_bundled_cli_bridge(source, &service.paths().cli_bridge_dir);
     if bridge.status != CliBridgeHealth::Valid {
         return Err("CLI_UNAVAILABLE".into());
     }
@@ -198,17 +185,15 @@ pub async fn enable_ai_management(
 #[tauri::command]
 pub async fn get_agent_access_status(
     service: State<'_, SkillsHubService>,
-    startup: State<'_, crate::core::cli_bridge::CliBridgeStartupState>,
 ) -> Result<AgentAccessStatusDto, String> {
     let service = service.inner().clone();
-    let startup = startup.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let status = service
             .agent_access_status()
             .map_err(format_service_error)?;
         Ok(agent_access_dto(
             status,
-            agent_access_bridge_status(&service.paths().cli_bridge_dir, &startup),
+            crate::core::cli_bridge::bundled_cli_bridge_status(&service.paths().cli_bridge_dir),
         ))
     })
     .await
@@ -244,18 +229,16 @@ fn set_agent_access_impl(
 #[tauri::command]
 pub async fn set_agent_access(
     service: State<'_, SkillsHubService>,
-    startup: State<'_, crate::core::cli_bridge::CliBridgeStartupState>,
     agent: String,
     action: String,
     confirmed: Option<bool>,
 ) -> Result<AgentAccessStatusDto, String> {
     let service = service.inner().clone();
-    let startup = startup.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let status = set_agent_access_impl(&service, agent, action, confirmed.unwrap_or(false))?;
         Ok(agent_access_dto(
             status,
-            agent_access_bridge_status(&service.paths().cli_bridge_dir, &startup),
+            crate::core::cli_bridge::bundled_cli_bridge_status(&service.paths().cli_bridge_dir),
         ))
     })
     .await

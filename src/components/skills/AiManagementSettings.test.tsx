@@ -173,3 +173,18 @@ it('focuses and scrolls to AI management when opened from the library notice', a
     await screen.findByRole('button', { name: 'aiManagement.enable' })
   } finally { HTMLElement.prototype.scrollIntoView = original }
 })
+
+it.each(['missing', 'damaged'] as const)('only installs the CLI after an explicit click when bridge is %s', async bridgeState => {
+  const status = fixture()
+  status.bridge.status = bridgeState
+  status.bridge.reason = bridgeState === 'damaged' ? 'VERSION_MISMATCH' : 'DIRECTORY_MISSING'
+  const invoke = vi.fn(async (command: string) => {
+    expect(['get_agent_access_status', 'enable_ai_management']).toContain(command)
+    return status
+  })
+  render(<AiManagementSettings isTauri invokeTauri={invoke} onChanged={() => {}} onOpenSkill={() => {}} t={t} />)
+  const button = await screen.findByRole('button', { name: 'aiManagement.enable' })
+  expect(invoke.mock.calls.every(args => args[0] === 'get_agent_access_status')).toBe(true)
+  fireEvent.click(button)
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('enable_ai_management'))
+})

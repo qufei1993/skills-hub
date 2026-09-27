@@ -69,18 +69,14 @@ pub struct CliBridgeStatus {
     pub version: Option<String>,
 }
 
-/// Retained even when startup publication fails before a bridge directory exists.
-#[derive(Clone, Debug)]
-pub struct CliBridgeStartupState(pub CliBridgeStatus);
-
-pub fn publish_cli_bridge_on_startup(
+pub fn publish_cli_bridge_status(
     source: &Path,
     destination: &Path,
     version: &str,
     expected_hash: &str,
-) -> CliBridgeStartupState {
+) -> CliBridgeStatus {
     match publish_cli_bridge(source, destination, version, expected_hash) {
-        Ok(status) => CliBridgeStartupState(status),
+        Ok(status) => status,
         Err(error) => {
             let reason = [
                 CliBridgeReason::HashMismatch,
@@ -92,7 +88,7 @@ pub fn publish_cli_bridge_on_startup(
             .find(|reason| error.to_string() == reason.code())
             .unwrap_or(CliBridgeReason::IoError);
             log::warn!("CLI bridge publication failed: {}", reason.code());
-            CliBridgeStartupState(CliBridgeStatus::damaged(destination, reason))
+            CliBridgeStatus::damaged(destination, reason)
         }
     }
 }
@@ -105,8 +101,8 @@ pub fn bundled_cli_bridge_status(destination: &Path) -> CliBridgeStatus {
     )
 }
 
-pub fn publish_bundled_cli_bridge(source: &Path, destination: &Path) -> CliBridgeStartupState {
-    publish_cli_bridge_on_startup(
+pub fn publish_bundled_cli_bridge(source: &Path, destination: &Path) -> CliBridgeStatus {
+    publish_cli_bridge_status(
         source,
         destination,
         env!("CARGO_PKG_VERSION"),

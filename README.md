@@ -30,48 +30,27 @@ Skills Hub installs skills into one central repository, then syncs them to tools
 - **Discovery controls**: Choose which installed tool directories participate in import discovery.
 - **Multilingual interface**: Use Skills Hub in English, Simplified Chinese, or Korean.
 
-## Manage Skills Through AI
+## Interface Preview
 
-1. Open **Settings → AI Management** in Skills Hub and enable it. This installs the official `manage-skills-hub` Skill for detected, enabled tools.
+### AI Management — Manage Skills Through Conversations
+
+1. Open **Settings → AI Management** in Skills Hub and enable it. This prepares the bundled CLI and installs the official `manage-skills-hub` Skill for detected, enabled tools.
 2. In your AI coding tool, ask it to use `manage-skills-hub`, for example: “List my installed Skills” or “Check my Skills for updates.”
 3. Return to Skills Hub to view the results. The AI and desktop app share the same local library.
 
 If no tools are available, check their installation and enabled state on the **Tools** page, then try again.
 
-The desktop app bundles a compiled Rust CLI and updates it with the app. You do not need to install Node.js, npm, or a separate CLI package to use this feature. Once enabled, it also works while the desktop app is closed. The npm commands below are for developing and building Skills Hub from source.
+The desktop app includes a compiled Rust CLI, which is installed only when you enable AI management. After updating the app, use AI management to update the installed CLI if its status indicates a version mismatch. You do not need to install Node.js, npm, or a separate CLI package to use this feature. Once enabled, it also works while the desktop app is closed. The npm commands below are for developing and building Skills Hub from source.
 
-## Standalone CLI Installation
+Enable AI management in Settings:
 
-Already using the desktop app? Its bundled CLI is ready after startup; you do not need a separate installation. For terminal-only use, copy the command for your system below. No Node.js, npm, or administrator access is required.
+![Enable AI management in Settings](docs/assets/ai-management-setup.png)
 
-**macOS / Linux** (Intel/AMD x64 or ARM64):
+After enabling it, find `manage-skills-hub` in My Skills and view its synced tools:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/qufei1993/skills-hub/main/scripts/install-cli.sh | bash
-```
+![Official management Skill installed and synced to tools](docs/assets/ai-management-installed.png)
 
-**Windows x64** (PowerShell):
-
-```powershell
-irm https://raw.githubusercontent.com/qufei1993/skills-hub/main/scripts/install-cli.ps1 | iex
-```
-
-The installer selects the latest stable release, checks its SHA-256 checksum, and installs to `~/.local/bin` on macOS/Linux or `%LOCALAPPDATA%\SkillsHub\bin` on Windows. It preserves your existing CLI if download or checksum verification fails. CLI release assets are available starting with v0.11.0; the command cannot install a CLI until that release is published.
-
-On macOS/Linux, open a new terminal after installation; Bash and Zsh configuration is updated automatically. For other shells, add `~/.local/bin` to PATH yourself. Windows updates both the current PowerShell session and the user PATH.
-
-Verify the installation:
-
-```bash
-skillshub-cli version --json
-skillshub-cli --help
-```
-
-Run the same installation command again to upgrade. This standalone copy is separate from the desktop-managed CLI and does not update automatically with the app. To remove it, delete the installed `skillshub-cli` executable (`skillshub-cli.exe` on Windows); your Skill library is retained.
-
-The CLI shares the local library with Skills Hub. Installing it alone does not install the official AI management Skill. Device sync, scheduled tasks, account authorization, and app settings remain desktop features. Linux releases target GNU/glibc systems, not Alpine/musl.
-
-## Interface Preview
+Only using the terminal? See [Standalone CLI Installation](#standalone-cli-installation).
 
 ### My Skills — Managed Skills and Bulk Actions
 
@@ -202,6 +181,37 @@ Skills Hub includes 48 built-in tool adapters and supports custom skills directo
 | `hermes_agent` | Hermes Agent | `.hermes/skills` | N/A | `.hermes` |
 
 See [`src-tauri/src/core/tool_adapters/mod.rs`](src-tauri/src/core/tool_adapters/mod.rs) for the complete path rules and detection logic.
+
+## Standalone CLI Installation
+
+Using the desktop app? Enable AI management in Settings to install its bundled CLI; you do not need a separate download. Starting the app or opening Settings does not install or update the CLI. For terminal-only use, copy the command for your system below. No Node.js, npm, or administrator access is required.
+
+**macOS / Linux** (Intel/AMD x64 or ARM64):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/qufei1993/skills-hub/main/scripts/install-cli.sh | bash
+```
+
+**Windows x64** (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/qufei1993/skills-hub/main/scripts/install-cli.ps1 | iex
+```
+
+The installer selects the latest stable release, checks its SHA-256 checksum, and installs to `~/.local/bin` on macOS/Linux or `%LOCALAPPDATA%\SkillsHub\bin` on Windows. It preserves your existing CLI if download or checksum verification fails. CLI release assets are available starting with v0.11.0; the command cannot install a CLI until that release is published.
+
+On macOS/Linux, open a new terminal after installation; Bash and Zsh configuration is updated automatically. For other shells, add `~/.local/bin` to PATH yourself. Windows updates both the current PowerShell session and the user PATH.
+
+Verify the installation:
+
+```bash
+skillshub-cli version --json
+skillshub-cli --help
+```
+
+Run the same installation command again to upgrade. This standalone copy is separate from the desktop-managed CLI and does not update automatically with the app. To remove it, delete the installed `skillshub-cli` executable (`skillshub-cli.exe` on Windows); your Skill library is retained.
+
+The CLI shares the local library with Skills Hub. Installing it alone does not install the official AI management Skill. Device sync, scheduled tasks, account authorization, and app settings remain desktop features. Linux releases target GNU/glibc systems, not Alpine/musl.
 
 ## Development
 
