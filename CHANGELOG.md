@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - **Clearer Settings**: AI management uses a compact card with installation details available on demand. Background checks preserve the current status and keep View Skill available. Network and storage settings can collapse while keeping their summaries visible.
 
 ### Fixed
+- **Windows AI management setup**: Preparing the bundled CLI can now replace its files while retaining protection against directory replacement.
 - **Skill update sync**: Tool detection and update destinations now use the same runtime home as deployment, so installed copies refresh correctly in isolated environments.
 - **Shared tool directories**: Deployment previews list all tools affected by a shared directory. One-click AI setup stops when it would affect tools outside the selected scope, without registering disabled tools as sync targets.
 - **Ambiguous legacy sources**: Checks and updates stop when an older multi-Skill record cannot be matched to a unique source, preserving installed content.

@@ -1,3 +1,6 @@
+#[cfg(any(windows, test))]
+mod windows_rename;
+
 use std::ffi::{OsStr, OsString};
 #[cfg(windows)]
 use std::fs;
@@ -224,13 +227,20 @@ impl BridgeDirectory {
         #[cfg(windows)]
         let file = {
             use std::os::windows::fs::OpenOptionsExt;
-            fs::OpenOptions::new()
+            let mut options = fs::OpenOptions::new();
+            options
                 .read(true)
                 .write(create)
                 .create(create)
                 .create_new(exclusive)
-                .custom_flags(0x00200000)
-                .open(self.path.join(name))?
+                .custom_flags(0x00200000);
+            if exclusive {
+                // Temporary files are renamed using their existing handle.
+                options
+                    .access_mode(0x80000000 | 0x40000000 | 0x00010000)
+                    .share_mode(1);
+            }
+            options.open(self.path.join(name))?
         };
         let metadata = file.metadata()?;
         if !metadata.is_file() {
@@ -262,16 +272,13 @@ impl BridgeDirectory {
         }
     }
 
+    #[cfg(unix)]
     fn replace(&self, from: &OsStr, to: &OsStr) -> io::Result<()> {
         self.verify()?;
         #[cfg(unix)]
         {
             rustix::fs::renameat(&self.file, from, &self.file, to)?;
             self.file.sync_all()?;
-        }
-        #[cfg(windows)]
-        {
-            fs::rename(self.path.join(from), self.path.join(to))?;
         }
         Ok(())
     }
@@ -281,6 +288,7 @@ impl BridgeDirectory {
         let file = self.open_file(&name, true, true)?;
         Ok(BridgeTemp {
             directory: self,
+            #[cfg(unix)]
             name,
             file,
             persisted: false,
@@ -290,6 +298,7 @@ impl BridgeDirectory {
 
 pub(super) struct BridgeTemp<'a> {
     directory: &'a BridgeDirectory,
+    #[cfg(unix)]
     name: OsString,
     pub(super) file: File,
     persisted: bool,
@@ -297,7 +306,13 @@ pub(super) struct BridgeTemp<'a> {
 
 impl BridgeTemp<'_> {
     pub(super) fn persist(mut self, name: &str) -> io::Result<()> {
+        #[cfg(unix)]
         self.directory.replace(&self.name, OsStr::new(name))?;
+        #[cfg(windows)]
+        {
+            self.directory.verify()?;
+            windows_rename::rename(&self.file, name)?;
+        }
         self.persisted = true;
         Ok(())
     }
@@ -306,7 +321,10 @@ impl BridgeTemp<'_> {
 impl Drop for BridgeTemp<'_> {
     fn drop(&mut self) {
         if !self.persisted {
+            #[cfg(unix)]
             let _ = self.directory.remove_bound(&self.name);
+            #[cfg(windows)]
+            let _ = windows_rename::delete(&self.file);
         }
     }
 }

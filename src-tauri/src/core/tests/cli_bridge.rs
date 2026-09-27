@@ -291,6 +291,7 @@ fn open_writable_directory(path: &Path) -> std::io::Result<File> {
 #[cfg(windows)]
 #[test]
 fn cli_bridge_windows_held_ancestors_deny_write_and_junction_changes() {
+    use std::os::windows::fs::OpenOptionsExt;
     let f = Fixture::new();
     let prod = f.root.path().join("production");
     fs::create_dir(&prod).unwrap();
@@ -304,11 +305,41 @@ fn cli_bridge_windows_held_ancestors_deny_write_and_junction_changes() {
     directory.verify().unwrap();
     let mut temp = directory.temp().unwrap();
     temp.file.write_all(b"verified child operation").unwrap();
+    let temporary_path = fs::read_dir(&destination)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    assert_eq!(
+        OpenOptions::new()
+            .write(true)
+            .open(&temporary_path)
+            .unwrap_err()
+            .raw_os_error(),
+        Some(32)
+    );
+    assert!(fs::rename(&temporary_path, prod.join("escaped-temp")).is_err());
     temp.persist("child").unwrap();
     assert_eq!(
         fs::read(destination.join("child")).unwrap(),
         b"verified child operation"
     );
+    let mut replacement = directory.temp().unwrap();
+    replacement.file.write_all(b"replacement").unwrap();
+    replacement.persist("child").unwrap();
+    assert_eq!(fs::read(destination.join("child")).unwrap(), b"replacement");
+    let held = OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .open(destination.join("child"))
+        .unwrap();
+    let mut blocked = directory.temp().unwrap();
+    blocked.file.write_all(b"must not replace").unwrap();
+    assert!(blocked.persist("child").is_err());
+    assert_eq!(fs::read(destination.join("child")).unwrap(), b"replacement");
+    assert_eq!(fs::read_dir(&destination).unwrap().count(), 1);
+    drop(held);
     assert_eq!(fs::read_dir(&prod).unwrap().count(), 0);
     drop(directory);
 }

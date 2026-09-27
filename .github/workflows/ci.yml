@@ -94,7 +94,7 @@ jobs:
       - name: Windows native bridge ancestor and junction race tests
         if: runner.os == 'Windows'
         working-directory: src-tauri
-        run: cargo test --locked --lib cli_bridge_windows_ -- --nocapture
+        run: cargo test --locked --lib cli_bridge -- --nocapture
       - run: npm run build
       - run: npm run cli:prepare -- --target ${{ matrix.target }}
       - name: Native bundled CLI smoke
@@ -117,3 +117,9 @@ jobs:
           New-Item -ItemType Directory -Force target | Out-Null
           rustc --edition=2021 scripts/windows-console-probe.rs --out-dir target
           .\target\windows-console-probe.exe
+      - name: Verify guarded CLI file replacement on Windows
+        shell: pwsh
+        run: |
+          rustc --edition=2021 --test scripts/windows-bridge-rename-probe.rs --out-dir target
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\target\windows-bridge-rename-probe.exe
