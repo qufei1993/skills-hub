@@ -8,6 +8,32 @@ use core::skill_store::{default_db_path, migrate_legacy_db_if_needed, SkillStore
 use tauri::Manager;
 use tauri_plugin_log::{Target, TargetKind};
 
+/// The scheduled update task launches this same executable with these arguments.
+/// Such an invocation runs headless and must never put a window on screen.
+const BACKGROUND_TASK_MARKER: [&str; 2] = ["--background-task", "update-skills"];
+
+fn is_background_task_args<I, S>(args: I) -> bool
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    args.into_iter()
+        .map(|arg| arg.as_ref().to_owned())
+        .collect::<Vec<_>>()
+        .windows(2)
+        .any(|pair| pair[0] == BACKGROUND_TASK_MARKER[0] && pair[1] == BACKGROUND_TASK_MARKER[1])
+}
+
+/// Windows declared in the config are created before `setup` runs, so a background run
+/// cannot hide them in time: a visible window would appear and then sit frozen because
+/// `setup` runs the whole update synchronously. Marking them as not created is the only
+/// way to keep the run headless, and it also skips booting WebView2 and the web app.
+fn disable_window_creation(config: &mut tauri::Config) {
+    for window in config.app.windows.iter_mut() {
+        window.create = false;
+    }
+}
+
 fn runtime_context() -> tauri::Context<tauri::Wry> {
     let context = tauri::generate_context!();
     #[cfg(debug_assertions)]
@@ -18,6 +44,10 @@ fn runtime_context() -> tauri::Context<tauri::Wry> {
         }
         context
     };
+    let mut context = context;
+    if is_background_task_args(std::env::args()) {
+        disable_window_creation(context.config_mut());
+    }
     context
 }
 
@@ -51,10 +81,7 @@ pub fn run() {
                     .build(),
             )?;
 
-            let is_background_update = std::env::args()
-                .collect::<Vec<_>>()
-                .windows(2)
-                .any(|pair| pair[0] == "--background-task" && pair[1] == "update-skills");
+            let is_background_update = is_background_task_args(std::env::args());
             let force_background_update = std::env::args().any(|arg| arg == "--force");
 
             let store = init_store(app.handle()).map_err(tauri::Error::from)?;
@@ -314,5 +341,64 @@ mod environment_tests {
         } else {
             assert_eq!(runtime.config().identifier, identifier);
         }
+    }
+}
+
+#[cfg(test)]
+mod background_task_tests {
+    use super::{disable_window_creation, is_background_task_args};
+
+    #[test]
+    fn background_task_invocation_is_detected_anywhere_in_the_arguments() {
+        assert!(is_background_task_args([
+            "--background-task",
+            "update-skills",
+            "--force"
+        ]));
+        assert!(is_background_task_args([
+            "--force",
+            "--background-task",
+            "update-skills"
+        ]));
+        assert!(is_background_task_args([
+            "--background-task",
+            "update-skills"
+        ]));
+    }
+
+    #[test]
+    fn ordinary_launches_and_near_misses_are_not_background_tasks() {
+        assert!(!is_background_task_args(Vec::<String>::new()));
+        assert!(!is_background_task_args(["--force"]));
+        assert!(!is_background_task_args(["--background-task"]));
+        assert!(!is_background_task_args([
+            "update-skills",
+            "--background-task"
+        ]));
+        assert!(!is_background_task_args([
+            "--background-task",
+            "something-else"
+        ]));
+    }
+
+    #[test]
+    fn background_task_run_never_creates_the_packaged_window() {
+        let mut config: tauri::Config =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert!(
+            !config.app.windows.is_empty(),
+            "the packaged config is expected to declare a window"
+        );
+        assert!(
+            config.app.windows.iter().all(|window| window.create),
+            "windows declared in the packaged config are created by default"
+        );
+
+        disable_window_creation(&mut config);
+
+        assert!(
+            config.app.windows.iter().all(|window| !window.create),
+            "a background run must not create any window"
+        );
     }
 }

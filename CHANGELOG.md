@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **Visible frozen window during automatic updates**: The update run by the scheduled background task, and "Update now" in the update menu, no longer put a window on screen. Background runs are detected before the app is built and skip creating the windows declared in `tauri.conf.json`, which is the only point where the packaged window can be suppressed, and "Update now" now runs inside the running app instead of asking the operating-system scheduler to start a second instance. That action also no longer re-registers the scheduled task, so switching automatic updates off is respected instead of being undone by the next manual update. Connections waiting on a concurrent SQLite writer now wait for it instead of failing immediately with `SQLITE_BUSY` (fixes [#152](https://github.com/qufei1993/skills-hub/issues/152)).
+
 ## [0.10.1] - 2026-09-13
 
 ### Fixed

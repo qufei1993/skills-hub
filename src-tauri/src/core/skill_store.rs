@@ -26,6 +26,12 @@ pub const DEVICE_SYNC_HISTORY_LIMIT: usize = 100;
 const DEVICE_SYNC_STARTUP_CREDENTIAL_CONSENT_MIGRATION: &str =
     "migration.device_sync_startup_credential_consent_v1";
 
+/// SQLite applies busy handling per connection, so this must be set on every one.
+/// The app and a scheduled background run open the same database file; without a
+/// timeout a concurrent write fails immediately with SQLITE_BUSY instead of waiting
+/// for the other writer to commit.
+const DB_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 const DEVICE_SYNC_SCHEMA_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS device_sync_config (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -1889,12 +1895,19 @@ impl SkillStore {
     }
 
     fn with_conn<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
-        let conn = Connection::open(&self.db_path)
-            .with_context(|| format!("failed to open db at {:?}", self.db_path))?;
-        // Enforce foreign key constraints on every connection (rusqlite PRAGMA is per-connection).
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_connection(&self.db_path)?;
         f(&conn)
     }
+}
+
+/// Opens a database connection with the per-connection settings every call site needs.
+fn open_connection(db_path: &Path) -> Result<Connection> {
+    let conn =
+        Connection::open(db_path).with_context(|| format!("failed to open db at {:?}", db_path))?;
+    conn.busy_timeout(DB_BUSY_TIMEOUT)?;
+    // Enforce foreign key constraints on every connection (rusqlite PRAGMA is per-connection).
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    Ok(conn)
 }
 
 fn upsert_skill_with_conn(conn: &Connection, record: &SkillRecord) -> Result<()> {
@@ -2205,7 +2218,7 @@ fn app_created_database_backups(target_db_path: &Path) -> Result<Vec<PathBuf>> {
 }
 
 fn scrub_legacy_github_token_from_database(db_path: &Path) -> Result<()> {
-    let conn = Connection::open(db_path)
+    let conn = open_connection(db_path)
         .with_context(|| format!("failed to open historical db at {:?}", db_path))?;
     let has_settings_table: i64 = conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='settings'",
@@ -2229,7 +2242,7 @@ fn db_has_any_skills(db_path: &Path) -> Result<bool> {
     }
 
     let conn =
-        Connection::open(db_path).with_context(|| format!("failed to open db at {:?}", db_path))?;
+        open_connection(db_path).with_context(|| format!("failed to open db at {:?}", db_path))?;
     let has_table: i64 = conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='skills';",
         [],
