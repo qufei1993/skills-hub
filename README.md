@@ -15,6 +15,7 @@ Skills Hub installs skills into one central repository, then syncs them to tools
 
 ## Key Features
 
+- **AI management**: Install, update, and organize skills through conversations with your AI coding tool, using the same library as the desktop app.
 - **Centralized library**: Install skills into one central repository instead of scattering copies across tool folders.
 - **Explore and install**: Install from curated lists, online search, local folders, or Git repositories.
 - **Multi-tool sync**: Sync skills to different AI coding tools by global or project scope.
@@ -28,6 +29,16 @@ Skills Hub installs skills into one central repository, then syncs them to tools
 - **Migration**: Scan and import existing local skills into one managed library.
 - **Discovery controls**: Choose which installed tool directories participate in import discovery.
 - **Multilingual interface**: Use Skills Hub in English, Simplified Chinese, or Korean.
+
+## Manage Skills Through AI
+
+1. Open **Settings → AI Management** in Skills Hub and enable it. This installs the official `manage-skills-hub` Skill for detected, enabled tools.
+2. In your AI coding tool, ask it to use `manage-skills-hub`, for example: “List my installed Skills” or “Check my Skills for updates.”
+3. Return to Skills Hub to view the results. The AI and desktop app share the same local library.
+
+If no tools are available, check their installation and enabled state on the **Tools** page, then try again.
+
+The desktop app bundles a compiled Rust CLI and updates it with the app. You do not need to install Node.js, npm, or a separate CLI package to use this feature. Once enabled, it also works while the desktop app is closed. The npm commands below are for developing and building Skills Hub from source.
 
 ## Interface Preview
 
@@ -91,7 +102,7 @@ Updates can register a system-level schedule that keeps Git and local-source ski
 
 ### Settings — App-Level Preferences
 
-Settings keeps app-level preferences such as interface language, appearance, storage and cache, GitHub token, network proxy, and app updates.
+Settings keeps app-level preferences such as interface language, appearance, AI management, storage and cache, GitHub token, network proxy, and app updates.
 
 ![Application preferences](docs/assets/app-settings.png)
 
