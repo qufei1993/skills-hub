@@ -15,6 +15,84 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
+#[test]
+fn shared_directory_scope_error_reaches_desktop_as_a_distinct_recovery_hint() {
+    let error = crate::services::error::ServiceError::new(
+        crate::services::error::ErrorCode::TargetConflict,
+        "shared directory affects tools outside the selected scope",
+        serde_json::json!({"reason":"shared_directory_scope_expansion", "path":"/tools/shared"}),
+    );
+    assert_eq!(
+        format_service_error(error),
+        "SHARED_DIRECTORY_SCOPE_EXPANSION"
+    );
+}
+
+#[test]
+fn ai_management_does_not_install_when_bundled_cli_is_unavailable() {
+    use crate::core::runtime_paths::{RuntimePaths, RuntimeProfile};
+    let home = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(home.path().join(".codex")).unwrap();
+    let service = SkillsHubService::open(RuntimePaths::from_roots(
+        RuntimeProfile::Test,
+        home.path(),
+        data.path(),
+    ))
+    .unwrap();
+    assert_eq!(
+        enable_ai_management_impl(&service, &home.path().join("absent")).unwrap_err(),
+        "CLI_UNAVAILABLE"
+    );
+    assert!(service.list_skills().unwrap().is_empty());
+}
+
+#[test]
+fn agent_access_startup_failure_is_not_hidden_by_a_missing_directory() {
+    use crate::core::cli_bridge::{
+        CliBridgeHealth, CliBridgeReason, CliBridgeStartupState, CliBridgeStatus,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let bridge = directory.path().join("missing");
+    let startup = CliBridgeStartupState(CliBridgeStatus::damaged(
+        &bridge,
+        CliBridgeReason::SourceMissing,
+    ));
+    let status = agent_access_bridge_status(&bridge, &startup);
+    assert_eq!(status.status, CliBridgeHealth::Damaged);
+    assert_eq!(status.reason, Some(CliBridgeReason::SourceMissing));
+}
+
+#[test]
+fn agent_access_commands_require_explicit_single_agent_actions_and_removal_confirmation() {
+    use crate::core::runtime_paths::{RuntimePaths, RuntimeProfile};
+    let home = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(home.path().join(".codex")).unwrap();
+    std::fs::create_dir_all(home.path().join(".cursor")).unwrap();
+    let service = SkillsHubService::open(RuntimePaths::from_roots(
+        RuntimeProfile::Test,
+        home.path(),
+        data.path(),
+    ))
+    .unwrap();
+    assert!(set_agent_access_impl(&service, "codex".into(), "execute".into(), false).is_err());
+    assert!(!service.agent_access_status().unwrap().installed);
+    let installed =
+        set_agent_access_impl(&service, "codex".into(), "install".into(), false).unwrap();
+    assert_eq!(installed.skill.unwrap().targets.len(), 1);
+    assert!(!home
+        .path()
+        .join(".cursor/skills/manage-skills-hub")
+        .exists());
+    assert!(set_agent_access_impl(&service, "codex".into(), "remove".into(), false).is_err());
+    assert!(home.path().join(".codex/skills/manage-skills-hub").exists());
+    set_agent_access_impl(&service, "codex".into(), "repair".into(), false).unwrap();
+    let removed = set_agent_access_impl(&service, "codex".into(), "remove".into(), true).unwrap();
+    assert!(removed.installed);
+    assert!(!removed.deployed);
+}
+
 fn make_store() -> (tempfile::TempDir, SkillStore) {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = SkillStore::new(dir.path().join("test.db"));
@@ -1213,6 +1291,229 @@ fn format_anyhow_error_github_hint_auth() {
 }
 
 #[test]
+fn format_service_error_serializes_all_multi_skill_candidates_for_desktop() {
+    let error = crate::services::error::ServiceError::new(
+        crate::services::error::ErrorCode::MultiSkills,
+        "the source contains multiple skills",
+        serde_json::json!({
+            "candidates": [
+                { "name": "中文技能", "description": "中文说明", "subpath": "skills/zh" },
+                { "name": "한국어 스킬", "description": "한국어 설명", "subpath": "skills/ko" }
+            ]
+        }),
+    );
+
+    let formatted = format_service_error(error);
+    let payload = formatted.strip_prefix("MULTI_SKILLS|").unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(payload).unwrap(),
+        serde_json::json!([
+            { "name": "中文技能", "description": "中文说明", "subpath": "skills/zh" },
+            { "name": "한국어 스킬", "description": "한국어 설명", "subpath": "skills/ko" }
+        ])
+    );
+}
+
+#[test]
+fn format_service_error_restores_safe_legacy_auth_and_network_hints() {
+    let auth = crate::services::error::ServiceError::new(
+        crate::services::error::ErrorCode::AuthRequired,
+        "the remote source requires authentication",
+        serde_json::json!({ "legacy_category": "github_auth" }),
+    );
+    let network = crate::services::error::ServiceError::new(
+        crate::services::error::ErrorCode::NetworkError,
+        "the remote source could not be reached",
+        serde_json::json!({ "legacy_category": "github_network" }),
+    );
+
+    let auth_message = format_service_error(auth);
+    let network_message = format_service_error(network);
+
+    assert!(auth_message.contains("无法访问该仓库"));
+    assert!(network_message.contains("请检查网络/代理"));
+    assert!(!auth_message.contains("INTERNAL_ERROR"));
+    assert!(!network_message.contains("INTERNAL_ERROR"));
+}
+
+#[test]
+fn format_service_error_restores_specific_safe_git_failure_hints() {
+    for (code, category, expected) in [
+        (
+            crate::services::error::ErrorCode::NetworkError,
+            "github_tls",
+            "TLS/证书校验失败",
+        ),
+        (
+            crate::services::error::ErrorCode::InvalidSource,
+            "github_not_found",
+            "仓库不存在或无权限访问",
+        ),
+        (
+            crate::services::error::ErrorCode::NetworkError,
+            "github_dns",
+            "无法解析 GitHub 域名",
+        ),
+        (
+            crate::services::error::ErrorCode::NetworkError,
+            "github_timeout",
+            "连接 GitHub 超时",
+        ),
+        (
+            crate::services::error::ErrorCode::NetworkError,
+            "github_connection",
+            "连接 GitHub 失败",
+        ),
+        (
+            crate::services::error::ErrorCode::NetworkError,
+            "github_rate_limited",
+            "GitHub API 频率限制已触发",
+        ),
+    ] {
+        let error = crate::services::error::ServiceError::new(
+            code,
+            "safe remote failure",
+            serde_json::json!({ "legacy_category": category }),
+        );
+        assert!(format_service_error(error).contains(expected));
+    }
+}
+
+#[test]
+fn format_service_error_preserves_existing_prefixes_and_localized_messages() {
+    for message in [
+        "TARGET_EXISTS|/tmp/safe-target",
+        "无法安装此技能，请检查来源。",
+        "이 스킬을 설치할 수 없습니다. 소스를 확인하세요.",
+    ] {
+        let error = crate::services::error::ServiceError::new(
+            crate::services::error::ErrorCode::InternalError,
+            message,
+            serde_json::json!({}),
+        );
+        assert_eq!(format_service_error(error), message);
+    }
+}
+
+#[test]
+fn format_service_error_maps_target_conflict_back_to_the_desktop_prefix() {
+    let error = crate::services::error::ServiceError::new(
+        crate::services::error::ErrorCode::TargetConflict,
+        "the deployment target already contains unmanaged content",
+        serde_json::json!({ "path": "/tmp/safe-target" }),
+    );
+
+    assert_eq!(
+        format_service_error(error),
+        "TARGET_EXISTS|/tmp/safe-target"
+    );
+}
+
+#[test]
+fn format_service_error_preserves_modified_target_semantics_for_safe_removal() {
+    let error = crate::services::error::ServiceError::new(
+        crate::services::error::ErrorCode::TargetConflict,
+        "a managed target contains user changes",
+        serde_json::json!({
+            "path": "/tmp/safe-target",
+            "reason": "target_modified"
+        }),
+    );
+
+    assert_eq!(
+        format_service_error(error),
+        "TARGET_MODIFIED|/tmp/safe-target"
+    );
+}
+
+fn make_install_service() -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    crate::core::runtime_paths::RuntimePaths,
+    SkillsHubService,
+) {
+    let home = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let paths = crate::core::runtime_paths::RuntimePaths::from_roots(
+        crate::core::runtime_paths::RuntimeProfile::Test,
+        home.path(),
+        data.path(),
+    );
+    let service = SkillsHubService::open(paths.clone()).unwrap();
+    (home, data, paths, service)
+}
+
+fn write_install_test_skill(path: &Path, name: &str) {
+    std::fs::create_dir_all(path).unwrap();
+    std::fs::write(
+        path.join("SKILL.md"),
+        format!("---\nname: {name}\ndescription: Test skill\n---\n\nBody\n"),
+    )
+    .unwrap();
+}
+
+fn init_install_test_git_repo(path: &Path) {
+    let repo = git2::Repository::init(path).unwrap();
+    let signature = git2::Signature::now("Skills Hub Test", "test@example.com").unwrap();
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+        .unwrap();
+}
+
+#[test]
+fn duplicate_local_install_reaches_the_desktop_target_exists_protocol() {
+    let (_home, _data, paths, service) = make_install_service();
+    let source = paths.app_data_dir.join("private-local-source");
+    write_install_test_skill(&source, "duplicate-local");
+    service.install(InstallRequest::local(&source)).unwrap();
+
+    let error = service.install(InstallRequest::local(&source)).unwrap_err();
+    let formatted = format_service_error(error);
+
+    assert_eq!(
+        formatted,
+        format!(
+            "TARGET_EXISTS|{}",
+            paths.default_central_repo.join("duplicate-local").display()
+        )
+    );
+    assert!(!formatted.contains(source.to_string_lossy().as_ref()));
+}
+
+#[test]
+fn duplicate_git_install_reaches_desktop_without_leaking_the_source_url() {
+    let (_home, _data, paths, service) = make_install_service();
+    let secret = "do-not-leak-source-secret";
+    let repo_path = paths.app_data_dir.join(secret);
+    write_install_test_skill(&repo_path, "duplicate-git");
+    init_install_test_git_repo(&repo_path);
+    let source_url = format!("file://{}", repo_path.display());
+    service
+        .install(InstallRequest::git(&source_url).with_name(Some("duplicate-git".to_string())))
+        .unwrap();
+
+    let error = service
+        .install(InstallRequest::git(&source_url).with_name(Some("duplicate-git".to_string())))
+        .unwrap_err();
+    let formatted = format_service_error(error);
+
+    assert_eq!(
+        formatted,
+        format!(
+            "TARGET_EXISTS|{}",
+            paths.default_central_repo.join("duplicate-git").display()
+        )
+    );
+    assert!(!formatted.contains(secret));
+    assert!(!formatted.contains(&source_url));
+}
+
+#[test]
 fn expand_home_path_basic() {
     let home = dirs::home_dir().expect("home");
     assert_eq!(expand_home_path("~").unwrap(), home);
@@ -1243,7 +1544,7 @@ fn saving_custom_tool_config_creates_enabled_skills_dir() {
                     label: "Existing".to_string(),
                     avatar: Some("data:image/png;base64,AA==".to_string()),
                     skills_dir: existing.to_string_lossy().to_string(),
-                    project_skills_dir: None,
+                    project_skills_dir: Some(".custom/skills".to_string()),
                     sync_mode: SyncMode::Auto,
                     enabled: true,
                 },
@@ -1279,9 +1580,69 @@ fn saving_custom_tool_config_creates_enabled_skills_dir() {
         Some("data:image/png;base64,AA==")
     );
     assert_eq!(existing_tool.sync_mode, SyncMode::Auto);
+    assert_eq!(
+        existing_tool.supports_project_scope,
+        cfg!(any(target_os = "macos", target_os = "linux"))
+    );
+    for tool in tools.iter().filter(|tool| !tool.is_custom) {
+        let expected = cfg!(any(target_os = "macos", target_os = "linux"))
+            && !matches!(tool.key.as_str(), "hermes_agent" | "workbuddy");
+        assert_eq!(tool.supports_project_scope, expected, "{}", tool.key);
+    }
     assert!(created_tool.enabled);
     assert!(created_tool.installed);
     assert_eq!(created_tool.sync_mode, SyncMode::Copy);
+}
+
+#[test]
+fn tool_status_adapter_keeps_detected_separate_from_enabled() {
+    let dto = ToolInfoDto::from(ServiceAgent {
+        key: "disabled-agent".to_string(),
+        label: "Disabled Agent".to_string(),
+        avatar: None,
+        detected: true,
+        enabled: false,
+        is_custom: false,
+        skills_dir: "/tmp/agent-skills".to_string(),
+        project_skills_dir: ".agent/skills".to_string(),
+        supports_project_scope: true,
+        sync_mode: SyncMode::Auto,
+    });
+
+    assert!(dto.installed);
+    assert!(!dto.enabled);
+}
+
+#[test]
+fn desktop_tool_status_tracks_newly_detected_agents_after_service_read() {
+    let (_dir, store) = make_store();
+    store
+        .set_setting("installed_tools_v1", r#"["existing"]"#)
+        .unwrap();
+    let status = desktop_tool_status(
+        &store,
+        crate::services::types::AgentList {
+            agents: vec![ServiceAgent {
+                key: "disabled-new".to_string(),
+                label: "Disabled New".to_string(),
+                avatar: None,
+                detected: true,
+                enabled: false,
+                is_custom: false,
+                skills_dir: "/tmp/agent-skills".to_string(),
+                project_skills_dir: ".agent/skills".to_string(),
+                supports_project_scope: true,
+                sync_mode: SyncMode::Auto,
+            }],
+            installed: vec!["existing".to_string(), "disabled-new".to_string()],
+        },
+    );
+
+    assert_eq!(status.newly_installed, vec!["disabled-new"]);
+    assert_eq!(
+        store.get_setting("installed_tools_v1").unwrap().as_deref(),
+        Some(r#"["existing","disabled-new"]"#)
+    );
 }
 
 #[test]
@@ -1437,7 +1798,7 @@ fn get_managed_skills_impl_maps_targets() {
     assert_eq!(out[0].targets[0].status, "error");
     assert_eq!(
         out[0].targets[0].last_error.as_deref(),
-        Some("permission denied")
+        Some("SKILL_ISSUE|permission")
     );
     assert!(out[0].targets[0].project_path.is_none());
     assert_eq!(out[0].status, "error");
@@ -1473,47 +1834,59 @@ fn managed_skill_status_keeps_existing_local_sources_healthy() {
 }
 
 #[test]
-fn record_skill_target_failure_persists_error_status() {
-    let (_dir, store) = make_store();
-    let skill = SkillRecord {
-        id: "s1".to_string(),
-        name: "S1".to_string(),
-        description: None,
-        source_type: "local".to_string(),
-        source_ref: Some("/tmp/src".to_string()),
-        source_subpath: None,
-        source_revision: None,
-        central_path: "/tmp/central".to_string(),
-        content_hash: None,
-        created_at: 1,
-        updated_at: 2,
-        last_sync_at: None,
-        last_seen_at: 1,
-        enabled: true,
-        status: "ok".to_string(),
-    };
-    store.upsert_skill(&skill).unwrap();
+fn deployment_errors_preserve_desktop_prefixes() {
+    use crate::services::error::{ErrorCode, ServiceError};
+    for (code, details, expected) in [
+        (
+            ErrorCode::AgentNotFound,
+            serde_json::json!({"agent":"cursor"}),
+            "TOOL_NOT_INSTALLED|cursor",
+        ),
+        (
+            ErrorCode::ProjectScopeUnsupported,
+            serde_json::json!({"agent":"workbuddy"}),
+            "PROJECT_SCOPE_UNSUPPORTED|workbuddy",
+        ),
+        (
+            ErrorCode::TargetConflict,
+            serde_json::json!({"agent":"cursor","path":"/tools/demo","reason":"unmanaged_target"}),
+            "TARGET_EXISTS|/tools/demo",
+        ),
+        (
+            ErrorCode::PlanStale,
+            serde_json::json!({}),
+            "PLAN_STALE|deployment state changed",
+        ),
+    ] {
+        assert_eq!(
+            format_deployment_error(ServiceError::new(code, "domain error", details)),
+            expected
+        );
+    }
+}
 
-    record_skill_target_failure(
-        &store,
-        "s1",
-        "cursor",
-        "global",
-        None,
-        std::path::Path::new("/tmp/target"),
-        SyncMode::Copy,
-        "permission denied",
+#[test]
+fn desktop_deployment_request_keeps_an_explicit_agent_and_project_scope() {
+    let request = desktop_deployment_request(
+        "id".into(),
+        "cursor".into(),
+        Some("project".into()),
+        Some("/project".into()),
     )
     .unwrap();
-
-    let target = store
-        .get_skill_target("s1", "cursor", "global", None)
-        .unwrap()
-        .unwrap();
-    assert_eq!(target.status, "error");
-    assert_eq!(target.last_error.as_deref(), Some("permission denied"));
-    assert_eq!(target.mode, "copy");
-    assert!(target.synced_at.is_none());
+    assert_eq!(
+        request.skill,
+        crate::services::types::SkillSelector::Id("id".into())
+    );
+    assert_eq!(request.agents, ["cursor"]);
+    assert_eq!(
+        request.scope,
+        crate::services::deployment::DeploymentScope::Project("/project".into())
+    );
+    assert!(
+        desktop_deployment_request("id".into(), "cursor".into(), Some("project".into()), None)
+            .is_err()
+    );
 }
 
 #[cfg(unix)]

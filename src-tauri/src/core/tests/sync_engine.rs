@@ -356,6 +356,67 @@ fn managed_copy_rechecks_the_actual_directory_after_staging() {
 }
 
 #[test]
+fn legacy_rollback_retries_transient_backup_restore_failure_on_drop() {
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("a.txt"), b"new").unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let target = root.path().join("target");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("a.txt"), b"old").unwrap();
+    let expected_hash = crate::core::content_hash::hash_dir_strict(&target).unwrap();
+    let mut replacement =
+        PreparedDirReplacement::prepare_copy(source.path(), &target, Some(expected_hash), false)
+            .unwrap();
+    replacement.activate().unwrap();
+    let backup = replacement.backup.clone().unwrap();
+    let temporarily_unavailable = root.path().join("temporarily-unavailable-backup");
+    fs::rename(&backup, &temporarily_unavailable).unwrap();
+
+    assert!(replacement.rollback().is_err());
+    assert!(!target.exists());
+    fs::rename(&temporarily_unavailable, &backup).unwrap();
+    drop(replacement);
+
+    assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"old");
+    assert!(!backup.exists());
+}
+
+#[test]
+fn detailed_rollback_keeps_reported_recovery_and_backup_paths_stable_after_drop() {
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("a.txt"), b"new").unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let target = root.path().join("target");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("a.txt"), b"old").unwrap();
+    let expected_hash = crate::core::content_hash::hash_dir_strict(&target).unwrap();
+    let mut replacement =
+        PreparedDirReplacement::prepare_copy(source.path(), &target, Some(expected_hash), false)
+            .unwrap();
+    replacement.activate().unwrap();
+    fs::write(target.join("user.txt"), b"concurrent content").unwrap();
+    let backup = replacement.backup.clone().unwrap();
+    let temporarily_unavailable = root.path().join("temporarily-unavailable-backup");
+    fs::rename(&backup, &temporarily_unavailable).unwrap();
+
+    let report = replacement.rollback_with_outcome().unwrap_err().outcome;
+    assert!(!report.files_restored);
+    assert_eq!(report.reason, super::DirRollbackReason::RollbackFailed);
+    assert_eq!(report.backup_path.as_ref(), Some(&backup));
+    let recovery = report.recovery_path.unwrap();
+    fs::rename(&temporarily_unavailable, &backup).unwrap();
+    drop(replacement);
+
+    assert!(!target.exists());
+    assert_eq!(fs::read(backup.join("a.txt")).unwrap(), b"old");
+    assert_eq!(fs::read(recovery.join("a.txt")).unwrap(), b"new");
+    assert_eq!(
+        fs::read(recovery.join("user.txt")).unwrap(),
+        b"concurrent content"
+    );
+}
+
+#[test]
 fn rollback_preserves_changes_written_after_activation() {
     let source = tempfile::tempdir().unwrap();
     fs::write(source.path().join("a.txt"), b"new").unwrap();
@@ -373,6 +434,13 @@ fn rollback_preserves_changes_written_after_activation() {
     let error = replacement.rollback().unwrap_err();
 
     assert!(format!("{error:#}").contains("ROLLBACK_CONFLICT"));
+    let typed = error.downcast_ref::<super::DirRollbackError>().unwrap();
+    assert!(typed.outcome.files_restored);
+    assert_eq!(
+        typed.outcome.reason,
+        super::DirRollbackReason::ConcurrentContentPreserved
+    );
+    assert!(typed.outcome.backup_path.is_none());
     assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"old");
     let recovery = fs::read_dir(target_root.path())
         .unwrap()
@@ -385,6 +453,8 @@ fn rollback_preserves_changes_written_after_activation() {
                 .starts_with(".skills-hub-recovery-")
         })
         .expect("concurrent changes should be preserved in a recovery directory");
+    assert_eq!(typed.outcome.recovery_path.as_ref(), Some(&recovery));
+    drop(replacement);
     assert_eq!(
         fs::read(recovery.join("user-created.txt")).unwrap(),
         b"keep me"

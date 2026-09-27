@@ -2648,11 +2648,9 @@ mod tests {
             .delete_setting("device_sync.source_baseline.one")
             .unwrap();
         let app = tauri::test::mock_app();
+        let paths = crate::runtime_paths_for_tauri(app.handle()).unwrap();
         let result = crate::core::installer::update_managed_skill_from_source_with_lock_held(
-            app.handle(),
-            &store,
-            "one",
-            true,
+            &paths, &store, "one", true,
         )
         .unwrap();
         assert!(!result.changed);
@@ -2662,10 +2660,7 @@ mod tests {
         );
         fs::write(source.join("SKILL.md"), "local new").unwrap();
         let result = crate::core::installer::update_managed_skill_from_source_with_lock_held(
-            app.handle(),
-            &store,
-            "one",
-            true,
+            &paths, &store, "one", true,
         )
         .unwrap();
         assert!(result.changed);
@@ -2840,7 +2835,8 @@ mod tests {
         assert_eq!(b.get_skill_by_id("one").unwrap().unwrap().status, "ok");
         assert!(b.source_checks().unwrap().get("one").unwrap().0.is_none());
         let app = tauri::test::mock_app();
-        let err = crate::core::installer::update_managed_skill_from_source(app.handle(), &b, "one")
+        let paths = crate::runtime_paths_for_tauri(app.handle()).unwrap();
+        let err = crate::core::installer::update_managed_skill_from_source(&paths, &b, "one")
             .err()
             .unwrap();
         assert!(err.to_string().starts_with("SKILL_SOURCE_UNBOUND|"));

@@ -4,10 +4,12 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use walkdir::WalkDir;
 
 use super::central_repo::resolve_central_repo_path;
 use super::content_hash::hash_dir;
 use super::skill_store::SkillStore;
+use super::sync_engine::path_for_comparison;
 use super::tool_adapters::{
     default_tool_adapters, resolve_adapter_path_in_home, scan_tool_dir, DetectedSkill,
 };
@@ -62,20 +64,191 @@ pub struct OnboardingPlan {
     pub groups: Vec<OnboardingGroup>,
 }
 
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub(crate) struct AdoptScanCandidate {
+    pub name: String,
+    pub path: PathBuf,
+    pub content_hash: String,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub(crate) struct AdoptScanExclusion {
+    pub path: PathBuf,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub(crate) struct AdoptScanResult {
+    pub root: PathBuf,
+    pub candidates: Vec<AdoptScanCandidate>,
+    pub excluded: Vec<AdoptScanExclusion>,
+}
+
+pub(crate) fn scan_adopt_directory(
+    root: &Path,
+    central_root: &Path,
+    managed_skills: &[crate::core::skill_store::SkillRecord],
+    managed_targets: &[(String, String)],
+) -> Result<AdoptScanResult> {
+    anyhow::ensure!(root.exists(), "adopt source path not found");
+    let root_metadata = fs::symlink_metadata(root)?;
+    anyhow::ensure!(
+        root_metadata.is_dir() && !root_metadata.file_type().is_symlink(),
+        "adopt source must be a real directory"
+    );
+    let canonical_root = fs::canonicalize(root)?;
+    let canonical_central = path_for_comparison(central_root)
+        .unwrap_or_else(|_| central_root.components().collect::<PathBuf>());
+    let mut managed_sources = Vec::new();
+    let mut managed_target_paths = Vec::new();
+    for skill in managed_skills {
+        if let Ok(path) = path_for_comparison(Path::new(&skill.central_path)) {
+            managed_sources.push(path);
+        }
+        if let Some(source) = (skill.source_type == "local")
+            .then_some(skill.source_ref.as_deref())
+            .flatten()
+            .filter(|value| !value.trim().is_empty())
+        {
+            if let Ok(path) = path_for_comparison(Path::new(source)) {
+                managed_sources.push(path);
+            }
+        }
+    }
+    for (_, target) in managed_targets {
+        if let Ok(path) = path_for_comparison(Path::new(target)) {
+            managed_target_paths.push(path);
+        }
+    }
+
+    let direct_skill = regular_skill_manifest(root);
+    let mut paths = if direct_skill {
+        vec![root.to_path_buf()]
+    } else {
+        fs::read_dir(root)?
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| {
+                fs::symlink_metadata(path)
+                    .map(|metadata| metadata.is_dir() || metadata.file_type().is_symlink())
+                    .unwrap_or(false)
+            })
+            .collect::<Vec<_>>()
+    };
+    paths.sort_by_key(|left| normalize_path_for_key(left));
+
+    let mut candidates = Vec::new();
+    let mut excluded = Vec::new();
+    for path in paths {
+        let canonical = match fs::canonicalize(&path) {
+            Ok(value) if value.starts_with(&canonical_root) => value,
+            _ => {
+                excluded.push(adopt_exclusion(path, "path_escape"));
+                continue;
+            }
+        };
+        if managed_sources
+            .iter()
+            .any(|managed| paths_overlap_physical(&canonical, managed))
+        {
+            excluded.push(adopt_exclusion(path, "managed_source"));
+            continue;
+        }
+        if managed_target_paths
+            .iter()
+            .any(|managed| paths_overlap_physical(&canonical, managed))
+        {
+            excluded.push(adopt_exclusion(path, "managed_target"));
+            continue;
+        }
+        if canonical.starts_with(&canonical_central) {
+            excluded.push(adopt_exclusion(path, "managed_source"));
+            continue;
+        }
+        if !regular_skill_manifest(&canonical) {
+            excluded.push(adopt_exclusion(path, "missing_skill_md"));
+            continue;
+        }
+        if tree_has_escaping_symlink(&canonical, &canonical)? {
+            excluded.push(adopt_exclusion(path, "path_escape"));
+            continue;
+        }
+        let Some(name) = canonical
+            .file_name()
+            .map(|value| value.to_string_lossy().into_owned())
+        else {
+            excluded.push(adopt_exclusion(path, "invalid_name"));
+            continue;
+        };
+        candidates.push(AdoptScanCandidate {
+            name,
+            content_hash: hash_dir(&canonical)?,
+            path: canonical,
+        });
+    }
+
+    Ok(AdoptScanResult {
+        root: canonical_root,
+        candidates,
+        excluded,
+    })
+}
+
+fn regular_skill_manifest(path: &Path) -> bool {
+    fs::symlink_metadata(path.join("SKILL.md"))
+        .map(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
+fn tree_has_escaping_symlink(path: &Path, boundary: &Path) -> Result<bool> {
+    for entry in WalkDir::new(path).follow_links(false) {
+        let entry = entry?;
+        if entry.file_type().is_symlink() {
+            let target = match fs::canonicalize(entry.path()) {
+                Ok(target) => target,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+                Err(error) => return Err(error.into()),
+            };
+            if !target.starts_with(boundary) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn paths_overlap_physical(left: &Path, right: &Path) -> bool {
+    left == right || left.starts_with(right) || right.starts_with(left)
+}
+
+fn adopt_exclusion(path: PathBuf, reason: &str) -> AdoptScanExclusion {
+    AdoptScanExclusion {
+        path,
+        reason: reason.to_string(),
+    }
+}
+
 pub fn build_onboarding_plan<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     store: &SkillStore,
 ) -> Result<OnboardingPlan> {
     let home =
         dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to resolve home directory"))?;
-    let central = resolve_central_repo_path(app, store)?;
+    let paths = crate::runtime_paths_for_tauri(app)?;
+    build_onboarding_plan_for_runtime(&paths, store, &home)
+}
+
+pub(crate) fn build_onboarding_plan_for_runtime(
+    paths: &crate::core::runtime_paths::RuntimePaths,
+    store: &SkillStore,
+    home: &Path,
+) -> Result<OnboardingPlan> {
+    let central = resolve_central_repo_path(paths, store)?;
     let mut managed_targets = store
-        .list_all_skill_target_paths()
-        .unwrap_or_default()
+        .list_all_skill_target_paths()?
         .into_iter()
         .map(|(tool, path)| managed_target_key(&tool, Path::new(&path)))
         .collect::<std::collections::HashSet<_>>();
-    for skill in store.list_skills().unwrap_or_default() {
+    for skill in store.list_skills()? {
         if let Some(source_ref) = skill.source_ref {
             managed_targets.insert(managed_target_key(
                 CLAUDE_PLUGIN_TOOL_KEY,
@@ -83,13 +256,13 @@ pub fn build_onboarding_plan<R: tauri::Runtime>(
             ));
         }
     }
-    let claude_config_dir = resolve_claude_config_dir(&home);
+    let claude_config_dir = resolve_claude_config_dir(home);
     let disabled_source_keys = load_discovery_scan_config(store)?
         .disabled_source_keys
         .into_iter()
         .collect::<HashSet<_>>();
     build_onboarding_plan_with_claude_dir(
-        &home,
+        home,
         &claude_config_dir,
         Some(&central),
         Some(&managed_targets),
@@ -555,7 +728,8 @@ fn is_under(path: &Path, base: &Path) -> bool {
 
 fn managed_target_key(tool: &str, path: &Path) -> String {
     let tool = tool.to_ascii_lowercase();
-    let normalized = normalize_path_for_key(path);
+    let resolved = path_for_comparison(path).unwrap_or_else(|_| path.to_path_buf());
+    let normalized = normalize_path_for_key(&resolved);
     format!("{tool}\n{normalized}")
 }
 

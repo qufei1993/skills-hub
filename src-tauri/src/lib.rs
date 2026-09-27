@@ -1,33 +1,49 @@
+pub mod cli;
 mod commands;
-mod core;
+pub mod core;
+pub mod services;
+
+const _: () = assert!(
+    cfg!(debug_assertions) == (env!("SKILLS_HUB_EXPECT_DEBUG_ASSERTIONS").as_bytes()[0] == b'1'),
+    "CLI_BRIDGE_PROFILE_MISMATCH"
+);
+
+#[cfg(test)]
+#[path = "../cli_sidecar_profile.rs"]
+mod cli_bridge_profile;
 
 use std::sync::Arc;
 
 use core::cancel_token::CancelToken;
-use core::skill_store::{default_db_path, migrate_legacy_db_if_needed, SkillStore};
+use core::runtime_paths::open_store;
+pub use core::runtime_paths::{RuntimePaths, RuntimeProfile};
+use services::operation_lock::{OperationKind, OperationLock};
+use services::skills_hub::SkillsHubService;
 use tauri::Manager;
 use tauri_plugin_log::{Target, TargetKind};
 
 fn runtime_context() -> tauri::Context<tauri::Wry> {
-    let context = tauri::generate_context!();
-    #[cfg(debug_assertions)]
-    let context = {
-        let mut context: tauri::Context<tauri::Wry> = context;
-        if !context.config().identifier.ends_with(".dev") {
-            context.config_mut().identifier.push_str(".dev");
-        }
-        context
-    };
-    context
+    tauri::generate_context!()
 }
 
-fn init_store<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> anyhow::Result<SkillStore> {
-    let db_path = default_db_path(app)?;
-    migrate_legacy_db_if_needed(&db_path)?;
-    let store = SkillStore::new(db_path);
-    store.ensure_schema()?;
-    store.migrate_device_sync_startup_credential_consent()?;
-    Ok(store)
+fn runtime_paths<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> anyhow::Result<RuntimePaths> {
+    let app_data_dir = app.path().app_data_dir()?;
+    let home_root = dirs::home_dir().unwrap_or_else(|| app_data_dir.clone());
+    Ok(RuntimePaths::from_tauri(
+        RuntimeProfile::current(),
+        home_root,
+        app_data_dir,
+        app.path().app_cache_dir()?,
+    ))
+}
+
+pub(crate) fn runtime_paths_for_tauri<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> anyhow::Result<RuntimePaths> {
+    if let Some(paths) = app.try_state::<RuntimePaths>() {
+        return Ok(paths.inner().clone());
+    }
+    runtime_paths(app)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -57,18 +73,26 @@ pub fn run() {
                 .any(|pair| pair[0] == "--background-task" && pair[1] == "update-skills");
             let force_background_update = std::env::args().any(|arg| arg == "--force");
 
-            let store = init_store(app.handle()).map_err(tauri::Error::from)?;
+            let paths = runtime_paths(app.handle()).map_err(tauri::Error::from)?;
+            let store = open_store(&paths).map_err(tauri::Error::from)?;
+            app.manage(paths.clone());
+            app.manage(store.clone());
+            app.manage(SkillsHubService::from_store(paths.clone(), store.clone()));
 
             if is_background_update {
                 #[cfg(target_os = "macos")]
                 {
                     app.set_activation_policy(tauri::ActivationPolicy::Accessory);
                 }
-                let run_result = if force_background_update {
-                    core::auto_update::run_auto_update_now(app.handle(), &store).map(Some)
-                } else {
-                    core::auto_update::run_due_auto_update(app.handle(), &store)
-                };
+                let run_result = (|| -> anyhow::Result<_> {
+                    let _operation_lock =
+                        OperationLock::acquire(&paths, OperationKind::AutoUpdate)?;
+                    if force_background_update {
+                        core::auto_update::run_auto_update_now(app.handle(), &store).map(Some)
+                    } else {
+                        core::auto_update::run_due_auto_update(app.handle(), &store)
+                    }
+                })();
                 match run_result {
                     Ok(Some(result)) => {
                         log::info!(
@@ -90,20 +114,35 @@ pub fn run() {
                 return Ok(());
             }
 
-            app.manage(store.clone());
             app.manage(Arc::new(CancelToken::new()));
 
-            let sync_workspace = app.handle().path().app_data_dir()?.join("device-sync");
-            let sync_central = core::central_repo::resolve_central_repo_path(app.handle(), &store)?;
+            let cli_source = tauri::utils::platform::current_exe()
+                .ok()
+                .and_then(|executable| {
+                    executable
+                        .parent()
+                        .map(|directory| directory.join(core::cli_bridge::BINARY_NAME))
+                })
+                .unwrap_or_default();
+            app.manage(core::cli_bridge::publish_bundled_cli_bridge(
+                &cli_source,
+                &paths.cli_bridge_dir,
+            ));
+
+            let sync_workspace = paths.app_data_dir.join("device-sync");
+            let sync_central = core::central_repo::resolve_central_repo_path(&paths, &store)?;
             let sync_credentials = core::device_sync::credentials::SystemCredentialStore;
-            match core::device_sync::DeviceSyncService::new(
-                &store,
-                &sync_credentials,
-                sync_workspace,
-                sync_central,
-            )
-            .repair_legacy_same_device_conflicts()
-            {
+            let repair_result = (|| -> anyhow::Result<bool> {
+                let _operation_lock = OperationLock::acquire(&paths, OperationKind::DeviceSync)?;
+                core::device_sync::DeviceSyncService::new(
+                    &store,
+                    &sync_credentials,
+                    sync_workspace,
+                    sync_central,
+                )
+                .repair_legacy_same_device_conflicts()
+            })();
+            match repair_result {
                 Ok(true) => {
                     log::info!("recovered same-device sync baseline from repository history")
                 }
@@ -120,9 +159,12 @@ pub fn run() {
                     let store_for_device_sync = store.clone();
                     tauri::async_runtime::spawn(async move {
                         let result = tauri::async_runtime::spawn_blocking(move || {
-                            let workspace = handle.path().app_data_dir()?.join("device-sync");
+                            let paths = handle.state::<RuntimePaths>();
+                            let _operation_lock =
+                                OperationLock::acquire(paths.inner(), OperationKind::DeviceSync)?;
+                            let workspace = paths.app_data_dir.join("device-sync");
                             let central = core::central_repo::resolve_central_repo_path(
-                                &handle,
+                                paths.inner(),
                                 &store_for_device_sync,
                             )?;
                             let credentials = core::device_sync::credentials::SystemCredentialStore;
@@ -152,11 +194,11 @@ pub fn run() {
             // - Only deletes directories that match prefix `skills-hub-git-*`
             // - And contain our marker file `.skills-hub-git-temp`
             // - And are older than the max age.
-            let handle = app.handle().clone();
+            let cleanup_paths = app.state::<RuntimePaths>().inner().clone();
             let store_for_cleanup = store.clone();
             tauri::async_runtime::spawn(async move {
                 let removed = core::temp_cleanup::cleanup_old_git_temp_dirs(
-                    &handle,
+                    &cleanup_paths,
                     std::time::Duration::from_secs(24 * 60 * 60),
                 )
                 .unwrap_or(0);
@@ -170,7 +212,8 @@ pub fn run() {
                     let max_age =
                         std::time::Duration::from_secs(cleanup_days as u64 * 24 * 60 * 60);
                     let removed =
-                        core::cache_cleanup::cleanup_git_cache_dirs(&handle, max_age).unwrap_or(0);
+                        core::cache_cleanup::cleanup_git_cache_dirs(&cleanup_paths, max_age)
+                            .unwrap_or(0);
                     if removed > 0 {
                         log::info!("cleaned up {} git cache dirs", removed);
                     }
@@ -180,21 +223,21 @@ pub fn run() {
             let recycle_handle = app.handle().clone();
             let recycle_store = store.clone();
             std::thread::spawn(move || loop {
-                let root = match recycle_handle.path().app_data_dir() {
-                    Ok(path) => path.join("recycle-bin"),
-                    Err(error) => {
-                        log::warn!("resolve recycle bin directory failed: {error:#}");
-                        std::thread::sleep(std::time::Duration::from_secs(24 * 60 * 60));
-                        continue;
-                    }
-                };
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_millis() as i64;
-                match core::recycle_bin::RecycleBinService::new(&recycle_store, root)
+                let cleanup_result = (|| -> anyhow::Result<usize> {
+                    let paths = recycle_handle.state::<RuntimePaths>();
+                    let _operation_lock =
+                        OperationLock::acquire(paths.inner(), OperationKind::Delete)?;
+                    core::recycle_bin::RecycleBinService::new(
+                        &recycle_store,
+                        paths.recycle_bin_dir.clone(),
+                    )
                     .cleanup_expired(now)
-                {
+                })();
+                match cleanup_result {
                     Ok(removed) if removed > 0 => {
                         log::info!("cleaned up {removed} expired recycle bin items");
                     }
@@ -215,6 +258,9 @@ pub fn run() {
             commands::get_tool_config,
             commands::set_tool_config,
             commands::get_tool_status,
+            commands::get_agent_access_status,
+            commands::set_agent_access,
+            commands::enable_ai_management,
             commands::get_git_cache_cleanup_days,
             commands::get_git_cache_ttl_secs,
             commands::set_git_cache_cleanup_days,
@@ -303,16 +349,12 @@ pub fn run() {
 #[cfg(test)]
 mod environment_tests {
     #[test]
-    fn development_data_is_separate_from_packaged_data() {
+    fn development_and_packaged_desktop_use_the_cli_data_identifier() {
         let packaged: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         let identifier = packaged["identifier"].as_str().unwrap();
         let runtime = super::runtime_context();
-        if cfg!(debug_assertions) {
-            assert_ne!(runtime.config().identifier, identifier);
-            assert_eq!(runtime.config().identifier, format!("{identifier}.dev"));
-        } else {
-            assert_eq!(runtime.config().identifier, identifier);
-        }
+        assert_eq!(runtime.config().identifier, identifier);
+        assert_eq!(identifier, super::core::runtime_paths::PRODUCT_IDENTIFIER);
     }
 }

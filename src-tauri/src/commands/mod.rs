@@ -22,7 +22,6 @@ use crate::core::central_repo::{
     ensure_central_repo, plan_central_repo_migration, resolve_central_repo_path,
     validate_central_repo_path_change, CentralRepoMigrationItem,
 };
-use crate::core::content_hash::hash_dir;
 #[cfg(test)]
 use crate::core::device_sync::credentials::resolve_access_token;
 use crate::core::device_sync::credentials::{
@@ -44,11 +43,7 @@ use crate::core::github_token::{
     has_github_token, resolve_github_token, set_github_token as set_github_token_core,
     SystemGithubTokenStore,
 };
-use crate::core::installer::{
-    import_existing_local_skill, install_git_skill, install_git_skill_from_selection,
-    install_local_skill, install_local_skill_from_selection, list_git_skills, list_local_skills,
-    update_managed_skill_from_source, GitSkillCandidate, InstallResult, LocalSkillCandidate,
-};
+use crate::core::installer::{GitSkillCandidate, LocalSkillCandidate};
 use crate::core::network_proxy::{
     app_http_client, get_github_proxy_config as get_github_proxy_config_core,
     get_github_proxy_url as get_github_proxy_url_core,
@@ -59,33 +54,224 @@ use crate::core::onboarding::{
     build_onboarding_plan, get_discovery_scan_settings as get_discovery_scan_settings_core,
     save_discovery_scan_config, DiscoveryScanConfig, DiscoveryScanSettings, OnboardingPlan,
 };
-use crate::core::recycle_bin::{DeletionSource, RecycleBinItem, RecycleBinService};
-use crate::core::skill_store::{
-    SkillRecord, SkillStore, SkillTargetRecord, DEVICE_SYNC_HISTORY_LIMIT,
-};
-use crate::core::skills_search::{
-    search_skills_online as search_skills_online_core, OnlineSkillResult,
-};
+use crate::core::recycle_bin::{RecycleBinItem, RecycleBinService};
+#[cfg(test)]
+use crate::core::skill_store::{SkillRecord, SkillTargetRecord};
+use crate::core::skill_store::{SkillStore, DEVICE_SYNC_HISTORY_LIMIT};
+use crate::core::skills_search::OnlineSkillResult;
 use crate::core::sync_engine::{
     copy_dir_recursive, path_is_protected_real_content, paths_overlap,
-    remove_path_any as remove_path_any_core, sync_dir_for_tool_with_overwrite, sync_dir_hybrid,
-    sync_dir_with_mode_with_overwrite, SyncMode,
+    remove_path_any as remove_path_any_core, sync_dir_hybrid, sync_dir_with_mode_with_overwrite,
+    SyncMode,
 };
 use crate::core::system_scheduler::{
     current_scheduler_config, get_auto_update_task_status, install_auto_update_task,
     trigger_auto_update_task_now, uninstall_auto_update_task,
 };
 use crate::core::tool_adapters::{
-    adapter_by_key, adapters_sharing_project_skills_dir, is_builtin_tool_enabled,
-    is_tool_installed, load_tool_config, project_relative_skills_dir, resolve_default_path,
-    save_tool_config, supports_project_scope, CustomToolConfig, ToolConfig,
+    is_builtin_tool_enabled, is_tool_installed, load_tool_config, project_relative_skills_dir,
+    resolve_default_path, save_tool_config, supports_project_scope, CustomToolConfig, ToolConfig,
 };
+use crate::services::install::{InstallOutcome, InstallRequest};
+use crate::services::library::{AdoptRequest, RemoveRequest, TagAction, TagSelector};
+use crate::services::operation_lock::{OperationKind, OperationLock};
+use crate::services::skills_hub::SkillsHubService;
+use crate::services::types::{Agent as ServiceAgent, Skill as ServiceSkill};
 use uuid::Uuid;
 
 const RECENT_PROJECTS_SETTING: &str = "recent_projects_v1";
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentAccessAgentDto {
+    key: String,
+    label: String,
+    detected: bool,
+    enabled: bool,
+    deployed: bool,
+    needs_repair: bool,
+    reason: Option<crate::services::agent_access::AgentAccessReason>,
+    path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentAccessStatusDto {
+    skill_id: Option<String>,
+    skill_enabled: bool,
+    official_state: crate::services::agent_access::OfficialSkillState,
+    conflict: Option<crate::services::agent_access::OfficialSkillConflict>,
+    bridge: crate::core::cli_bridge::CliBridgeStatus,
+    bundled_version: String,
+    installed_version: Option<String>,
+    installed: bool,
+    central_reason: Option<crate::services::agent_access::AgentAccessReason>,
+    agents: Vec<AgentAccessAgentDto>,
+}
+
+fn agent_access_bridge_status(
+    directory: &std::path::Path,
+    startup: &crate::core::cli_bridge::CliBridgeStartupState,
+) -> crate::core::cli_bridge::CliBridgeStatus {
+    use crate::core::cli_bridge::{bundled_cli_bridge_status, CliBridgeHealth};
+    let current = bundled_cli_bridge_status(directory);
+    if current.status != CliBridgeHealth::Valid && startup.0.status == CliBridgeHealth::Damaged {
+        startup.0.clone()
+    } else {
+        current
+    }
+}
+
+fn agent_access_dto(
+    status: crate::services::agent_access::AgentAccessStatus,
+    bridge: crate::core::cli_bridge::CliBridgeStatus,
+) -> AgentAccessStatusDto {
+    let agents = status
+        .agents
+        .agents
+        .into_iter()
+        .map(|agent| {
+            let health = status
+                .health
+                .iter()
+                .find(|health| health.agent == agent.key);
+            AgentAccessAgentDto {
+                deployed: health.is_some_and(|health| health.deployed),
+                needs_repair: health.is_some_and(|health| health.needs_repair),
+                reason: health.and_then(|health| health.reason),
+                key: agent.key,
+                label: agent.label,
+                detected: agent.detected,
+                enabled: agent.enabled,
+                path: agent.skills_dir,
+            }
+        })
+        .collect();
+    AgentAccessStatusDto {
+        skill_enabled: status.skill.as_ref().is_some_and(|skill| skill.enabled),
+        skill_id: status.skill_id,
+        official_state: status.official_state,
+        conflict: status.conflict,
+        bridge,
+        bundled_version: status.bundled_version,
+        installed_version: status.installed_version,
+        installed: status.installed,
+        central_reason: status.central_reason,
+        agents,
+    }
+}
+
+fn enable_ai_management_impl(
+    service: &SkillsHubService,
+    source: &std::path::Path,
+) -> Result<AgentAccessStatusDto, String> {
+    use crate::core::cli_bridge::{publish_bundled_cli_bridge, CliBridgeHealth};
+    let bridge = publish_bundled_cli_bridge(source, &service.paths().cli_bridge_dir).0;
+    if bridge.status != CliBridgeHealth::Valid {
+        return Err("CLI_UNAVAILABLE".into());
+    }
+    let status = service
+        .enable_ai_management()
+        .map_err(format_service_error)?;
+    Ok(agent_access_dto(status, bridge))
+}
+
+#[tauri::command]
+pub async fn enable_ai_management(
+    service: State<'_, SkillsHubService>,
+) -> Result<AgentAccessStatusDto, String> {
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let source = tauri::utils::platform::current_exe()
+            .ok()
+            .and_then(|exe| {
+                exe.parent()
+                    .map(|dir| dir.join(crate::core::cli_bridge::BINARY_NAME))
+            })
+            .ok_or_else(|| "CLI_UNAVAILABLE".to_string())?;
+        enable_ai_management_impl(&service, &source)
+    })
+    .await
+    .map_err(|_| "INTERNAL_ERROR".to_string())?
+}
+
+#[tauri::command]
+pub async fn get_agent_access_status(
+    service: State<'_, SkillsHubService>,
+    startup: State<'_, crate::core::cli_bridge::CliBridgeStartupState>,
+) -> Result<AgentAccessStatusDto, String> {
+    let service = service.inner().clone();
+    let startup = startup.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let status = service
+            .agent_access_status()
+            .map_err(format_service_error)?;
+        Ok(agent_access_dto(
+            status,
+            agent_access_bridge_status(&service.paths().cli_bridge_dir, &startup),
+        ))
+    })
+    .await
+    .map_err(|_| "INTERNAL_ERROR".to_string())?
+}
+
+fn set_agent_access_impl(
+    service: &SkillsHubService,
+    agent: String,
+    action: String,
+    confirmed: bool,
+) -> Result<crate::services::agent_access::AgentAccessStatus, String> {
+    use crate::services::agent_access::SetupAgentRequest;
+    let request = match action.as_str() {
+        "install" | "repair" => SetupAgentRequest::install(agent),
+        "remove" => SetupAgentRequest {
+            agents: vec![agent],
+            remove: true,
+            confirmed,
+            dry_run: false,
+        },
+        _ => return Err("INVALID_ARGUMENT".to_string()),
+    };
+    service.setup_agent_access(request).map_err(|error| {
+        if error.details["reason"].as_str() == Some("target_modified") {
+            "TARGET_MODIFIED".to_string()
+        } else {
+            error.code.as_str().to_string()
+        }
+    })
+}
+
+#[tauri::command]
+pub async fn set_agent_access(
+    service: State<'_, SkillsHubService>,
+    startup: State<'_, crate::core::cli_bridge::CliBridgeStartupState>,
+    agent: String,
+    action: String,
+    confirmed: Option<bool>,
+) -> Result<AgentAccessStatusDto, String> {
+    let service = service.inner().clone();
+    let startup = startup.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let status = set_agent_access_impl(&service, agent, action, confirmed.unwrap_or(false))?;
+        Ok(agent_access_dto(
+            status,
+            agent_access_bridge_status(&service.paths().cli_bridge_dir, &startup),
+        ))
+    })
+    .await
+    .map_err(|_| "INTERNAL_ERROR".to_string())?
+}
 const DEVICE_SYNC_PENDING_OAUTH_SETTING: &str = "device_sync_pending_oauth_v1";
 const DEVICE_SYNC_CREDENTIAL_CLEANUP_QUEUE_SETTING: &str =
     "device_sync_credential_cleanup_queue_v1";
+
+fn acquire_operation_lock<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    kind: OperationKind,
+) -> anyhow::Result<OperationLock> {
+    let paths = crate::runtime_paths_for_tauri(app)?;
+    OperationLock::acquire(&paths, kind).map_err(Into::into)
+}
 
 fn oauth_proxy_url(store: &SkillStore, _provider_id: ProviderId) -> anyhow::Result<String> {
     get_github_proxy_url_core(store)
@@ -168,6 +354,68 @@ fn format_anyhow_error(err: anyhow::Error) -> String {
     full
 }
 
+fn format_service_error(error: crate::services::error::ServiceError) -> String {
+    match error.code {
+        crate::services::error::ErrorCode::MultiSkills => {
+            let candidates = error
+                .details
+                .get("candidates")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!([]));
+            format!(
+                "MULTI_SKILLS|{}",
+                serde_json::to_string(&candidates).unwrap_or_else(|_| "[]".to_string())
+            )
+        }
+        crate::services::error::ErrorCode::UpdateHeldBack => {
+            let removal_count = error.details["removal_count"].as_u64().unwrap_or(0);
+            format!("UPDATE_HELD_BACK|{removal_count}")
+        }
+        crate::services::error::ErrorCode::TargetConflict => {
+            match (
+                error.details["reason"].as_str(),
+                error.details["path"].as_str(),
+            ) {
+                (Some("shared_directory_scope_expansion"), _) => {
+                    "SHARED_DIRECTORY_SCOPE_EXPANSION".into()
+                }
+                (Some("target_modified"), Some(path)) => format!("TARGET_MODIFIED|{path}"),
+                (_, Some(path)) => format!("TARGET_EXISTS|{path}"),
+                _ => format_anyhow_error(anyhow::anyhow!(error.message)),
+            }
+        }
+        _ => match error.details["legacy_category"].as_str() {
+            Some("github_auth") => format_anyhow_error(anyhow::anyhow!(
+                "git clone https://github.com/<owner>/<repo> failed: authentication failed"
+            )),
+            Some("github_network") => format_anyhow_error(anyhow::anyhow!(
+                "git clone https://github.com/<owner>/<repo> failed"
+            )),
+            Some("github_tls") => format_anyhow_error(anyhow::anyhow!(
+                "git clone https://github.com/<owner>/<repo> failed: SecureTransport certificate error"
+            )),
+            Some("github_not_found") => format_anyhow_error(anyhow::anyhow!(
+                "git clone https://github.com/<owner>/<repo> failed: repository not found"
+            )),
+            Some("github_dns") => format_anyhow_error(anyhow::anyhow!(
+                "git clone https://github.com/<owner>/<repo> failed: could not resolve host"
+            )),
+            Some("github_timeout") => format_anyhow_error(anyhow::anyhow!(
+                "git clone https://github.com/<owner>/<repo> failed: connection timed out"
+            )),
+            Some("github_connection") => format_anyhow_error(anyhow::anyhow!(
+                "git clone https://github.com/<owner>/<repo> failed: connection refused"
+            )),
+            Some("github_rate_limited") => {
+                "GitHub API 频率限制已触发。可在设置中配置 GitHub Token 以提升限额。"
+                    .to_string()
+            }
+            Some("cancelled") => "CANCELLED|操作已被用户取消。".to_string(),
+            _ => format_anyhow_error(anyhow::anyhow!(error.message)),
+        },
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct ToolInfoDto {
     pub key: String,
@@ -189,7 +437,25 @@ pub struct ToolStatusDto {
     pub newly_installed: Vec<String>,
 }
 
+impl From<ServiceAgent> for ToolInfoDto {
+    fn from(agent: ServiceAgent) -> Self {
+        Self {
+            key: agent.key,
+            label: agent.label,
+            avatar: agent.avatar,
+            installed: agent.detected,
+            enabled: agent.enabled,
+            is_custom: agent.is_custom,
+            skills_dir: agent.skills_dir,
+            project_skills_dir: agent.project_skills_dir,
+            supports_project_scope: agent.supports_project_scope,
+            sync_mode: agent.sync_mode,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 struct RuntimeTool {
     key: String,
     label: String,
@@ -281,7 +547,8 @@ fn runtime_tools(store: &SkillStore, include_disabled: bool) -> anyhow::Result<V
             is_custom: false,
             skills_dir: resolve_default_path(&adapter)?,
             project_skills_dir: project_relative_skills_dir(&adapter).to_string(),
-            supports_project_scope: supports_project_scope(&adapter),
+            supports_project_scope: cfg!(any(target_os = "macos", target_os = "linux"))
+                && supports_project_scope(&adapter),
             sync_mode: SyncMode::Auto,
         });
     }
@@ -291,7 +558,8 @@ fn runtime_tools(store: &SkillStore, include_disabled: bool) -> anyhow::Result<V
             continue;
         }
         let skills_dir = expand_home_path(&custom.skills_dir)?;
-        let supports_project_scope = custom.project_skills_dir.is_some();
+        let supports_project_scope = cfg!(any(target_os = "macos", target_os = "linux"))
+            && custom.project_skills_dir.is_some();
         let detected = skills_dir.is_dir();
         tools.push(RuntimeTool {
             key: custom.key,
@@ -308,46 +576,6 @@ fn runtime_tools(store: &SkillStore, include_disabled: bool) -> anyhow::Result<V
     }
 
     Ok(tools)
-}
-
-fn runtime_tool_by_key(store: &SkillStore, key: &str) -> anyhow::Result<RuntimeTool> {
-    runtime_tools(store, false)?
-        .into_iter()
-        .find(|tool| tool.key == key)
-        .ok_or_else(|| anyhow::anyhow!("TOOL_NOT_INSTALLED|{}", key))
-}
-
-fn runtime_tools_sharing_dir(
-    store: &SkillStore,
-    selected: &RuntimeTool,
-    scope: &str,
-) -> anyhow::Result<Vec<RuntimeTool>> {
-    let tools = runtime_tools(store, false)?;
-    let shared = tools
-        .into_iter()
-        .filter(|tool| {
-            tool.installed
-                && if scope == "project" {
-                    tool.project_skills_dir == selected.project_skills_dir
-                } else {
-                    tool.skills_dir == selected.skills_dir
-                }
-        })
-        .collect::<Vec<_>>();
-    Ok(shared)
-}
-
-fn resolve_runtime_tool_root(
-    tool: &RuntimeTool,
-    project_root: Option<&std::path::Path>,
-) -> anyhow::Result<std::path::PathBuf> {
-    if let Some(project_root) = project_root {
-        if !tool.supports_project_scope {
-            anyhow::bail!("PROJECT_SCOPE_UNSUPPORTED|{}", tool.key);
-        }
-        return Ok(project_root.join(&tool.project_skills_dir));
-    }
-    Ok(tool.skills_dir.clone())
 }
 
 #[tauri::command]
@@ -374,59 +602,44 @@ pub async fn set_tool_config(
 }
 
 #[tauri::command]
-pub async fn get_tool_status(store: State<'_, SkillStore>) -> Result<ToolStatusDto, String> {
+pub async fn get_tool_status(
+    service: State<'_, SkillsHubService>,
+    store: State<'_, SkillStore>,
+) -> Result<ToolStatusDto, String> {
+    let service = service.inner().clone();
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut tools: Vec<ToolInfoDto> = Vec::new();
-        let mut installed: Vec<String> = Vec::new();
-
-        for tool in runtime_tools(&store, true)? {
-            tools.push(ToolInfoDto {
-                key: tool.key.clone(),
-                label: tool.label,
-                avatar: tool.avatar,
-                installed: tool.installed,
-                enabled: tool.enabled,
-                is_custom: tool.is_custom,
-                skills_dir: tool.skills_dir.to_string_lossy().to_string(),
-                project_skills_dir: tool.project_skills_dir,
-                supports_project_scope: tool.supports_project_scope,
-                sync_mode: tool.sync_mode,
-            });
-            if tool.installed {
-                installed.push(tool.key);
-            }
-        }
-
-        installed.dedup();
-
-        let prev: Vec<String> = store
-            .get_setting("installed_tools_v1")?
-            .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
-            .unwrap_or_default();
-
-        let prev_set: std::collections::HashSet<String> = prev.into_iter().collect();
-        let newly_installed: Vec<String> = installed
-            .iter()
-            .filter(|k| !prev_set.contains(*k))
-            .cloned()
-            .collect();
-
-        // Persist current set (best effort).
-        let _ = store.set_setting(
-            "installed_tools_v1",
-            &serde_json::to_string(&installed).unwrap_or_else(|_| "[]".to_string()),
-        );
-
-        Ok::<_, anyhow::Error>(ToolStatusDto {
-            tools,
-            installed,
-            newly_installed,
-        })
+        service
+            .list_agents()
+            .map(|agents| desktop_tool_status(&store, agents))
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(format_service_error)
+}
+
+fn desktop_tool_status(
+    store: &SkillStore,
+    agents: crate::services::types::AgentList,
+) -> ToolStatusDto {
+    let serialized = serde_json::to_string(&agents.installed).unwrap_or_else(|_| "[]".to_string());
+    let previous = store
+        .replace_setting("installed_tools_v1", &serialized)
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<std::collections::HashSet<String>>(&raw).ok())
+        .unwrap_or_default();
+    let newly_installed = agents
+        .installed
+        .iter()
+        .filter(|key| !previous.contains(*key))
+        .cloned()
+        .collect();
+    ToolStatusDto {
+        tools: agents.agents.into_iter().map(ToolInfoDto::from).collect(),
+        installed: agents.installed,
+        newly_installed,
+    }
 }
 
 #[tauri::command]
@@ -493,7 +706,8 @@ pub async fn set_git_cache_cleanup_days(
 #[tauri::command]
 pub async fn clear_git_cache_now(app: tauri::AppHandle) -> Result<usize, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        cleanup_git_cache_dirs(&app, std::time::Duration::from_secs(0))
+        let paths = crate::runtime_paths_for_tauri(&app)?;
+        cleanup_git_cache_dirs(&paths, std::time::Duration::from_secs(0))
     })
     .await
     .map_err(|err| err.to_string())?
@@ -718,6 +932,7 @@ pub async fn run_auto_update_now(
 ) -> Result<AutoUpdateRunResultDto, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::AutoUpdate)?;
         run_auto_update_now_core(&app, &store).map(to_auto_update_run_result_dto)
     })
     .await
@@ -829,7 +1044,8 @@ pub async fn get_central_repo_path(
 ) -> Result<String, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let path = resolve_central_repo_path(&app, &store)?;
+        let paths = crate::runtime_paths_for_tauri(&app)?;
+        let path = resolve_central_repo_path(&paths, &store)?;
         ensure_central_repo(&path)?;
         Ok::<_, anyhow::Error>(path.to_string_lossy().to_string())
     })
@@ -923,7 +1139,8 @@ pub async fn preview_central_repo_path_change(
         if !new_base.is_absolute() {
             anyhow::bail!("storage path must be absolute");
         }
-        let current_base = resolve_central_repo_path(&app, &store)?;
+        let paths = crate::runtime_paths_for_tauri(&app)?;
+        let current_base = resolve_central_repo_path(&paths, &store)?;
         let skill_count = if current_base == new_base {
             0
         } else {
@@ -949,11 +1166,13 @@ pub async fn set_central_repo_path(
 ) -> Result<String, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::StorageMigration)?;
         let new_base = expand_home_path(&path)?;
         if !new_base.is_absolute() {
             anyhow::bail!("storage path must be absolute");
         }
-        let current_base = resolve_central_repo_path(&app, &store)?;
+        let paths = crate::runtime_paths_for_tauri(&app)?;
+        let current_base = resolve_central_repo_path(&paths, &store)?;
         if current_base == new_base {
             store.set_setting("central_repo_path", new_base.to_string_lossy().as_ref())?;
             return Ok::<_, anyhow::Error>(new_base.to_string_lossy().to_string());
@@ -1060,106 +1279,124 @@ pub async fn set_central_repo_path(
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn install_local(
-    app: tauri::AppHandle,
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     sourcePath: String,
     name: Option<String>,
 ) -> Result<InstallResultDto, String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let result = install_local_skill(&app, &store, sourcePath.as_ref(), name)?;
-        Ok::<_, anyhow::Error>(to_install_dto(result))
+        service
+            .install(InstallRequest::local(sourcePath).with_name(name))
+            .map(to_service_install_dto)
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(format_service_error)
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
-pub async fn list_local_skills_cmd(basePath: String) -> Result<Vec<LocalSkillCandidate>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let path = std::path::PathBuf::from(basePath);
-        list_local_skills(&path)
-    })
-    .await
-    .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+pub async fn list_local_skills_cmd(
+    service: State<'_, SkillsHubService>,
+    basePath: String,
+) -> Result<Vec<LocalSkillCandidate>, String> {
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || service.local_install_candidates(basePath))
+        .await
+        .map_err(|err| err.to_string())?
+        .map_err(format_service_error)
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn install_local_selection(
-    app: tauri::AppHandle,
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     basePath: String,
     subpath: String,
     name: Option<String>,
 ) -> Result<InstallResultDto, String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let base = std::path::PathBuf::from(basePath);
-        let result =
-            install_local_skill_from_selection(&app, &store, base.as_ref(), &subpath, name)?;
-        Ok::<_, anyhow::Error>(to_install_dto(result))
+        service
+            .install(
+                InstallRequest::local(basePath)
+                    .with_subpath(subpath)
+                    .with_name(name),
+            )
+            .map(to_service_install_dto)
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(format_service_error)
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn install_git(
-    app: tauri::AppHandle,
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     cancel: State<'_, Arc<CancelToken>>,
     repoUrl: String,
     name: Option<String>,
 ) -> Result<InstallResultDto, String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
     cancel.reset();
     let cancel_token = Arc::clone(cancel.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        let result = install_git_skill(&app, &store, &repoUrl, name, Some(&cancel_token))?;
-        Ok::<_, anyhow::Error>(to_install_dto(result))
+        service
+            .install_with_cancel(
+                InstallRequest::git(repoUrl).with_name(name),
+                Some(&cancel_token),
+            )
+            .map(to_service_install_dto)
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(format_service_error)
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn list_git_skills_cmd(
-    app: tauri::AppHandle,
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
+    cancel: State<'_, Arc<CancelToken>>,
     repoUrl: String,
 ) -> Result<Vec<GitSkillCandidate>, String> {
-    let store = store.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || list_git_skills(&app, &store, &repoUrl))
-        .await
-        .map_err(|err| err.to_string())?
-        .map_err(format_anyhow_error)
+    let service = service.inner().clone();
+    cancel.reset();
+    let cancel_token = Arc::clone(cancel.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        service.git_install_candidates_with_cancel(&repoUrl, Some(&cancel_token))
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_service_error)
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn install_git_selection(
-    app: tauri::AppHandle,
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
+    cancel: State<'_, Arc<CancelToken>>,
     repoUrl: String,
     subpath: String,
     name: Option<String>,
 ) -> Result<InstallResultDto, String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
+    cancel.reset();
+    let cancel_token = Arc::clone(cancel.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        let result = install_git_skill_from_selection(&app, &store, &repoUrl, &subpath, name)?;
-        Ok::<_, anyhow::Error>(to_install_dto(result))
+        service
+            .install_with_cancel(
+                InstallRequest::git(repoUrl)
+                    .with_subpath(subpath)
+                    .with_name(name),
+                Some(&cancel_token),
+            )
+            .map(to_service_install_dto)
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(format_service_error)
 }
 
 #[derive(Debug, Serialize)]
@@ -1168,54 +1405,14 @@ pub struct SyncResultDto {
     pub target_path: String,
 }
 
-fn sync_mode_name(mode: SyncMode) -> &'static str {
-    match mode {
-        SyncMode::Auto => "auto",
-        SyncMode::Symlink => "symlink",
-        SyncMode::Junction => "junction",
-        SyncMode::Copy => "copy",
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn record_skill_target_failure(
-    store: &SkillStore,
-    skill_id: &str,
-    tool: &str,
-    scope: &str,
-    project_path: Option<&str>,
-    target_path: &std::path::Path,
-    requested_mode: SyncMode,
-    error: &str,
-) -> anyhow::Result<()> {
-    let existing = store.get_skill_target(skill_id, tool, scope, project_path)?;
-    let record = SkillTargetRecord {
-        id: existing
-            .as_ref()
-            .map(|target| target.id.clone())
-            .unwrap_or_else(|| Uuid::new_v4().to_string()),
-        skill_id: skill_id.to_string(),
-        tool: tool.to_string(),
-        scope: scope.to_string(),
-        project_path: project_path.map(str::to_string),
-        target_path: target_path.to_string_lossy().to_string(),
-        mode: existing
-            .as_ref()
-            .map(|target| target.mode.clone())
-            .unwrap_or_else(|| sync_mode_name(requested_mode).to_string()),
-        status: "error".to_string(),
-        last_error: Some(error.to_string()),
-        synced_at: existing.and_then(|target| target.synced_at),
-    };
-    store.upsert_skill_target(&record)
-}
-
 #[tauri::command]
 pub async fn sync_skill_dir(
+    app: tauri::AppHandle,
     source_path: String,
     target_path: String,
 ) -> Result<SyncResultDto, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::Deploy)?;
         let result = sync_dir_hybrid(source_path.as_ref(), target_path.as_ref())?;
         Ok::<_, anyhow::Error>(SyncResultDto {
             mode_used: match result.mode_used {
@@ -1237,7 +1434,7 @@ pub async fn sync_skill_dir(
 #[allow(non_snake_case)]
 #[allow(clippy::too_many_arguments)]
 pub async fn sync_skill_to_tool(
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     sourcePath: String,
     skillId: String,
     tool: String,
@@ -1247,193 +1444,66 @@ pub async fn sync_skill_to_tool(
     scope: Option<String>,
     projectPath: Option<String>,
 ) -> Result<SyncResultDto, String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let runtime_tool = runtime_tool_by_key(&store, &tool)?;
-        let scope = normalize_scope(scope.as_deref())?;
-        if scope == "project" && !runtime_tool.supports_project_scope {
-            anyhow::bail!("PROJECT_SCOPE_UNSUPPORTED|{}", runtime_tool.key);
+        let skill = service
+            .show_skill(skillId.clone().into())
+            .map_err(format_service_error)?;
+        if skill.central_path != sourcePath || skill.name != name {
+            return Err("PLAN_STALE|skill source or name changed".to_string());
         }
-        let project_root = if scope == "project" {
-            let raw = projectPath
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("projectPath is required for project scope"))?;
-            let path = expand_home_path(raw)?;
-            if !path.is_dir() {
-                anyhow::bail!("projectPath must be an existing directory: {:?}", path);
-            }
-            Some(path)
-        } else {
-            None
-        };
-
-        let tool_root = resolve_runtime_tool_root(&runtime_tool, project_root.as_deref())?;
-        let target = tool_root.join(&name);
-        ensure_target_does_not_overlap_local_source(&store, &skillId, &target)?;
-        let project_path_for_record = project_root
-            .as_ref()
-            .map(|path| path.to_string_lossy().to_string());
-        if scope == "global" && !runtime_tool.installed {
-            let error = format!("TOOL_NOT_INSTALLED|{}", runtime_tool.key);
-            record_skill_target_failure(
-                &store,
-                &skillId,
-                &tool,
-                scope,
-                project_path_for_record.as_deref(),
-                &target,
-                runtime_tool.sync_mode,
-                &error,
-            )?;
-            anyhow::bail!(error);
-        }
-        // Pre-check: ensure the skills directory is writable (fixes #20 — Windows OS error 5).
-        if let Err(err) = std::fs::create_dir_all(&tool_root) {
-            let error = if err.kind() == std::io::ErrorKind::PermissionDenied {
-                format!(
-                    "TOOL_NOT_WRITABLE|{}|{}",
-                    runtime_tool.label,
-                    tool_root.to_string_lossy()
-                )
-            } else {
-                format!("failed to create skills dir {:?}: {}", tool_root, err)
-            };
-            record_skill_target_failure(
-                &store,
-                &skillId,
-                &tool,
-                scope,
-                project_path_for_record.as_deref(),
-                &target,
-                runtime_tool.sync_mode,
-                &error,
-            )?;
-            anyhow::bail!(error);
-        }
-        if let Some(existing) =
-            store.get_skill_target(&skillId, &tool, scope, project_path_for_record.as_deref())?
-        {
-            if existing.mode == "copy"
-                && existing.target_path == target.to_string_lossy()
-                && overwrite != Some(true)
-            {
-                let previous =
-                    crate::core::content_hash::hash_dir_for_sync_conflict(sourcePath.as_ref())?;
-                crate::core::tool_distribution::refresh_copy(
-                    &store,
-                    &skillId,
-                    sourcePath.as_ref(),
-                    &target,
-                    Some(&previous),
-                )?;
-                return Ok(SyncResultDto {
-                    mode_used: "copy".into(),
-                    target_path: existing.target_path,
-                });
-            }
-            if existing.status == "ok"
-                && overwrite != Some(true)
-                && existing.target_path == target.to_string_lossy()
-                && target.exists()
-            {
-                return Ok::<_, anyhow::Error>(SyncResultDto {
-                    mode_used: existing.mode,
-                    target_path: existing.target_path,
-                });
-            }
-        }
-        let overwrite = overwrite.unwrap_or(false)
-            || (overwriteIfSameContent.unwrap_or(false)
-                && target_has_same_content(sourcePath.as_ref(), &target));
-        let result = if runtime_tool.is_custom {
-            sync_dir_with_mode_with_overwrite(
-                runtime_tool.sync_mode,
-                sourcePath.as_ref(),
-                &target,
-                overwrite,
-            )
-        } else {
-            sync_dir_for_tool_with_overwrite(&tool, sourcePath.as_ref(), &target, overwrite)
-        };
-        let result = match result {
-            Ok(result) => result,
-            Err(err) => {
-                let msg = err.to_string();
-                let error = if msg.contains("target already exists") {
-                    format!("TARGET_EXISTS|{}", target.to_string_lossy())
-                } else if msg.contains("os error 5")
-                    || msg.contains("Access is denied")
-                    || msg.contains("Permission denied")
-                {
-                    format!(
-                        "TOOL_NOT_WRITABLE|{}|{}",
-                        runtime_tool.label,
-                        tool_root.to_string_lossy()
-                    )
-                } else {
-                    msg
-                };
-                record_skill_target_failure(
-                    &store,
-                    &skillId,
-                    &tool,
-                    scope,
-                    project_path_for_record.as_deref(),
-                    &target,
-                    runtime_tool.sync_mode,
-                    &error,
-                )?;
-                anyhow::bail!(error);
-            }
-        };
-
-        // Some tools share the same skills directory; keep DB records consistent across them.
-        let group = runtime_tools_sharing_dir(&store, &runtime_tool, scope)?;
-        for a in group {
-            let record = SkillTargetRecord {
-                id: Uuid::new_v4().to_string(),
-                skill_id: skillId.clone(),
-                tool: a.key,
-                scope: scope.to_string(),
-                project_path: project_path_for_record.clone(),
-                target_path: result.target_path.to_string_lossy().to_string(),
-                mode: match result.mode_used {
-                    SyncMode::Auto => "auto",
-                    SyncMode::Symlink => "symlink",
-                    SyncMode::Junction => "junction",
-                    SyncMode::Copy => "copy",
-                }
-                .to_string(),
-                status: "ok".to_string(),
-                last_error: None,
-                synced_at: Some(now_ms()),
-            };
-            store.upsert_skill_target(&record)?;
-        }
-
-        Ok::<_, anyhow::Error>(SyncResultDto {
-            mode_used: match result.mode_used {
-                SyncMode::Auto => "auto",
-                SyncMode::Symlink => "symlink",
-                SyncMode::Junction => "junction",
-                SyncMode::Copy => "copy",
-            }
-            .to_string(),
-            target_path: result.target_path.to_string_lossy().to_string(),
+        let mut request = desktop_deployment_request(skillId, tool, scope, projectPath)?;
+        request.overwrite = overwrite.unwrap_or(false);
+        request.overwrite_if_same_content = overwriteIfSameContent.unwrap_or(false);
+        let outcome = service.deploy(request).map_err(format_deployment_error)?;
+        let target = outcome
+            .targets
+            .first()
+            .ok_or_else(|| "deployment returned no target".to_string())?;
+        Ok(SyncResultDto {
+            mode_used: crate::services::deployment::mode_name(target.mode).to_string(),
+            target_path: target.path.to_string_lossy().into_owned(),
         })
     })
     .await
-    .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(|error| error.to_string())?
 }
 
-fn target_has_same_content(source: &std::path::Path, target: &std::path::Path) -> bool {
-    if !source.is_dir() || !target.is_dir() {
-        return false;
+fn desktop_deployment_request(
+    skill_id: String,
+    tool: String,
+    scope: Option<String>,
+    project_path: Option<String>,
+) -> Result<crate::services::deployment::DeploymentRequest, String> {
+    let mut request = crate::services::deployment::DeploymentRequest::global(
+        crate::services::types::SkillSelector::Id(skill_id),
+        [tool],
+    );
+    if normalize_scope(scope.as_deref()).map_err(format_anyhow_error)? == "project" {
+        request.scope = crate::services::deployment::DeploymentScope::Project(
+            project_path
+                .ok_or_else(|| "projectPath is required for project scope".to_string())?
+                .into(),
+        );
     }
-    match (hash_dir(source), hash_dir(target)) {
-        (Ok(source_hash), Ok(target_hash)) => source_hash == target_hash,
-        _ => false,
+    Ok(request)
+}
+
+fn format_deployment_error(error: crate::services::error::ServiceError) -> String {
+    use crate::services::error::ErrorCode;
+    let agent = error.details["agent"].as_str().unwrap_or_default();
+    let path = error.details["path"].as_str().unwrap_or_default();
+    match error.code {
+        ErrorCode::AgentNotFound => format!("TOOL_NOT_INSTALLED|{agent}"),
+        ErrorCode::ProjectScopeUnsupported => format!("PROJECT_SCOPE_UNSUPPORTED|{agent}"),
+        ErrorCode::TargetConflict if error.details["reason"] == "not_writable" => {
+            format!("TOOL_NOT_WRITABLE|{agent}|{path}")
+        }
+        ErrorCode::TargetConflict if error.details["reason"] == "overlaps_skill_source" => format!(
+            "SKILL_TARGET_OVERLAPS_SOURCE|{path}|sync target overlaps original local source"
+        ),
+        ErrorCode::PlanStale => "PLAN_STALE|deployment state changed".to_string(),
+        _ => format_service_error(error),
     }
 }
 
@@ -1487,88 +1557,40 @@ fn remove_skill_target_safely(
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn unsync_skill_from_tool(
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     skillId: String,
     tool: String,
     scope: Option<String>,
     projectPath: Option<String>,
 ) -> Result<(), String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let scope = normalize_scope(scope.as_deref())?;
-        let project_path = if scope == "project" {
-            let raw = projectPath
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("projectPath is required for project scope"))?;
-            Some(expand_home_path(raw)?.to_string_lossy().to_string())
-        } else {
-            None
-        };
-
-        // Some tools share the same skills directory; unsync should update all of them.
-        let group_tool_keys: Vec<String> =
-            if let Ok(runtime_tool) = runtime_tool_by_key(&store, &tool) {
-                runtime_tools_sharing_dir(&store, &runtime_tool, scope)?
-                    .into_iter()
-                    .map(|tool| tool.key)
-                    .collect()
-            } else if let Some(adapter) = adapter_by_key(&tool) {
-                let group = if scope == "project" {
-                    adapters_sharing_project_skills_dir(&adapter)
-                } else {
-                    crate::core::tool_adapters::adapters_sharing_skills_dir(&adapter)
-                };
-                // If none of the group tools are installed, do nothing (treat as already not effective).
-                if scope == "global" {
-                    let mut any_installed = false;
-                    for a in &group {
-                        if is_tool_installed(a)? {
-                            any_installed = true;
-                            break;
-                        }
-                    }
-                    if !any_installed {
-                        return Ok::<_, anyhow::Error>(());
-                    }
-                }
-                group
-                    .into_iter()
-                    .map(|a| a.id.as_key().to_string())
-                    .collect()
-            } else {
-                vec![tool.clone()]
-            };
-
-        // Remove filesystem target once (shared dir => shared target path).
-        let mut removed = false;
-        for k in &group_tool_keys {
-            if let Some(target) =
-                store.get_skill_target(&skillId, k, scope, project_path.as_deref())?
-            {
-                if !removed {
-                    remove_skill_target_safely(&store, &skillId, &target.target_path)?;
-                    removed = true;
-                }
-                store.delete_skill_target(&skillId, k, scope, project_path.as_deref())?;
-            }
-        }
-
-        Ok::<_, anyhow::Error>(())
+        let request = desktop_deployment_request(skillId, tool, scope, projectPath)?;
+        service
+            .undeploy(request)
+            .map(|_| ())
+            .map_err(format_deployment_error)
     })
     .await
-    .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn set_skill_enabled(
+    app: tauri::AppHandle,
     store: State<'_, SkillStore>,
     skillId: String,
     enabled: bool,
 ) -> Result<(), String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let operation_kind = if enabled {
+            OperationKind::Deploy
+        } else {
+            OperationKind::Undeploy
+        };
+        let _operation_lock = acquire_operation_lock(&app, operation_kind)?;
         if !enabled {
             let targets = store.list_skill_targets(&skillId)?;
             let mut remove_failures: Vec<String> = Vec::new();
@@ -1620,15 +1642,13 @@ pub struct UpdateResultDto {
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn update_managed_skill(
-    app: tauri::AppHandle,
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     skillId: String,
 ) -> Result<UpdateResultDto, String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let res = update_managed_skill_from_source(&app, &store, &skillId)?;
-        Ok::<_, anyhow::Error>(UpdateResultDto {
-            skill_id: res.skill_id,
+        service.update(skillId.into()).map(|res| UpdateResultDto {
+            skill_id: res.id,
             name: res.name,
             content_hash: res.content_hash,
             source_revision: res.source_revision,
@@ -1639,7 +1659,7 @@ pub async fn update_managed_skill(
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(format_service_error)
 }
 
 #[tauri::command]
@@ -1794,25 +1814,22 @@ pub async fn set_github_proxy_url(
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn import_existing_skill(
-    app: tauri::AppHandle,
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     sourcePath: String,
     name: Option<String>,
 ) -> Result<InstallResultDto, String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let source = std::path::Path::new(&sourcePath);
-        // Validate SKILL.md exists before importing (fixes #8: prevents importing
-        // directories that were "discovered" but lack a valid SKILL.md).
-        if !source.join("SKILL.md").exists() {
-            anyhow::bail!("SKILL_INVALID|missing_skill_md");
-        }
-        let result = import_existing_local_skill(&app, &store, source, name)?;
-        Ok::<_, anyhow::Error>(to_install_dto(result))
+        let plan = service.plan_adopt_direct_with_name(&sourcePath, name)?;
+        let mut outcome = service.adopt(AdoptRequest::confirmed(plan.id))?;
+        let adopted = outcome.adopted.pop().ok_or_else(|| {
+            crate::services::error::ServiceError::internal("failed to import the selected skill")
+        })?;
+        Ok::<_, crate::services::error::ServiceError>(to_service_install_dto(adopted))
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(format_service_error)
 }
 
 #[derive(Debug, Serialize)]
@@ -1860,9 +1877,56 @@ pub struct SkillTargetDto {
     pub synced_at: Option<i64>,
 }
 
+impl From<ServiceSkill> for ManagedSkillDto {
+    fn from(skill: ServiceSkill) -> Self {
+        Self {
+            id: skill.id,
+            name: skill.name,
+            description: skill.description,
+            source_type: skill.source.kind,
+            source_ref: skill.source.reference,
+            central_path: skill.central_path,
+            created_at: skill.created_at,
+            updated_at: skill.updated_at,
+            last_sync_at: skill.last_sync_at,
+            enabled: skill.enabled,
+            status: skill.content_status,
+            source_error: skill.source_error,
+            source_checked_at: skill.source_checked_at,
+            tags: skill
+                .tags
+                .into_iter()
+                .map(|tag| TagDto {
+                    id: tag.id,
+                    name: tag.name,
+                })
+                .collect(),
+            targets: skill
+                .targets
+                .into_iter()
+                .map(|target| SkillTargetDto {
+                    tool: target.tool,
+                    scope: target.scope,
+                    project_path: target.project_path,
+                    mode: target.mode,
+                    status: target.status,
+                    last_error: target.last_error,
+                    target_path: target.target_path,
+                    synced_at: target.synced_at,
+                })
+                .collect(),
+        }
+    }
+}
+
 #[tauri::command]
-pub fn get_managed_skills(store: State<'_, SkillStore>) -> Result<Vec<ManagedSkillDto>, String> {
-    get_managed_skills_impl(store.inner())
+pub fn get_managed_skills(
+    service: State<'_, SkillsHubService>,
+) -> Result<Vec<ManagedSkillDto>, String> {
+    service
+        .list_skills()
+        .map(|skills| skills.into_iter().map(ManagedSkillDto::from).collect())
+        .map_err(format_service_error)
 }
 
 #[tauri::command]
@@ -1884,36 +1948,58 @@ pub fn get_tags(store: State<'_, SkillStore>) -> Result<Vec<TagWithCountDto>, St
 
 #[tauri::command]
 #[allow(non_snake_case)]
-pub fn create_tag(store: State<'_, SkillStore>, name: String) -> Result<TagDto, String> {
-    store
-        .create_tag(&name)
+pub fn create_tag(service: State<'_, SkillsHubService>, name: String) -> Result<TagDto, String> {
+    service
+        .apply_tag_action(TagAction::Create { name })
+        .and_then(|outcome| {
+            outcome.tag.ok_or_else(|| {
+                crate::services::error::ServiceError::internal("created tag is missing")
+            })
+        })
         .map(|tag| TagDto {
             id: tag.id,
             name: tag.name,
         })
-        .map_err(format_anyhow_error)
+        .map_err(format_service_error)
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
 pub fn rename_tag(
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     tagId: i64,
     name: String,
 ) -> Result<TagDto, String> {
-    store
-        .rename_tag(tagId, &name)
+    service
+        .apply_tag_action(TagAction::Rename {
+            tag: TagSelector::Id(tagId),
+            name,
+        })
+        .and_then(|outcome| {
+            outcome.tag.ok_or_else(|| {
+                crate::services::error::ServiceError::internal("renamed tag is missing")
+            })
+        })
         .map(|tag| TagDto {
             id: tag.id,
             name: tag.name,
         })
-        .map_err(format_anyhow_error)
+        .map_err(format_service_error)
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
-pub fn delete_tag(store: State<'_, SkillStore>, tagId: i64) -> Result<(), String> {
-    store.delete_tag(tagId).map_err(format_anyhow_error)
+pub fn delete_tag(service: State<'_, SkillsHubService>, tagId: i64) -> Result<(), String> {
+    service
+        .plan_tag_delete(TagSelector::Id(tagId))
+        .and_then(|plan| {
+            service.apply_tag_action(TagAction::Delete {
+                plan_id: plan.id,
+                confirmed: true,
+            })
+        })
+        .map(|_| ())
+        .map_err(format_service_error)
 }
 
 #[tauri::command]
@@ -1938,13 +2024,17 @@ pub fn get_skill_tags(
 #[tauri::command]
 #[allow(non_snake_case)]
 pub fn set_skill_tags(
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     skillId: String,
     tagIds: Vec<i64>,
 ) -> Result<(), String> {
-    store
-        .set_skill_tags(&skillId, &tagIds)
-        .map_err(format_anyhow_error)
+    service
+        .apply_tag_action(TagAction::SetIds {
+            skill: crate::services::types::SkillSelector::Id(skillId),
+            tag_ids: tagIds,
+        })
+        .map(|_| ())
+        .map_err(format_service_error)
 }
 
 #[tauri::command]
@@ -1955,34 +2045,24 @@ pub fn get_untagged_skill_ids(store: State<'_, SkillStore>) -> Result<Vec<String
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn delete_managed_skill(
-    app: tauri::AppHandle,
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     skillId: String,
 ) -> Result<(), String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let _device_sync_guard = if store.get_device_sync_config()?.is_some() {
-            Some(crate::core::device_sync::try_lock_device_sync()?)
-        } else {
-            None
+        let plan = match service.plan_remove(crate::services::types::SkillSelector::Id(skillId)) {
+            Ok(plan) => plan,
+            Err(error) if error.code == crate::services::error::ErrorCode::SkillNotFound => {
+                return Ok(());
+            }
+            Err(error) => return Err(error),
         };
-        // 便于排查“按钮点了没反应”：确认前端确实触发了命令
-        println!("[delete_managed_skill] skillId={}", skillId);
-
-        if store.get_skill_by_id(&skillId)?.is_some() {
-            let trash_root = app.path().app_data_dir()?.join("recycle-bin");
-            RecycleBinService::new(&store, trash_root).archive(
-                &skillId,
-                DeletionSource::Manual,
-                now_ms(),
-            )?;
-        }
-
-        Ok::<_, anyhow::Error>(())
+        service.remove(RemoveRequest::confirmed(plan.id))?;
+        Ok::<_, crate::services::error::ServiceError>(())
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(format_service_error)
 }
 
 #[cfg(test)]
@@ -1990,11 +2070,11 @@ fn remove_path_any(path: &str) -> Result<(), String> {
     remove_path_any_core(std::path::Path::new(path)).map_err(|err| format!("{path}: {err:#}"))
 }
 
-fn to_install_dto(result: InstallResult) -> InstallResultDto {
+fn to_service_install_dto(result: InstallOutcome) -> InstallResultDto {
     InstallResultDto {
-        skill_id: result.skill_id,
+        skill_id: result.id,
         name: result.name,
-        central_path: result.central_path.to_string_lossy().to_string(),
+        central_path: result.central_path,
         content_hash: result.content_hash,
     }
 }
@@ -2080,83 +2160,27 @@ fn now_ms() -> i64 {
     now.as_millis() as i64
 }
 
+#[cfg(test)]
 fn managed_skill_status(skill: &SkillRecord) -> String {
-    if skill.status != "ok" {
-        return skill.status.clone();
-    }
-    if skill.source_type != "local" || skill.has_unbound_local_source() {
-        return skill.status.clone();
-    }
-    let source_exists = skill
-        .source_ref
-        .as_deref()
-        .and_then(|source| expand_home_path(source).ok())
-        .map(|source| source.exists())
-        .unwrap_or(false);
-    if source_exists {
-        skill.status.clone()
-    } else {
-        "error".to_string()
-    }
+    crate::services::skills_hub::content_status(skill)
 }
 
+#[cfg(test)]
 fn get_managed_skills_impl(store: &SkillStore) -> Result<Vec<ManagedSkillDto>, String> {
-    let skills = store.list_skills().map_err(|err| err.to_string())?;
-    let checks = store.source_checks().map_err(format_anyhow_error)?;
-    Ok(skills
-        .into_iter()
-        .map(|skill| {
-            let source_check = checks.get(&skill.id);
-            let source_error = source_check.and_then(|check| check.0.clone());
-            let status = if source_error.is_some() {
-                "error".into()
-            } else {
-                managed_skill_status(&skill)
-            };
-            let targets = store
-                .list_skill_targets(&skill.id)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|target| SkillTargetDto {
-                    tool: target.tool,
-                    scope: target.scope,
-                    project_path: target.project_path,
-                    mode: target.mode,
-                    status: target.status,
-                    last_error: target.last_error,
-                    target_path: target.target_path,
-                    synced_at: target.synced_at,
-                })
-                .collect();
-            let tags = store
-                .get_skill_tags(&skill.id)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|tag| TagDto {
-                    id: tag.id,
-                    name: tag.name,
-                })
-                .collect();
-
-            ManagedSkillDto {
-                source_error,
-                source_checked_at: source_check.map(|check| check.1),
-                id: skill.id,
-                name: skill.name,
-                description: skill.description,
-                source_type: skill.source_type,
-                source_ref: skill.source_ref,
-                central_path: skill.central_path,
-                created_at: skill.created_at,
-                updated_at: skill.updated_at,
-                last_sync_at: skill.last_sync_at,
-                enabled: skill.enabled,
-                status,
-                tags,
-                targets,
-            }
-        })
-        .collect())
+    let app_data_dir = store
+        .db_path()
+        .parent()
+        .ok_or_else(|| "test database has no parent".to_string())?;
+    let paths = crate::core::runtime_paths::RuntimePaths::from_tauri(
+        crate::core::runtime_paths::RuntimeProfile::Test,
+        app_data_dir,
+        app_data_dir,
+        app_data_dir,
+    );
+    SkillsHubService::from_store(paths, store.clone())
+        .list_skills()
+        .map(|skills| skills.into_iter().map(ManagedSkillDto::from).collect())
+        .map_err(format_service_error)
 }
 
 #[derive(Debug, Serialize)]
@@ -2217,20 +2241,20 @@ impl From<OnlineSkillResult> for OnlineSkillDto {
 
 #[tauri::command]
 pub async fn search_skills_online(
-    store: State<'_, SkillStore>,
+    service: State<'_, SkillsHubService>,
     query: String,
     limit: Option<u32>,
 ) -> Result<Vec<OnlineSkillDto>, String> {
-    let store = store.inner().clone();
+    let service = service.inner().clone();
     let limit = limit.unwrap_or(20) as usize;
     tauri::async_runtime::spawn_blocking(move || {
-        let proxy_url = get_github_proxy_url_core(&store)?;
-        let results = search_skills_online_core(&query, limit, &proxy_url)?;
-        Ok::<_, anyhow::Error>(results.into_iter().map(OnlineSkillDto::from).collect())
+        service
+            .search(&query, limit)
+            .map(|results| results.into_iter().map(OnlineSkillDto::from).collect())
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    .map_err(format_service_error)
 }
 
 #[derive(Debug, Serialize)]
@@ -2619,6 +2643,7 @@ pub async fn check_device_sync(
 ) -> Result<SyncChangeSummary, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::DeviceSync)?;
         let (workspace, central) = device_sync_paths(&app, &store)?;
         let credentials = SystemCredentialStore;
         DeviceSyncService::new(&store, &credentials, workspace, central).check()
@@ -2635,6 +2660,7 @@ pub async fn run_device_sync(
 ) -> Result<SyncRunResult, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::DeviceSync)?;
         let (workspace, central) = device_sync_paths(&app, &store)?;
         let credentials = SystemCredentialStore;
         DeviceSyncService::new(&store, &credentials, workspace, central).sync()
@@ -2739,6 +2765,7 @@ pub async fn restore_recycle_bin_item(
 ) -> Result<(), String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::Restore)?;
         let root = app.path().app_data_dir()?.join("recycle-bin");
         let service = RecycleBinService::new(&store, root);
         if service.has_snapshot(&trashId)? {
@@ -2768,6 +2795,7 @@ pub async fn delete_recycle_bin_item(
 ) -> Result<(), String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::Delete)?;
         let root = app.path().app_data_dir()?.join("recycle-bin");
         RecycleBinService::new(&store, root).delete_permanently(&trashId)
     })
@@ -2785,6 +2813,7 @@ pub async fn clear_recycle_bin(
 ) -> Result<usize, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::Delete)?;
         let root = app.path().app_data_dir()?.join("recycle-bin");
         RecycleBinService::new(&store, root).clear(&trashIds)
     })
@@ -2803,6 +2832,7 @@ pub async fn resolve_device_sync_conflict(
 ) -> Result<(), String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::DeviceSync)?;
         let (workspace, central) = device_sync_paths(&app, &store)?;
         let credentials = SystemCredentialStore;
         DeviceSyncService::new(&store, &credentials, workspace, central)
@@ -2822,6 +2852,7 @@ pub async fn restore_device_sync_trash(
 ) -> Result<(), String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lock = acquire_operation_lock(&app, OperationKind::Restore)?;
         let (workspace, central) = device_sync_paths(&app, &store)?;
         let credentials = SystemCredentialStore;
         DeviceSyncService::new(&store, &credentials, workspace, central).restore_trash(&trashId)
@@ -3138,12 +3169,9 @@ fn device_sync_paths(
     app: &tauri::AppHandle,
     store: &SkillStore,
 ) -> anyhow::Result<(std::path::PathBuf, std::path::PathBuf)> {
-    let workspace = app
-        .path()
-        .app_data_dir()
-        .context("resolve device sync data directory")?
-        .join("device-sync");
-    let central = resolve_central_repo_path(app, store)?;
+    let paths = crate::runtime_paths_for_tauri(app)?;
+    let workspace = paths.app_data_dir.join("device-sync");
+    let central = resolve_central_repo_path(&paths, store)?;
     Ok((workspace, central))
 }
 

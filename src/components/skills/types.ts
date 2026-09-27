@@ -1,3 +1,34 @@
+export type AgentAccessReason = 'CENTRAL_MISSING' | 'CENTRAL_MODIFIED' | 'RECORD_ERROR' | 'TARGET_MISSING' | 'TARGET_MODIFIED' | 'TARGET_OWNERSHIP' | 'VERSION_MISMATCH'
+
+export type AgentAccessAgentDto = {
+  key: string
+  label: string
+  detected: boolean
+  enabled: boolean
+  deployed: boolean
+  needsRepair: boolean
+  reason: AgentAccessReason | null
+  path: string
+}
+
+export type AgentAccessStatusDto = {
+  skillId: string | null
+  skillEnabled: boolean
+  officialState: 'missing' | 'healthy' | 'needs_repair' | 'name_conflict'
+  conflict: { sourceKind: 'local' | 'git' | 'other'; centralPath: string } | null
+  bridge: {
+    status: 'missing' | 'valid' | 'damaged'
+    reason: 'DIRECTORY_MISSING' | 'BINARY_MISSING' | 'STAMP_MISSING' | 'VERSION_MISMATCH' | 'HASH_MISMATCH' | 'NOT_EXECUTABLE' | 'INVALID_METADATA' | 'SOURCE_MISSING' | 'IO_ERROR' | 'PUBLICATION_IN_PROGRESS' | null
+    path: string
+    version: string | null
+  }
+  bundledVersion: string
+  installedVersion: string | null
+  installed: boolean
+  centralReason: AgentAccessReason | null
+  agents: AgentAccessAgentDto[]
+}
+
 export type OnboardingVariant = {
   tool: string
   name: string

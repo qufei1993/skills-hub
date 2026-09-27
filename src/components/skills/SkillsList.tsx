@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, type ReactNode } from 'react'
 import { MessageCircle, SlidersHorizontal } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import type { ManagedSkill, OnboardingPlan, ToolOption } from './types'
@@ -10,6 +10,7 @@ type GithubInfo = {
 }
 
 type SkillsListProps = {
+  notice?: ReactNode
   plan: OnboardingPlan | null
   hasManagedSkills: boolean
   hasFilters: boolean
@@ -39,6 +40,7 @@ type SkillsListProps = {
 }
 
 const SkillsList = ({
+  notice,
   hasManagedSkills,
   hasFilters,
   onClearFilters,
@@ -82,6 +84,7 @@ const SkillsList = ({
         if (list.scrollTop !== previousScrollTop) event.preventDefault()
       }}
     >
+      {notice}
       {plan && plan.total_skills_found > 0 ? (
         <div className="discovered-banner">
           <div className="banner-left">

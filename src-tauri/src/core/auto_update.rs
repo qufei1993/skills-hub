@@ -227,7 +227,8 @@ pub fn run_auto_update_now<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     store: &SkillStore,
 ) -> Result<AutoUpdateRunResult> {
-    let _update_lock = acquire_skill_update_lock(app, store)?;
+    let paths = crate::runtime_paths_for_tauri(app)?;
+    let _update_lock = acquire_skill_update_lock(&paths, store)?;
     let entries = list_auto_update_skill_entries(store)?;
     let mut progress = AutoUpdateProgressSnapshot {
         total: entries.len(),
@@ -253,7 +254,7 @@ pub fn run_auto_update_now<R: tauri::Runtime>(
             .retain(|pending| pending.skill_id != skill_id);
         record_auto_update_progress_snapshot(store, &progress)?;
 
-        match update_managed_skill_from_source_with_lock_held(app, store, &skill_id, true) {
+        match update_managed_skill_from_source_with_lock_held(&paths, store, &skill_id, true) {
             Ok(update) => {
                 if update.changed {
                     result.updated += 1;

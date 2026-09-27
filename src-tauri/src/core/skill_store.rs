@@ -1,8 +1,8 @@
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
-use tauri::Manager;
 use uuid::Uuid;
 
 use super::device_sync::types::{
@@ -25,6 +25,24 @@ const RECYCLE_BIN_SCHEMA_VERSION: &str = "1";
 pub const DEVICE_SYNC_HISTORY_LIMIT: usize = 100;
 const DEVICE_SYNC_STARTUP_CREDENTIAL_CONSENT_MIGRATION: &str =
     "migration.device_sync_startup_credential_consent_v1";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IncompatibleDatabaseError {
+    pub found_version: i32,
+    pub supported_version: i32,
+}
+
+impl fmt::Display for IncompatibleDatabaseError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "database schema version {} is newer than app supports {}",
+            self.found_version, self.supported_version
+        )
+    }
+}
+
+impl std::error::Error for IncompatibleDatabaseError {}
 
 const DEVICE_SYNC_SCHEMA_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS device_sync_config (
@@ -295,6 +313,36 @@ impl SkillStore {
         &self.db_path
     }
 
+    pub(crate) fn ensure_compatible_readonly(&self) -> Result<()> {
+        if !self.db_path.try_exists()? {
+            return Ok(());
+        }
+        // Even a read-only SQLite connection can change the source WAL index.
+        // Inspect a private snapshot so opening an unknown schema changes no files.
+        let snapshot = tempfile::tempdir().context("create schema inspection snapshot")?;
+        let database = snapshot.path().join(DB_FILE_NAME);
+        std::fs::copy(&self.db_path, &database)
+            .context("snapshot database for schema inspection")?;
+        let mut wal = self.db_path.as_os_str().to_os_string();
+        wal.push("-wal");
+        let wal = PathBuf::from(wal);
+        if wal.try_exists()? {
+            std::fs::copy(wal, snapshot.path().join("skills_hub.db-wal"))
+                .context("snapshot WAL for schema inspection")?;
+        }
+        let conn =
+            Connection::open_with_flags(database, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        if version > SCHEMA_VERSION && version != PRE_RELEASE_DEVICE_SYNC_SCHEMA_VERSION {
+            return Err(IncompatibleDatabaseError {
+                found_version: version,
+                supported_version: SCHEMA_VERSION,
+            }
+            .into());
+        }
+        Ok(())
+    }
+
     pub fn ensure_schema(&self) -> Result<()> {
         self.with_conn(|conn| {
             conn.execute_batch("PRAGMA foreign_keys = ON;")?;
@@ -329,11 +377,11 @@ impl SkillStore {
             } else if user_version > SCHEMA_VERSION
                 && user_version != PRE_RELEASE_DEVICE_SYNC_SCHEMA_VERSION
             {
-                anyhow::bail!(
-                    "database schema version {} is newer than app supports {}",
-                    user_version,
-                    SCHEMA_VERSION
-                );
+                return Err(IncompatibleDatabaseError {
+                    found_version: user_version,
+                    supported_version: SCHEMA_VERSION,
+                }
+                .into());
             }
 
             conn.execute_batch(DEVICE_SYNC_SCHEMA_V1)?;
@@ -394,6 +442,37 @@ impl SkillStore {
                 params![key, value],
             )?;
             Ok(())
+        })
+    }
+
+    pub fn replace_setting(&self, key: &str, value: &str) -> Result<Option<String>> {
+        self.with_conn(|conn| {
+            conn.execute_batch("BEGIN IMMEDIATE;")?;
+            let result = (|| -> Result<Option<String>> {
+                let previous = conn
+                    .query_row(
+                        "SELECT value FROM settings WHERE key = ?1",
+                        params![key],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                conn.execute(
+                    "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![key, value],
+                )?;
+                Ok(previous)
+            })();
+            match result {
+                Ok(previous) => {
+                    conn.execute_batch("COMMIT;")?;
+                    Ok(previous)
+                }
+                Err(error) => {
+                    let _ = conn.execute_batch("ROLLBACK;");
+                    Err(error)
+                }
+            }
         })
     }
 
@@ -1157,6 +1236,29 @@ impl SkillStore {
         })
     }
 
+    pub(crate) fn commit_deployment_targets(
+        &self,
+        upserts: &[(SkillTargetRecord, String)],
+        deletions: &[SkillTargetRecord],
+        validate: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        self.with_conn(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            for record in deletions {
+                tx.execute("DELETE FROM skill_targets WHERE id=?1", params![record.id])?;
+                tx.execute("DELETE FROM settings WHERE key=?1", params![format!("device_sync.target_baseline.{}", record.id)])?;
+            }
+            for (record, hash) in upserts {
+                upsert_skill_target_with_conn(&tx, record)?;
+                tx.execute("INSERT INTO settings (key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    params![format!("device_sync.target_baseline.{}", record.id), serde_json::to_string(&(&record.target_path, hash))?])?;
+            }
+            validate()?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
     pub fn commit_skill_update(
         &self,
         skill: &SkillRecord,
@@ -1177,6 +1279,37 @@ impl SkillStore {
                 ON CONFLICT(skill_id) DO UPDATE SET error_code=NULL,checked_at=excluded.checked_at", params![skill.id, now_ms()])?;
             for target in targets {
                 upsert_skill_target_with_conn(&transaction, target)?;
+            }
+            transaction.commit()?;
+            Ok(())
+        })
+    }
+
+    pub(crate) fn commit_skill_updates(&self, skills: &[SkillRecord]) -> Result<()> {
+        self.with_conn(|conn| {
+            let transaction = conn.unchecked_transaction()?;
+            for skill in skills {
+                upsert_skill_with_conn(&transaction, skill)?;
+                if let Some(baseline) = skill
+                    .content_hash
+                    .clone()
+                    .and_then(|hash| SourceBaseline::from_skill(skill, hash))
+                {
+                    transaction.execute(
+                        "INSERT INTO settings (key,value) VALUES (?1,?2)
+                         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                        params![
+                            format!("device_sync.source_baseline.{}", skill.id),
+                            serde_json::to_string(&baseline)?
+                        ],
+                    )?;
+                }
+                transaction.execute(
+                    "INSERT INTO skill_source_checks (skill_id,error_code,checked_at)
+                     VALUES (?1,NULL,?2)
+                     ON CONFLICT(skill_id) DO UPDATE SET error_code=NULL,checked_at=excluded.checked_at",
+                    params![skill.id, now_ms()],
+                )?;
             }
             transaction.commit()?;
             Ok(())
@@ -1573,6 +1706,16 @@ impl SkillStore {
         })
     }
 
+    pub(crate) fn list_tag_skill_ids(&self, tag_id: i64) -> Result<Vec<String>> {
+        self.with_conn(|conn| {
+            let mut statement = conn.prepare(
+                "SELECT skill_id FROM skill_tag_links WHERE tag_id = ?1 ORDER BY skill_id ASC",
+            )?;
+            let rows = statement.query_map(params![tag_id], |row| row.get(0))?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
+
     pub fn get_skill_tags(&self, skill_id: &str) -> Result<Vec<TagRecord>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
@@ -1810,6 +1953,7 @@ impl SkillStore {
         })
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn get_skill_target(
         &self,
         skill_id: &str,
@@ -1846,6 +1990,7 @@ impl SkillStore {
         })
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn delete_skill_target(
         &self,
         skill_id: &str,
@@ -2078,16 +2223,7 @@ fn now_ms() -> i64 {
     now.as_millis() as i64
 }
 
-pub fn default_db_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf> {
-    let app_dir = app
-        .path()
-        .app_data_dir()
-        .context("failed to resolve app data dir")?;
-    std::fs::create_dir_all(&app_dir)
-        .with_context(|| format!("failed to create app data dir {:?}", app_dir))?;
-    Ok(app_dir.join(DB_FILE_NAME))
-}
-
+#[allow(dead_code)]
 pub fn migrate_legacy_db_if_needed(target_db_path: &Path) -> Result<()> {
     let Some(data_dir) = dirs::data_dir() else {
         return Ok(());
@@ -2096,7 +2232,10 @@ pub fn migrate_legacy_db_if_needed(target_db_path: &Path) -> Result<()> {
     migrate_legacy_db_if_needed_in_data_dir(target_db_path, &data_dir)
 }
 
-fn migrate_legacy_db_if_needed_in_data_dir(target_db_path: &Path, data_dir: &Path) -> Result<()> {
+pub(crate) fn migrate_legacy_db_if_needed_in_data_dir(
+    target_db_path: &Path,
+    data_dir: &Path,
+) -> Result<()> {
     let legacy_db_paths = LEGACY_APP_IDENTIFIERS
         .iter()
         .map(|id| data_dir.join(id).join(DB_FILE_NAME))

@@ -93,6 +93,9 @@ const settingsProps = (
   onClearGitCacheNow: () => Promise<boolean>,
 ): ComponentProps<typeof SettingsPage> => ({
   isTauri: false,
+  invokeTauri: vi.fn(),
+  onAiManagementChanged: vi.fn(),
+  onOpenOfficialSkill: vi.fn(),
   language: 'en',
   storagePath: '/Users/demo/.skillshub',
   gitCacheCleanupDays: 7,
@@ -124,6 +127,16 @@ const settingsProps = (
 })
 
 describe('destructive action confirmations', () => {
+  it('keeps advanced settings collapsed and reveals existing controls on demand', () => {
+    render(<SettingsPage {...settingsProps(vi.fn(async () => true))} />)
+    const heading = screen.getByText('settingsSectionStorage')
+    const panel = heading.closest('details')
+    expect(panel).not.toBeNull()
+    expect(panel?.open).toBe(false)
+    fireEvent.click(heading.closest('summary')!)
+    expect(panel?.open).toBe(true)
+    expect(screen.getByRole('button', { name: 'Clean now' })).toBeTruthy()
+  })
   it('selects Korean as the interface language', () => {
     const onLanguageChange = vi.fn()
     render(
@@ -187,6 +200,7 @@ describe('destructive action confirmations', () => {
     const onClearGitCacheNow = vi.fn(async () => true)
     render(<SettingsPage {...settingsProps(onClearGitCacheNow)} />)
 
+    fireEvent.click(screen.getByText('settingsSectionStorage').closest('summary')!)
     fireEvent.click(screen.getByRole('button', { name: 'Clean now' }))
 
     expect(onClearGitCacheNow).not.toHaveBeenCalled()
@@ -202,6 +216,7 @@ describe('destructive action confirmations', () => {
     const onClearGitCacheNow = vi.fn(async () => false)
     render(<SettingsPage {...settingsProps(onClearGitCacheNow)} />)
 
+    fireEvent.click(screen.getByText('settingsSectionStorage').closest('summary')!)
     fireEvent.click(screen.getByRole('button', { name: 'Clean now' }))
     fireEvent.click(screen.getByRole('button', { name: 'Clear cache' }))
 
@@ -211,6 +226,7 @@ describe('destructive action confirmations', () => {
 
   it('traps focus, closes on Escape, and restores focus to the trigger', () => {
     render(<SettingsPage {...settingsProps(vi.fn(async () => true))} />)
+    fireEvent.click(screen.getByText('settingsSectionStorage').closest('summary')!)
     const trigger = screen.getByRole('button', { name: 'Clean now' })
 
     trigger.focus()

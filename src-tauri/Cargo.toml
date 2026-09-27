@@ -1,6 +1,7 @@
 [package]
 name = "app"
-version = "0.10.1"
+default-run = "app"
+version = "0.11.0"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -14,10 +15,17 @@ rust-version = "1.77.2"
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[bin]]
+name = "skillshub-cli"
+path = "src/bin/skillshub-cli.rs"
+
 [build-dependencies]
+serde_json = "1.0"
+sha2 = "0.10"
 tauri-build = { version = "2.5.3", features = [] }
 
 [dependencies]
+clap = { version = "=4.5.4", features = ["derive"] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
@@ -44,10 +52,14 @@ trash = "=3.3.1"
 fs2 = "0.4"
 chrono = { version = "0.4.43", default-features = false, features = ["clock"] }
 
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "=1.1.3", features = ["fs"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

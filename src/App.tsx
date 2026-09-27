@@ -27,6 +27,7 @@ import SkillDetailView from './components/skills/SkillDetailView'
 import Header from './components/skills/Header'
 import LoadingOverlay from './components/skills/LoadingOverlay'
 import SkillsList from './components/skills/SkillsList'
+import AiManagementNotice from './components/skills/AiManagementNotice'
 import TagsPage from './components/skills/TagsPage'
 import AddSkillModal from './components/skills/modals/AddSkillModal'
 import BulkDeleteModal from './components/skills/modals/BulkDeleteModal'
@@ -90,6 +91,7 @@ import type {
   InstallResultDto,
   LocalSkillCandidate,
   ManagedSkill,
+  AgentAccessStatusDto,
   OnboardingPlan,
   OnlineSkillDto,
   StoragePathChangePreview,
@@ -130,6 +132,8 @@ const buildUpdaterProxyOptions = (
 }
 
 function App() {
+  const [focusAiManagement, setFocusAiManagement] = useState(false)
+  const [aiManagementStatus, setAiManagementStatus] = useState<AgentAccessStatusDto | null>(null)
   const { t, i18n } = useTranslation()
   const language = i18n.resolvedLanguage ?? i18n.language ?? 'en'
   const languageStorageKey = 'skills-language'
@@ -503,9 +507,13 @@ function App() {
     }
   }, [invokeTauri, isTauri])
 
+  const skillsReadSequence = useRef(0)
+  const tagsReadSequence = useRef(0)
   const loadManagedSkills = useCallback(async () => {
+    const sequence = ++skillsReadSequence.current
     try {
       const result = await invokeTauri<ManagedSkill[]>('get_managed_skills')
+      if (sequence !== skillsReadSequence.current) return
       setManagedSkills(result)
       setDetailSkill(current => current ? result.find(skill => skill.id === current.id) ?? null : null)
     } catch (err) {
@@ -514,8 +522,10 @@ function App() {
   }, [invokeTauri])
 
   const loadTags = useCallback(async () => {
+    const sequence = ++tagsReadSequence.current
     try {
       const result = await invokeTauri<TagWithCountDto[]>('get_tags')
+      if (sequence !== tagsReadSequence.current) return
       setTags(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -526,12 +536,18 @@ function App() {
     await Promise.all([loadManagedSkills(), loadTags()])
   }, [loadManagedSkills, loadTags])
 
-  useEffect(() => {
-    if (isTauri) {
-      loadManagedSkills()
-      loadTags()
-    }
+  const refreshLibrary = useCallback(() => {
+    if (isTauri) void Promise.all([loadManagedSkills(), loadTags()])
   }, [isTauri, loadManagedSkills, loadTags])
+
+  useEffect(() => {
+    if (activeView === 'myskills' || (activeView === 'manage' && managementTab === 'tags')) refreshLibrary()
+  }, [activeView, managementTab, refreshLibrary])
+
+  useEffect(() => {
+    window.addEventListener('focus', refreshLibrary)
+    return () => window.removeEventListener('focus', refreshLibrary)
+  }, [refreshLibrary])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -1455,6 +1471,7 @@ function App() {
   }, [toolStatus, tools])
 
   const handleOpenSettings = useCallback(() => {
+    setFocusAiManagement(false)
     setShowAddModal(false)
     setActiveView('settings')
   }, [])
@@ -1523,10 +1540,11 @@ function App() {
         setManagementTab('tags')
       }
       if (view === 'myskills') {
+        if (activeView === view) refreshLibrary()
         setDetailSkill(null)
       }
     },
-    [loadFeaturedSkills],
+    [activeView, loadFeaturedSkills, refreshLibrary],
   )
 
   const handleOpenDetail = useCallback((skill: ManagedSkill) => {
@@ -1700,9 +1718,10 @@ function App() {
   }, [])
 
   const handleOpenTagsPage = useCallback(() => {
+    if (activeView === 'manage' && managementTab === 'tags') refreshLibrary()
     setManagementTab('tags')
     setActiveView('manage')
-  }, [])
+  }, [activeView, managementTab, refreshLibrary])
 
   const handleClearListFilters = useCallback(() => {
     setIssuesOnly(false)
@@ -3614,6 +3633,7 @@ function App() {
   }, [loadManagedSkills, loadTags, refreshRecycleBinCount])
 
   const handleManagementTabChange = (tab: ManagementTab) => {
+    if (tab === 'tags' && activeView === 'manage' && managementTab === 'tags') refreshLibrary()
     setShowAddModal(false)
     setManagementTab(tab)
     setActiveView('manage')
@@ -3737,6 +3757,7 @@ function App() {
               onToggleUntagged={handleToggleUntaggedFilter}
               onClearTags={handleClearTagFilters}
               onManageTags={handleOpenTagsPage}
+              onOpenTags={refreshLibrary}
               onToggleBulkMode={handleToggleBulkMode}
               onViewModeChange={setSkillViewMode}
               t={t}
@@ -3748,6 +3769,10 @@ function App() {
               </div>
             ) : null}
             <SkillsList
+              notice={<AiManagementNotice isTauri={isTauri} invokeTauri={invokeTauri} skills={managedSkills} onStatusChanged={setAiManagementStatus} onOpen={() => {
+                setFocusAiManagement(true)
+                setActiveView('settings')
+              }} t={t} />}
               hasManagedSkills={managedSkills.length > 0}
               hasFilters={hasListFilters}
               onClearFilters={handleClearListFilters}
@@ -3906,7 +3931,20 @@ function App() {
           </div>
         ) : activeView === 'settings' ? (
           <SettingsPage
+            focusAiManagement={focusAiManagement}
+            aiManagementStatus={aiManagementStatus}
+            onAiManagementStatusChanged={setAiManagementStatus}
             isTauri={isTauri}
+            invokeTauri={invokeTauri}
+            onAiManagementChanged={loadManagedSkills}
+            onOpenOfficialSkill={async (id) => {
+              try {
+                const skills = await invokeTauri('get_managed_skills') as ManagedSkill[]
+                const skill = skills.find(item => item.id === id)
+                if (skill) handleOpenDetail(skill)
+                else { await loadManagedSkills(); setActiveView('myskills') }
+              } catch { toast.error(t('aiManagement.errors.read')) }
+            }}
             language={language}
             storagePath={storagePath}
             gitCacheCleanupDays={gitCacheCleanupDays}

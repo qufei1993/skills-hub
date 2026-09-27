@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.11.0]
+
+### Added
+- **AI Skill management**: Enable AI management in Settings to install the official `manage-skills-hub` Skill. Use AI conversations to search, install, import, update, deploy, tag, and safely remove Skills from the same library used by the desktop app.
+- **Bundled CLI**: The native `skillshub-cli` is included with the desktop app and follows its version. Once prepared, it works even when the desktop is closed. Users do not need Node.js, npm, or a separate CLI installation.
+
+### Improved
+- **AI management discovery**: A dismissible notice in My Skills introduces AI management before the official Skill is installed. Go to setup opens and highlights the Settings card; dismissed notices stay hidden.
+- **Default tool sync**: AI installations sync to detected, enabled tools by default. Explicit tool choices, library-only requests, and project scope take precedence. Incomplete sync is reported separately from a successful installation.
+- **Shared library refresh**: Skills and tags refresh when returning to the app, entering library or tag pages, or opening tag filters. Existing filters are preserved, so AI changes appear without restarting.
+- **Clearer Settings**: AI management uses a compact card with installation details available on demand. Background checks preserve the current status and keep View Skill available. Network and storage settings can collapse while keeping their summaries visible.
+
+### Fixed
+- **Windows AI management setup**: Preparing the bundled CLI can now replace its files while retaining protection against directory replacement.
+- **Skill update sync**: Tool detection and update destinations now use the same runtime home as deployment, so installed copies refresh correctly in isolated environments.
+- **Shared tool directories**: Deployment previews list all tools affected by a shared directory. One-click AI setup stops when it would affect tools outside the selected scope, without registering disabled tools as sync targets.
+- **Ambiguous legacy sources**: Checks and updates stop when an older multi-Skill record cannot be matched to a unique source, preserving installed content.
+
+### Usage notes
+- **Scope and safety**: Project-level deployment is supported for compatible tools on macOS and Linux; Windows supports global scope only. Destructive operations require confirmation. Conflicts, concurrent writes, and unsafe updates stop without forced overwrites; deleted Skills remain recoverable through the desktop recycle bin.
+- **Desktop settings**: Device sync, scheduled tasks, credentials, app settings, app updates, recycle-bin restoration, and permanent deletion remain desktop-only. The shared library remains compatible with v0.10.1.
+- **Development builds**: Development and release builds now share the Skill library, configuration, cache, recycle bin, and write lock. Development operations affect real data and tool directories. Credentials and CLI binaries remain separate; previous development data is preserved without automatic merging.
+
 ## [0.10.1] - 2026-09-13
 
 ### Fixed

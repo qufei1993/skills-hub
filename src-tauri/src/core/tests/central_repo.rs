@@ -4,6 +4,7 @@ use crate::core::central_repo::{
     ensure_central_repo, plan_central_repo_migration, resolve_central_repo_path,
     validate_central_repo_path_change,
 };
+use crate::core::runtime_paths::{RuntimePaths, RuntimeProfile};
 use crate::core::skill_store::{SkillRecord, SkillStore};
 
 fn make_store() -> (tempfile::TempDir, SkillStore) {
@@ -16,13 +17,13 @@ fn make_store() -> (tempfile::TempDir, SkillStore) {
 #[test]
 fn resolve_uses_setting_when_present() {
     let (dir, store) = make_store();
-    let app = tauri::test::mock_app();
+    let paths = RuntimePaths::from_roots(RuntimeProfile::Test, dir.path(), dir.path());
     let expected = dir.path().join("central");
     store
         .set_setting("central_repo_path", expected.to_string_lossy().as_ref())
         .unwrap();
 
-    let got = resolve_central_repo_path(app.handle(), &store).unwrap();
+    let got = resolve_central_repo_path(&paths, &store).unwrap();
     assert_eq!(got, expected);
 }
 

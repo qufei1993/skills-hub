@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [main]
@@ -10,6 +11,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      rust: ${{ steps.detect.outputs.rust }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - id: detect
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/ci-changes.mjs
+
   web:
     runs-on: ubuntu-latest
     steps:
@@ -21,30 +42,107 @@ jobs:
       - run: npm ci
       - run: npm run version:check
       - run: npm run lint
+      - run: npm test
+      - run: npm run network:check
       - run: npm run build
 
   rust:
+    needs: changes
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true')
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: src-tauri
     steps:
+      - name: Require successful change detection
+        working-directory: .
+        if: needs.changes.result != 'success'
+        run: exit 1
       - uses: actions/checkout@v4
       - name: Install system dependencies (linux)
         run: |
           sudo apt-get update
           sudo apt-get install -y libglib2.0-dev libgtk-3-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - name: Prepare debug sidecar before desktop Rust checks
+        working-directory: .
+        run: node scripts/prepare-cli-sidecar.mjs --target x86_64-unknown-linux-gnu --debug
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test --all
 
+  cli-native:
+    if: github.event_name == 'workflow_dispatch'
+    name: Native CLI (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: npm ci
+      - name: Verify native host matches target
+        shell: bash
+        run: |
+          test "$(rustc -vV | sed -n 's/^host: //p')" = "${{ matrix.target }}"
+      - run: npm run cli:prepare -- --target ${{ matrix.target }} --debug
+      - name: CLI and previous-stable compatibility tests (native debug executable)
+        working-directory: src-tauri
+        run: cargo test --locked --test cli_integration --test cli_desktop_compatibility
+      - name: Windows native bridge ancestor and junction race tests
+        if: runner.os == 'Windows'
+        working-directory: src-tauri
+        run: cargo test --locked --lib cli_bridge -- --nocapture
+      - run: npm run build
+      - run: npm run cli:prepare -- --target ${{ matrix.target }}
+      - name: Native bundled CLI smoke
+        shell: bash
+        run: |
+          extension=""
+          if [ "$RUNNER_OS" = "Windows" ]; then extension=".exe"; fi
+          source="$GITHUB_WORKSPACE/src-tauri/binaries/skillshub-cli-${{ matrix.target }}$extension"
+          "$source" version --json
+          "$source" doctor --json
+
   windows-console:
+    needs: changes
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true')
     runs-on: windows-2022
     steps:
+      - name: Require successful change detection
+        working-directory: .
+        if: needs.changes.result != 'success'
+        run: exit 1
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify background child processes have no console window
@@ -53,3 +151,9 @@ jobs:
           New-Item -ItemType Directory -Force target | Out-Null
           rustc --edition=2021 scripts/windows-console-probe.rs --out-dir target
           .\target\windows-console-probe.exe
+      - name: Verify guarded CLI file replacement on Windows
+        shell: pwsh
+        run: |
+          rustc --edition=2021 --test scripts/windows-bridge-rename-probe.rs --out-dir target
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\target\windows-bridge-rename-probe.exe

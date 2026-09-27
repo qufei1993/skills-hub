@@ -107,7 +107,126 @@ export const ko = {
     },
     "manageCenterTitle": "관리센터",
     "manageCenterHelp": "태그, 동기화 대상 도구, 스킬 업데이트를 한 곳에서 관리하세요.",
+    aiManagement: {
+  "title": "AI 관리",
+  "notice": {"title": "AI로 Skills를 관리하세요", "description": "AI와 대화하며 Skills를 설치, 업데이트, 정리하세요. 데스크톱 앱과 같은 라이브러리를 사용합니다.", "action": "설정으로 이동", "dismiss": "AI 관리 안내 닫기"},
+"networkSummary": "GitHub: {{token}} · 프록시: {{proxy}}", "configured": "설정됨", "notConfigured": "미설정", "on": "켜짐", "off": "꺼짐",
+  "description": "AI와 대화하며 Skills를 설치, 업데이트, 정리하고 데스크톱 앱과 함께 관리하세요.",
+  "enable": "한 번에 활성화",
+  "enabling": "활성화 중…",
+  "ready": "활성화됨",
+  "inactive": "공식 Skill이 설치되어 있지만 로컬 도구에서 활성화되지 않았습니다. 내 Skills에서 활성화 상태와 동기화 도구를 관리하세요.",
+  "viewSkill": "Skill 보기",
+  "details": "설치 상태",
+  "errors": {
+    "read": "상태를 읽을 수 없습니다. 새로 고침 후 다시 시도하세요.",
+    "cli": "관리 구성 요소를 준비하지 못했습니다. 다시 시도하거나 데스크톱 앱을 재설치하세요.",
+    "noTools": "활성화된 로컬 도구를 찾지 못했습니다. 도구 설정을 확인하세요.",
+    "sharedDirectory": "일부 도구가 Skills 폴더를 공유합니다. 선택하지 않은 도구에도 영향을 줄 수 있어 설치를 중단했습니다. 도구에서 공유 폴더와 활성화 상태를 확인한 후 다시 시도하세요.",
+    "busy": "다른 작업이 진행 중입니다. 완료 후 다시 시도하세요.",
+    "conflict": "기존 Skill 콘텐츠와 충돌합니다. 내 Skills에서 확인하세요. 기존 콘텐츠는 덮어쓰지 않습니다.",
+    "action": "활성화를 완료하지 못했습니다. 상태를 새로 고친 후 다시 시도하세요."
+  }
+},
+    agentAccess: {
+      "help": "공식 Skill을 통해 Agent가 Skills Hub를 사용하도록 설정하세요.",
+      "nameConflict": {
+        "state": "이름 충돌",
+        "title": "공식 Skill 이름이 이미 사용 중입니다",
+        "help": "skills-hub라는 기존 Skill이 있지만 공식 내장 Skill이 아닙니다. 연결을 설치하거나 복구할 수 없습니다. 내 스킬에서 확인한 뒤 직접 이름을 변경하거나 제거하고 공식 연결을 설치하세요.",
+        "source": "기존 출처",
+        "location": "관리 라이브러리 위치",
+        "sourceKind": {
+          "local": "로컬 Skill",
+          "git": "Git Skill",
+          "other": "기타 출처"
+        }
+      },
+      "retry": "다시 시도",
+      "loading": "설치 상태 확인 중…",
+      "desktopOnly": "AI 관리는 데스크톱 앱에서 사용하세요.",
+      "cliStatus": "CLI 확인",
+      "cliVersion": "CLI 버전",
+      "cliPath": "CLI 경로",
+      "checkReason": "확인 세부 정보",
+      "unknown": "사용 불가",
+      "officialSkill": "공식 Skill",
+      "installed": "설치됨",
+      "notInstalled": "설치되지 않음",
+      "bundledVersion": "내장 Skill 버전",
+      "installedVersion": "설치된 Skill 버전",
+      "agents": "이 기기의 Agent",
+      "column": {
+        "agent": "Agent",
+        "detection": "감지",
+        "configuration": "설정",
+        "deployment": "공식 Skill",
+        "actions": "작업"
+      },
+      "detected": "감지됨",
+      "notDetected": "감지되지 않음",
+      "enabled": "활성화됨",
+      "disabled": "비활성화됨",
+      "deployed": "배포됨",
+      "notDeployed": "배포되지 않음",
+      "needsRepair": "복구 필요",
+      "install": "설치",
+      "repair": "복구",
+      "remove": "제거",
+      "installing": "설치 중…",
+      "repairing": "복구 중…",
+      "removing": "제거 중…",
+      "removeTitle": "Agent 연결을 제거할까요?",
+      "removeBody": "{{agent}}에서 공식 Skill 배포를 제거합니다. 라이브러리 사본은 유지되며 수정된 파일은 보호됩니다.",
+      "confirmRemove": "연결 제거",
+      "empty": "사용 가능한 Agent가 없습니다. Agent를 설치한 후 새로고침하세요.",
+      "prerequisite": "설치와 복구에는 감지되고 활성화된 Agent가 필요합니다. 도구에서 활성화한 후 이 페이지를 새로고침하세요.",
+      "cliOnly": "CLI 독립 사용",
+      "copyCommand": "명령 복사",
+      "copied": "복사됨",
+      "copyFailed": "복사하지 못했습니다. 명령을 선택하여 직접 복사하거나 다시 시도하세요.",
+      "desktopResponsibilities": "장치 동기화, 예약 작업 및 자격 증명은 계속 데스크톱 앱에서 관리합니다.",
+      "bridgeState": {
+        "valid": "검증됨",
+        "missing": "사용 불가",
+        "damaged": "확인 필요"
+      },
+      "reason": {
+        "DIRECTORY_MISSING": "CLI 폴더가 없습니다. 데스크톱 앱을 다시 시작하여 내장 CLI를 게시하세요.",
+        "BINARY_MISSING": "CLI 파일이 없습니다. 데스크톱 앱을 다시 시작하세요.",
+        "STAMP_MISSING": "검증 정보가 없습니다. 데스크톱 앱을 다시 시작하세요.",
+        "VERSION_MISMATCH": "CLI 버전이 앱과 다릅니다. 데스크톱 앱을 다시 시작하거나 재설치하세요.",
+        "HASH_MISMATCH": "CLI 체크섬이 일치하지 않습니다. 앱을 다시 시작하거나 재설치하세요.",
+        "NOT_EXECUTABLE": "CLI를 실행할 수 없습니다. 폴더 권한을 확인하고 앱을 다시 시작하세요.",
+        "INVALID_METADATA": "CLI 메타데이터가 유효하지 않습니다. 앱을 재설치하세요.",
+        "SOURCE_MISSING": "앱에 내장 CLI가 없습니다. 데스크톱 앱을 재설치하세요.",
+        "IO_ERROR": "CLI 파일을 읽거나 게시할 수 없습니다. 폴더 권한을 확인하고 앱을 다시 시작하세요.",
+        "PUBLICATION_IN_PROGRESS": "CLI 게시 중입니다. 완료된 후 새로고침하세요."
+      },
+      "healthReason": {
+        "CENTRAL_MISSING": "공식 라이브러리 사본이 없습니다. 사본을 복원한 후 연결을 복구하세요.",
+        "CENTRAL_MODIFIED": "공식 라이브러리 사본이 변경되었습니다. 변경 사항을 백업하고 원본을 복원한 후 복구하세요.",
+        "RECORD_ERROR": "마지막 배포에 오류가 기록되었습니다. 대상 폴더를 확인하고 복구하세요.",
+        "TARGET_MISSING": "배포 파일이 없거나 링크가 끊어졌습니다. 복구를 시도하세요.",
+        "TARGET_MODIFIED": "배포 파일이 공식 사본과 다릅니다. 변경 사항을 백업한 후 복구하세요.",
+        "TARGET_OWNERSHIP": "배포 경로나 링크가 다른 위치를 가리킵니다. 원래 위치로 복원한 후 복구하세요.",
+        "VERSION_MISMATCH": "새 공식 Skill이 내장되어 있습니다. 복구하여 이 Agent를 업데이트하세요."
+      },
+      "errors": {
+        "read": "Agent 연결 상태를 읽지 못했습니다. 새로고침하여 다시 시도하세요.",
+        "action": "작업에 실패했습니다. Agent 폴더 권한을 확인하고 새로고침 후 다시 시도하세요.",
+        "targetModified": "배포에 로컬 변경 사항이 있어 덮어쓰지 않았습니다. 변경 사항을 백업하고 원본을 복원한 후 다시 시도하세요.",
+        "conflict": "기존 파일이 작업과 충돌합니다. 파일을 백업하고 충돌을 해결한 후 다시 시도하세요.",
+        "busy": "다른 작업이 실행 중입니다. 완료 후 다시 시도하세요."
+      },
+      "success": {
+        "install": "{{agent}} 연결을 설치했습니다.",
+        "repair": "{{agent}} 연결을 복구했습니다.",
+        "remove": "{{agent}} 연결을 제거했습니다."
+      }
+    },
     "manageTabs": {
+      agents: 'Agent 연결',
       "tags": "태그",
       "tools": "도구",
       "updates": "업데이트"
