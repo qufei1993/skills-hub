@@ -95,7 +95,7 @@ Explore 汇总精选仓库中的 Skill，并支持在线搜索。点击 Install 
 
 ### AI 管理 — 通过对话管理 Skills（v0.11.0 新增）
 
-在 **设置 → AI 管理** 点击 **一键启用**，按需安装内置 CLI 和官方 Skill，无需 Node.js 或 npm。
+在 **设置 → AI 管理** 点击 **一键启用**，即可安装内置 CLI、配置终端命令并安装官方 Skill。重新打开终端即可使用 `skillshub-cli`；如未生效，请退出并重启终端应用。无需 Node.js 或 npm。终端配置支持 macOS/Linux 的 Bash、Zsh，以及 Windows 用户 PATH。
 
 ![在设置页启用 AI 管理](./assets/ai-management-setup.png)
 
@@ -103,7 +103,7 @@ Explore 汇总精选仓库中的 Skill，并支持在线搜索。点击 Install 
 
 ![官方管理 Skill 已安装并同步到工具](./assets/ai-management-installed.png)
 
-仅在终端使用？查看[独立安装 CLI](#独立安装-cli)。
+不使用桌面端的用户可选择[独立安装 CLI](#独立安装-cli)（不推荐）。
 
 ## 工作方式
 
@@ -173,7 +173,12 @@ Explore 汇总精选仓库中的 Skill，并支持在线搜索。点击 Install 
 
 ## 独立安装 CLI
 
-桌面端用户可在「设置 → AI 管理」点击「一键启用」，按需安装内置 CLI，无需另行下载。启动应用或打开设置不会安装、更新 CLI。如果只想在终端使用，复制对应系统的一条命令即可，无需 Node.js、npm 或管理员权限。
+推荐通过桌面端安装和管理 CLI。以下方式仅供不使用桌面端的用户选择。
+
+<details>
+<summary>仅命令行用户手动安装（不推荐）</summary>
+
+不使用桌面端时，可复制对应系统的一条命令安装，无需 Node.js、npm 或管理员权限。
 
 **macOS / Linux**（Intel/AMD x64 或 ARM64）：
 
@@ -201,6 +206,8 @@ skillshub-cli --help
 升级时重新执行同一条安装命令即可。这份独立 CLI 与桌面端内置的 CLI 分开维护，不会随桌面端自动升级。卸载时删除安装目录中的 `skillshub-cli`（Windows 为 `skillshub-cli.exe`）即可，技能库会保留。
 
 CLI 与桌面端共用本地技能库，但单独安装 CLI 不会自动安装官方 AI 管理 Skill。设备同步、定时任务、账号授权和应用设置仍需使用桌面端。Linux 下载文件面向 GNU/glibc 系统，不适用于 Alpine/musl。
+
+</details>
 
 ## 开发
 

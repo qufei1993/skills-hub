@@ -98,7 +98,7 @@ Settings keeps app-level preferences such as interface language, appearance, AI 
 
 ### AI Management — Manage Skills Through Conversations (New in v0.11.0)
 
-Click **Settings → AI Management → Enable in one click** to install the bundled CLI and official Skill. No Node.js or npm is required.
+Click **Settings → AI Management → Enable in one click** to install the bundled CLI and official Skill and configure the terminal command. Open a new terminal to use `skillshub-cli`; restart the terminal app if needed. No Node.js or npm is required. Terminal configuration supports Bash/Zsh on macOS/Linux and user PATH on Windows.
 
 ![Enable AI management in Settings](docs/assets/ai-management-setup.png)
 
@@ -106,7 +106,7 @@ Find `manage-skills-hub` in My Skills, then ask your AI tool to install, update,
 
 ![Official management Skill installed and synced to tools](docs/assets/ai-management-installed.png)
 
-For terminal-only use, see [Standalone CLI Installation](#standalone-cli-installation).
+For users without the desktop app, see [Standalone CLI Installation](#standalone-cli-installation) (not recommended).
 
 ## Workflow
 
@@ -176,7 +176,12 @@ See [`src-tauri/src/core/tool_adapters/mod.rs`](src-tauri/src/core/tool_adapters
 
 ## Standalone CLI Installation
 
-Desktop users can enable AI management in Settings to install the bundled CLI on demand, without a separate download. Starting the app or opening Settings does not install or update the CLI. For terminal-only use, copy the command for your system below. No Node.js, npm, or administrator access is required.
+The desktop app is the recommended way to install and manage the CLI. This alternative is only for users who do not use the desktop app.
+
+<details>
+<summary>Terminal-only installation (not recommended)</summary>
+
+For terminal-only use without the desktop app, copy the command for your system below. No Node.js, npm, or administrator access is required.
 
 **macOS / Linux** (Intel/AMD x64 or ARM64):
 
@@ -204,6 +209,8 @@ skillshub-cli --help
 Run the same installation command again to upgrade. This standalone copy is separate from the desktop-managed CLI and does not update automatically with the app. To remove it, delete the installed `skillshub-cli` executable (`skillshub-cli.exe` on Windows); your Skill library is retained.
 
 The CLI shares the local library with Skills Hub. Installing it alone does not install the official AI management Skill. Device sync, scheduled tasks, account authorization, and app settings remain desktop features. Linux releases target GNU/glibc systems, not Alpine/musl.
+
+</details>
 
 ## Development
 

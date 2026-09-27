@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - **Bundled CLI**: The native `skillshub-cli` is included with the desktop app and follows its version. Once prepared, it works even when the desktop is closed. Users do not need Node.js, npm, or a separate CLI installation.
 
 ### Improved
+- **Terminal command setup**: Desktop AI setup also configures the user command path. Open a new terminal to run `skillshub-cli`; existing AI setups can complete this configuration with the same enable button.
 - **On-demand AI setup**: The bundled CLI is installed, updated, or repaired only when you explicitly enable AI management. App startup and Settings status checks leave existing CLI files untouched.
 - **AI management discovery**: A dismissible notice in My Skills introduces AI management before the official Skill is installed. Go to setup opens and highlights the Settings card; dismissed notices stay hidden.
 - **Default tool sync**: AI installations sync to detected, enabled tools by default. Explicit tool choices, library-only requests, and project scope take precedence. Incomplete sync is reported separately from a successful installation.

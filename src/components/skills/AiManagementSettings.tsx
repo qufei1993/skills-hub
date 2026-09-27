@@ -66,7 +66,8 @@ const AiManagementSettings = ({ focusOnMount = false, initialStatus = null, onSt
       await onChanged()
     } catch (cause) {
       const message = String(cause)
-      if (mounted.current) setError(message.includes('CLI_UNAVAILABLE') ? 'cli'
+      if (mounted.current) setError(message.includes('CLI_TERMINAL_UNAVAILABLE') ? 'terminal'
+        : message.includes('CLI_UNAVAILABLE') ? 'cli'
         : message.includes('AGENT_NOT_FOUND') ? 'noTools'
           : message.includes('OPERATION_BUSY') ? 'busy'
             : message.includes('SHARED_DIRECTORY_SCOPE_EXPANSION') ? 'sharedDirectory'
@@ -79,10 +80,10 @@ const AiManagementSettings = ({ focusOnMount = false, initialStatus = null, onSt
       }
     }
   }
-  const ready = status?.skillEnabled && status.bridge.status === 'valid' && status.officialState === 'healthy'
+  const ready = status?.skillEnabled && status.terminalReady && status.bridge.status === 'valid' && status.officialState === 'healthy'
     && status.agents.some(agent => agent.deployed && !agent.needsRepair && agent.enabled && agent.detected)
   const conflict = status?.officialState === 'name_conflict'
-  const inactive = status?.installed && status.officialState === 'healthy' && status.bridge.status === 'valid' && !ready
+  const inactive = status?.installed && status.terminalReady && status.officialState === 'healthy' && status.bridge.status === 'valid' && !ready
   return <section ref={cardRef} tabIndex={-1} className={`settings-card ai-management-card${focusOnMount ? ' ai-management-card-highlight' : ''}${ready ? ' ai-management-card-ready' : ''}`} aria-label={t('aiManagement.title')} aria-busy={pending}>
     <div className="settings-card-head">
       <span className="settings-card-icon"><Bot size={18} aria-hidden="true" /></span>
@@ -101,6 +102,7 @@ const AiManagementSettings = ({ focusOnMount = false, initialStatus = null, onSt
     </div>
     <div className="ai-management-body">
       {!isTauri ? <p className="settings-helper">{t('agentAccess.desktopOnly')}</p> : null}
+      {ready ? <p className="settings-helper">{t('aiManagement.terminalReady')}</p> : null}
       {inactive ? <p className="settings-helper">{t('aiManagement.inactive')}</p> : null}
       {conflict ? <p role="alert">{t('aiManagement.errors.conflict')}</p> : null}
       {error ? <p role="alert" className="ai-management-error">{t(`aiManagement.errors.${error}`)}</p> : null}

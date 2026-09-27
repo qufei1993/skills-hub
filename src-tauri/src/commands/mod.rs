@@ -99,6 +99,7 @@ pub struct AgentAccessAgentDto {
 pub struct AgentAccessStatusDto {
     skill_id: Option<String>,
     skill_enabled: bool,
+    terminal_ready: bool,
     official_state: crate::services::agent_access::OfficialSkillState,
     conflict: Option<crate::services::agent_access::OfficialSkillConflict>,
     bridge: crate::core::cli_bridge::CliBridgeStatus,
@@ -112,6 +113,7 @@ pub struct AgentAccessStatusDto {
 fn agent_access_dto(
     status: crate::services::agent_access::AgentAccessStatus,
     bridge: crate::core::cli_bridge::CliBridgeStatus,
+    terminal_ready: bool,
 ) -> AgentAccessStatusDto {
     let agents = status
         .agents
@@ -136,6 +138,7 @@ fn agent_access_dto(
         .collect();
     AgentAccessStatusDto {
         skill_enabled: status.skill.as_ref().is_some_and(|skill| skill.enabled),
+        terminal_ready,
         skill_id: status.skill_id,
         official_state: status.official_state,
         conflict: status.conflict,
@@ -160,7 +163,16 @@ fn enable_ai_management_impl(
     let status = service
         .enable_ai_management()
         .map_err(format_service_error)?;
-    Ok(agent_access_dto(status, bridge))
+    crate::core::cli_terminal::configure(
+        service
+            .paths()
+            .default_central_repo
+            .parent()
+            .ok_or("CLI_TERMINAL_UNAVAILABLE")?,
+        &service.paths().cli_bridge_dir,
+    )
+    .map_err(|_| "CLI_TERMINAL_UNAVAILABLE".to_string())?;
+    Ok(agent_access_dto(status, bridge, true))
 }
 
 #[tauri::command]
@@ -194,6 +206,13 @@ pub async fn get_agent_access_status(
         Ok(agent_access_dto(
             status,
             crate::core::cli_bridge::bundled_cli_bridge_status(&service.paths().cli_bridge_dir),
+            service
+                .paths()
+                .default_central_repo
+                .parent()
+                .is_some_and(|home| {
+                    crate::core::cli_terminal::configured(home, &service.paths().cli_bridge_dir)
+                }),
         ))
     })
     .await
@@ -239,6 +258,13 @@ pub async fn set_agent_access(
         Ok(agent_access_dto(
             status,
             crate::core::cli_bridge::bundled_cli_bridge_status(&service.paths().cli_bridge_dir),
+            service
+                .paths()
+                .default_central_repo
+                .parent()
+                .is_some_and(|home| {
+                    crate::core::cli_terminal::configured(home, &service.paths().cli_bridge_dir)
+                }),
         ))
     })
     .await
