@@ -4,15 +4,6 @@ import path from "node:path";
 import process from "node:process";
 
 const ROOT = process.cwd();
-const CLI_PLATFORM_PACKAGES = [
-  ["packages/cli-darwin-arm64/package.json", "@skillshub-app/cli-darwin-arm64"],
-  ["packages/cli-darwin-x64/package.json", "@skillshub-app/cli-darwin-x64"],
-  ["packages/cli-win32-x64/package.json", "@skillshub-app/cli-win32-x64"],
-  ["packages/cli-linux-x64/package.json", "@skillshub-app/cli-linux-x64"],
-  ["packages/cli-linux-arm64/package.json", "@skillshub-app/cli-linux-arm64"],
-];
-const CLI_MAIN_PACKAGE = "packages/skillshub-cli/package.json";
-
 function read(filePath) {
   return fs.readFileSync(path.join(ROOT, filePath), "utf8");
 }
@@ -72,9 +63,6 @@ function syncLockfiles(version) {
   const lock = JSON.parse(read("package-lock.json"));
   lock.version = version;
   lock.packages[""].version = version;
-  const main = JSON.parse(read(CLI_MAIN_PACKAGE));
-  lock.packages["packages/skillshub-cli"].version = version;
-  lock.packages["packages/skillshub-cli"].optionalDependencies = main.optionalDependencies;
   write("package-lock.json", `${JSON.stringify(lock, null, 2)}\n`);
   const cargo = read("src-tauri/Cargo.lock");
   const pattern = /(\[\[package\]\]\r?\nname = "app"\r?\nversion = ")[^"]+(")/;
@@ -88,47 +76,8 @@ function syncFromPackageJson() {
   results.push({ file: "package.json", ...(replaceJsonStringProp("package.json", "version", version)) });
   results.push({ file: "src-tauri/tauri.conf.json", ...(replaceJsonStringProp("src-tauri/tauri.conf.json", "version", version)) });
   results.push({ file: "src-tauri/Cargo.toml", ...(replaceCargoPackageVersion("src-tauri/Cargo.toml", version)) });
-  results.push({ file: CLI_MAIN_PACKAGE, ...(replaceJsonStringProp(CLI_MAIN_PACKAGE, "version", version)) });
-  for (const [filePath, packageName] of CLI_PLATFORM_PACKAGES) {
-    results.push({ file: filePath, ...(replaceJsonStringProp(filePath, "version", version)) });
-    results.push({ file: CLI_MAIN_PACKAGE, ...(replaceJsonStringProp(CLI_MAIN_PACKAGE, packageName, version)) });
-  }
   syncLockfiles(version);
   return { version, results };
-}
-
-function checkCliPackageVersions(version, mismatches) {
-  const main = JSON.parse(read(CLI_MAIN_PACKAGE));
-  if (main.name !== "skillshub-cli") {
-    mismatches.push(`${CLI_MAIN_PACKAGE} name=${main.name} (expected skillshub-cli)`);
-  }
-  if (main.version !== version) {
-    mismatches.push(`${CLI_MAIN_PACKAGE} version=${main.version} (expected ${version})`);
-  }
-
-  const expectedOptionalNames = CLI_PLATFORM_PACKAGES.map(([, packageName]) => packageName);
-  const actualOptionalNames = Object.keys(main.optionalDependencies ?? {});
-  for (const packageName of expectedOptionalNames) {
-    const dependencyVersion = main.optionalDependencies?.[packageName];
-    if (dependencyVersion !== version) {
-      mismatches.push(`${CLI_MAIN_PACKAGE} optionalDependencies ${packageName}=${dependencyVersion} (expected ${version})`);
-    }
-  }
-  for (const packageName of actualOptionalNames) {
-    if (!expectedOptionalNames.includes(packageName)) {
-      mismatches.push(`${CLI_MAIN_PACKAGE} unexpected optionalDependency ${packageName}`);
-    }
-  }
-
-  for (const [filePath, packageName] of CLI_PLATFORM_PACKAGES) {
-    const manifest = JSON.parse(read(filePath));
-    if (manifest.name !== packageName) {
-      mismatches.push(`${filePath} name=${manifest.name} (expected ${packageName})`);
-    }
-    if (manifest.version !== version) {
-      mismatches.push(`${filePath} version=${manifest.version} (expected ${version})`);
-    }
-  }
 }
 
 function checkInSync() {
@@ -155,12 +104,8 @@ function checkInSync() {
     mismatches.push(`src-tauri/Cargo.toml version=${cargoVersion} (expected ${version})`);
   }
 
-  checkCliPackageVersions(version, mismatches);
-
   const lock = JSON.parse(read("package-lock.json"));
-  if (lock.version !== version || lock.packages?.[""]?.version !== version
-      || lock.packages?.["packages/skillshub-cli"]?.version !== version
-      || CLI_PLATFORM_PACKAGES.some(([, name]) => lock.packages?.["packages/skillshub-cli"]?.optionalDependencies?.[name] !== version)) {
+  if (lock.version !== version || lock.packages?.[""]?.version !== version) {
     mismatches.push(`package-lock.json product versions do not match ${version}`);
   }
   const lockedCargoVersion = read("src-tauri/Cargo.lock").match(/\[\[package\]\]\r?\nname = "app"\r?\nversion = "([^"]+)"/)?.[1];

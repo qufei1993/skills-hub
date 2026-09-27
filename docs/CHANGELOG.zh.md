@@ -20,7 +20,7 @@
 - **Agent-first CLI**：`skillshub-cli` 与桌面共享本地中央库、标签、来源、部署目标和写锁。无需启动桌面，即可查找、安装、导入、向明确 Agent 部署、安全更新、管理标签、可恢复删除和排错。
 - **设置中的 AI 管理**：一键准备内置管理组件并安装 `manage-skills-hub`，复用普通 Skill 流程同步到已检测、已启用的工具。移除独立「Agent 接入」页面，安装后通过「我的 Skills」管理；网络与存储设置支持折叠并保留摘要。
 - **校验后的桌面 CLI 桥接**：桌面构建内置同版本原生 CLI，启动时原子发布二进制、版本戳和 SHA-256 校验戳。发布中断或文件损坏会保留明确状态；开发版使用独立目录，拒绝重定向的上级目录，并强制 CLI 与桌面的构建模式一致。
-- **分发**：发布流程覆盖 macOS arm64/x64、Windows x64、Linux GNU arm64/x64，提供带 SHA-256 的独立 CLI 和由 `skillshub-cli` 选择的平台 npm 包。发布前必须通过五个平台的原生 CI；本机验证不代表其余四个平台已经完成原生验证。
+- **分发**：发布流程覆盖 macOS arm64/x64、Windows x64、Linux GNU arm64/x64，桌面端内置同版本 CLI，并提供 SHA-256 发布校验文件。取消 npm CLI 分发，AI 管理无需用户安装 Node.js 或 npm。发布前必须通过五个平台的原生 CI；本机验证不代表其余四个平台已经完成原生验证。
 
 ### 安全与范围
 - macOS 和 Linux 可向支持的 Agent 部署项目级 Skill。Windows 仅声明全局范围能力，项目请求返回 `PROJECT_SCOPE_UNSUPPORTED`，不修改中央库或 Agent 目标。

@@ -1,5 +1,7 @@
 # Skills Hub Agent-first CLI 设计
 
+> 2026-09-27 分发调整：取消本文中的 npm 主包、五个平台包及 npm 发布方案。CLI 随桌面端构建、打包和更新，用户从「设置 → AI 管理」启用，无需安装 Node.js 或 npm。GitHub Release 保留同次构建的原生 CLI 和 SHA-256 文件；下文 npm 内容仅为历史设计。
+
 > 2026-09-26 UI revision: the Settings AI management card replaces the separate Agent Access page. One action prepares the native CLI and installs `manage-skills-hub` using the shared installer for detected, enabled tools. Normal Skill controls handle subsequent management. Earlier per-Agent page descriptions below are superseded; CLI explicit-agent setup remains supported.
 
 - 状态：已确认

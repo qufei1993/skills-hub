@@ -20,7 +20,7 @@ macOS 和 Linux 支持向已配置项目目录的 Agent 进行项目级部署。
 
 `skillshub-cli` 通过与桌面相同的 Rust 服务和数据库提供本机 Skill 管理：列表、详情、搜索、检查更新、本地/Git 安装、多 Skill 选择、导入、向明确 Agent 部署、支持的全局/项目范围、安全的单个/批量更新、标签、可恢复删除、状态和诊断。安装只进入中央库，部署需要另行明确指定。
 
-发布后，CLI-only 用户可从 npm 安装 `skillshub-cli`，也可下载独立二进制并核对 `.sha256`。npm 自动选择 macOS arm64/x64、Windows x64 或 Linux GNU arm64/x64 平台包；其他平台不支持。`skillshub-cli setup --agent codex` 只向指定 Agent 安装和部署官方 `manage-skills-hub` Skill；其他工具使用检测到的 Agent ID。
+安装 Skills Hub 后，在「设置 → AI 管理」启用内置原生 CLI。CLI 跟随桌面端版本，新版应用启动时更新本机 CLI；关闭桌面端后仍可使用。不再维护或发布单独的 npm 包。
 
 官方 Skill 优先使用校验后的桌面 CLI 桥接，仅当桥接目录不存在时才查找 PATH。桥接损坏或版本不符时停止，并引导用户打开桌面修复。桌面入口移入「设置 → AI 管理」：一键校验并准备内置 CLI，通过共用安装流程将官方 Skill 安装并同步到已检测、已启用的工具。此桌面流程不依赖用户安装 Node.js 或 npm。安装后沿用普通 Skill 管理，技术状态默认折叠；移除独立「Agent 接入」页面。网络与存储卡片支持折叠并保留摘要。
 

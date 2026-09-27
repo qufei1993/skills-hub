@@ -74,7 +74,7 @@ jobs:
         run: cargo test --locked --lib cli_bridge -- --nocapture
       - run: npm run build
       - run: npm run cli:prepare -- --target ${{ matrix.target }}
-      - name: Native release binary and offline npm tarball smoke
+      - name: Native bundled CLI smoke
         shell: bash
         run: |
           extension=""
@@ -82,7 +82,6 @@ jobs:
           source="$GITHUB_WORKSPACE/src-tauri/binaries/skillshub-cli-${{ matrix.target }}$extension"
           "$source" version --json
           "$source" doctor --json
-          SKILLSHUB_CLI_SMOKE_SOURCE="$source" npm test -- scripts/package-cli.test.mjs -t 'installs explicit local main and host tarballs'
 
   release:
     needs: verify
@@ -543,7 +542,7 @@ jobs:
           cp "${EXE}" "release-assets/${NEW_EXE}"
           cp "${EXE}.sig" "release-assets/${NEW_EXE}.sig"
 
-      - name: Native release and offline npm smoke
+      - name: Native bundled CLI smoke
         shell: bash
         run: |
           extension=""
@@ -551,16 +550,11 @@ jobs:
           source="$GITHUB_WORKSPACE/src-tauri/binaries/skillshub-cli-${{ matrix.target }}$extension"
           "$source" version --json
           "$source" doctor --json
-          SKILLSHUB_CLI_SMOKE_SOURCE="$source" npm test -- scripts/package-cli.test.mjs -t 'installs explicit local main and host tarballs'
 
-      - name: Prepare standalone CLI, SHA-256, and verified npm platform tarball
+      - name: Prepare CLI binary and SHA-256
         shell: bash
         run: |
           set -euo pipefail
-          extension=""
-          if [ "$RUNNER_OS" = "Windows" ]; then extension=".exe"; fi
-          source="src-tauri/binaries/skillshub-cli-${{ matrix.target }}$extension"
-          npm run cli:package -- --version "${GITHUB_REF_NAME#v}" --target ${{ matrix.platform }} --source "$source" --output npm-assets
           node --input-type=module <<'NODE'
           import { readFileSync, writeFileSync, copyFileSync, mkdirSync } from 'node:fs';
           import { createHash } from 'node:crypto';
@@ -571,16 +565,9 @@ jobs:
           mkdirSync('release-assets', { recursive: true });
           copyFileSync(base + extension, 'release-assets/' + name);
           const digest = createHash('sha256').update(readFileSync('release-assets/' + name)).digest('hex');
-          if (digest !== metadata.sha256) throw new Error('Standalone/npm sidecar digest mismatch');
+          if (digest !== metadata.sha256) throw new Error('CLI sidecar digest mismatch');
           writeFileSync('release-assets/' + name + '.sha256', digest + '  ' + name + '\n');
           NODE
-
-      - name: Upload npm platform artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: npm-${{ matrix.platform }}
-          path: npm-assets/*.tgz
-          if-no-files-found: error
 
       - name: List prepared assets
         shell: bash
@@ -593,59 +580,10 @@ jobs:
           path: release-assets/*
           if-no-files-found: error
 
-  publish-npm-platforms:
-    needs: [verify, release]
-    if: startsWith(github.ref, 'refs/tags/v')
-    environment: release
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npm install --global npm@11.5.1
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: npm-*
-          path: npm-assets
-          merge-multiple: true
-      - name: Publish all five platform packages with OIDC provenance
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          for platform in darwin-arm64 darwin-x64 win32-x64 linux-x64 linux-arm64; do
-            test -f "npm-assets/skillshub-app-cli-$platform-$version.tgz"
-          done
-          for platform in darwin-arm64 darwin-x64 win32-x64 linux-x64 linux-arm64; do
-            npm publish "npm-assets/skillshub-app-cli-$platform-$version.tgz" --access public --provenance
-          done
-
-  publish-npm-main:
-    needs: [verify, release, publish-npm-platforms]
-    if: startsWith(github.ref, 'refs/tags/v')
-    environment: release
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npm install --global npm@11.5.1
-      - run: npm run version:check
-      - name: Publish main package only after every platform succeeds
-        run: npm publish ./packages/skillshub-cli --access public --provenance
-
   assemble-updater-json:
     name: Assemble updater.json
     runs-on: macos-14
-    needs: [verify, release, publish-npm-main]
+    needs: [verify, release]
     if: startsWith(github.ref, 'refs/tags/v')
     environment: release
     permissions:

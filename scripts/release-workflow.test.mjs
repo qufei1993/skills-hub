@@ -32,17 +32,13 @@ it('tag release independently verifies every native target before build or publi
   assert.match(commands, /--test cli_desktop_compatibility/)
   assert.match(commands, /version --json/)
   assert.match(commands, /doctor --json/)
-  assert.match(commands, /SKILLSHUB_CLI_SMOKE_SOURCE=/)
-  assert.match(commands, /installs explicit local main and host tarballs/)
   assert.ok(verify.steps.some(step => step.if === "runner.os == 'Windows'" && /cargo test --locked --lib cli_bridge\b/.test(step.run)))
   assert.ok(verify.steps.every(step => !step['continue-on-error']))
-  for (const name of ['release', 'publish-npm-platforms', 'publish-npm-main', 'assemble-updater-json']) {
+  for (const name of ['release', 'assemble-updater-json']) {
     const job = workflow.jobs[name]
     assert.ok(needs(job).includes('verify'), `${name} must require all native verification jobs`)
     assert.equal(job.if, "startsWith(github.ref, 'refs/tags/v')")
   }
-  assert.ok(needs(workflow.jobs['publish-npm-platforms']).includes('release'))
-  assert.ok(needs(workflow.jobs['publish-npm-main']).includes('publish-npm-platforms'))
 })
 
 it('both notarization submissions gate on parsed Accepted results before stapling and asset preparation', () => {
@@ -86,4 +82,18 @@ it('notarization gate accepts only Accepted JSON and never echoes untrusted resp
     assert.equal(output.status, status)
     assert.ok(!result.stdout.includes(hidden))
   }
+})
+
+it('desktop release has no npm publication dependency and retains native CLI preparation', () => {
+  assert.deepEqual(needs(workflow.jobs['assemble-updater-json']), ['verify', 'release'])
+  for (const job of Object.values(workflow.jobs)) {
+    assert.ok(needs(job).every(name => Object.hasOwn(workflow.jobs, name)))
+    assert.equal(job.permissions?.['id-token'], undefined)
+    for (const step of job.steps ?? []) {
+      assert.doesNotMatch(step.run ?? '', /npm publish|cli:package|package-cli\.test/)
+    }
+  }
+  const commands = workflow.jobs.release.steps.map(step => step.run ?? '').join('\n')
+  assert.match(commands, /npm run cli:prepare/)
+  assert.match(commands, /Bundled CLI changed after metadata was embedded/)
 })

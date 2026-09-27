@@ -3,9 +3,6 @@
   "private": true,
   "version": "0.11.0",
   "type": "module",
-  "workspaces": [
-    "packages/skillshub-cli"
-  ],
   "scripts": {
     "dev": "vite --port 5173 --strictPort",
     "build": "tsc -b && vite build",
@@ -23,7 +20,6 @@
     "version:check": "node scripts/version.mjs check",
     "tauri": "tauri",
     "cli:prepare": "node scripts/prepare-cli-sidecar.mjs",
-    "cli:package": "node scripts/package-cli.mjs",
     "tauri:dev": "node scripts/build-desktop.mjs --dev",
     "tauri:icon:desktop": "node scripts/tauri-icon-desktop.mjs",
     "tauri:build": "npm run version:check && node scripts/build-desktop.mjs",

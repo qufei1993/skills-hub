@@ -15,16 +15,10 @@ it('version set synchronizes both lockfiles and check rejects stale lockfile ver
       mkdirSync(path.dirname(path.join(fixture, file)), { recursive: true })
       cpSync(path.join(root, file), path.join(fixture, file))
     }
-    for (const directory of ['skillshub-cli', 'cli-darwin-arm64', 'cli-darwin-x64', 'cli-win32-x64', 'cli-linux-x64', 'cli-linux-arm64']) {
-      mkdirSync(path.join(fixture, 'packages', directory), { recursive: true })
-      cpSync(path.join(root, 'packages', directory, 'package.json'), path.join(fixture, 'packages', directory, 'package.json'))
-    }
     execFileSync(process.execPath, ['scripts/version.mjs', 'set', '99.0.0'], { cwd: fixture })
     const lock = JSON.parse(readFileSync(path.join(fixture, 'package-lock.json')))
     assert.equal(lock.version, '99.0.0')
     assert.equal(lock.packages[''].version, '99.0.0')
-    assert.equal(lock.packages['packages/skillshub-cli'].version, '99.0.0')
-    assert.ok(Object.values(lock.packages['packages/skillshub-cli'].optionalDependencies).every(value => value === '99.0.0'))
     assert.match(readFileSync(path.join(fixture, 'src-tauri/Cargo.lock'), 'utf8'), /name = "app"\nversion = "99\.0\.0"/)
     execFileSync(process.execPath, ['scripts/version.mjs', 'check'], { cwd: fixture })
     for (const file of ['package-lock.json', 'src-tauri/Cargo.lock']) {
