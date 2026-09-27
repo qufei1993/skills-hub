@@ -376,6 +376,24 @@ fn agent_access_official_bundle_works_with_normal_check_and_update_workflows() {
 }
 
 #[test]
+fn agent_access_update_skips_tools_missing_from_runtime_home() {
+    let f = Fixture::new();
+    f.old_bundle();
+    let previous_target = fs::read(f.target("cursor").join("SKILL.md")).unwrap();
+    let detached = f.home.path().join("cursor-detached");
+    fs::rename(f.home.path().join(".cursor"), &detached).unwrap();
+    let updated = f.service.update("manage-skills-hub".into()).unwrap();
+    assert!(updated.changed);
+    let record = f.service.show_skill("manage-skills-hub".into()).unwrap();
+    assert!(record.targets.iter().all(|target| target.status != "error"));
+    assert_eq!(
+        fs::read(detached.join("skills/manage-skills-hub/SKILL.md")).unwrap(),
+        previous_target
+    );
+    assert!(!f.home.path().join(".cursor").exists());
+}
+
+#[test]
 fn agent_access_bundled_copy_is_excluded_from_onboarding_discovery() {
     let f = Fixture::new();
     f.service

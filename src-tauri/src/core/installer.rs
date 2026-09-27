@@ -23,7 +23,7 @@ use super::sync_engine::{
     copy_dir_recursive, sync_dir_for_tool_with_overwrite, PreparedDirReplacement, SyncMode,
 };
 use super::tool_adapters::{
-    adapter_by_key, is_tool_installed, project_relative_skills_dir, resolve_default_path, ToolId,
+    adapter_by_key, project_relative_skills_dir, resolve_adapter_path_in_home, ToolId,
 };
 
 pub const OFFICIAL_SKILL_MD: &str = include_str!(concat!(
@@ -975,6 +975,7 @@ pub struct UpdateCheckResult {
 }
 
 fn expected_builtin_target_path(
+    paths: &RuntimePaths,
     adapter: &super::tool_adapters::ToolAdapter,
     skill_name: &str,
     target: &SkillTargetRecord,
@@ -986,7 +987,11 @@ fn expected_builtin_target_path(
             .context("project target is missing its project path")?;
         PathBuf::from(project_path).join(project_relative_skills_dir(adapter))
     } else {
-        resolve_default_path(adapter)?
+        let home = paths
+            .default_central_repo
+            .parent()
+            .context("missing runtime home")?;
+        resolve_adapter_path_in_home(adapter, home, adapter.relative_skills_dir, "skills")
     };
     Ok(root.join(skill_name))
 }
@@ -1344,7 +1349,13 @@ fn update_managed_skill_from_source_inner(
         }
         if original.scope == "global" {
             if let Some(adapter) = adapter_by_key(&original.tool) {
-                if !is_tool_installed(&adapter).unwrap_or(false) {
+                let home = paths
+                    .default_central_repo
+                    .parent()
+                    .context("missing runtime home")?;
+                if !resolve_adapter_path_in_home(&adapter, home, adapter.relative_detect_dir, "")
+                    .exists()
+                {
                     continue;
                 }
             }
@@ -1353,7 +1364,8 @@ fn update_managed_skill_from_source_inner(
             let mut target = original.clone();
             if let Some(adapter) = adapter_by_key(&target.tool) {
                 if adapter.id == ToolId::KimiCli {
-                    let expected = expected_builtin_target_path(&adapter, &record.name, &target)?;
+                    let expected =
+                        expected_builtin_target_path(paths, &adapter, &record.name, &target)?;
                     if Path::new(&target.target_path) != expected {
                         if std::fs::symlink_metadata(&expected).is_ok() {
                             let hash = hash_dir_for_sync_conflict(&expected)?;
