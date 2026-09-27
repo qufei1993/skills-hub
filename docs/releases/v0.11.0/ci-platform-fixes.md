@@ -7,3 +7,9 @@ Windows MSVC builds embed the Common Controls v6 manifest in executables, includ
 Validation: the missing-runtime-tool regression failed before the fix and passes afterward. Full local checks and native CI are required before release.
 
 Windows native diagnostics confirmed that `MoveFileExW` and the Win32 path-based rename reopen the guarded parent and fail with sharing violation 32. `NtSetInformationFile` with a NULL root and a single filename succeeds under the existing read-only sharing guard. Temporary files retain DELETE access and allow read sharing only, preventing external writes or moves before publication. Rename and failed-operation cleanup both use the existing file handle; no ancestor sharing restriction is relaxed. Regression checks cover creation, replacement, locked-target preservation, cleanup, and invalid destination names. A lightweight Windows probe uses the production rename helper, while native CI runs the full bridge test group.
+
+## CI scope and local iteration
+
+Run focused tests locally while developing, then `npm run check` before committing. Automatic CI keeps the web checks and runs Linux Rust checks plus lightweight Windows probes only when the changed paths require native validation. Frontend and documentation-only diffs skip native checks; dependencies, bundled Skills, build scripts, workflow files and unknown paths require them. PR comparisons cover the complete diff from the base merge point, while main pushes compare the pushed range. Missing comparison history fails the detection job instead of silently skipping validation.
+
+The five-platform debug/release matrix is manual through the CI workflow's Run workflow action. Normal PR updates and main pushes no longer trigger that matrix. Restore the Rust cache before preparing the debug sidecar. The release workflow retains its independent five-platform verification gate before publication.

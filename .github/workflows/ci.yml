@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [main]
@@ -10,6 +11,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      rust: ${{ steps.detect.outputs.rust }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - id: detect
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/ci-changes.mjs
+
   web:
     runs-on: ubuntu-latest
     steps:
@@ -26,11 +47,17 @@ jobs:
       - run: npm run build
 
   rust:
+    needs: changes
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true')
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: src-tauri
     steps:
+      - name: Require successful change detection
+        working-directory: .
+        if: needs.changes.result != 'success'
+        run: exit 1
       - uses: actions/checkout@v4
       - name: Install system dependencies (linux)
         run: |
@@ -40,17 +67,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Prepare debug sidecar before desktop Rust checks
-        working-directory: .
-        run: node scripts/prepare-cli-sidecar.mjs --target x86_64-unknown-linux-gnu --debug
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - name: Prepare debug sidecar before desktop Rust checks
+        working-directory: .
+        run: node scripts/prepare-cli-sidecar.mjs --target x86_64-unknown-linux-gnu --debug
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test --all
 
   cli-native:
+    if: github.event_name == 'workflow_dispatch'
     name: Native CLI (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -107,8 +135,14 @@ jobs:
           "$source" doctor --json
 
   windows-console:
+    needs: changes
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true')
     runs-on: windows-2022
     steps:
+      - name: Require successful change detection
+        working-directory: .
+        if: needs.changes.result != 'success'
+        run: exit 1
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify background child processes have no console window
