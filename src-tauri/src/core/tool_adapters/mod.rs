@@ -553,9 +553,8 @@ pub fn default_tool_adapters() -> Vec<ToolAdapter> {
         ToolAdapter {
             id: ToolId::Cline,
             display_name: "Cline",
-            // add-skill global path: ~/.agents/skills/
-            relative_skills_dir: ".agents/skills",
-            relative_detect_dir: ".agents",
+            relative_skills_dir: ".cline/skills",
+            relative_detect_dir: ".cline",
         },
         ToolAdapter {
             id: ToolId::CodeBuddy,
@@ -857,7 +856,7 @@ pub fn project_relative_skills_dir(adapter: &ToolAdapter) -> &'static str {
         ToolId::Augment => ".augment/skills",
         ToolId::ClaudeCode => ".claude/skills",
         ToolId::OpenClaw => "skills",
-        ToolId::Cline => ".agents/skills",
+        ToolId::Cline => ".cline/skills",
         ToolId::CodeBuddy => ".codebuddy/skills",
         ToolId::CodeWhale => ".codewhale/skills",
         ToolId::WorkBuddy => ".workbuddy/skills",

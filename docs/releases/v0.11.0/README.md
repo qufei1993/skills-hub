@@ -4,6 +4,10 @@
 
 v0.11.0 lets you manage Skills through AI conversations using the official `manage-skills-hub` Skill and `skillshub-cli`. Enable AI management in Settings with one click. AI installations sync to detected, enabled tools by default, and desktop lists refresh on navigation and window focus. The CLI shares the desktop library and is bundled with the desktop, follows its version, and works after the desktop is closed. Installation and updates happen only through the explicit AI management enable action, never during ordinary startup. See [Agent-first CLI](agent-first-cli.md) and [verified desktop bridge](verified-cli-bridge.md).
 
+## Cline desktop support
+
+The existing Cline adapter now detects `~/.cline` and syncs global Skills to `~/.cline/skills` and project Skills to `.cline/skills`, matching [Cline’s documented directories](https://docs.cline.bot/customization/skills). Shared-directory previews no longer group Cline with `.agents/skills` tools. Existing files in `.agents/skills` are not moved or deleted; deploy the desired Skills to Cline again to populate its native directory.
+
 ## Release status
 
 This is release preparation, not evidence of publication. The release workflow advertises exactly macOS arm64/x64, Windows x64, and Linux GNU arm64/x64, each on a matching native runner. This work was validated locally on macOS arm64; the other native jobs and configured signing/notarization must pass in CI before release. No release, signing, or notarization was performed during preparation.

@@ -397,7 +397,7 @@ fn project_relative_skills_dir_maps_supported_agents() {
         ("github_copilot", ".agents/skills"),
         ("amp", ".agents/skills"),
         ("antigravity", ".agents/skills"),
-        ("cline", ".agents/skills"),
+        ("cline", ".cline/skills"),
     ];
 
     for (key, expected) in shared_agents {
@@ -466,7 +466,7 @@ fn adapters_sharing_project_skills_dir_groups_agents_tools() {
     assert!(keys.contains("amp"));
     assert!(!keys.contains("kimi_cli"));
     assert!(keys.contains("antigravity"));
-    assert!(keys.contains("cline"));
+    assert!(!keys.contains("cline"));
     assert!(!keys.contains("claude_code"));
     assert!(!keys.contains("windsurf"));
 }
@@ -525,4 +525,50 @@ fn scan_tool_dir_skips_app_support_path() {
 
     let out = scan_tool_dir(&tool, &root).unwrap();
     assert!(out.is_empty());
+}
+
+#[test]
+fn cline_discovers_global_and_project_skills_in_native_directories() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let cline = adapter_by_key("cline").unwrap();
+    for root in [home.path(), project.path()] {
+        let skill = root.join(".cline/skills/desktop-skill");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "# Desktop skill").unwrap();
+    }
+    let global = resolve_adapter_path_in_home_with_kimi_home(
+        &cline,
+        home.path(),
+        cline.relative_skills_dir,
+        "skills",
+        None,
+    );
+    for path in [
+        global,
+        resolve_project_path(&cline, project.path()).unwrap(),
+    ] {
+        let skills = scan_tool_dir(&cline, &path).unwrap();
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "desktop-skill");
+    }
+    assert_eq!(adapters_sharing_skills_dir(&cline).len(), 1);
+    assert_eq!(adapters_sharing_project_skills_dir(&cline).len(), 1);
+}
+
+#[test]
+fn cline_detection_requires_its_own_directory() {
+    let home = tempfile::tempdir().unwrap();
+    let cline = adapter_by_key("cline").unwrap();
+    fs::create_dir_all(home.path().join(".agents/skills")).unwrap();
+    let detect = resolve_adapter_path_in_home_with_kimi_home(
+        &cline,
+        home.path(),
+        cline.relative_detect_dir,
+        "",
+        None,
+    );
+    assert!(!detect.exists());
+    fs::create_dir_all(home.path().join(".cline")).unwrap();
+    assert!(detect.exists());
 }

@@ -6,6 +6,10 @@ v0.11.0 支持通过 AI 对话管理 Skills，由官方 `manage-skills-hub` Skil
 
 详细说明见 [Agent 优先的命令行入口](agent-first-cli.zh.md) 和 [桌面 CLI 桥接](verified-cli-bridge.zh.md)。
 
+## Cline 桌面版支持
+
+更新现有 Cline 适配：通过 `~/.cline` 检测安装状态，全局同步到 `~/.cline/skills`，项目同步到 `.cline/skills`，与 [Cline 官方目录说明](https://docs.cline.bot/customization/skills)一致。共享目录预览不再将 Cline 与 `.agents/skills` 工具归为一组。已有 `.agents/skills` 文件不会迁移或删除；请将所需 Skills 重新同步到 Cline，写入其原生目录。
+
 ## 发布状态
 
 当前是发布准备记录，不代表已发布。发布矩阵覆盖 macOS arm64/x64、Windows x64、Linux GNU arm64/x64，各自使用匹配架构的原生运行环境。本次本地验证仅覆盖 macOS arm64；其余原生平台和已配置的签名、公证仍须在 CI 通过。本次准备未执行正式发布、签名或公证。
