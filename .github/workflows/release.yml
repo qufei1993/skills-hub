@@ -638,7 +638,12 @@ jobs:
 
       - name: Verify desktop bundle excludes CLI
         shell: bash
-        run: node scripts/verify-desktop-bundle.mjs "src-tauri/target/${{ matrix.target }}/release/bundle"
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            node scripts/verify-desktop-bundle.mjs "src-tauri/target/${{ matrix.target }}/release/bundle" "src-tauri/target/${{ matrix.target }}/release/nsis/x64/installer.nsi"
+          else
+            node scripts/verify-desktop-bundle.mjs "src-tauri/target/${{ matrix.target }}/release/bundle"
+          fi
 
       - name: Prepare macOS Assets
         if: runner.os == 'macOS'

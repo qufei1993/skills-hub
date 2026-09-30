@@ -19,3 +19,9 @@ CLI targets require the non-default Cargo `cli` feature; `npm run cli:prepare` a
 The public [CLI resource repository](https://github.com/qufei1993/skills-hub-cli) has been created, but no CLI release was published. The existing desktop v0.11.0 release remains a draft and its tag is unchanged.
 
 Five-platform native verification, Windows PowerShell tests, configured platform signing/notarization, the resource token's cross-repository permissions, and anonymous production CLI downloads must pass in CI before desktop publication. This local implementation does not substitute for those gates. A release owner must choose the candidate/tag that contains these changes before publication; the old draft must not be published as this implementation.
+
+## Final review
+
+The Windows packaging gate now requires and checks the actual sibling `release/nsis/x64/installer.nsi`; missing instructions or CLI payloads fail validation. Default builds explicitly pass their resolved target so staging cleanup and output agree. Both READMEs document the required matching release manifest. Regression tests failed before these fixes and passed afterward. Final full check passed: 282 frontend, 623 Rust unit, 2 compatibility and 19 CLI integration tests; workflow lint and version checks also passed. One final fix pass was performed, without a second independent review. No minor review findings remain deferred.
+
+The complete implementation decision ledger and tradeoffs are recorded in [the Chinese validation record](cli-on-demand-download.zh.md#最终审查与实现决定). The user-deferred missing central Skill directory issue is unchanged. Native CI, signing, notarization, public download and candidate-tag decisions remain release prerequisites.

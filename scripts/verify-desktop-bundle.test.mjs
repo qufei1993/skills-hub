@@ -16,3 +16,19 @@ it('checks real package files and Windows packaging instructions for a carried C
     writeFileSync(path.join(root,'installer.nsi'),'File "binaries/skillshub-cli.exe"'); assert.throws(()=>api.verifyDesktopBundle(root))
   } finally {rmSync(root,{recursive:true,force:true})}
 })
+
+it('requires and scans Windows NSIS instructions beside the bundle directory', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'windows-bundle-'))
+  try {
+    const bundle = path.join(root, 'release/bundle/nsis')
+    const instructions = path.join(root, 'release/nsis/x64/installer.nsi')
+    mkdirSync(bundle, { recursive: true })
+    mkdirSync(path.dirname(instructions), { recursive: true })
+    writeFileSync(path.join(bundle, 'Skills Hub.exe'), 'installer')
+    assert.throws(() => api.verifyDesktopBundle(path.dirname(bundle), { nsisScript: instructions }))
+    writeFileSync(instructions, 'File "app.exe"')
+    api.verifyDesktopBundle(path.dirname(bundle), { nsisScript: instructions })
+    writeFileSync(instructions, 'File "skillshub-cli.exe"')
+    assert.throws(() => api.verifyDesktopBundle(path.dirname(bundle), { nsisScript: instructions }))
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})

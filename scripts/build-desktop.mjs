@@ -86,6 +86,11 @@ async function main(args) {
   if (command === 'build') clearDesktopBundle({ root, ...options })
   if (devIndex !== -1) args.splice(devIndex, 1)
   if (command === 'build') {
+    const targetArgs = args.slice(0, args.indexOf('--') === -1 ? args.length : args.indexOf('--'))
+    if (!targetArgs.some(arg => arg === '--target' || arg === '-t' || arg.startsWith('--target='))) {
+      const boundary = args.indexOf('--')
+      args.splice(boundary === -1 ? args.length : boundary, 0, '--target', options.target)
+    }
     const runnerIndex = args.indexOf('--')
     if (runnerIndex === -1) args.push('--', '--bin', 'app')
     else args.splice(runnerIndex + 1, 0, '--bin', 'app')

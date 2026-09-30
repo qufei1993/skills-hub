@@ -238,8 +238,12 @@ npm run tauri:dev
 ```bash
 npm run lint
 npm run build
-npm run tauri:build
+# Example: macOS ARM; select the triple for your platform.
+node scripts/prepare-cli-sidecar.mjs --target aarch64-apple-darwin
+npm run tauri:build -- --target aarch64-apple-darwin --cli-manifest src-tauri/binaries/skillshub-cli-aarch64-apple-darwin.json
 ```
+
+Release builds require a release CLI manifest matching the desktop version, commit and target. The example generates a local validation manifest; the release workflow signs the CLI first and generates its manifest from the final bytes. Each platform command below also requires `-- --cli-manifest <path>`, or `SKILLS_HUB_CLI_MANIFEST_PATH`. Development startup prepares the local CLI automatically.
 
 #### Platform build commands (from `package.json`)
 

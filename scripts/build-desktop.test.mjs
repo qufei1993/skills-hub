@@ -202,7 +202,7 @@ describe('desktop OAuth build configuration', () => {
       })
       assert.equal(result.status, 0, result.stderr)
       assert.deepEqual(JSON.parse(result.stdout.trim()), {
-        args: [modeArgs.length ? 'dev' : 'build', '--config', 'test.json', ...(modeArgs.length ? [] : ['--', '--bin', 'app'])],
+        args: [modeArgs.length ? 'dev' : 'build', '--config', 'test.json', ...(modeArgs.length ? [] : ['--target', 'aarch64-apple-darwin', '--', '--bin', 'app'])],
         github: githubId,
         gitlab: gitlabId,
         prepared: modeArgs.length ? { target: 'aarch64-apple-darwin', debug: true } : null,

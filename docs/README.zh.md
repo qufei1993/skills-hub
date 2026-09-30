@@ -237,8 +237,12 @@ npm run tauri:dev
 ```bash
 npm run lint
 npm run build
-npm run tauri:build
+# 示例：macOS ARM；其他平台请使用对应的目标三元组。
+node scripts/prepare-cli-sidecar.mjs --target aarch64-apple-darwin
+npm run tauri:build -- --target aarch64-apple-darwin --cli-manifest src-tauri/binaries/skillshub-cli-aarch64-apple-darwin.json
 ```
+
+正式构建必须提供与桌面版本、提交和平台一致的 release CLI 清单。上述命令生成本地验证用清单；正式发布由工作流先签名 CLI，再根据最终文件生成清单。所有下方平台命令也必须追加 `-- --cli-manifest <清单路径>`，或设置 `SKILLS_HUB_CLI_MANIFEST_PATH`。开发启动会自动准备本地 CLI，无需此参数。
 
 #### 各系统构建命令（来自 `package.json`）
 
