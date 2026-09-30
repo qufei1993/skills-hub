@@ -11,7 +11,7 @@
     "rust:fmt": "cd src-tauri && cargo fmt --all",
     "rust:fmt:check": "cd src-tauri && cargo fmt --all -- --check",
     "rust:clippy": "cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings",
-    "rust:test": "cd src-tauri && cargo test",
+    "rust:test": "cd src-tauri && cargo test --features cli",
     "network:check": "node --test scripts/check-network-boundaries.test.mjs && node scripts/check-network-boundaries.mjs",
     "check": "npm run network:check && npm run lint && npm run test && npm run build && npm run rust:fmt:check && npm run rust:clippy && npm run rust:test",
     "preview": "vite preview",
@@ -59,7 +59,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
-    "@tauri-apps/cli": "^2.9.6",
+    "@tauri-apps/cli": "^2.12.0",
     "@testing-library/react": "^16.3.0",
     "@types/node": "^24.10.7",
     "@types/react": "^19.2.8",

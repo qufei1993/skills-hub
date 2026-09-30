@@ -13,6 +13,8 @@ describe('CLI sidecar preparation', () => {
     assert.equal(result.status, 0, result.stderr)
     const app = JSON.parse(result.stdout).packages.find(item => item.name === 'app')
     assert.equal(app.default_run, 'app')
+    assert.deepEqual(app.targets.find(target => target.name === 'skillshub-cli')['required-features'], ['cli'])
+    assert.deepEqual(app.features.cli, [])
   })
   it('maps only the five explicitly supported targets and rejects shell input', () => {
     for (const [target, triple] of [
@@ -55,7 +57,7 @@ describe('CLI sidecar preparation', () => {
       } })
       assert.equal(calls.length, 1)
       assert.equal(calls[0].command, 'cargo')
-      assert.deepEqual(calls[0].args, ['build', '--locked', '--bin', 'skillshub-cli', '--target', 'x86_64-pc-windows-msvc', '--message-format=json-render-diagnostics'])
+      assert.deepEqual(calls[0].args, ['build', '--locked', '--features', 'cli', '--bin', 'skillshub-cli', '--target', 'x86_64-pc-windows-msvc', '--message-format=json-render-diagnostics'])
       assert.equal(calls[0].options.shell, false)
       assert.equal(calls[0].options.env.SKILLS_HUB_PREPARE_CLI_SIDECAR, '1')
       assert.equal(calls[0].options.env.CARGO_TARGET_DIR, path.join(root, 'src-tauri/target'))

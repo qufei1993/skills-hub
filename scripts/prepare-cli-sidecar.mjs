@@ -48,7 +48,7 @@ export function prepareCliSidecar({ root, target, debug = false, run = spawnSync
     throw new Error('CLI and desktop package versions must match.')
   }
   const profile = debug ? 'debug' : 'release'
-  const args = ['build', '--locked', '--bin', 'skillshub-cli', '--target', triple, '--message-format=json-render-diagnostics']
+  const args = ['build', '--locked', '--features', 'cli', '--bin', 'skillshub-cli', '--target', triple, '--message-format=json-render-diagnostics']
   if (!debug) args.push('--release')
   const result = run('cargo', args, {
     cwd: tauriRoot,

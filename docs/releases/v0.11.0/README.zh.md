@@ -45,3 +45,5 @@ CLI 与桌面分别公证，各自响应都必须为 `Accepted`。桌面公证�
 五个平台的 CLI 二进制、校验文件和最终字节清单发布到公开的 `qufei1993/skills-hub-cli` 资源仓库。桌面构建只嵌入匹配清单，发布前必须匿名验证对应 CLI 可下载。`GH_RELEASE_TOKEN` 需要资源仓库的 Contents 读写权限，只通过 Actions secret 提供；同名版本资源不同会停止，不会覆盖。
 
 现有 v0.11.0 草稿和标签仍指向此前的内置 CLI 版本。本次不公开草稿、不改写标签；上线前由发布负责人另行确定候选版本和标签。
+
+[CLI 按需下载验证](cli-on-demand-download.zh.md)

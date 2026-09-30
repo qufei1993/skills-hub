@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -27,6 +27,11 @@ function resolveOAuthClientId(key, env, contents) {
 
 export function resolveOAuthClientIds(env, contents = '') {
   return Object.fromEntries(oauthClientIdKeys.map(key => [key, resolveOAuthClientId(key, env, contents)]))
+}
+
+export function clearDesktopBundle({ root, target, debug }) {
+  if (!/^(?:aarch64|x86_64)-(?:apple-darwin|unknown-linux-gnu|pc-windows-msvc)$/.test(target)) throw new Error('Invalid desktop bundle target.')
+  rmSync(path.join(root, 'src-tauri', 'target', target, debug ? 'debug' : 'release', 'bundle'), { recursive: true, force: true })
 }
 
 async function main(args) {
@@ -78,6 +83,7 @@ async function main(args) {
     throw new Error('CLI_MANIFEST_REQUIRED: pass --cli-manifest <path> for the matching release CLI.')
   }
   env.SKILLS_HUB_CLI_MANIFEST_PATH = manifestPath
+  if (command === 'build') clearDesktopBundle({ root, ...options })
   if (devIndex !== -1) args.splice(devIndex, 1)
   if (command === 'build') {
     const runnerIndex = args.indexOf('--')

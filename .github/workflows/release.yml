@@ -67,7 +67,7 @@ jobs:
       - run: npm run cli:prepare -- --target ${{ matrix.target }} --debug
       - name: CLI and previous-stable compatibility tests (native debug executable)
         working-directory: src-tauri
-        run: cargo test --locked --test cli_integration --test cli_desktop_compatibility
+        run: cargo test --locked --features cli --test cli_integration --test cli_desktop_compatibility
       - name: Windows native bridge ancestor and junction race tests
         if: runner.os == 'Windows'
         working-directory: src-tauri
@@ -547,6 +547,14 @@ jobs:
         shell: bash
         run: |
           echo "SKILLS_HUB_CLI_MANIFEST_PATH=$GITHUB_WORKSPACE/cli-manifests/cli-manifest-${{ matrix.target }}.json" >> "$GITHUB_ENV"
+
+      - name: Clear stale desktop bundle staging
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { clearDesktopBundle } from './scripts/build-desktop.mjs';
+          clearDesktopBundle({ root: process.cwd(), target: '${{ matrix.target }}', debug: false });
+          NODE
 
       - name: Build Tauri App (macOS)
         if: runner.os == 'macOS'

@@ -40,3 +40,10 @@ it('refuses a conflicting existing release without upload, overwrite or publicat
   assert.ok(calls.every(args=>args[0]==='api'))
  })
 })
+it('requires a source commit before any remote inspection or mutation',async()=>{
+ await fixture(async({directory,assets})=>{
+  const calls=[]
+  await assert.rejects(api.publishCliRelease({directory,tag:'v0.11.0',gh:async args=>{calls.push(args);return {draft:false,assets}}}))
+  assert.equal(calls.length,0)
+ })
+})

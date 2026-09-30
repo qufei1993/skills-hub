@@ -41,3 +41,5 @@ References: [GitHub native runners](https://docs.github.com/en/actions/reference
 Five CLI targets publish binary, SHA-256, and final-byte manifest files to the public `qufei1993/skills-hub-cli` repository. The desktop builds embed matching manifests and exclude CLI binaries; desktop publication waits for successful anonymous fixed-version downloads. `GH_RELEASE_TOKEN` must have Contents read/write access to the resource repository and is supplied only through Actions secrets. Existing version assets must match exactly; the pipeline never overwrites a conflicting version.
 
 The existing v0.11.0 desktop draft and tag refer to the previous bundled build. These changes do not publish that draft or rewrite the tag. A release owner must choose the replacement candidate/tag before shipping this implementation.
+
+[On-demand CLI validation](cli-on-demand-download.md)

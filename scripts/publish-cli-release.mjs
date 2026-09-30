@@ -14,6 +14,7 @@ function runGh(args) {
   return args[0]==='api' ? JSON.parse(result.stdout) : undefined
 }
 export async function publishCliRelease({directory,tag,sourceCommit,gh=runGh}) {
+  if(!/^[a-f0-9]{40}$/.test(sourceCommit ?? '')) throw new Error('CLI_RELEASE_SOURCE_REQUIRED')
   if(!/^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(tag)) throw new Error('CLI_RELEASE_TAG_INVALID')
   const manifests=readReleaseManifests(directory,{version:tag.slice(1),sourceCommit})
   const names=manifests.flatMap(m=>[m.assetName,`${m.assetName}.sha256`,`cli-manifest-${m.target}.json`])

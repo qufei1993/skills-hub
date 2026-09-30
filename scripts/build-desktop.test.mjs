@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 const { describe, it } = process.env.VITEST ? await import('vitest') : await import('node:test')
 import { resolveOAuthClientIds } from './build-desktop.mjs'
+import * as desktopBuild from './build-desktop.mjs'
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -212,4 +213,20 @@ describe('desktop OAuth build configuration', () => {
     }
   })
   }
+})
+
+it('clears stale bundle contents before packaging without deleting compiled executables', () => {
+  assert.equal(typeof desktopBuild.clearDesktopBundle, 'function')
+  const root = mkdtempSync(path.join(tmpdir(), 'stale-desktop-bundle-'))
+  try {
+    const output = path.join(root, 'src-tauri/target/aarch64-apple-darwin/release')
+    const bundle = path.join(output, 'bundle/macos/Skills Hub.app/Contents/MacOS')
+    mkdirSync(bundle, { recursive: true })
+    writeFileSync(path.join(bundle, 'skillshub-cli'), 'stale sidecar')
+    writeFileSync(path.join(output, 'app'), 'compiled desktop')
+    desktopBuild.clearDesktopBundle({ root, target: 'aarch64-apple-darwin', debug: false })
+    assert.equal(existsSync(path.join(output, 'bundle')), false)
+    assert.equal(existsSync(path.join(output, 'app')), true)
+    assert.throws(() => desktopBuild.clearDesktopBundle({ root, target: '../../unsafe', debug: false }))
+  } finally { rmSync(root, { recursive: true, force: true }) }
 })
