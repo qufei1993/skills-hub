@@ -179,7 +179,7 @@ describe('desktop OAuth build configuration', () => {
         "import { writeFileSync } from 'node:fs'",
         "import path from 'node:path'",
         "export function desktopSidecarOptions(args) { return { target: 'aarch64-apple-darwin', debug: args.includes('--dev') } }",
-        "export function prepareCliSidecar({ root, target, debug }) { writeFileSync(path.join(root, 'prepared.json'), JSON.stringify({ target, debug })) }",
+        "export function prepareCliSidecar({ root, target, debug }) { writeFileSync(path.join(root, 'prepared.json'), JSON.stringify({ target, debug })); return { metadataPath: 'debug-manifest.json' } }",
       ].join('\n'))
       writeFileSync(path.join(cliDir, 'package.json'), '{"name":"@tauri-apps/cli","version":"0.0.0"}')
       writeFileSync(path.join(cliDir, 'tauri.js'), [
@@ -190,11 +190,12 @@ describe('desktop OAuth build configuration', () => {
         `  gitlab: process.env.${gitlabKey},`,
         '  githubSecret: process.env.SKILLS_HUB_GITHUB_CLIENT_SECRET,',
         '  userToken: process.env.USER_TOKEN,',
-        "  prepared: JSON.parse(readFileSync('prepared.json', 'utf8')),",
+        "  prepared: require('node:fs').existsSync('prepared.json') ? JSON.parse(readFileSync('prepared.json', 'utf8')) : null,",
+        "  manifest: process.env.SKILLS_HUB_CLI_MANIFEST_PATH,",
         '}',
         'console.log(JSON.stringify(picked))',
       ].join('\n'))
-      const result = spawnSync(process.execPath, [realpathSync(copied), ...modeArgs, '--config', 'test.json'], {
+      const result = spawnSync(process.execPath, [realpathSync(copied), ...modeArgs, ...(modeArgs.length ? [] : ['--cli-manifest', 'release-manifest.json']), '--config', 'test.json'], {
         env: withoutOAuthClientIds({ PATH: process.env.PATH }),
         encoding: 'utf8',
       })
@@ -203,7 +204,8 @@ describe('desktop OAuth build configuration', () => {
         args: [modeArgs.length ? 'dev' : 'build', '--config', 'test.json', ...(modeArgs.length ? [] : ['--', '--bin', 'app'])],
         github: githubId,
         gitlab: gitlabId,
-        prepared: { target: 'aarch64-apple-darwin', debug: modeArgs.length > 0 },
+        prepared: modeArgs.length ? { target: 'aarch64-apple-darwin', debug: true } : null,
+        manifest: modeArgs.length ? 'debug-manifest.json' : path.resolve(realpathSync(root), 'release-manifest.json'),
       })
     } finally {
       rmSync(root, { recursive: true, force: true })

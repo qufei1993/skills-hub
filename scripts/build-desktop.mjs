@@ -62,7 +62,22 @@ async function main(args) {
   const env = { ...process.env, ...clientIds }
   delete env.SKILLS_HUB_PREPARE_CLI_SIDECAR
   const { desktopSidecarOptions, prepareCliSidecar } = await import('./prepare-cli-sidecar.mjs')
-  prepareCliSidecar({ root, env, ...desktopSidecarOptions(args) })
+  const options = desktopSidecarOptions(args)
+  const manifestIndex = args.indexOf('--cli-manifest')
+  let manifestPath = env.SKILLS_HUB_CLI_MANIFEST_PATH
+  if (manifestIndex !== -1) {
+    const supplied = args[manifestIndex + 1]
+    if (!supplied || supplied.startsWith('--') || args.lastIndexOf('--cli-manifest') !== manifestIndex) throw new Error('Missing or invalid --cli-manifest path.')
+    manifestPath = path.resolve(root, supplied)
+    args.splice(manifestIndex, 2)
+  }
+  if (options.debug) {
+    if (manifestPath) throw new Error('Development CLI must be prepared locally.')
+    manifestPath = prepareCliSidecar({ root, env, ...options }).metadataPath
+  } else if (!manifestPath) {
+    throw new Error('CLI_MANIFEST_REQUIRED: pass --cli-manifest <path> for the matching release CLI.')
+  }
+  env.SKILLS_HUB_CLI_MANIFEST_PATH = manifestPath
   if (devIndex !== -1) args.splice(devIndex, 1)
   if (command === 'build') {
     const runnerIndex = args.indexOf('--')

@@ -29,7 +29,7 @@
     }
   },
   "bundle": {
-    "externalBin": ["binaries/skillshub-cli"],
+    "externalBin": [],
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,

@@ -46,7 +46,7 @@ describe('CLI sidecar preparation', () => {
       writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '0.10.1' }))
       writeFileSync(path.join(root, 'src-tauri/tauri.conf.json'), JSON.stringify({ version: '0.10.1' }))
       const calls = []
-      const result = prepareCliSidecar({ root, target: 'win32-x64', debug: true, run: (command, args, options) => {
+      const result = prepareCliSidecar({ root, sourceCommit: 'a'.repeat(40), target: 'win32-x64', debug: true, run: (command, args, options) => {
         calls.push({ command, args, options })
         const output = path.join(root, 'src-tauri/target/x86_64-pc-windows-msvc/debug')
         mkdirSync(output, { recursive: true })
@@ -61,7 +61,7 @@ describe('CLI sidecar preparation', () => {
       assert.equal(calls[0].options.env.CARGO_TARGET_DIR, path.join(root, 'src-tauri/target'))
       assert.equal(readFileSync(path.join(root, 'src-tauri/binaries/skillshub-cli-x86_64-pc-windows-msvc.exe'), 'utf8'), 'abc')
       assert.deepEqual(JSON.parse(readFileSync(result.metadataPath, 'utf8')), {
-        version: '0.10.1', target: 'x86_64-pc-windows-msvc', profile: 'debug', sha256: createHash('sha256').update('abc').digest('hex'),
+        version: '0.10.1', sourceCommit: 'a'.repeat(40), assetName: 'skillshub-cli-0.10.1-windows-x64.exe', size: 3, target: 'x86_64-pc-windows-msvc', profile: 'debug', sha256: createHash('sha256').update('abc').digest('hex'),
       })
       assert.equal(existsSync(path.join(root, 'src-tauri/binaries/skillshub-cli-x86_64-pc-windows-msvc.exe.version')), false)
     } finally { rmSync(root, { recursive: true, force: true }) }
@@ -75,7 +75,7 @@ describe('CLI sidecar preparation', () => {
       writeFileSync(path.join(root, 'src-tauri/tauri.conf.json'), JSON.stringify({ version: '0.10.1' }))
       const metadata = path.join(root, 'src-tauri/binaries/skillshub-cli-aarch64-apple-darwin.json')
       writeFileSync(metadata, '{"old":true}')
-      assert.throws(() => prepareCliSidecar({ root, target: 'darwin-arm64', run: () => ({ status: 1 }) }), /build failed/)
+      assert.throws(() => prepareCliSidecar({ root, sourceCommit: 'a'.repeat(40), target: 'darwin-arm64', run: () => ({ status: 1 }) }), /build failed/)
       assert.equal(existsSync(metadata), false)
       assert.equal(existsSync(path.join(root, 'src-tauri/binaries/skillshub-cli-aarch64-apple-darwin')), false)
     } finally { rmSync(root, { recursive: true, force: true }) }
@@ -88,7 +88,7 @@ describe('CLI sidecar preparation', () => {
         mkdirSync(path.join(root, 'src-tauri'))
         writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '0.10.1' }))
         writeFileSync(path.join(root, 'src-tauri/tauri.conf.json'), JSON.stringify({ version: '0.10.1' }))
-        assert.throws(() => prepareCliSidecar({ root, target: 'darwin-arm64', debug, run: (_command, args) => {
+        assert.throws(() => prepareCliSidecar({ root, sourceCommit: 'a'.repeat(40), target: 'darwin-arm64', debug, run: (_command, args) => {
           assert.equal(args.includes('--release'), !debug)
           const output = path.join(root, 'src-tauri/target/aarch64-apple-darwin', debug ? 'debug' : 'release', 'skillshub-cli')
           mkdirSync(path.dirname(output), { recursive: true })
