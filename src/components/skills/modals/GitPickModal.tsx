@@ -1,7 +1,48 @@
-import { memo, useMemo, useState } from 'react'
+import { memo, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Search } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import type { GitSkillCandidate } from '../types'
+
+const SkillDescription = memo(({ text, t }: { text: string; t: TFunction }) => {
+  const contentRef = useRef<HTMLDivElement>(null)
+  const contentId = useId()
+  const [expanded, setExpanded] = useState(false)
+  const [overflowing, setOverflowing] = useState(false)
+
+  useLayoutEffect(() => {
+    const content = contentRef.current
+    if (!content) return
+    const measure = () => {
+      const lineHeight = Number.parseFloat(getComputedStyle(content).lineHeight)
+      const collapsedHeight = Number.isFinite(lineHeight) ? lineHeight * 3 : content.clientHeight
+      setOverflowing(content.scrollHeight > collapsedHeight + 1)
+    }
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(content)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [text])
+
+  return (
+    <div className="git-pick-description">
+      <div id={contentId} ref={contentRef}
+        className={`pick-item-desc git-pick-description-text${expanded ? ' is-expanded' : ''}`}>
+        {text}
+      </div>
+      {overflowing || expanded ? (
+        <button type="button" className="git-pick-description-toggle"
+          aria-expanded={expanded} aria-controls={contentId}
+          onClick={() => setExpanded((value) => !value)}>
+          {t(expanded ? 'gitInstall.collapseDescription' : 'gitInstall.expandDescription')}
+        </button>
+      ) : null}
+    </div>
+  )
+})
 
 type GitPickModalProps = {
   open: boolean
@@ -56,7 +97,7 @@ const GitPickModal = ({
 
   return (
     <div className="modal-backdrop" onClick={onRequestClose}>
-      <div className="modal pick-skill-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal pick-skill-modal git-pick-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">{t('gitPickTitle')}</div>
           <button
@@ -106,7 +147,7 @@ const GitPickModal = ({
               <div className="empty">{t('pickSearchEmpty')}</div>
             ) : null}
             {filteredCandidates.map((c) => (
-              <div className="pick-item" key={c.subpath}>
+              <div className={`pick-item${c.status === 'conflict' ? ' git-pick-item-conflict' : ''}`} key={c.subpath}>
                 <label className="pick-item-checkbox">
                   <input
                     type="checkbox"
@@ -129,7 +170,7 @@ const GitPickModal = ({
                     <div className="pick-item-desc">{t('gitInstall.conflict')}</div>
                   ) : null}
                   {c.description ? (
-                    <div className="pick-item-desc">{c.description}</div>
+                    <SkillDescription text={c.description} t={t} />
                   ) : null}
                   <div className="pick-item-path">{c.subpath}</div>
                 </div>

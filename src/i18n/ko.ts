@@ -1028,6 +1028,8 @@ export const ko = {
       cancelled: '취소됨. 설치 {{installed}}개, 업데이트 {{updated}}개, 최신 {{unchanged}}개, 실패 {{failed}}개.',
       install: '새 스킬',
       update: '설치됨 · 업데이트 확인',
+      expandDescription: '설명 더 보기',
+      collapseDescription: '설명 접기',
       conflictLabel: '충돌 · 건너뜀',
       conflict: '소스 또는 이름 충돌 · 건너뜀. 기존 스킬을 먼저 관리하세요.',
       preview: '{{install}}개 설치, {{update}}개 업데이트 확인, 충돌 {{conflict}}개 건너뛰기. 기존 설정을 유지하고 로컬 변경 사항을 보호합니다.',

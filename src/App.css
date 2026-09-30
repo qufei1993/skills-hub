@@ -2411,6 +2411,74 @@
   font-size: 14px;
 }
 
+.git-pick-item-conflict {
+  background: var(--bg-app);
+}
+
+.git-pick-item-conflict .pick-item-title {
+  color: var(--text-secondary);
+}
+
+.git-pick-modal .pick-item-checkbox:has(input:disabled),
+.git-pick-modal .pick-item-checkbox input:disabled {
+  cursor: not-allowed;
+}
+
+.git-pick-modal .pick-item-checkbox input:disabled:not(:checked) {
+  appearance: none;
+  flex-shrink: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--bg-element-hover);
+  position: relative;
+}
+
+.git-pick-modal .pick-item-checkbox input:disabled:not(:checked)::after {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 2px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--text-tertiary);
+}
+
+.git-pick-description-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.git-pick-description-text.is-expanded {
+  display: block;
+  -webkit-line-clamp: unset;
+}
+
+.git-pick-description-toggle {
+  padding: 2px 0;
+  margin-top: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--accent-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.git-pick-description-toggle:hover {
+  color: var(--accent-primary-hover);
+  text-decoration: underline;
+}
+
+.git-pick-description-toggle:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 .git-pick-item-heading {
   display: flex;
   align-items: center;
