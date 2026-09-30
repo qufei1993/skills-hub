@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 const { describe, it } = process.env.VITEST ? await import('vitest') : await import('node:test')
 import { resolveOAuthClientIds } from './build-desktop.mjs'
+import * as desktopBuild from './build-desktop.mjs'
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -179,7 +180,7 @@ describe('desktop OAuth build configuration', () => {
         "import { writeFileSync } from 'node:fs'",
         "import path from 'node:path'",
         "export function desktopSidecarOptions(args) { return { target: 'aarch64-apple-darwin', debug: args.includes('--dev') } }",
-        "export function prepareCliSidecar({ root, target, debug }) { writeFileSync(path.join(root, 'prepared.json'), JSON.stringify({ target, debug })) }",
+        "export function prepareCliSidecar({ root, target, debug }) { writeFileSync(path.join(root, 'prepared.json'), JSON.stringify({ target, debug })); return { metadataPath: 'debug-manifest.json' } }",
       ].join('\n'))
       writeFileSync(path.join(cliDir, 'package.json'), '{"name":"@tauri-apps/cli","version":"0.0.0"}')
       writeFileSync(path.join(cliDir, 'tauri.js'), [
@@ -190,24 +191,42 @@ describe('desktop OAuth build configuration', () => {
         `  gitlab: process.env.${gitlabKey},`,
         '  githubSecret: process.env.SKILLS_HUB_GITHUB_CLIENT_SECRET,',
         '  userToken: process.env.USER_TOKEN,',
-        "  prepared: JSON.parse(readFileSync('prepared.json', 'utf8')),",
+        "  prepared: require('node:fs').existsSync('prepared.json') ? JSON.parse(readFileSync('prepared.json', 'utf8')) : null,",
+        "  manifest: process.env.SKILLS_HUB_CLI_MANIFEST_PATH,",
         '}',
         'console.log(JSON.stringify(picked))',
       ].join('\n'))
-      const result = spawnSync(process.execPath, [realpathSync(copied), ...modeArgs, '--config', 'test.json'], {
+      const result = spawnSync(process.execPath, [realpathSync(copied), ...modeArgs, ...(modeArgs.length ? [] : ['--cli-manifest', 'release-manifest.json']), '--config', 'test.json'], {
         env: withoutOAuthClientIds({ PATH: process.env.PATH }),
         encoding: 'utf8',
       })
       assert.equal(result.status, 0, result.stderr)
       assert.deepEqual(JSON.parse(result.stdout.trim()), {
-        args: [modeArgs.length ? 'dev' : 'build', '--config', 'test.json', ...(modeArgs.length ? [] : ['--', '--bin', 'app'])],
+        args: [modeArgs.length ? 'dev' : 'build', '--config', 'test.json', ...(modeArgs.length ? [] : ['--target', 'aarch64-apple-darwin', '--', '--bin', 'app'])],
         github: githubId,
         gitlab: gitlabId,
-        prepared: { target: 'aarch64-apple-darwin', debug: modeArgs.length > 0 },
+        prepared: modeArgs.length ? { target: 'aarch64-apple-darwin', debug: true } : null,
+        manifest: modeArgs.length ? 'debug-manifest.json' : path.resolve(realpathSync(root), 'release-manifest.json'),
       })
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
   })
   }
+})
+
+it('clears stale bundle contents before packaging without deleting compiled executables', () => {
+  assert.equal(typeof desktopBuild.clearDesktopBundle, 'function')
+  const root = mkdtempSync(path.join(tmpdir(), 'stale-desktop-bundle-'))
+  try {
+    const output = path.join(root, 'src-tauri/target/aarch64-apple-darwin/release')
+    const bundle = path.join(output, 'bundle/macos/Skills Hub.app/Contents/MacOS')
+    mkdirSync(bundle, { recursive: true })
+    writeFileSync(path.join(bundle, 'skillshub-cli'), 'stale sidecar')
+    writeFileSync(path.join(output, 'app'), 'compiled desktop')
+    desktopBuild.clearDesktopBundle({ root, target: 'aarch64-apple-darwin', debug: false })
+    assert.equal(existsSync(path.join(output, 'bundle')), false)
+    assert.equal(existsSync(path.join(output, 'app')), true)
+    assert.throws(() => desktopBuild.clearDesktopBundle({ root, target: '../../unsafe', debug: false }))
+  } finally { rmSync(root, { recursive: true, force: true }) }
 })

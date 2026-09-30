@@ -67,7 +67,7 @@ jobs:
       - run: npm run cli:prepare -- --target ${{ matrix.target }} --debug
       - name: CLI and previous-stable compatibility tests (native debug executable)
         working-directory: src-tauri
-        run: cargo test --locked --test cli_integration --test cli_desktop_compatibility
+        run: cargo test --locked --features cli --test cli_integration --test cli_desktop_compatibility
       - name: Windows native bridge ancestor and junction race tests
         if: runner.os == 'Windows'
         working-directory: src-tauri
@@ -83,15 +83,11 @@ jobs:
           "$source" version --json
           "$source" doctor --json
 
-  release:
+  cli-build:
     needs: verify
     if: startsWith(github.ref, 'refs/tags/v')
     environment: release
     runs-on: ${{ matrix.os }}
-    env:
-      SKILLS_HUB_GITHUB_CLIENT_ID: ${{ secrets.SKILLS_HUB_GITHUB_CLIENT_ID }}
-      SKILLS_HUB_GITLAB_CLIENT_ID: ${{ secrets.SKILLS_HUB_GITLAB_CLIENT_ID }}
-      SKILLS_HUB_GITEE_AUTH_RELAY_URL: ${{ secrets.SKILLS_HUB_GITEE_AUTH_RELAY_URL }}
     strategy:
       fail-fast: false
       matrix:
@@ -165,6 +161,264 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libglib2.0-dev libgtk-3-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Verify native runner and release version
+        shell: bash
+        run: |
+          test "$(rustc -vV | sed -n 's/^host: //p')" = "${{ matrix.target }}"
+          npm run version:check
+          node -e 'if ("v" + JSON.parse(require("fs").readFileSync("package.json")).version !== process.env.GITHUB_REF_NAME) process.exit(1)'
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Import Apple certificate (codesign)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY_INPUT: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APPLE_CERTIFICATE:-}" ]; then
+            echo "ℹ️ 未配置 APPLE_CERTIFICATE，跳过 codesign 导入"
+            exit 0
+          fi
+          if [ -z "${APPLE_CERTIFICATE_PASSWORD:-}" ]; then
+            echo "❌ 缺少 Secret：APPLE_CERTIFICATE_PASSWORD" >&2
+            exit 1
+          fi
+          if [ -z "${KEYCHAIN_PASSWORD:-}" ]; then
+            echo "❌ 缺少 Secret：KEYCHAIN_PASSWORD" >&2
+            exit 1
+          fi
+
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+
+          echo "$APPLE_CERTIFICATE" | (base64 --decode 2>/dev/null || base64 -D) > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+
+          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "Available identities:"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH" || true
+
+          if [ -n "${APPLE_SIGNING_IDENTITY_INPUT:-}" ]; then
+            echo "APPLE_SIGNING_IDENTITY=${APPLE_SIGNING_IDENTITY_INPUT}" >> "$GITHUB_ENV"
+          else
+            IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | head -n 1 | sed -n 's/.*\"\\(.*\\)\".*/\\1/p' || true)"
+            if [ -z "$IDENTITY" ]; then
+              echo "❌ 未能从 keychain 推断 APPLE_SIGNING_IDENTITY，请配置 Secret：APPLE_SIGNING_IDENTITY" >&2
+              exit 1
+            fi
+            echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build release CLI sidecar
+        run: |
+          npm run build
+          npm run cli:prepare -- --target ${{ matrix.target }}
+
+      - name: Sign and verify macOS CLI
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="src-tauri/binaries/skillshub-cli-${{ matrix.target }}"
+          if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$binary"
+            codesign --verify --strict --verbose=4 "$binary"
+          else
+            echo "::warning::No Apple identity configured; standalone CLI and desktop are unsigned."
+          fi
+
+      - name: Windows CLI signing follows desktop configuration
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $config = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $binary = (Resolve-Path "src-tauri/binaries/skillshub-cli-${{ matrix.target }}.exe").Path
+          $windows = $config.bundle.windows
+          if ($windows.signCommand) {
+            $sign = $windows.signCommand
+            if ($sign -is [string]) {
+              $parts = $sign.Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
+              $command = $parts[0]
+              $arguments = @($parts | Select-Object -Skip 1)
+            } else {
+              $command = $sign.cmd
+              $arguments = @($sign.args)
+            }
+            $arguments = @($arguments | ForEach-Object { $_.Replace('%1', $binary) })
+            & $command @arguments
+            if ($LASTEXITCODE -ne 0) { throw "CLI signing failed" }
+          } elseif ($windows.certificateThumbprint) {
+            $arguments = @('sign', '/sha1', $windows.certificateThumbprint, '/fd', 'SHA256')
+            if ($windows.timestampUrl) { $arguments += @('/tr', $windows.timestampUrl, '/td', 'SHA256') }
+            & signtool @arguments $binary
+            if ($LASTEXITCODE -ne 0) { throw "CLI signing failed" }
+          } else {
+            Write-Output "::warning::No Windows Authenticode configuration; CLI and installer are unsigned. Tauri updater signatures do not provide Authenticode."
+            exit 0
+          }
+          if ((Get-AuthenticodeSignature $binary).Status -ne 'Valid') { throw "CLI signature verification failed" }
+
+      - name: Notarize macOS CLI when configured
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APPLE_ID:-}${APPLE_PASSWORD:-}${APPLE_TEAM_ID:-}" ]; then
+            echo "::notice::CLI notarization credentials not configured; skipped."
+            exit 0
+          fi
+          test -n "${APPLE_ID:-}" && test -n "${APPLE_PASSWORD:-}" && test -n "${APPLE_TEAM_ID:-}"
+          test -n "${APPLE_SIGNING_IDENTITY:-}"
+          ditto -c -k "src-tauri/binaries/skillshub-cli-${{ matrix.target }}" "$RUNNER_TEMP/cli-notarization.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/cli-notarization.zip" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait --output-format json 2>/dev/null | node scripts/assert-notarization.mjs
+          codesign --verify --strict "src-tauri/binaries/skillshub-cli-${{ matrix.target }}" > /dev/null 2>&1
+
+      - name: Generate final CLI manifest and assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync, copyFileSync, mkdirSync } from 'node:fs';
+          import { createCliManifest, writeCliManifest } from './scripts/cli-manifest.mjs';
+          const binaryPath = 'src-tauri/binaries/skillshub-cli-${{ matrix.target }}' + (process.platform === 'win32' ? '.exe' : '');
+          const version = JSON.parse(readFileSync('package.json')).version;
+          const manifest = createCliManifest({ binaryPath, version, sourceCommit: process.env.GITHUB_SHA, target: '${{ matrix.target }}', profile: 'release' });
+          mkdirSync('cli-assets', { recursive: true });
+          copyFileSync(binaryPath, 'cli-assets/' + manifest.assetName);
+          writeFileSync('cli-assets/' + manifest.assetName + '.sha256', manifest.sha256 + '  ' + manifest.assetName + '\n');
+          writeCliManifest('cli-assets/cli-manifest-${{ matrix.target }}.json', manifest);
+          NODE
+
+      - name: Native bundled CLI smoke
+        shell: bash
+        run: |
+          extension=""
+          if [ "$RUNNER_OS" = "Windows" ]; then extension=".exe"; fi
+          source="$GITHUB_WORKSPACE/src-tauri/binaries/skillshub-cli-${{ matrix.target }}$extension"
+          "$source" version --json
+          "$source" doctor --json
+
+      - name: Upload CLI resources
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-assets-${{ matrix.target }}
+          path: cli-assets/*
+          if-no-files-found: error
+
+  cli-publish:
+    needs: [verify, cli-build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cli-assets-*
+          path: cli-assets
+          merge-multiple: true
+      - name: Publish immutable CLI resources to dedicated repository
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: node scripts/publish-cli-release.mjs cli-assets
+      - name: Verify anonymous fixed-version downloads
+        run: node scripts/verify-cli-release.mjs cli-assets
+
+  desktop-build:
+    needs: [verify, cli-build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: release
+    runs-on: ${{ matrix.os }}
+    env:
+      SKILLS_HUB_GITHUB_CLIENT_ID: ${{ secrets.SKILLS_HUB_GITHUB_CLIENT_ID }}
+      SKILLS_HUB_GITLAB_CLIENT_ID: ${{ secrets.SKILLS_HUB_GITLAB_CLIENT_ID }}
+      SKILLS_HUB_GITEE_AUTH_RELAY_URL: ${{ secrets.SKILLS_HUB_GITEE_AUTH_RELAY_URL }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS Intel (x86_64)
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            arch: x86_64
+            platform: darwin-x64
+          # macOS Apple Silicon (arm64)
+          - os: macos-14
+            target: aarch64-apple-darwin
+            arch: aarch64
+            platform: darwin-arm64
+          # Windows x64 (Intel/AMD)
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            arch: x64
+            platform: win32-x64
+
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Add macOS targets
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install macOS build deps
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          brew install pkg-config cmake
+
+      - name: Install Windows build deps
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          # Install Strawberry Perl for OpenSSL build (required by openssl-sys)
+          choco install -y strawberryperl
+          # Add Strawberry Perl to PATH
+          export PATH="/c/Strawberry/perl/bin:$PATH"
+          # WebView2 Runtime is pre-installed on windows-2022 runner
+          rustup target add ${{ matrix.target }}
 
       - name: Verify native runner and release version
         shell: bash
@@ -282,69 +536,26 @@ jobs:
             echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
           fi
 
-      - name: Build release CLI sidecar
-        run: |
-          npm run build
-          npm run cli:prepare -- --target ${{ matrix.target }}
+      - name: Download verified CLI manifests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cli-assets-*
+          path: cli-manifests
+          merge-multiple: true
 
-      - name: Sign and verify macOS CLI
-        if: runner.os == 'macOS'
+      - name: Select matching CLI manifest without bundling its binary
         shell: bash
         run: |
-          set -euo pipefail
-          binary="src-tauri/binaries/skillshub-cli-${{ matrix.target }}"
-          if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
-            codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$binary"
-            codesign --verify --strict --verbose=4 "$binary"
-          else
-            echo "::warning::No Apple identity configured; standalone CLI and desktop are unsigned."
-          fi
+          echo "SKILLS_HUB_CLI_MANIFEST_PATH=$GITHUB_WORKSPACE/cli-manifests/cli-manifest-${{ matrix.target }}.json" >> "$GITHUB_ENV"
 
-      - name: Windows CLI signing follows desktop configuration
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $config = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
-          $binary = (Resolve-Path "src-tauri/binaries/skillshub-cli-${{ matrix.target }}.exe").Path
-          $windows = $config.bundle.windows
-          if ($windows.signCommand) {
-            $sign = $windows.signCommand
-            if ($sign -is [string]) {
-              $parts = $sign.Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
-              $command = $parts[0]
-              $arguments = @($parts | Select-Object -Skip 1)
-            } else {
-              $command = $sign.cmd
-              $arguments = @($sign.args)
-            }
-            $arguments = @($arguments | ForEach-Object { $_.Replace('%1', $binary) })
-            & $command @arguments
-            if ($LASTEXITCODE -ne 0) { throw "CLI signing failed" }
-          } elseif ($windows.certificateThumbprint) {
-            $arguments = @('sign', '/sha1', $windows.certificateThumbprint, '/fd', 'SHA256')
-            if ($windows.timestampUrl) { $arguments += @('/tr', $windows.timestampUrl, '/td', 'SHA256') }
-            & signtool @arguments $binary
-            if ($LASTEXITCODE -ne 0) { throw "CLI signing failed" }
-          } else {
-            Write-Output "::warning::No Windows Authenticode configuration; CLI and installer are unsigned. Tauri updater signatures do not provide Authenticode."
-            exit 0
-          }
-          if ((Get-AuthenticodeSignature $binary).Status -ne 'Valid') { throw "CLI signature verification failed" }
-
-      - name: Recompute sidecar metadata after signing, before desktop compilation
+      - name: Clear stale desktop bundle staging
         shell: bash
         run: |
           node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs';
-          import { createHash } from 'node:crypto';
-          const base = 'src-tauri/binaries/skillshub-cli-${{ matrix.target }}';
-          const file = base + (process.platform === 'win32' ? '.exe' : '');
-          const metadata = JSON.parse(readFileSync(base + '.json'));
-          metadata.sha256 = createHash('sha256').update(readFileSync(file)).digest('hex');
-          writeFileSync(base + '.json', JSON.stringify(metadata) + '\n');
+          import { clearDesktopBundle } from './scripts/build-desktop.mjs';
+          clearDesktopBundle({ root: process.cwd(), target: '${{ matrix.target }}', debug: false });
           NODE
 
-      # Invoke Tauri directly below: the normal wrapper would rebuild and overwrite the signed CLI.
       - name: Build Tauri App (macOS)
         if: runner.os == 'macOS'
         # updater 产物（*.tar.gz/*.sig）是基于 .app bundle 生成的，因此必须包含 app
@@ -360,17 +571,7 @@ jobs:
             echo "ℹ️ 未配置 APPLE_SIGNING_IDENTITY，构建未签名版本"
             unset APPLE_SIGNING_IDENTITY
           fi
-          # macOS custom files preserve the already signed CLI bytes; externalBin would sign it again.
-          node node_modules/@tauri-apps/cli/tauri.js build --target ${{ matrix.target }} --bundles app,dmg --config '{"bundle":{"externalBin":[],"macOS":{"files":{"MacOS/skillshub-cli":"binaries/skillshub-cli-${{ matrix.target }}"}}}}' -- --bin app
-          test -x 'src-tauri/target/${{ matrix.target }}/release/bundle/macos/Skills Hub.app/Contents/MacOS/skillshub-cli'
-          test "$(find 'src-tauri/target/${{ matrix.target }}/release/bundle/macos/Skills Hub.app' -type f -name 'skillshub-cli*' | wc -l | tr -d ' ')" = 1
-          node --input-type=module <<'NODE'
-          import { readFileSync } from 'node:fs';
-          import { createHash } from 'node:crypto';
-          const metadata = JSON.parse(readFileSync('src-tauri/binaries/skillshub-cli-${{ matrix.target }}.json'));
-          const bundled = readFileSync('src-tauri/target/${{ matrix.target }}/release/bundle/macos/Skills Hub.app/Contents/MacOS/skillshub-cli');
-          if (createHash('sha256').update(bundled).digest('hex') !== metadata.sha256) throw new Error('Bundled CLI changed after metadata was embedded');
-          NODE
+          node node_modules/@tauri-apps/cli/tauri.js build --target ${{ matrix.target }} --bundles app,dmg -- --bin app
           echo "=== Build completed ==="
           ls -la src-tauri/target/${{ matrix.target }}/release/bundle/ || true
 
@@ -407,9 +608,8 @@ jobs:
           echo "APP_PATH=$APP_PATH"
           codesign -dv --verbose=4 "$APP_PATH" || true
           codesign --verify --deep --strict --verbose=4 "$APP_PATH"
-          codesign --verify --strict --verbose=4 "$APP_PATH/Contents/MacOS/skillshub-cli"
 
-      - name: Notarize macOS desktop and CLI when configured
+      - name: Notarize macOS desktop when configured
         if: runner.os == 'macOS'
         shell: bash
         env:
@@ -427,19 +627,23 @@ jobs:
           app="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Skills Hub.app"
           test -d "$app"
           ditto -c -k --keepParent "$app" "$RUNNER_TEMP/desktop-notarization.zip"
-          ditto -c -k "src-tauri/binaries/skillshub-cli-${{ matrix.target }}" "$RUNNER_TEMP/cli-notarization.zip"
           xcrun notarytool submit "$RUNNER_TEMP/desktop-notarization.zip" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait --output-format json 2>/dev/null | node scripts/assert-notarization.mjs
-          xcrun notarytool submit "$RUNNER_TEMP/cli-notarization.zip" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait --output-format json 2>/dev/null | node scripts/assert-notarization.mjs
-          # Both submissions must be Accepted before stapling. Raw Mach-O CLI files cannot be stapled.
           xcrun stapler staple "$app" > /dev/null 2>&1
           xcrun stapler validate "$app" > /dev/null 2>&1
           codesign --verify --deep --strict "$app" > /dev/null 2>&1
-          codesign --verify --strict "$app/Contents/MacOS/skillshub-cli" > /dev/null 2>&1
-          cmp "$app/Contents/MacOS/skillshub-cli" "src-tauri/binaries/skillshub-cli-${{ matrix.target }}"
           # Refresh the updater archive and signature so it contains the stapled app.
           archive="$app.tar.gz"
           tar -czf "$archive" -C "$(dirname "$app")" "$(basename "$app")"
           TAURI_PRIVATE_KEY="$TAURI_SIGNING_PRIVATE_KEY" TAURI_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" node node_modules/@tauri-apps/cli/tauri.js signer sign "$archive" > /dev/null 2>&1
+
+      - name: Verify desktop bundle excludes CLI
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            node scripts/verify-desktop-bundle.mjs "src-tauri/target/${{ matrix.target }}/release/bundle" "src-tauri/target/${{ matrix.target }}/release/nsis/x64/installer.nsi"
+          else
+            node scripts/verify-desktop-bundle.mjs "src-tauri/target/${{ matrix.target }}/release/bundle"
+          fi
 
       - name: Prepare macOS Assets
         if: runner.os == 'macOS'
@@ -542,33 +746,6 @@ jobs:
           cp "${EXE}" "release-assets/${NEW_EXE}"
           cp "${EXE}.sig" "release-assets/${NEW_EXE}.sig"
 
-      - name: Native bundled CLI smoke
-        shell: bash
-        run: |
-          extension=""
-          if [ "$RUNNER_OS" = "Windows" ]; then extension=".exe"; fi
-          source="$GITHUB_WORKSPACE/src-tauri/binaries/skillshub-cli-${{ matrix.target }}$extension"
-          "$source" version --json
-          "$source" doctor --json
-
-      - name: Prepare CLI binary and SHA-256
-        shell: bash
-        run: |
-          set -euo pipefail
-          node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync, copyFileSync, mkdirSync } from 'node:fs';
-          import { createHash } from 'node:crypto';
-          const extension = process.platform === 'win32' ? '.exe' : '';
-          const base = 'src-tauri/binaries/skillshub-cli-${{ matrix.target }}';
-          const metadata = JSON.parse(readFileSync(base + '.json'));
-          const name = 'skillshub-cli-' + metadata.version + '-${{ matrix.platform }}' + extension;
-          mkdirSync('release-assets', { recursive: true });
-          copyFileSync(base + extension, 'release-assets/' + name);
-          const digest = createHash('sha256').update(readFileSync('release-assets/' + name)).digest('hex');
-          if (digest !== metadata.sha256) throw new Error('CLI sidecar digest mismatch');
-          writeFileSync('release-assets/' + name + '.sha256', digest + '  ' + name + '\n');
-          NODE
-
       - name: List prepared assets
         shell: bash
         run: ls -la release-assets || true
@@ -583,7 +760,7 @@ jobs:
   assemble-updater-json:
     name: Assemble updater.json
     runs-on: macos-14
-    needs: [verify, release]
+    needs: [verify, desktop-build, cli-publish]
     if: startsWith(github.ref, 'refs/tags/v')
     environment: release
     permissions:
@@ -598,6 +775,15 @@ jobs:
           path: dl
           pattern: release-assets-*
           merge-multiple: true
+
+      - name: Download CLI manifests for final availability check
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cli-assets-*
+          path: cli-resources
+          merge-multiple: true
+      - name: Recheck anonymous CLI availability before desktop publication
+        run: node scripts/verify-cli-release.mjs cli-resources
 
       - name: Generate release notes from changelog
         env:

@@ -6816,3 +6816,18 @@
 @media (prefers-reduced-motion: reduce) {
   .ai-management-card-highlight { animation: none; border-color: var(--accent-primary); }
 }
+
+.ai-management-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.ai-management-progress progress {
+  width: 140px;
+  height: 6px;
+  accent-color: var(--accent-primary);
+}

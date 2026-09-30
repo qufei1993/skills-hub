@@ -24,7 +24,7 @@ for ((i=1;i<=$#;i++)); do
   if [[ "$arg" == '-o' ]]; then ((i+=1)); out="\${!i}"; fi
   if [[ "$arg" == https://* ]]; then url="$arg"; fi
 done
-if [[ "$url" == */releases/latest ]]; then printf '%s' "https://github.com/qufei1993/skills-hub/releases/tag/\${TEST_TAG}"; exit; fi
+if [[ "$url" == */releases/latest ]]; then printf '%s' "https://github.com/qufei1993/skills-hub-cli/releases/tag/\${TEST_TAG}"; exit; fi
 printf '%s\\n' "$url" >> "$TEST_ROOT/requests"
 [[ "\${TEST_FAIL:-}" == download ]] && exit 22
 if [[ "$url" == *.sha256 ]]; then
@@ -58,6 +58,7 @@ it('maps all four supported Unix targets to release asset names', () => {
     fixture(({ root, install }) => {
       const result = install({ TEST_OS: os, TEST_ARCH: arch })
       assert.equal(result.status, 0, result.stderr)
+      assert.match(readFileSync(path.join(root, 'requests'), 'utf8'), /https:\/\/github.com\/qufei1993\/skills-hub-cli\/releases\/download\//)
       assert.match(readFileSync(path.join(root, 'requests'), 'utf8'), new RegExp(`skillshub-cli-0.11.0-${target}`))
     })
   }

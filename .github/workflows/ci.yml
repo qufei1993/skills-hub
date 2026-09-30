@@ -41,6 +41,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run version:check
+      - name: Validate CLI and desktop distribution pipeline
+        run: node --test scripts/cli-manifest.test.mjs scripts/verify-cli-release.test.mjs scripts/publish-cli-release.test.mjs scripts/verify-desktop-bundle.test.mjs scripts/release-workflow.test.mjs
       - run: npm run lint
       - run: npm test
       - run: npm run network:check
@@ -75,7 +77,7 @@ jobs:
         run: node scripts/prepare-cli-sidecar.mjs --target x86_64-unknown-linux-gnu --debug
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets --all-features -- -D warnings
-      - run: cargo test --all
+      - run: cargo test --all --features cli
 
   cli-native:
     if: github.event_name == 'workflow_dispatch'
@@ -118,7 +120,7 @@ jobs:
       - run: npm run cli:prepare -- --target ${{ matrix.target }} --debug
       - name: CLI and previous-stable compatibility tests (native debug executable)
         working-directory: src-tauri
-        run: cargo test --locked --test cli_integration --test cli_desktop_compatibility
+        run: cargo test --locked --features cli --test cli_integration --test cli_desktop_compatibility
       - name: Windows native bridge ancestor and junction race tests
         if: runner.os == 'Windows'
         working-directory: src-tauri

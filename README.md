@@ -98,7 +98,7 @@ Settings keeps app-level preferences such as interface language, appearance, AI 
 
 ### AI Management — Manage Skills Through Conversations (New in v0.11.0)
 
-Click **Settings → AI Management → Enable in one click** to install the bundled CLI and official Skill and configure the terminal command. Open a new terminal to use `skillshub-cli`; restart the terminal app if needed. No Node.js or npm is required. Terminal configuration supports Bash/Zsh on macOS/Linux and user PATH on Windows.
+Click **Settings → AI Management → Enable in one click** to download and verify the matching CLI and install the official Skill and configure the terminal command. Open a new terminal to use `skillshub-cli`; restart the terminal app if needed. No Node.js or npm is required. Terminal configuration supports Bash/Zsh on macOS/Linux and user PATH on Windows. The desktop installer does not include the CLI. First-time setup requires a network connection; a verified matching installation works offline. Updates are applied when you click Update in Settings, rather than during startup. CLI resources are published separately in [skills-hub-cli releases](https://github.com/qufei1993/skills-hub-cli/releases).
 
 ![Enable AI management in Settings](docs/assets/ai-management-setup.png)
 
@@ -195,7 +195,7 @@ curl -fsSL https://raw.githubusercontent.com/qufei1993/skills-hub/main/scripts/i
 irm https://raw.githubusercontent.com/qufei1993/skills-hub/main/scripts/install-cli.ps1 | iex
 ```
 
-The installer selects the latest stable release, checks its SHA-256 checksum, and installs to `~/.local/bin` on macOS/Linux or `%LOCALAPPDATA%\SkillsHub\bin` on Windows. It preserves your existing CLI if download or checksum verification fails. CLI release assets are available starting with v0.11.0; the command cannot install a CLI until that release is published.
+The installer selects the latest stable release from the public `qufei1993/skills-hub-cli` resource repository, checks its SHA-256 checksum, and installs to `~/.local/bin` on macOS/Linux or `%LOCALAPPDATA%\SkillsHub\bin` on Windows. It preserves your existing CLI if download or checksum verification fails. The command requires a publicly available CLI release in that repository.
 
 On macOS/Linux, open a new terminal after installation; Bash and Zsh configuration is updated automatically. For other shells, add `~/.local/bin` to PATH yourself. Windows updates both the current PowerShell session and the user PATH.
 
@@ -238,8 +238,12 @@ npm run tauri:dev
 ```bash
 npm run lint
 npm run build
-npm run tauri:build
+# Example: macOS ARM; select the triple for your platform.
+node scripts/prepare-cli-sidecar.mjs --target aarch64-apple-darwin
+npm run tauri:build -- --target aarch64-apple-darwin --cli-manifest src-tauri/binaries/skillshub-cli-aarch64-apple-darwin.json
 ```
+
+Release builds require a release CLI manifest matching the desktop version, commit and target. The example generates a local validation manifest; the release workflow signs the CLI first and generates its manifest from the final bytes. Each platform command below also requires `-- --cli-manifest <path>`, or `SKILLS_HUB_CLI_MANIFEST_PATH`. Development startup prepares the local CLI automatically.
 
 #### Platform build commands (from `package.json`)
 

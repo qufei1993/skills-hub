@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createCliManifest, sourceCommitFor } from './cli-manifest.mjs'
 import { copyFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -33,7 +33,7 @@ export function desktopSidecarOptions(args, platform = process.platform, arch = 
   return { target: resolveSidecarTarget(target ?? `${platform}-${arch}`), debug }
 }
 
-export function prepareCliSidecar({ root, target, debug = false, run = spawnSync, env = process.env }) {
+export function prepareCliSidecar({ root, target, debug = false, run = spawnSync, env = process.env, sourceCommit }) {
   const triple = resolveSidecarTarget(target)
   const tauriRoot = path.join(root, 'src-tauri')
   const binaries = path.join(tauriRoot, 'binaries')
@@ -48,7 +48,7 @@ export function prepareCliSidecar({ root, target, debug = false, run = spawnSync
     throw new Error('CLI and desktop package versions must match.')
   }
   const profile = debug ? 'debug' : 'release'
-  const args = ['build', '--locked', '--bin', 'skillshub-cli', '--target', triple, '--message-format=json-render-diagnostics']
+  const args = ['build', '--locked', '--features', 'cli', '--bin', 'skillshub-cli', '--target', triple, '--message-format=json-render-diagnostics']
   if (!debug) args.push('--release')
   const result = run('cargo', args, {
     cwd: tauriRoot,
@@ -68,9 +68,9 @@ export function prepareCliSidecar({ root, target, debug = false, run = spawnSync
   const tempMetadata = `${metadataPath}.${process.pid}.tmp`
   try {
     copyFileSync(source, tempBinary)
-    const sha256 = createHash('sha256').update(readFileSync(tempBinary)).digest('hex')
+    const manifest = createCliManifest({ binaryPath: tempBinary, version, sourceCommit: sourceCommit ?? sourceCommitFor(root), target: triple, profile })
     renameSync(tempBinary, binaryPath)
-    writeFileSync(tempMetadata, `${JSON.stringify({ version, target: triple, profile, sha256 })}\n`, { mode: 0o600 })
+    writeFileSync(tempMetadata, `${JSON.stringify(manifest)}\n`, { mode: 0o600 })
     renameSync(tempMetadata, metadataPath)
     return { binaryPath, metadataPath }
   } finally {

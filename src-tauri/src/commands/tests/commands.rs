@@ -41,7 +41,7 @@ fn ai_management_does_not_install_when_bundled_cli_is_unavailable() {
     ))
     .unwrap();
     assert_eq!(
-        enable_ai_management_impl(&service, &home.path().join("absent")).unwrap_err(),
+        enable_ai_management_impl(&service, &|| Err("CLI_UNAVAILABLE".into())).unwrap_err(),
         "CLI_UNAVAILABLE"
     );
     assert!(service.list_skills().unwrap().is_empty());
@@ -1949,4 +1949,25 @@ fn imported_local_skill_can_resync_its_existing_tool_link() {
     skill.source_ref = Some(original.to_string_lossy().into());
     store.upsert_skill(&skill).unwrap();
     assert!(ensure_target_does_not_overlap_local_source(&store, &skill.id, &target).is_err());
+}
+
+#[test]
+fn ai_management_preflight_rejects_no_tools_before_preparing_cli() {
+    use crate::core::runtime_paths::{RuntimePaths, RuntimeProfile};
+    let home = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let service = SkillsHubService::open(RuntimePaths::from_roots(
+        RuntimeProfile::Test,
+        home.path(),
+        data.path(),
+    ))
+    .unwrap();
+    let calls = AtomicUsize::new(0);
+    let result = enable_ai_management_impl(&service, &|| {
+        calls.fetch_add(1, Ordering::SeqCst);
+        Err("CLI_UNAVAILABLE".into())
+    });
+    assert_eq!(result.unwrap_err(), "AGENT_NOT_FOUND");
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert!(service.list_skills().unwrap().is_empty());
 }

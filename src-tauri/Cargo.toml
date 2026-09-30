@@ -18,6 +18,18 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [[bin]]
 name = "skillshub-cli"
 path = "src/bin/skillshub-cli.rs"
+required-features = ["cli"]
+
+[[test]]
+name = "cli_integration"
+required-features = ["cli"]
+
+[[test]]
+name = "cli_desktop_compatibility"
+required-features = ["cli"]
+
+[features]
+cli = []
 
 [build-dependencies]
 serde_json = "1.0"

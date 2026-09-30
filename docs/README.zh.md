@@ -95,7 +95,7 @@ Explore 汇总精选仓库中的 Skill，并支持在线搜索。点击 Install 
 
 ### AI 管理 — 通过对话管理 Skills（v0.11.0 新增）
 
-在 **设置 → AI 管理** 点击 **一键启用**，即可安装内置 CLI、配置终端命令并安装官方 Skill。重新打开终端即可使用 `skillshub-cli`；如未生效，请退出并重启终端应用。无需 Node.js 或 npm。终端配置支持 macOS/Linux 的 Bash、Zsh，以及 Windows 用户 PATH。
+在 **设置 → AI 管理** 点击 **一键启用**，即可下载并校验对应版本的 CLI、配置终端命令并安装官方 Skill。桌面安装包不包含 CLI；首次启用需要联网，已安装并校验通过的对应版本可离线使用。需要更新时，在设置中点击更新；启动应用不会自动安装或升级组件。CLI 文件单独发布到 [skills-hub-cli 资源仓库](https://github.com/qufei1993/skills-hub-cli/releases)。重新打开终端即可使用 `skillshub-cli`；如未生效，请退出并重启终端应用。无需 Node.js 或 npm。终端配置支持 macOS/Linux 的 Bash、Zsh，以及 Windows 用户 PATH。
 
 ![在设置页启用 AI 管理](./assets/ai-management-setup.png)
 
@@ -192,7 +192,7 @@ curl -fsSL https://raw.githubusercontent.com/qufei1993/skills-hub/main/scripts/i
 irm https://raw.githubusercontent.com/qufei1993/skills-hub/main/scripts/install-cli.ps1 | iex
 ```
 
-脚本自动下载最新正式版，校验 SHA-256，并安装到 macOS/Linux 的 `~/.local/bin` 或 Windows 的 `%LOCALAPPDATA%\SkillsHub\bin`。下载或校验失败会保留已有 CLI。CLI 下载文件从 v0.11.0 开始提供，该版本发布前安装命令暂不可用。
+脚本从公开的 `qufei1993/skills-hub-cli` 资源仓库下载最新正式版，校验 SHA-256，并安装到 macOS/Linux 的 `~/.local/bin` 或 Windows 的 `%LOCALAPPDATA%\SkillsHub\bin`。下载或校验失败会保留已有 CLI。资源仓库中需先有公开可下载的 CLI 版本，安装命令才能使用。
 
 macOS/Linux 安装后请重新打开终端，脚本会自动配置 Bash 和 Zsh；其他 Shell 需自行将 `~/.local/bin` 加入 PATH。Windows 会更新当前 PowerShell 会话和用户 PATH。
 
@@ -203,7 +203,7 @@ skillshub-cli version --json
 skillshub-cli --help
 ```
 
-升级时重新执行同一条安装命令即可。这份独立 CLI 与桌面端内置的 CLI 分开维护，不会随桌面端自动升级。卸载时删除安装目录中的 `skillshub-cli`（Windows 为 `skillshub-cli.exe`）即可，技能库会保留。
+升级时重新执行同一条安装命令即可。这份独立 CLI 与桌面端管理的 CLI 分开维护，不会随桌面端自动升级。卸载时删除安装目录中的 `skillshub-cli`（Windows 为 `skillshub-cli.exe`）即可，技能库会保留。
 
 CLI 与桌面端共用本地技能库，但单独安装 CLI 不会自动安装官方 AI 管理 Skill。设备同步、定时任务、账号授权和应用设置仍需使用桌面端。Linux 下载文件面向 GNU/glibc 系统，不适用于 Alpine/musl。
 
@@ -237,8 +237,12 @@ npm run tauri:dev
 ```bash
 npm run lint
 npm run build
-npm run tauri:build
+# 示例：macOS ARM；其他平台请使用对应的目标三元组。
+node scripts/prepare-cli-sidecar.mjs --target aarch64-apple-darwin
+npm run tauri:build -- --target aarch64-apple-darwin --cli-manifest src-tauri/binaries/skillshub-cli-aarch64-apple-darwin.json
 ```
+
+正式构建必须提供与桌面版本、提交和平台一致的 release CLI 清单。上述命令生成本地验证用清单；正式发布由工作流先签名 CLI，再根据最终文件生成清单。所有下方平台命令也必须追加 `-- --cli-manifest <清单路径>`，或设置 `SKILLS_HUB_CLI_MANIFEST_PATH`。开发启动会自动准备本地 CLI，无需此参数。
 
 #### 各系统构建命令（来自 `package.json`）
 

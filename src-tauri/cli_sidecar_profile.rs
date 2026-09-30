@@ -39,3 +39,86 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod manifest_tests {
+    #[test]
+    fn release_metadata_is_valid_without_a_binary_and_rejects_identity_changes() {
+        let commit = "a".repeat(40);
+        let metadata = serde_json::json!({"version":"0.11.0","sourceCommit":commit,"target":"aarch64-apple-darwin","profile":"release","assetName":"skillshub-cli-0.11.0-darwin-arm64","size":3,"sha256":"a".repeat(64)});
+        assert!(super::validate_manifest(
+            &metadata,
+            "0.11.0",
+            "aarch64-apple-darwin",
+            "release",
+            &commit
+        )
+        .is_ok());
+        for (field, value) in [
+            ("version", serde_json::json!("0.10.1")),
+            ("sourceCommit", serde_json::json!("b".repeat(40))),
+            ("target", serde_json::json!("x86_64-apple-darwin")),
+            ("profile", serde_json::json!("debug")),
+            ("size", serde_json::json!(0)),
+            ("assetName", serde_json::json!("../cli")),
+            ("sha256", serde_json::json!("z".repeat(64))),
+        ] {
+            let mut altered = metadata.clone();
+            altered[field] = value;
+            assert!(
+                super::validate_manifest(
+                    &altered,
+                    "0.11.0",
+                    "aarch64-apple-darwin",
+                    "release",
+                    &commit
+                )
+                .is_err(),
+                "{field}"
+            );
+        }
+    }
+}
+
+pub fn validate_manifest(
+    metadata: &serde_json::Value,
+    version: &str,
+    target: &str,
+    profile: &str,
+    commit: &str,
+) -> Result<(), &'static str> {
+    let platform = match target {
+        "aarch64-apple-darwin" => "darwin-arm64",
+        "x86_64-apple-darwin" => "darwin-x64",
+        "x86_64-pc-windows-msvc" => "windows-x64",
+        "aarch64-unknown-linux-gnu" => "linux-arm64",
+        "x86_64-unknown-linux-gnu" => "linux-x64",
+        _ => return Err("CLI_MANIFEST_INVALID"),
+    };
+    let hex = |text: &str, length| {
+        text.len() == length
+            && text
+                .bytes()
+                .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+    };
+    let asset = format!(
+        "skillshub-cli-{version}-{platform}{}",
+        if target.contains("windows") {
+            ".exe"
+        } else {
+            ""
+        }
+    );
+    if metadata["version"].as_str() != Some(version)
+        || metadata["target"].as_str() != Some(target)
+        || metadata["profile"].as_str() != Some(profile)
+        || metadata["sourceCommit"].as_str() != Some(commit)
+        || !hex(commit, 40)
+        || !hex(metadata["sha256"].as_str().unwrap_or(""), 64)
+        || metadata["size"].as_u64().unwrap_or(0) == 0
+        || metadata["assetName"].as_str() != Some(&asset)
+    {
+        return Err("CLI_MANIFEST_MISMATCH");
+    }
+    Ok(())
+}
