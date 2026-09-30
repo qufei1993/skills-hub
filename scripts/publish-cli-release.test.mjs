@@ -22,10 +22,12 @@ function fixture(run) {
 it('stages CLI resources in the desktop release without publishing it',async()=>{
  assert.equal(typeof api.publishCliRelease,'function')
  await fixture(async({directory,assets})=>{
-  const calls=[]; let inspected=false
+  const calls=[]; let created=false
   await api.publishCliRelease({directory,tag:'v0.11.0',sourceCommit:'a'.repeat(40),gh:async args=>{
    calls.push(args)
-   if(args[0]==='api'){if(!inspected){inspected=true;return null}return {draft:true,assets}}
+   if(args[0]==='api' && args[1].endsWith('/releases')) return []
+   if(args[0]==='api') return created ? {draft:true,assets} : null
+   if(args[1]==='create') created=true
   }})
   assert.equal(calls.filter(args=>args[0]==='release'&&args[1]==='create').length,1)
   assert.ok(calls.find(args=>args[1]==='create').includes('--draft'))
@@ -78,5 +80,31 @@ it('adds only missing CLI resources to an existing draft and verifies them befor
   assert.equal(calls.filter(args=>args[1]==='upload').length,1)
   assert.equal(calls.find(args=>args[1]==='upload').filter(arg=>arg.startsWith(directory)).length,1)
   assert.ok(calls.every(args=>args[1]!=='edit'))
+ })
+})
+
+it('finds an existing draft through the release list when the tag endpoint returns 404', async () => {
+ await fixture(async ({directory,assets}) => {
+  const calls=[]
+  await api.publishCliRelease({directory,tag:'v0.11.0',sourceCommit:'a'.repeat(40),gh:async args=>{
+   calls.push(args)
+   if(args[0]==='api' && args[1].includes('/releases/tags/')) return null
+   if(args[0]==='api' && args[1].endsWith('/releases')) return [[{tag_name:'v0.10.1',draft:false,assets:[]}],[{tag_name:'v0.11.0',draft:true,assets}]]
+   throw new Error('unexpected release mutation')
+  }})
+  assert.ok(calls.some(args=>args.includes('--paginate') && args.includes('--slurp')))
+  assert.ok(calls.every(args=>args[0]==='api'))
+ })
+})
+
+it('rejects duplicate drafts for one tag before mutating either release', async () => {
+ await fixture(async ({directory,assets}) => {
+  const calls=[]
+  await assert.rejects(api.publishCliRelease({directory,tag:'v0.11.0',sourceCommit:'a'.repeat(40),gh:async args=>{
+   calls.push(args)
+   if(args[1].includes('/releases/tags/')) return null
+   return [[{tag_name:'v0.11.0',draft:true,assets},{tag_name:'v0.11.0',draft:true,assets}]]
+  }}), /CLI_RELEASE_IMMUTABLE_CONFLICT/)
+  assert.ok(calls.every(args=>args[0]==='api'))
  })
 })

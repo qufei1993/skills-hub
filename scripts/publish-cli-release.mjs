@@ -25,7 +25,14 @@ export async function publishCliRelease({directory,tag,sourceCommit,publish=fals
     const checksum=files.find(f=>f.name===`${manifest.assetName}.sha256`).bytes.toString('utf8')
     if(binary.length!==manifest.size || createHash('sha256').update(binary).digest('hex')!==manifest.sha256 || checksum!==`${manifest.sha256}  ${manifest.assetName}\n`) throw new Error('CLI_RELEASE_LOCAL_INTEGRITY_FAILED')
   }
-  const inspect=()=>gh(['api',`repos/${repository}/releases/tags/${tag}`])
+  const inspect=async()=>{
+    const tagged=await gh(['api',`repos/${repository}/releases/tags/${tag}`])
+    if(tagged) return tagged
+    const pages=await gh(['api',`repos/${repository}/releases`,'--paginate','--slurp'])
+    const matches=(pages ?? []).flat().filter(release=>release.tag_name===tag)
+    if(matches.length>1) throw new Error('CLI_RELEASE_IMMUTABLE_CONFLICT')
+    return matches[0] ?? null
+  }
   let release=await inspect()
   if(!release) {
     await gh(['release','create',tag,'--repo',repository,'--draft','--verify-tag','--title',`Skills Hub ${tag}`,'--notes',`Native CLI resources. Source commit: ${sourceCommit}. Source: https://github.com/qufei1993/skills-hub`,...(tag.includes('-')?['--prerelease']:[]),...names.map(name=>path.join(directory,name))])

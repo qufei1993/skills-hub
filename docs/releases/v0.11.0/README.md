@@ -26,7 +26,7 @@ After changing the environment variable, restart Skills Hub (and its launcher if
 
 ## Release preparation and gates
 
-This record does not imply publication. The current v0.11.0 draft and tag refer to the previous bundled build. A release owner must choose a candidate version/tag containing the final changes before shipping.
+This record does not imply publication. The previous bundled-build draft was replaced with the on-demand CLI candidate at tag v0.11.0. Keep the replacement release as a draft until the release owner explicitly approves publication.
 
 - Protect the `release` GitHub environment and restrict it to approved tags. The workflow triggers on `v*` tags and verifies all product versions.
 - Each tag independently runs the five-platform native CLI verification matrix at its SHA: macOS arm64/x64, Windows x64 and Linux GNU arm64/x64. Compatibility and Windows bridge tests are included; prior PR/main CI does not replace this gate. Desktop packaging covers macOS arm64/x64 and Windows x64.
@@ -35,6 +35,8 @@ This record does not imply publication. The current v0.11.0 draft and tag refer 
 - Stage CLI binaries, checksums, manifests and desktop assets in the same original-repository release draft. Verify remote CLI sizes and digests before publication; check anonymous downloads afterward. Conflicting version assets are not overwritten. Use the original repository GITHUB_TOKEN with Contents write permission; no separate resource repository or npm publishing credentials are required.
 
 The release workflow prepares a draft only; it does not publish automatically. After CLI and desktop asset upload and verification, wait for release-owner approval. Explicit approval is required before publication and anonymous download verification. Public downloads cannot be verified while the release is a draft.
+
+Draft lookup falls back to the authenticated, paginated release list when GitHub's release-by-tag endpoint returns 404. This prevents creation of a duplicate draft; multiple releases with the same tag are rejected for manual reconciliation.
 
 ## Validation records
 
