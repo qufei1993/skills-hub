@@ -5,7 +5,7 @@ use crate::core::sync_engine::SyncMode;
 use crate::core::tool_adapters::{
     adapter_by_key, adapters_sharing_project_skills_dir, adapters_sharing_skills_dir,
     default_tool_adapters, load_tool_config, project_relative_skills_dir,
-    resolve_adapter_path_in_home_with_kimi_home, resolve_project_path, save_tool_config,
+    resolve_adapter_path_in_home_with_override, resolve_project_path, save_tool_config,
     scan_tool_dir, supports_project_scope, CustomToolConfig, ToolAdapter, ToolConfig, ToolId,
 };
 
@@ -356,7 +356,7 @@ fn kimi_adapter_honors_kimi_code_home() {
     let kimi_home = tempfile::tempdir().unwrap();
     let kimi = adapter_by_key("kimi_cli").unwrap();
     assert_eq!(
-        resolve_adapter_path_in_home_with_kimi_home(
+        resolve_adapter_path_in_home_with_override(
             &kimi,
             home.path(),
             kimi.relative_skills_dir,
@@ -366,7 +366,7 @@ fn kimi_adapter_honors_kimi_code_home() {
         kimi_home.path().join("skills")
     );
     assert_eq!(
-        resolve_adapter_path_in_home_with_kimi_home(
+        resolve_adapter_path_in_home_with_override(
             &kimi,
             home.path(),
             kimi.relative_detect_dir,
@@ -537,7 +537,7 @@ fn cline_discovers_global_and_project_skills_in_native_directories() {
         fs::create_dir_all(&skill).unwrap();
         fs::write(skill.join("SKILL.md"), "# Desktop skill").unwrap();
     }
-    let global = resolve_adapter_path_in_home_with_kimi_home(
+    let global = resolve_adapter_path_in_home_with_override(
         &cline,
         home.path(),
         cline.relative_skills_dir,
@@ -561,7 +561,7 @@ fn cline_detection_requires_its_own_directory() {
     let home = tempfile::tempdir().unwrap();
     let cline = adapter_by_key("cline").unwrap();
     fs::create_dir_all(home.path().join(".agents/skills")).unwrap();
-    let detect = resolve_adapter_path_in_home_with_kimi_home(
+    let detect = resolve_adapter_path_in_home_with_override(
         &cline,
         home.path(),
         cline.relative_detect_dir,
@@ -571,4 +571,80 @@ fn cline_detection_requires_its_own_directory() {
     assert!(!detect.exists());
     fs::create_dir_all(home.path().join(".cline")).unwrap();
     assert!(detect.exists());
+}
+
+#[test]
+fn deepseek_harness_home_resolution_matches_native_rules() {
+    use std::path::Path;
+    let home = tempfile::tempdir().unwrap();
+    let adapter = adapter_by_key("deepseek_harness").unwrap();
+    let custom = home.path().join("DeepSeek Harness 数据");
+    for (configured, expected) in [
+        (None, home.path().join(".dsh")),
+        (Some(Path::new("")), home.path().join(".dsh")),
+        (Some(Path::new(" \t ")), home.path().join(".dsh")),
+        (Some(custom.as_path()), custom.clone()),
+        (
+            Some(Path::new(" dsh home ")),
+            std::env::current_dir().unwrap().join(" dsh home "),
+        ),
+        (Some(Path::new("~")), home.path().to_path_buf()),
+        (Some(Path::new("~/dsh home")), home.path().join("dsh home")),
+        (Some(Path::new("~\\dsh home")), home.path().join("dsh home")),
+        (
+            Some(Path::new("relative-dsh")),
+            std::env::current_dir().unwrap().join("relative-dsh"),
+        ),
+        (Some(Path::new("~/unused/../dsh")), home.path().join("dsh")),
+    ] {
+        for suffix in ["", "skills"] {
+            let relative = if suffix.is_empty() {
+                adapter.relative_detect_dir
+            } else {
+                adapter.relative_skills_dir
+            };
+            assert_eq!(
+                resolve_adapter_path_in_home_with_override(
+                    &adapter,
+                    home.path(),
+                    relative,
+                    suffix,
+                    configured
+                ),
+                expected.join(suffix),
+            );
+        }
+    }
+    assert_eq!(project_relative_skills_dir(&adapter), ".dsh/skills");
+    assert_eq!(
+        resolve_project_path(&adapter, home.path()).unwrap(),
+        home.path().join(".dsh/skills")
+    );
+}
+
+#[test]
+#[cfg(windows)]
+fn deepseek_harness_resolves_drive_relative_home_before_parent_components() {
+    use std::path::{Component, Path, Prefix};
+    let cwd = std::env::current_dir().unwrap();
+    let drive = match cwd.components().next().unwrap() {
+        Component::Prefix(prefix) => match prefix.kind() {
+            Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => drive as char,
+            _ => panic!("test requires a drive working directory"),
+        },
+        _ => panic!("test requires a drive working directory"),
+    };
+    let adapter = adapter_by_key("deepseek_harness").unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let input = format!("{drive}:..\\dsh home");
+    let expected = cwd.parent().unwrap_or(&cwd).join("dsh home/skills");
+    let resolved = resolve_adapter_path_in_home_with_override(
+        &adapter,
+        home.path(),
+        adapter.relative_skills_dir,
+        "skills",
+        Some(Path::new(&input)),
+    );
+    assert!(resolved.is_absolute());
+    assert_eq!(resolved, expected);
 }

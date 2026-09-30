@@ -914,33 +914,119 @@ pub(crate) fn resolve_adapter_path_in_home(
     adapter: &ToolAdapter,
     home: &Path,
     relative_path: &str,
-    kimi_suffix: &str,
+    suffix: &str,
 ) -> PathBuf {
-    let kimi_home = std::env::var_os("KIMI_CODE_HOME")
+    let variable = match adapter.id {
+        ToolId::KimiCli => Some("KIMI_CODE_HOME"),
+        ToolId::DeepSeekHarness => Some("DSH_HOME"),
+        _ => None,
+    };
+    let tool_home = variable
+        .and_then(std::env::var_os)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
-    resolve_adapter_path_in_home_with_kimi_home(
+    resolve_adapter_path_in_home_with_override(
         adapter,
         home,
         relative_path,
-        kimi_suffix,
-        kimi_home.as_deref(),
+        suffix,
+        tool_home.as_deref(),
     )
 }
 
-pub(crate) fn resolve_adapter_path_in_home_with_kimi_home(
+pub(crate) fn resolve_adapter_path_in_home_with_override(
     adapter: &ToolAdapter,
     home: &Path,
     relative_path: &str,
-    kimi_suffix: &str,
-    kimi_home: Option<&Path>,
+    suffix: &str,
+    tool_home: Option<&Path>,
 ) -> PathBuf {
-    if adapter.id == ToolId::KimiCli {
-        if let Some(kimi_home) = kimi_home {
-            return kimi_home.join(kimi_suffix);
+    if let Some(tool_home) = tool_home {
+        match adapter.id {
+            ToolId::KimiCli => return tool_home.join(suffix),
+            ToolId::DeepSeekHarness
+                if !tool_home.as_os_str().is_empty()
+                    && !tool_home
+                        .to_str()
+                        .is_some_and(|value| value.trim().is_empty()) =>
+            {
+                let expanded = if let Ok(rest) = tool_home.strip_prefix("~") {
+                    home.join(rest)
+                } else if let Some(rest) = tool_home
+                    .to_str()
+                    .and_then(|value| value.strip_prefix("~\\"))
+                {
+                    home.join(rest)
+                } else {
+                    tool_home.to_path_buf()
+                };
+                #[cfg(windows)]
+                let expanded = if !expanded.has_root()
+                    && matches!(
+                        expanded.components().next(),
+                        Some(std::path::Component::Prefix(_))
+                    ) {
+                    resolve_windows_full_path(&expanded).unwrap_or(expanded)
+                } else {
+                    expanded
+                };
+                let absolute = if expanded.is_absolute() {
+                    expanded
+                } else {
+                    std::env::current_dir()
+                        .unwrap_or_else(|_| home.to_path_buf())
+                        .join(expanded)
+                };
+                if !absolute.is_absolute() {
+                    return absolute.join(suffix);
+                }
+                let mut normalized = PathBuf::new();
+                for component in absolute.components() {
+                    match component {
+                        std::path::Component::ParentDir => {
+                            normalized.pop();
+                        }
+                        std::path::Component::CurDir => {}
+                        _ => normalized.push(component.as_os_str()),
+                    }
+                }
+                return normalized.join(suffix);
+            }
+            _ => {}
         }
     }
     home.join(relative_path)
+}
+
+#[cfg(windows)]
+fn resolve_windows_full_path(path: &Path) -> Option<PathBuf> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows_sys::Win32::Storage::FileSystem::GetFullPathNameW;
+
+    let input = path
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let mut buffer = vec![0u16; 260];
+    loop {
+        let length = unsafe {
+            GetFullPathNameW(
+                input.as_ptr(),
+                buffer.len() as u32,
+                buffer.as_mut_ptr(),
+                std::ptr::null_mut(),
+            )
+        } as usize;
+        if length == 0 {
+            return None;
+        }
+        if length < buffer.len() {
+            return Some(PathBuf::from(OsString::from_wide(&buffer[..length])));
+        }
+        buffer.resize(length + 1, 0);
+    }
 }
 
 pub fn is_tool_installed(adapter: &ToolAdapter) -> Result<bool> {

@@ -126,7 +126,7 @@ Skills Hub includes 48 built-in tool adapters and supports custom skills directo
 | `cursor` | Cursor | `.cursor/skills` | `.agents/skills` | `.cursor` |
 | `claude_code` | Claude Code | `.claude/skills` | `.claude/skills` | `.claude` |
 | `codex` | Codex | `.codex/skills` | `.agents/skills` | `.codex` |
-| `deepseek_harness` | DeepSeek Harness | `.dsh/skills` | `.dsh/skills` | `.dsh` |
+| `deepseek_harness` | DeepSeek Harness | `.dsh/skills` (or `$DSH_HOME/skills`) | `.dsh/skills` | `.dsh` (or `$DSH_HOME`) |
 | `zcode` | ZCode | `.zcode/skills` | `.zcode/skills` | `.zcode` |
 | `opencode` | OpenCode | `.config/opencode/skills` | `.agents/skills` | `.config/opencode` |
 | `antigravity` | Antigravity | `.gemini/config/skills` | `.agents/skills` | `.gemini/config` |
