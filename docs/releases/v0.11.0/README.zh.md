@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-v0.11.0 支持通过 AI 对话管理 Skills，由官方 `manage-skills-hub` Skill 和 `skillshub-cli` 执行。在「设置 → AI 管理」一键启用后，AI 安装默认同步到已检测、已启用的工具；切换相关页面或切回应用即可刷新列表。CLI 与桌面共用本地库，随桌面端打包，仅在主动启用 AI 管理时安装或更新；普通启动不安装，关闭桌面端后仍可使用。
+v0.11.0 支持通过 AI 对话管理 Skills，由官方 `manage-skills-hub` Skill 和 `skillshub-cli` 执行。在「设置 → AI 管理」一键启用后，AI 安装默认同步到已检测、已启用的工具；切换相关页面或切回应用即可刷新列表。CLI 与桌面共用本地库，随桌面端打包；首次安装需主动启用，之后启动新版桌面端会更新已启用且有部署目标的 AI 管理组件。关闭桌面端后 CLI 仍可使用。
 
 详细说明见 [Agent 优先的命令行入口](agent-first-cli.zh.md) 和 [桌面 CLI 桥接](verified-cli-bridge.zh.md)。
 

@@ -11,7 +11,7 @@ import { resolve } from 'node:path'
 
 const t = ((key: string) => key) as TFunction
 const fixture = (): AgentAccessStatusDto => ({
-  officialState: 'missing', conflict: null, skillId: null, skillEnabled: true, terminalReady: true,
+  officialState: 'missing', conflict: null, skillId: null, skillEnabled: true, terminalReady: true, terminalPathConflict: false,
   bridge: { status: 'valid', reason: null, path: '/test/bin/skillshub-cli', version: '0.11.0' },
   bundledVersion: '0.11.0', installedVersion: null, installed: false, centralReason: null,
   agents: [{ key: 'codex', label: 'Codex', detected: true, enabled: true, deployed: false, needsRepair: false, reason: null, path: '/test/.codex/skills' }],
@@ -133,7 +133,7 @@ it('keeps user-disabled or unsynced skills in normal skill management', async ()
 })
 
 it('does not show a disabled official skill as ready even if targets remain', async () => {
-  const state = { ...fixture(), officialState: 'healthy' as const, installed: true, skillEnabled: false, skillId: 'id' }
+  const state = { ...fixture(), officialState: 'healthy' as const, installed: true, skillEnabled: false, skillId: 'id', terminalPathConflict: true }
   state.agents[0].deployed = true
   render(<AiManagementSettings isTauri invokeTauri={async () => state} onChanged={() => {}} onOpenSkill={() => {}} t={t} />)
   await screen.findByText('aiManagement.inactive')
@@ -189,6 +189,42 @@ it.each(['missing', 'damaged'] as const)('only installs the CLI after an explici
   await waitFor(() => expect(invoke).toHaveBeenCalledWith('enable_ai_management'))
 })
 
+it('marks a previously enabled older CLI as pending update', async () => {
+  const status = fixture()
+  Object.assign(status, { officialState: 'healthy', installed: true, installedVersion: '0.10.0' })
+  status.bridge.status = 'damaged'
+  status.bridge.reason = 'VERSION_MISMATCH'
+  status.agents[0].deployed = true
+  render(<AiManagementSettings isTauri invokeTauri={async () => status} onChanged={() => {}} onOpenSkill={() => {}} t={t} />)
+  await screen.findByRole('button', { name: 'aiManagement.update' })
+  expect(screen.getByText('aiManagement.updatePending')).toBeTruthy()
+  expect(screen.queryByText('aiManagement.ready')).toBeNull()
+})
+
+it('offers retry when only the official Skill version is older', async () => {
+  const status = fixture()
+  Object.assign(status, { officialState: 'healthy', installed: true, installedVersion: '0.10.0' })
+  status.agents[0].deployed = true
+  render(<AiManagementSettings isTauri invokeTauri={async () => status} onChanged={() => {}} onOpenSkill={() => {}} t={t} />)
+  await screen.findByRole('button', { name: 'aiManagement.update' })
+  expect(screen.queryByText('aiManagement.ready')).toBeNull()
+})
+
+it('keeps first-time setup available when the current PATH has an older CLI', async () => {
+  const status = { ...fixture(), terminalPathConflict: true }
+  render(<AiManagementSettings isTauri invokeTauri={async () => status} onChanged={() => {}} onOpenSkill={() => {}} t={t} />)
+  await screen.findByRole('button', { name: 'aiManagement.enable' })
+})
+
+it('warns when another CLI precedes the managed CLI in the current PATH', async () => {
+  const status = fixture()
+  Object.assign(status, { officialState: 'healthy', installed: true, installedVersion: status.bundledVersion, terminalPathConflict: true })
+  status.agents[0].deployed = true
+  render(<AiManagementSettings isTauri invokeTauri={async () => status} onChanged={() => {}} onOpenSkill={() => {}} t={t} />)
+  await screen.findByText('aiManagement.pathConflict')
+  expect(screen.queryByText('aiManagement.ready')).toBeNull()
+})
+
 it('offers setup for an already enabled Skill whose terminal command is not configured', async () => {
   const status = fixture()
   Object.assign(status, { officialState: 'healthy', installed: true, terminalReady: false })
@@ -208,4 +244,21 @@ it('reports terminal setup failure and leaves the enable action available for re
   fireEvent.click(await screen.findByRole('button', { name: 'aiManagement.enable' }))
   expect((await screen.findByRole('alert')).textContent).toContain('aiManagement.errors.terminal')
   expect((screen.getByRole('button', { name: 'aiManagement.enable' }) as HTMLButtonElement).disabled).toBe(false)
+})
+
+it('refreshes the installed state after a later setup step fails', async () => {
+  const before = fixture()
+  const after = { ...before, officialState: 'healthy' as const, installed: true, skillId: 'official', terminalReady: false }
+  after.agents = [{ ...before.agents[0], deployed: true }]
+  let reads = 0
+  const invoke = vi.fn(async (command: string) => {
+    if (command === 'enable_ai_management') throw new Error('CLI_TERMINAL_UNAVAILABLE')
+    return ++reads === 1 ? before : after
+  })
+  const changed = vi.fn()
+  render(<AiManagementSettings isTauri invokeTauri={invoke} onChanged={changed} onOpenSkill={() => {}} t={t} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'aiManagement.enable' }))
+  await screen.findByRole('button', { name: 'aiManagement.viewSkill' })
+  expect(screen.getByRole('alert').textContent).toContain('aiManagement.errors.terminal')
+  expect(changed).toHaveBeenCalledOnce()
 })

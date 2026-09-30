@@ -1,6 +1,53 @@
 use anyhow::{bail, Context, Result};
 use std::path::Path;
 
+fn path_conflicts_with_managed(path: &std::ffi::OsStr, managed: &Path) -> bool {
+    let mut earlier_cli = false;
+    let managed = managed
+        .canonicalize()
+        .unwrap_or_else(|_| managed.to_path_buf());
+    for directory in std::env::split_paths(path) {
+        let same = directory
+            .canonicalize()
+            .unwrap_or_else(|_| directory.clone())
+            == managed;
+        if same {
+            return earlier_cli;
+        }
+        let names: &[&str] = if cfg!(windows) {
+            &[
+                "skillshub-cli.exe",
+                "skillshub-cli.cmd",
+                "skillshub-cli.bat",
+                "skillshub-cli.com",
+            ]
+        } else {
+            &["skillshub-cli"]
+        };
+        earlier_cli |= names.iter().map(|name| directory.join(name)).any(|binary| {
+            if !binary.is_file() {
+                return false;
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                binary
+                    .metadata()
+                    .is_ok_and(|meta| meta.permissions().mode() & 0o111 != 0)
+            }
+            #[cfg(windows)]
+            {
+                true
+            }
+        });
+    }
+    false
+}
+
+pub fn current_path_conflict(managed: &Path) -> bool {
+    std::env::var_os("PATH").is_some_and(|path| path_conflicts_with_managed(&path, managed))
+}
+
 #[cfg(unix)]
 fn profiles(home: &Path) -> Result<Vec<std::path::PathBuf>> {
     let shell = std::env::var("SHELL").unwrap_or_default();
@@ -218,6 +265,49 @@ mod windows {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reports_when_an_older_cli_precedes_the_managed_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let older = root.path().join("older");
+        let managed = root.path().join("managed");
+        std::fs::create_dir_all(&older).unwrap();
+        std::fs::create_dir_all(&managed).unwrap();
+        let binary = if cfg!(windows) {
+            "skillshub-cli.exe"
+        } else {
+            "skillshub-cli"
+        };
+        std::fs::write(older.join(binary), "old").unwrap();
+        std::fs::write(managed.join(binary), "managed").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(older.join(binary), std::fs::Permissions::from_mode(0o755))
+                .unwrap();
+        }
+        let path = std::env::join_paths([&older, &managed]).unwrap();
+        assert!(path_conflicts_with_managed(&path, &managed));
+        let reversed = std::env::join_paths([&managed, &older]).unwrap();
+        assert!(!path_conflicts_with_managed(&reversed, &managed));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn detects_older_windows_command_shims() {
+        let root = tempfile::tempdir().unwrap();
+        let older = root.path().join("older");
+        let managed = root.path().join("managed");
+        std::fs::create_dir_all(&older).unwrap();
+        std::fs::create_dir_all(&managed).unwrap();
+        std::fs::write(managed.join("skillshub-cli.exe"), "managed").unwrap();
+        let path = std::env::join_paths([&older, &managed]).unwrap();
+        for extension in ["cmd", "bat"] {
+            let shim = older.join(format!("skillshub-cli.{extension}"));
+            std::fs::write(&shim, "old").unwrap();
+            assert!(path_conflicts_with_managed(&path, &managed));
+            std::fs::remove_file(shim).unwrap();
+        }
+    }
     #[test]
     fn windows_path_matching_preserves_other_entries() {
         assert!(contains_directory("C:\\Other;\"c:\\Tools\\\"", "C:\\tools"));

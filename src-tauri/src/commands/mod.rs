@@ -100,6 +100,7 @@ pub struct AgentAccessStatusDto {
     skill_id: Option<String>,
     skill_enabled: bool,
     terminal_ready: bool,
+    terminal_path_conflict: bool,
     official_state: crate::services::agent_access::OfficialSkillState,
     conflict: Option<crate::services::agent_access::OfficialSkillConflict>,
     bridge: crate::core::cli_bridge::CliBridgeStatus,
@@ -139,6 +140,10 @@ fn agent_access_dto(
     AgentAccessStatusDto {
         skill_enabled: status.skill.as_ref().is_some_and(|skill| skill.enabled),
         terminal_ready,
+        terminal_path_conflict: bridge
+            .path
+            .parent()
+            .is_some_and(crate::core::cli_terminal::current_path_conflict),
         skill_id: status.skill_id,
         official_state: status.official_state,
         conflict: status.conflict,
@@ -183,10 +188,7 @@ pub async fn enable_ai_management(
     tauri::async_runtime::spawn_blocking(move || {
         let source = tauri::utils::platform::current_exe()
             .ok()
-            .and_then(|exe| {
-                exe.parent()
-                    .map(|dir| dir.join(crate::core::cli_bridge::BINARY_NAME))
-            })
+            .and_then(|exe| crate::core::cli_bridge::bundled_cli_source(&exe))
             .ok_or_else(|| "CLI_UNAVAILABLE".to_string())?;
         enable_ai_management_impl(&service, &source)
     })
