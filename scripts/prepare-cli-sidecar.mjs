@@ -33,11 +33,11 @@ export function desktopSidecarOptions(args, platform = process.platform, arch = 
   return { target: resolveSidecarTarget(target ?? `${platform}-${arch}`), debug }
 }
 
-export function prepareCliSidecar({ root, target, debug = false, run = spawnSync, env = process.env, sourceCommit }) {
+export function prepareCliSidecar({ root, target, debug = false, localTest = false, run = spawnSync, env = process.env, sourceCommit }) {
   const triple = resolveSidecarTarget(target)
   const tauriRoot = path.join(root, 'src-tauri')
   const binaries = path.join(tauriRoot, 'binaries')
-  const base = `skillshub-cli-${triple}`
+  const base = `skillshub-cli${localTest ? '-local-test' : ''}-${triple}`
   const extension = triple.includes('windows') ? '.exe' : ''
   const metadataPath = path.join(binaries, `${base}.json`)
   mkdirSync(binaries, { recursive: true })
@@ -48,7 +48,7 @@ export function prepareCliSidecar({ root, target, debug = false, run = spawnSync
     throw new Error('CLI and desktop package versions must match.')
   }
   const profile = debug ? 'debug' : 'release'
-  const args = ['build', '--locked', '--features', 'cli', '--bin', 'skillshub-cli', '--target', triple, '--message-format=json-render-diagnostics']
+  const args = ['build', '--locked', '--features', localTest ? 'cli,local-test' : 'cli', '--bin', 'skillshub-cli', '--target', triple, '--message-format=json-render-diagnostics']
   if (!debug) args.push('--release')
   const result = run('cargo', args, {
     cwd: tauriRoot,

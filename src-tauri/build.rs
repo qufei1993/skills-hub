@@ -29,6 +29,7 @@ fn prepare_cli_bridge_metadata() {
     use sha2::{Digest, Sha256};
     use std::{env, fs, path::PathBuf};
 
+    println!("cargo:rustc-check-cfg=cfg(skills_hub_local_bundle)");
     println!("cargo:rerun-if-env-changed=SKILLS_HUB_PREPARE_CLI_SIDECAR");
     println!("cargo:rerun-if-changed=cli_sidecar_profile.rs");
     let profile = env::var("PROFILE").expect("CLI_BRIDGE_UNSUPPORTED_PROFILE");
@@ -57,7 +58,21 @@ fn prepare_cli_bridge_metadata() {
     }
     println!("cargo:rerun-if-env-changed=SKILLS_HUB_CLI_MANIFEST_PATH");
     let target = env::var("TARGET").expect("missing build target");
-    let base = PathBuf::from("binaries").join(format!("skillshub-cli-{target}"));
+    let local_bundle = profile == "release" && env::var_os("CARGO_FEATURE_LOCAL_TEST").is_some();
+    if local_bundle {
+        let config: serde_json::Value = env::var("TAURI_CONFIG")
+            .ok()
+            .and_then(|value| serde_json::from_str(&value).ok())
+            .unwrap_or(serde_json::Value::Null);
+        cli_sidecar_profile::validate_local_test_config(&config)
+            .unwrap_or_else(|reason| panic!("{reason}: use npm run tauri:build:local"));
+    }
+    let prefix = if local_bundle {
+        "skillshub-cli-local-test"
+    } else {
+        "skillshub-cli"
+    };
+    let base = PathBuf::from("binaries").join(format!("{prefix}-{target}"));
     let metadata_path = env::var_os("SKILLS_HUB_CLI_MANIFEST_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
@@ -108,7 +123,7 @@ fn prepare_cli_bridge_metadata() {
             );
         }
     }
-    if profile == "debug" {
+    if profile == "debug" || local_bundle {
         let binary_path = if target.contains("windows") {
             base.with_extension("exe")
         } else {
@@ -116,7 +131,7 @@ fn prepare_cli_bridge_metadata() {
         };
         println!("cargo:rerun-if-changed={}", binary_path.display());
         let binary =
-            fs::read(&binary_path).expect("prepare local debug CLI before building desktop");
+            fs::read(&binary_path).expect("prepare matching local CLI before building desktop");
         assert_eq!(
             metadata["size"].as_u64(),
             Some(binary.len() as u64),
@@ -132,6 +147,9 @@ fn prepare_cli_bridge_metadata() {
             "cargo:rustc-env=SKILLS_HUB_BUNDLED_CLI_SOURCE_PATH={}",
             env::current_dir().unwrap().join(binary_path).display()
         );
+    }
+    if local_bundle {
+        println!("cargo:rustc-cfg=skills_hub_local_bundle");
     }
     println!(
         "cargo:rustc-env=SKILLS_HUB_BUNDLED_CLI_SHA256={}",

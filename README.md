@@ -235,15 +235,31 @@ npm run tauri:dev
 
 ### Build
 
+For local installation testing, build on the target operating system:
+
 ```bash
-npm run lint
-npm run build
-# Example: macOS ARM; select the triple for your platform.
-node scripts/prepare-cli-sidecar.mjs --target aarch64-apple-darwin
-npm run tauri:build -- --target aarch64-apple-darwin --cli-manifest src-tauri/binaries/skillshub-cli-aarch64-apple-darwin.json
+# Automatically selects the host platform and architecture.
+npm run tauri:build:local
+# Or select an installer format.
+npm run tauri:build:local:mac:dmg
+npm run tauri:build:local:win:exe
+npm run tauri:build:local:win:msi
+npm run tauri:build:local:win:all
+npm run tauri:build:local:linux:deb
+npm run tauri:build:local:linux:appimage
+npm run tauri:build:local:linux:all
 ```
 
-Release builds require a release CLI manifest matching the desktop version, commit and target. The example generates a local validation manifest; the release workflow signs the CLI first and generates its manifest from the final bytes. Each platform command below also requires `-- --cli-manifest <path>`, or `SKILLS_HUB_CLI_MANIFEST_PATH`. Development startup prepares the local CLI automatically.
+Local test packaging compiles one CLI for the selected target (host by default, or an explicit supported `--target`). It embeds those exact bytes in the release-optimized desktop executable. The installed **Skills Hub Local Test** app verifies and installs that local CLI when you enable AI management; it does not download the CLI or depend on the source checkout. App identity and installer name are distinct, production updater endpoints and updater artifacts are disabled, and both desktop and CLI use the development credential and CLI bridge namespaces. Skill data, settings, caches, recycle bin and write locks are still shared with production; enabling AI management can change real Agent directories and terminal PATH. Do not combine this mode with `--cli-manifest`, `SKILLS_HUB_CLI_MANIFEST_PATH`, `--dev`, or debug flags. Universal macOS and Windows ARM targets are not currently supported; build the supported native target instead.
+
+For regular release packaging, provide the manifest from the published CLI for the same version, source commit and target:
+
+```bash
+# Example: macOS ARM, with the official release manifest downloaded separately.
+npm run tauri:build:mac:dmg -- --target aarch64-apple-darwin --cli-manifest /path/to/cli-manifest-aarch64-apple-darwin.json
+```
+
+All platform commands below require `-- --cli-manifest <path>`, or `SKILLS_HUB_CLI_MANIFEST_PATH`. A locally generated manifest may differ from the signed published CLI and fail download verification; use the local test mode for unpublished changes. Missing manifests produce platform-specific guidance and never silently switch to a test build. `npm run tauri:dev` continues to prepare a local debug CLI automatically. Local test packages cover installation and local CLI integration; verify the official CLI download, checksum and installation flow separately in a release package. Both build modes require the public OAuth Client IDs described above.
 
 #### Platform build commands (from `package.json`)
 

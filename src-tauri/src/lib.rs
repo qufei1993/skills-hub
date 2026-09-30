@@ -27,6 +27,9 @@ fn runtime_context() -> tauri::Context<tauri::Wry> {
 }
 
 fn runtime_paths<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> anyhow::Result<RuntimePaths> {
+    if cfg!(feature = "local-test") {
+        return RuntimePaths::for_cli(RuntimeProfile::Development);
+    }
     let app_data_dir = app.path().app_data_dir()?;
     let home_root = dirs::home_dir().unwrap_or_else(|| app_data_dir.clone());
     Ok(RuntimePaths::from_tauri(
@@ -337,12 +340,17 @@ pub fn run() {
 #[cfg(test)]
 mod environment_tests {
     #[test]
-    fn development_and_packaged_desktop_use_the_cli_data_identifier() {
+    fn desktop_identity_keeps_the_shared_cli_data_identifier() {
         let packaged: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         let identifier = packaged["identifier"].as_str().unwrap();
         let runtime = super::runtime_context();
-        assert_eq!(runtime.config().identifier, identifier);
+        let expected_identity = if cfg!(skills_hub_local_bundle) {
+            "com.qufei1993.skillshub.local-test"
+        } else {
+            identifier
+        };
+        assert_eq!(runtime.config().identifier, expected_identity);
         assert_eq!(identifier, super::core::runtime_paths::PRODUCT_IDENTIFIER);
     }
 }

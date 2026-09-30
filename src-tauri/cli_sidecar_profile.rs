@@ -122,3 +122,51 @@ pub fn validate_manifest(
     }
     Ok(())
 }
+
+pub fn validate_local_test_config(config: &serde_json::Value) -> Result<(), &'static str> {
+    if config["productName"] != "Skills Hub Local Test"
+        || config["mainBinaryName"] != "skills-hub-local-test"
+        || config["identifier"] != "com.qufei1993.skillshub.local-test"
+        || config["bundle"]["createUpdaterArtifacts"] != false
+        || config["bundle"]["externalBin"] != serde_json::json!([])
+        || config["plugins"]["updater"]["endpoints"] != serde_json::json!([])
+    {
+        return Err("LOCAL_TEST_BUILD_CONFIG_REQUIRED");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod local_test_config_tests {
+    #[test]
+    fn local_test_requires_distinct_identity_binary_and_disabled_release_updater() {
+        let config = serde_json::json!({
+            "productName": "Skills Hub Local Test", "mainBinaryName": "skills-hub-local-test",
+            "identifier": "com.qufei1993.skillshub.local-test",
+            "bundle": { "createUpdaterArtifacts": false, "externalBin": [] },
+            "plugins": { "updater": { "endpoints": [] } }
+        });
+        assert!(super::validate_local_test_config(&config).is_ok());
+        for field in [
+            "productName",
+            "mainBinaryName",
+            "identifier",
+            "bundle",
+            "plugins",
+        ] {
+            let mut altered = config.clone();
+            altered.as_object_mut().unwrap().remove(field);
+            assert_eq!(
+                super::validate_local_test_config(&altered),
+                Err("LOCAL_TEST_BUILD_CONFIG_REQUIRED")
+            );
+        }
+        let mut altered = config.clone();
+        altered["plugins"]["updater"]["endpoints"] =
+            serde_json::json!(["https://example.com/updater.json"]);
+        assert!(super::validate_local_test_config(&altered).is_err());
+        let mut altered = config;
+        altered["bundle"]["createUpdaterArtifacts"] = serde_json::json!(true);
+        assert!(super::validate_local_test_config(&altered).is_err());
+    }
+}
