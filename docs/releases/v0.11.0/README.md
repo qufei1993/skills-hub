@@ -2,6 +2,16 @@
 
 [中文](README.zh.md)
 
+## Downloads
+
+| System | Computer | Installer |
+| --- | --- | --- |
+| macOS | Apple silicon (M1 / M2 / M3, etc.) | [Download .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-aarch64.dmg) |
+| macOS | Intel processor | [Download .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-x86_64.dmg) |
+| Windows | Intel / AMD 64-bit PCs | [Download .exe](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Windows-x64.exe) |
+
+Desktop users only need the installer. The CLI downloads automatically when you enable AI management.
+
 v0.11.0 lets you manage Skills through AI conversations using the official `manage-skills-hub` Skill and `skillshub-cli`. Enable AI management in Settings with one click. AI installations sync to detected, enabled tools by default, and desktop lists refresh on navigation and window focus. The CLI shares the desktop library and follows its version, but is downloaded only when enabling or updating AI management. The desktop installer contains no CLI binary. First setup requires network access; a verified matching installation works offline and after the desktop is closed. Startup does not update the CLI or official Skill. See [Agent-first CLI](agent-first-cli.md) and [verified desktop bridge](verified-cli-bridge.md).
 
 ## Incremental Git installation

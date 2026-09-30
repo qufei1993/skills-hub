@@ -98,6 +98,12 @@ it('desktop release has no npm publication dependency and retains native CLI pre
   assert.match(commands, /cli-manifest/)
 })
 
+it('release notes generate bilingual download tables from actual desktop assets', () => {
+  const step = workflow.jobs['assemble-updater-json'].steps.find(item => item.name === 'Generate release notes from changelog')
+  assert.match(step.run, /extract-changelog\.mjs "\$TAG" docs\/CHANGELOG\.zh\.md --assets dl --language zh/)
+  assert.match(step.run, /extract-changelog\.mjs "\$TAG" CHANGELOG\.md --assets dl --language en/)
+})
+
 it('separates CLI and desktop builds and keeps the complete release as a draft', () => {
   assert.equal(workflow.jobs['cli-build'].strategy.matrix.include.length, 5)
   assert.equal(workflow.jobs['desktop-build'].strategy.matrix.include.length, 3)

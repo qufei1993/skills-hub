@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ## [0.11.0]
 
+### Downloads
+
+| System | Computer | Installer |
+| --- | --- | --- |
+| macOS | Apple silicon (M1 / M2 / M3, etc.) | [Download .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-aarch64.dmg) |
+| macOS | Intel processor | [Download .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-x86_64.dmg) |
+| Windows | Intel / AMD 64-bit PCs | [Download .exe](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Windows-x64.exe) |
+
+Desktop users only need the installer. The CLI downloads automatically when you enable AI management.
+
 ### Added
 
 - **AI Skill management**: Enable the official `manage-skills-hub` Skill in Settings. Use AI conversations to search, install, import, update, deploy, tag, and safely remove Skills from the desktop's shared library.

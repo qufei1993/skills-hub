@@ -6,6 +6,16 @@
 
 ## [0.11.0]
 
+### 下载安装
+
+| 系统 | 适用电脑 | 安装包 |
+| --- | --- | --- |
+| macOS | Apple 芯片（M1 / M2 / M3 等） | [下载 .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-aarch64.dmg) |
+| macOS | Intel 芯片 | [下载 .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-x86_64.dmg) |
+| Windows | Intel / AMD 64 位电脑 | [下载 .exe](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Windows-x64.exe) |
+
+桌面用户只需下载安装包，CLI 会在启用 AI 管理时自动下载。
+
 ### 新增
 
 - **AI 管理 Skills**：在「设置 → AI 管理」一键启用官方 `manage-skills-hub` Skill，通过 AI 对话搜索、安装、导入、更新、同步、管理标签和安全删除 Skills，与桌面端共用技能库。
