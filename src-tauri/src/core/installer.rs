@@ -1523,11 +1523,13 @@ fn stage_skill_source(
             record.name == "manage-skills-hub",
             conflict("unknown_bundled_skill")
         );
+        let mut local_record = record.clone();
+        crate::core::device_sync::manifest::recover_bundled_sync_hash(store, &mut local_record)?;
         let metadata = std::fs::symlink_metadata(&central_path)?;
         anyhow::ensure!(
             metadata.is_dir()
                 && !metadata.file_type().is_symlink()
-                && record.content_hash.as_ref() == Some(&hash_dir_strict(&central_path)?),
+                && local_record.content_hash.as_ref() == Some(&hash_dir_strict(&central_path)?),
             conflict("bundled_skill_modified")
         );
         preflight_managed_skill_update_targets(store, &record.id)?;

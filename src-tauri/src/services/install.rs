@@ -24,15 +24,20 @@ pub(super) struct BundledInstall {
     staging: tempfile::TempDir,
     pub record: crate::core::skill_store::SkillRecord,
     previous: Option<crate::core::skill_store::SkillRecord>,
+    previous_local_hash: Option<String>,
 }
 
 impl BundledInstall {
     pub fn preview_record(&self) -> crate::core::skill_store::SkillRecord {
-        self.previous.clone().unwrap_or_else(|| {
+        if let Some(previous) = &self.previous {
+            let mut record = previous.clone();
+            record.content_hash = self.previous_local_hash.clone();
+            record
+        } else {
             let mut record = self.record.clone();
             record.central_path = self.staging.path().to_string_lossy().into_owned();
             record
-        })
+        }
     }
 }
 
@@ -182,6 +187,7 @@ impl SkillsHubService {
             .into_iter()
             .filter(|skill| skill.name.eq_ignore_ascii_case(name));
         let previous = existing.next();
+        let mut verified_previous = previous.clone();
         let central =
             crate::core::central_repo::resolve_central_repo_path(self.paths(), self.store())
                 .map_err(|_| ServiceError::internal("failed to resolve bundled skill path"))?
@@ -193,10 +199,12 @@ impl SkillsHubService {
             .as_ref()
             .map(|skill| PathBuf::from(&skill.central_path))
             .unwrap_or(central);
-        if let Some(previous) = &previous {
+        if let Some(previous) = &mut verified_previous {
             if previous.source_type != "bundled" || previous.name != name {
                 return Err(bundled_conflict(&target, "non_bundled_skill"));
             }
+            crate::core::device_sync::manifest::recover_bundled_sync_hash(self.store(), previous)
+                .map_err(|_| bundled_conflict(&target, "bundled_skill_modified"))?;
             let safe_directory = std::fs::symlink_metadata(&target)
                 .is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink());
             if !safe_directory
@@ -251,6 +259,7 @@ impl SkillsHubService {
             staging,
             record,
             previous,
+            previous_local_hash: verified_previous.and_then(|record| record.content_hash),
         })
     }
 
@@ -271,10 +280,7 @@ impl SkillsHubService {
         let mut replacement = PreparedDirReplacement::prepare_copy(
             bundled.staging.path(),
             path,
-            bundled
-                .previous
-                .as_ref()
-                .and_then(|previous| previous.content_hash.clone()),
+            bundled.previous_local_hash.clone(),
             bundled.previous.is_none(),
         )
         .map_err(|_| bundled_conflict(path, "bundled_stage_failed"))?;

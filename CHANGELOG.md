@@ -30,6 +30,8 @@ Desktop users only need the installer. The CLI downloads automatically when you 
 
 ### Fixed
 
+- **AI management after device sync**: Device sync now records the local directory checksum instead of the portable sync checksum. Enabling or updating AI management safely repairs the old official Skill record when unchanged content matches its recorded sync checksum, while preserving genuine edits. CLI recovery instructions now point to Enable.
+
 - **DeepSeek Harness custom home**: Global deployment, discovery, and installation detection now honor `DSH_HOME`, including blank-value fallback and current-user tilde expansion. Existing deployments can be safely unsynced from their recorded directory before redeploying to the new home; modified copies remain protected (fixes [#166](https://github.com/qufei1993/skills-hub/issues/166)).
 - **Incremental Git installation**: Reinstalling a repository updates same-source Skills, skips unchanged content, and installs new Skills while preserving settings and local edits. The picker distinguishes new Skills, update checks, and conflicts. Conflicting items are disabled without blocking other selections; long descriptions can be expanded.
 - **Cline desktop support**: Cline now uses `~/.cline/skills` for global Skills and `.cline/skills` for project Skills, with installation detection through `~/.cline`. Cline is no longer incorrectly grouped with tools using `.agents/skills`.
