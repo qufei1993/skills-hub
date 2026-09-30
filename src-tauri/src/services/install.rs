@@ -5,10 +5,12 @@ use serde_json::json;
 
 use crate::core::cancel_token::CancelToken;
 use crate::core::installer::{
-    check_managed_skill_update, install_git_skill, install_git_skill_from_selection,
-    install_local_skill_from_selection, list_git_skills, list_local_skills,
-    update_managed_skill_from_source, validate_skill_name as validate_core_skill_name,
-    GitSkillCandidate, LocalSkillCandidate, SkillAlreadyExistsError,
+    check_managed_skill_update, git_install_content_is_unmodified,
+    git_skill_candidate_from_selection, install_git_skill, install_git_skill_from_selection,
+    install_local_skill_from_selection, list_git_skills, list_local_skills, same_git_skill_source,
+    update_managed_skill_from_source, update_managed_skill_from_source_with_cancel,
+    validate_skill_name as validate_core_skill_name, GitSkillCandidate, LocalSkillCandidate,
+    SkillAlreadyExistsError,
 };
 use crate::core::network_proxy::get_github_proxy_url;
 use crate::core::skills_search::{search_skills_online, OnlineSkillResult};
@@ -115,12 +117,32 @@ impl InstallRequest {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct InstallOutcome {
+    #[serde(default)]
+    pub action: InstallAction,
+    #[serde(default)]
+    pub pending_targets: Vec<String>,
     pub id: String,
     pub name: String,
     pub central_path: String,
     pub content_hash: Option<String>,
     pub source: SkillSource,
     pub targets: Vec<SkillTarget>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallAction {
+    #[default]
+    Installed,
+    Updated,
+    Unchanged,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GitInstallCandidate {
+    #[serde(flatten)]
+    pub candidate: GitSkillCandidate,
+    pub status: &'static str,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -321,10 +343,11 @@ impl SkillsHubService {
         if let Some(name) = request.name.as_deref() {
             validate_skill_name(name)?;
         }
-        let installed = match request.source {
+        let (installed, action, pending_targets) = match request.source {
             InstallSource::Local(source) => {
                 let source = resolve_local_source(self.paths(), &source)?;
                 install_local_request(self, &source, request.subpath.as_deref(), request.name)
+                    .map(|installed| (installed, InstallAction::Installed, Vec::new()))
             }
             InstallSource::Git(reference) => {
                 validate_git_reference(&reference)?;
@@ -339,6 +362,8 @@ impl SkillsHubService {
         }?;
         let skill = self.show_skill(SkillSelector::Id(installed.skill_id.clone()))?;
         Ok(InstallOutcome {
+            action,
+            pending_targets,
             id: skill.id,
             name: installed.name,
             central_path: installed.central_path.to_string_lossy().into_owned(),
@@ -389,6 +414,27 @@ impl SkillsHubService {
         self.ensure_database_compatible()?;
         validate_git_reference(reference)?;
         list_git_skills(self.paths(), self.store(), reference, cancel).map_err(map_install_error)
+    }
+
+    pub(crate) fn git_install_preview_with_cancel(
+        &self,
+        reference: &str,
+        name: Option<&str>,
+        cancel: Option<&CancelToken>,
+    ) -> Result<Vec<GitInstallCandidate>, ServiceError> {
+        let candidates = self.git_install_candidates_with_cancel(reference, cancel)?;
+        candidates
+            .into_iter()
+            .map(|candidate| {
+                let status = match classify_git_candidate(self, reference, &candidate, name) {
+                    Ok(Some(_)) => "update",
+                    Ok(None) => "install",
+                    Err(error) if error.code == ErrorCode::TargetConflict => "conflict",
+                    Err(error) => return Err(error),
+                };
+                Ok(GitInstallCandidate { candidate, status })
+            })
+            .collect()
     }
 
     pub fn check_updates(&self, selector: SkillSelector) -> Result<UpdateCheck, ServiceError> {
@@ -494,37 +540,151 @@ fn install_git_request(
     subpath: Option<&str>,
     name: Option<String>,
     cancel: Option<&CancelToken>,
-) -> Result<crate::core::installer::InstallResult, ServiceError> {
-    if let Some(subpath) = subpath {
-        return install_git_skill_from_selection(
+) -> Result<
+    (
+        crate::core::installer::InstallResult,
+        InstallAction,
+        Vec<String>,
+    ),
+    ServiceError,
+> {
+    if cancel.is_some_and(CancelToken::is_cancelled) {
+        return Err(map_install_error(anyhow::anyhow!("CANCELLED|")));
+    }
+    let candidate = if let Some(subpath) = subpath {
+        git_skill_candidate_from_selection(
             service.paths(),
             service.store(),
             reference,
             subpath,
-            name,
             cancel,
         )
-        .map_err(map_install_error);
+        .map_err(map_install_error)?
+    } else {
+        let candidates = service.git_install_candidates_with_cancel(reference, cancel)?;
+        match candidates.as_slice() {
+            [] => {
+                return install_git_skill(service.paths(), service.store(), reference, name, cancel)
+                    .map(|installed| (installed, InstallAction::Installed, Vec::new()))
+                    .map_err(map_install_error)
+            }
+            [candidate] => candidate.clone(),
+            _ => return Err(multi_git_candidates(&candidates)),
+        }
+    };
+    let existing = classify_git_candidate(service, reference, &candidate, name.as_deref())?;
+    if cancel.is_some_and(CancelToken::is_cancelled) {
+        return Err(map_install_error(anyhow::anyhow!("CANCELLED|")));
     }
-
-    let candidates = service.git_install_candidates_with_cancel(reference, cancel)?;
-    for candidate in &candidates {
-        validate_skill_name(&candidate.name)?;
-    }
-    match candidates.as_slice() {
-        [] => install_git_skill(service.paths(), service.store(), reference, name, cancel)
-            .map_err(map_install_error),
-        [candidate] => install_git_skill_from_selection(
+    if let Some(existing) = existing {
+        if !git_install_content_is_unmodified(service.paths(), service.store(), &existing, cancel)
+            .map_err(map_install_error)?
+        {
+            return Err(git_install_conflict(
+                &existing.central_path,
+                "target_modified",
+            ));
+        }
+        service.preflight_update_targets(&existing.id)?;
+        let updated = update_managed_skill_from_source_with_cancel(
             service.paths(),
             service.store(),
-            reference,
-            &candidate.subpath,
-            name,
+            &existing.id,
             cancel,
         )
-        .map_err(map_install_error),
-        _ => Err(multi_git_candidates(&candidates)),
+        .map_err(map_update_error)?;
+        let action = if updated.changed {
+            InstallAction::Updated
+        } else {
+            InstallAction::Unchanged
+        };
+        return Ok((
+            crate::core::installer::InstallResult {
+                skill_id: updated.skill_id,
+                name: updated.name,
+                central_path: updated.central_path,
+                content_hash: updated.content_hash,
+            },
+            action,
+            updated.pending_targets,
+        ));
     }
+    install_git_skill_from_selection(
+        service.paths(),
+        service.store(),
+        reference,
+        &candidate.subpath,
+        Some(name.unwrap_or_else(|| candidate.name.clone())),
+        cancel,
+    )
+    .map(|installed| (installed, InstallAction::Installed, Vec::new()))
+    .map_err(map_install_error)
+}
+
+fn git_install_conflict(path: &str, reason: &str) -> ServiceError {
+    ServiceError::new(
+        ErrorCode::TargetConflict,
+        "the installed skill cannot be replaced",
+        json!({ "path": path, "reason": reason }),
+    )
+}
+
+fn classify_git_candidate(
+    service: &SkillsHubService,
+    reference: &str,
+    candidate: &GitSkillCandidate,
+    name: Option<&str>,
+) -> Result<Option<crate::core::skill_store::SkillRecord>, ServiceError> {
+    let desired_name = name.unwrap_or(&candidate.name);
+    validate_skill_name(desired_name)?;
+    let records = service
+        .store()
+        .list_skills()
+        .map_err(|_| ServiceError::internal("failed to inspect installed skills"))?;
+    let same_source = records
+        .iter()
+        .filter(|record| {
+            record.source_type == "git"
+                && record.source_ref.as_deref().is_some_and(|source| {
+                    same_git_skill_source(
+                        source,
+                        record.source_subpath.as_deref(),
+                        reference,
+                        &candidate.subpath,
+                    )
+                })
+                && name.map_or(true, |name| name == record.name)
+        })
+        .collect::<Vec<_>>();
+    if same_source.len() == 1 {
+        return Ok(Some(same_source[0].clone()));
+    }
+    if let Some(existing) = records
+        .iter()
+        .find(|record| record.name.eq_ignore_ascii_case(desired_name))
+    {
+        return Err(git_install_conflict(
+            &existing.central_path,
+            "different_source",
+        ));
+    }
+    if !same_source.is_empty() {
+        return Err(git_install_conflict(
+            &same_source[0].central_path,
+            "ambiguous_source",
+        ));
+    }
+    let target =
+        crate::core::central_repo::resolve_central_repo_path(service.paths(), service.store())
+            .map_err(|_| ServiceError::internal("failed to resolve skill directory"))?
+            .join(desired_name);
+    if std::fs::symlink_metadata(&target).is_ok() {
+        return Err(git_install_conflict(
+            &target.to_string_lossy(),
+            "unmanaged_target",
+        ));
+    }
+    Ok(None)
 }
 
 fn resolve_local_source(
@@ -720,6 +880,9 @@ fn map_install_error(error: anyhow::Error) -> ServiceError {
 }
 
 fn map_update_error(error: anyhow::Error) -> ServiceError {
+    if error.to_string().starts_with("CANCELLED|") {
+        return map_install_error(error);
+    }
     if let Some(conflict) = error.downcast_ref::<crate::core::installer::UpdateTargetConflict>() {
         return ServiceError::new(
             ErrorCode::TargetConflict,

@@ -1,7 +1,48 @@
-import { memo, useMemo, useState } from 'react'
+import { memo, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Search } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import type { GitSkillCandidate } from '../types'
+
+const SkillDescription = memo(({ text, t }: { text: string; t: TFunction }) => {
+  const contentRef = useRef<HTMLDivElement>(null)
+  const contentId = useId()
+  const [expanded, setExpanded] = useState(false)
+  const [overflowing, setOverflowing] = useState(false)
+
+  useLayoutEffect(() => {
+    const content = contentRef.current
+    if (!content) return
+    const measure = () => {
+      const lineHeight = Number.parseFloat(getComputedStyle(content).lineHeight)
+      const collapsedHeight = Number.isFinite(lineHeight) ? lineHeight * 3 : content.clientHeight
+      setOverflowing(content.scrollHeight > collapsedHeight + 1)
+    }
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(content)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [text])
+
+  return (
+    <div className="git-pick-description">
+      <div id={contentId} ref={contentRef}
+        className={`pick-item-desc git-pick-description-text${expanded ? ' is-expanded' : ''}`}>
+        {text}
+      </div>
+      {overflowing || expanded ? (
+        <button type="button" className="git-pick-description-toggle"
+          aria-expanded={expanded} aria-controls={contentId}
+          onClick={() => setExpanded((value) => !value)}>
+          {t(expanded ? 'gitInstall.collapseDescription' : 'gitInstall.expandDescription')}
+        </button>
+      ) : null}
+    </div>
+  )
+})
 
 type GitPickModalProps = {
   open: boolean
@@ -36,23 +77,27 @@ const GitPickModal = ({
       ),
     )
   }, [gitCandidates, normalizedQuery])
-  const selectedCandidates = filteredCandidates.filter(
+  const selectableCandidates = filteredCandidates.filter((c) => c.status !== 'conflict')
+  const selectedCandidates = selectableCandidates.filter(
     (c) => gitCandidateSelected[c.subpath],
   )
   const selectedCount = selectedCandidates.length
   const allVisibleSelected =
-    filteredCandidates.length > 0 &&
-    filteredCandidates.every((c) => gitCandidateSelected[c.subpath])
+    selectableCandidates.length > 0 &&
+    selectableCandidates.every((c) => gitCandidateSelected[c.subpath])
 
   const toggleVisibleCandidates = (checked: boolean) => {
-    filteredCandidates.forEach((c) => onToggleCandidate(c.subpath, checked))
+    selectableCandidates.forEach((c) => onToggleCandidate(c.subpath, checked))
   }
+
+  const updateCount = selectedCandidates.filter((c) => c.status === 'update').length
+  const conflictCount = filteredCandidates.length - selectableCandidates.length
 
   if (!open) return null
 
   return (
     <div className="modal-backdrop" onClick={onRequestClose}>
-      <div className="modal pick-skill-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal pick-skill-modal git-pick-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">{t('gitPickTitle')}</div>
           <button
@@ -66,6 +111,11 @@ const GitPickModal = ({
         </div>
         <div className="modal-body">
           <p className="label">{t('gitPickBody')}</p>
+          {updateCount > 0 || conflictCount > 0 ? (
+            <p className="label">{t('gitInstall.preview', {
+              install: selectedCount - updateCount, update: updateCount, conflict: conflictCount,
+            })}</p>
+          ) : null}
           <div className="pick-search">
             <Search size={16} className="search-icon-abs" />
             <input
@@ -81,14 +131,14 @@ const GitPickModal = ({
                 type="checkbox"
                 checked={allVisibleSelected}
                 onChange={(e) => toggleVisibleCandidates(e.target.checked)}
-                disabled={filteredCandidates.length === 0}
+                disabled={loading || selectableCandidates.length === 0}
               />
               {t('selectAll')}
             </label>
             <span className="pick-toolbar-count">
               {t('selectedCount', {
                 selected: selectedCount,
-                total: filteredCandidates.length,
+                total: selectableCandidates.length,
               })}
             </span>
           </div>
@@ -97,18 +147,30 @@ const GitPickModal = ({
               <div className="empty">{t('pickSearchEmpty')}</div>
             ) : null}
             {filteredCandidates.map((c) => (
-              <div className="pick-item" key={c.subpath}>
+              <div className={`pick-item${c.status === 'conflict' ? ' git-pick-item-conflict' : ''}`} key={c.subpath}>
                 <label className="pick-item-checkbox">
                   <input
                     type="checkbox"
-                    checked={Boolean(gitCandidateSelected[c.subpath])}
+                    checked={c.status !== 'conflict' && Boolean(gitCandidateSelected[c.subpath])}
+                    disabled={loading || c.status === 'conflict'}
+                    aria-label={c.name}
                     onChange={(e) => onToggleCandidate(c.subpath, e.target.checked)}
                   />
                 </label>
                 <div className="pick-item-main">
-                  <div className="pick-item-title">{c.name}</div>
+                  <div className="git-pick-item-heading">
+                    <div className="pick-item-title">{c.name}</div>
+                    {c.status ? (
+                      <span className={`git-pick-status git-pick-status-${c.status}`}>
+                        {t(c.status === 'conflict' ? 'gitInstall.conflictLabel' : `gitInstall.${c.status}`)}
+                      </span>
+                    ) : null}
+                  </div>
+                  {c.status === 'conflict' ? (
+                    <div className="pick-item-desc">{t('gitInstall.conflict')}</div>
+                  ) : null}
                   {c.description ? (
-                    <div className="pick-item-desc">{c.description}</div>
+                    <SkillDescription text={c.description} t={t} />
                   ) : null}
                   <div className="pick-item-path">{c.subpath}</div>
                 </div>
@@ -125,7 +187,7 @@ const GitPickModal = ({
             onClick={() => onInstall(selectedCandidates.map((c) => c.subpath))}
             disabled={loading || selectedCount === 0}
           >
-            {t('installSelected')}
+            {t(updateCount > 0 ? 'gitInstall.submit' : 'installSelected')}
           </button>
         </div>
       </div>

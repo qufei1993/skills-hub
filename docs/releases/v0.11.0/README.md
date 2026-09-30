@@ -4,6 +4,12 @@
 
 v0.11.0 lets you manage Skills through AI conversations using the official `manage-skills-hub` Skill and `skillshub-cli`. Enable AI management in Settings with one click. AI installations sync to detected, enabled tools by default, and desktop lists refresh on navigation and window focus. The CLI shares the desktop library and is bundled with the desktop, follows its version, and works after the desktop is closed. First-time installation requires the explicit enable action; later launches update active AI management installations to the desktop version. See [Agent-first CLI](agent-first-cli.md) and [verified desktop bridge](verified-cli-bridge.md).
 
+## Incremental Git installation
+
+Reinstalling a multi-Skill repository updates existing Skills from the same repository, branch selection, and subpath, while installing new Skills. Unchanged Skills retain their records. The desktop picker shows installation/update counts, uses green, blue, and amber badges for new Skills, update checks, and conflicts, and skips source or name conflicts; individual failures do not block the remaining selections. Conflicting items have visibly disabled checkboxes, and descriptions longer than three lines can be expanded or collapsed.
+
+Updates preserve Skill IDs, tags, enablement, and existing deployment configuration. Local edits and updates that would remove managed files are held back. Older records without content hashes are checked against their original Git revision; if that revision is no longer available in the cache, reinstallation is held back for manual review. Cross-source overwrite and interactive renaming are not included. Repository content follows the configured Git cache freshness policy.
+
 ## Cline desktop support
 
 The existing Cline adapter now detects `~/.cline` and syncs global Skills to `~/.cline/skills` and project Skills to `.cline/skills`, matching [Cline’s documented directories](https://docs.cline.bot/customization/skills). Shared-directory previews no longer group Cline with `.agents/skills` tools. Existing files in `.agents/skills` are not moved or deleted; deploy the desired Skills to Cline again to populate its native directory.

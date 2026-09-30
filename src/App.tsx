@@ -356,6 +356,9 @@ function App() {
         const path = raw.slice('TARGET_MODIFIED|'.length)
         return t('errors.targetModified', { path })
       }
+      if (raw.startsWith('UPDATE_HELD_BACK|')) {
+        return t('gitInstall.heldBack')
+      }
       if (raw.startsWith('UPDATE_IN_PROGRESS|')) {
         return t('errors.updateInProgress')
       }
@@ -2760,6 +2763,19 @@ function App() {
     }
   }
 
+  const finishGitInstall = async (result: InstallResultDto) => {
+    if (!result.action || result.action === 'installed') {
+      await applySelectedAddModalTags(result.skill_id, result.name)
+      return syncInstalledSkill(result)
+    }
+    return result.pending_targets?.length ? [{
+      title: result.name,
+      message: t('deviceSync.skillUpdatedToolsPending', {
+        name: result.name, count: result.pending_targets.length,
+      }),
+    }] : []
+  }
+
   const handleCreateGit = async () => {
     if (!gitUrl.trim()) {
       setError(t('errors.requireGitUrl'))
@@ -2771,127 +2787,40 @@ function App() {
     setActionMessage(t('actions.creatingGitSkill'))
     try {
       const url = gitUrl.trim()
-      const isFolderUrl = url.includes('/tree/') || url.includes('/blob/')
-
-      if (isFolderUrl) {
-        const candidates = await invokeTauri<GitSkillCandidate[]>(
-          'list_git_skills_cmd',
-          { repoUrl: url },
-        )
-        if (candidates.length === 0) {
-          throw new Error(t('errors.noSkillsFoundWithHint'))
-        }
-        if (candidates.length > 1) {
-          setGitCandidatesRepoUrl(url)
-          setGitCandidates(candidates)
-          setGitCandidateSelected(
-            Object.fromEntries(candidates.map((c) => [c.subpath, true])),
-          )
-          setShowGitPickModal(true)
-          setActionMessage(null)
-          setLoading(false)
-          setLoadingStartAt(null)
-          return
-        }
-        if (isSkillNameTaken(candidates[0].name)) {
-          setError(t('errors.skillAlreadyExists', { name: candidates[0].name }))
-          return
-        }
-        const created = await invokeTauri<InstallResultDto>(
-          'install_git_selection',
-          {
-            repoUrl: url,
-            subpath: candidates[0].subpath,
-            name: gitName.trim() || undefined,
-          },
-        )
-        await applySelectedAddModalTags(created.skill_id, created.name)
-        const syncErrors = await syncInstalledSkill(created)
-        if (syncErrors.length > 0) showActionErrors(syncErrors)
-      } else {
-        const candidates = await invokeTauri<GitSkillCandidate[]>(
-          'list_git_skills_cmd',
-          { repoUrl: url },
-        )
-        if (candidates.length === 0) {
-          throw new Error(t('errors.noSkillsFoundWithHint'))
-        }
-        if (candidates.length === 1) {
-          if (isSkillNameTaken(candidates[0].name)) {
-            setError(t('errors.skillAlreadyExists', { name: candidates[0].name }))
-            return
-          }
-          const created = await invokeTauri<InstallResultDto>(
-            'install_git_selection',
-            {
-            repoUrl: url,
-            subpath: candidates[0].subpath,
-            name: gitName.trim() || undefined,
-            },
-          )
-          await applySelectedAddModalTags(created.skill_id, created.name)
-          const syncErrors = await syncInstalledSkill(created)
-          if (syncErrors.length > 0) showActionErrors(syncErrors)
-        } else if (autoSelectSkillName) {
-          // Auto-select the matching skill from online search results.
-          // skills.sh name may differ from SKILL.md name (e.g. "json-render-react" vs "react"),
-          // so try exact match first, then containment match.
-          const target = autoSelectSkillName.toLowerCase()
-          const containMatches = candidates.filter((c) => {
-            const n = c.name.toLowerCase()
-            return target.includes(n) || n.includes(target)
-          })
-          const match =
-            candidates.find((c) => c.name.toLowerCase() === target) ??
-            (containMatches.length === 1 ? containMatches[0] : undefined)
-          setAutoSelectSkillName(null)
-          if (match) {
-            if (isSkillNameTaken(match.name)) {
-              setError(t('errors.skillAlreadyExists', { name: match.name }))
-              return
-            }
-            const created = await invokeTauri<InstallResultDto>(
-              'install_git_selection',
-              {
-                repoUrl: url,
-                subpath: match.subpath,
-                name: gitName.trim() || undefined,
-              },
-            )
-            await applySelectedAddModalTags(created.skill_id, created.name)
-            const syncErrors = await syncInstalledSkill(created)
-            if (syncErrors.length > 0) showActionErrors(syncErrors)
-          } else {
-            // No match found, fall back to picker
-            setGitCandidatesRepoUrl(url)
-            setGitCandidates(candidates)
-            setGitCandidateSelected(
-              Object.fromEntries(candidates.map((c) => [c.subpath, true])),
-            )
-            setShowGitPickModal(true)
-            setActionMessage(null)
-            setLoading(false)
-            setLoadingStartAt(null)
-            return
-          }
-        } else {
-          setGitCandidatesRepoUrl(url)
-          setGitCandidates(candidates)
-          setGitCandidateSelected(
-            Object.fromEntries(candidates.map((c) => [c.subpath, true])),
-          )
-          setShowGitPickModal(true)
-          setActionMessage(null)
-          setLoading(false)
-          setLoadingStartAt(null)
-          return
-        }
+      const candidates = await invokeTauri<GitSkillCandidate[]>('list_git_skills_cmd', {
+        repoUrl: url, name: gitName.trim() || undefined,
+      })
+      if (candidates.length === 0) throw new Error(t('errors.noSkillsFoundWithHint'))
+      let selected = candidates
+      if (autoSelectSkillName) {
+        const target = autoSelectSkillName.toLowerCase()
+        const containMatches = candidates.filter((c) => {
+          const name = c.name.toLowerCase()
+          return target.includes(name) || name.includes(target)
+        })
+        const match = candidates.find((c) => c.name.toLowerCase() === target)
+          ?? (containMatches.length === 1 ? containMatches[0] : undefined)
+        if (match) selected = [match]
+        setAutoSelectSkillName(null)
       }
+      if (selected.length !== 1 || selected[0].status === 'update' || selected[0].status === 'conflict') {
+        setGitCandidatesRepoUrl(url)
+        setGitCandidates(candidates)
+        setGitCandidateSelected(Object.fromEntries(candidates.map((c) => [
+          c.subpath, selected.includes(c) && c.status !== 'conflict',
+        ])))
+        setShowGitPickModal(true)
+        return
+      }
+      const created = await invokeTauri<InstallResultDto>('install_git_selection', {
+        repoUrl: url, subpath: selected[0].subpath, name: gitName.trim() || undefined,
+      })
+      const syncErrors = await finishGitInstall(created)
+      if (syncErrors.length > 0) showActionErrors(syncErrors)
       setGitUrl('')
       setGitName('')
-      setActionMessage(t('status.gitSkillCreated'))
-      setSuccessToastMessage(t('status.gitSkillCreated'))
-      setActionMessage(null)
+      setSuccessToastMessage(t(created.action === 'updated' ? 'status.updated'
+        : created.action === 'unchanged' ? 'status.unchanged' : 'status.gitSkillCreated', { name: created.name }))
       resetInstallScope()
       setShowAddModal(false)
       await loadManagedSkills()
@@ -2899,6 +2828,7 @@ function App() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
+      setActionMessage(null)
       setLoading(false)
       setLoadingStartAt(null)
     }
@@ -3030,15 +2960,10 @@ function App() {
   const handleInstallSelectedCandidates = async (subpaths: string[]) => {
     const requestedSubpaths = new Set(subpaths)
     const selected = gitCandidates.filter(
-      (c) => gitCandidateSelected[c.subpath] && requestedSubpaths.has(c.subpath),
+      (c) => c.status !== 'conflict' && gitCandidateSelected[c.subpath] && requestedSubpaths.has(c.subpath),
     )
     if (selected.length === 0) {
       setError(t('errors.selectAtLeastOneSkill'))
-      return
-    }
-    const duplicated = selected.find((c) => isSkillNameTaken(c.name))
-    if (duplicated) {
-      setError(t('errors.skillAlreadyExists', { name: duplicated.name }))
       return
     }
     if (selected.length > 1 && gitName.trim()) {
@@ -3051,6 +2976,8 @@ function App() {
     setError(null)
     try {
       const collectedErrors: { title: string; message: string }[] = []
+      let cancelled = false
+      const totals = { installed: 0, updated: 0, unchanged: 0, failed: 0 }
       for (let i = 0; i < selected.length; i++) {
         const candidate = selected[i]
         setActionMessage(
@@ -3064,19 +2991,24 @@ function App() {
           const created = await invokeTauri<InstallResultDto>(
             'install_git_selection',
             {
-            repoUrl: gitCandidatesRepoUrl,
-            subpath: candidate.subpath,
-            name: gitName.trim() || undefined,
+              repoUrl: gitCandidatesRepoUrl,
+              subpath: candidate.subpath,
+              name: gitName.trim() || undefined,
             },
           )
-          await applySelectedAddModalTags(created.skill_id, created.name)
-          const syncErrors = await syncInstalledSkill(created)
+          totals[created.action ?? 'installed'] += 1
+          const syncErrors = await finishGitInstall(created)
           collectedErrors.push(...syncErrors)
         } catch (err) {
           const raw = err instanceof Error ? err.message : String(err)
+          if (raw.includes('CANCELLED|')) {
+            cancelled = true
+            break
+          }
+          totals.failed += 1
           collectedErrors.push({
             title: t('errors.importFailedTitle', { name: candidate.name }),
-            message: raw,
+            message: formatErrorMessage(raw),
           })
         }
       }
@@ -3087,13 +3019,10 @@ function App() {
       setGitCandidatesRepoUrl('')
       setGitUrl('')
       setGitName('')
-      setActionMessage(t('status.selectedSkillsInstalled'))
-      setSuccessToastMessage(t('status.selectedSkillsInstalled'))
+      const summary = t(cancelled ? 'gitInstall.cancelled' : 'gitInstall.result', totals)
+      if (cancelled || collectedErrors.length > 0) toast.warning(summary)
+      else setSuccessToastMessage(summary)
       setActionMessage(null)
-      setShowGitPickModal(false)
-      setGitCandidates([])
-      setGitCandidateSelected({})
-      setGitCandidatesRepoUrl('')
       resetInstallScope()
       setShowAddModal(false)
       await loadManagedSkills()
