@@ -19,12 +19,12 @@ function Install-SkillsHubCli {
         }
     }
     Write-Host 'Finding the latest Skills Hub release...'
-    $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/qufei1993/skills-hub-cli/releases/latest' -TimeoutSec 120
+    $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/qufei1993/skills-hub/releases/latest' -TimeoutSec 120
     $tag = $release.tag_name
     if ($tag -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Could not resolve a stable release version.' }
     $version = $tag.Substring(1)
     $asset = "skillshub-cli-$version-windows-x64.exe"
-    $base = "https://github.com/qufei1993/skills-hub-cli/releases/download/$tag"
+    $base = "https://github.com/qufei1993/skills-hub/releases/download/$tag"
     New-Item -ItemType Directory -Force -Path $binDir | Out-Null
     $work = Join-Path $binDir ('.install-' + [Guid]::NewGuid().ToString())
     New-Item -ItemType Directory -Path $work | Out-Null

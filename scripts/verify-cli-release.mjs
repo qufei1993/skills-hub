@@ -42,7 +42,7 @@ async function downloadBytes(url, maximum) {
 export async function verifyCliRelease({ manifests, download = downloadBytes }) {
   validateReleaseManifests(manifests)
   for (const manifest of manifests) {
-    const base = `https://github.com/qufei1993/skills-hub-cli/releases/download/v${manifest.version}/`
+    const base = `https://github.com/qufei1993/skills-hub/releases/download/v${manifest.version}/`
     const published = JSON.parse(Buffer.from(await download(`${base}cli-manifest-${manifest.target}.json`,4096)).toString('utf8'))
     validateCliManifest(published, manifest)
     if (published.sha256 !== manifest.sha256 || published.size !== manifest.size || published.assetName !== manifest.assetName) throw new Error('CLI_RELEASE_IMMUTABLE_CONFLICT')

@@ -135,7 +135,7 @@ fn prepare_release_cli(
     on_progress: &dyn Fn(CliPreparationPhase, u64, Option<u64>),
 ) -> Result<CliBridgeStatus> {
     let url = format!(
-        "https://github.com/qufei1993/skills-hub-cli/releases/download/v{}/{}",
+        "https://github.com/qufei1993/skills-hub/releases/download/v{}/{}",
         manifest.version, manifest.asset_name
     );
     let client = super::network_proxy::app_download_client(proxy_url, 120)

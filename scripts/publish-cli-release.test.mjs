@@ -19,7 +19,7 @@ function fixture(run) {
  const assets=readdirSync(directory).map(name=>({name,size:readFileSync(path.join(directory,name)).length,digest:digest(readFileSync(path.join(directory,name)))}))
  return Promise.resolve(run({directory,assets})).finally(()=>rmSync(directory,{recursive:true,force:true}))
 }
-it('uploads in draft and only publishes after checking all final asset digests',async()=>{
+it('stages CLI resources in the desktop release without publishing it',async()=>{
  assert.equal(typeof api.publishCliRelease,'function')
  await fixture(async({directory,assets})=>{
   const calls=[]; let inspected=false
@@ -29,7 +29,8 @@ it('uploads in draft and only publishes after checking all final asset digests',
   }})
   assert.equal(calls.filter(args=>args[0]==='release'&&args[1]==='create').length,1)
   assert.ok(calls.find(args=>args[1]==='create').includes('--draft'))
-  assert.ok(calls.find(args=>args[1]==='edit').includes('--draft=false'))
+  assert.ok(calls.every(args=>args[1]!=='edit'))
+  assert.ok(calls.find(args=>args[1]==='create').includes('qufei1993/skills-hub'))
  })
 })
 it('refuses a conflicting existing release without upload, overwrite or publication',async()=>{
@@ -45,5 +46,37 @@ it('requires a source commit before any remote inspection or mutation',async()=>
   const calls=[]
   await assert.rejects(api.publishCliRelease({directory,tag:'v0.11.0',gh:async args=>{calls.push(args);return {draft:false,assets}}}))
   assert.equal(calls.length,0)
+ })
+})
+
+it('accepts matching CLI resources alongside desktop assets and publishes only explicitly', async () => {
+ await fixture(async ({directory,assets}) => {
+  const calls=[]
+  await api.publishCliRelease({directory,tag:'v0.11.0',sourceCommit:'a'.repeat(40),publish:true,gh:async args=>{
+   calls.push(args)
+   if(args[0]==='api') return {draft:true,assets:[...assets,{name:'Skills-Hub.dmg',size:100,digest:'desktop'}]}
+  }})
+  assert.ok(calls.find(args=>args[1]==='edit').includes('--draft=false'))
+ })
+})
+it('does not add new CLI assets to an already public desktop release', async () => {
+ await fixture(async ({directory}) => {
+  const calls=[]
+  await assert.rejects(api.publishCliRelease({directory,tag:'v0.11.0',sourceCommit:'a'.repeat(40),gh:async args=>{calls.push(args);return {draft:false,assets:[{name:'app.dmg'}]}}}))
+  assert.ok(calls.every(args=>args[0]==='api'))
+ })
+})
+
+it('adds only missing CLI resources to an existing draft and verifies them before publication', async () => {
+ await fixture(async ({directory,assets}) => {
+  let uploaded=false; const calls=[]
+  await api.publishCliRelease({directory,tag:'v0.11.0',sourceCommit:'a'.repeat(40),gh:async args=>{
+   calls.push(args)
+   if(args[0]==='api') return {draft:true,assets:uploaded?assets:assets.slice(1)}
+   if(args[1]==='upload') uploaded=true
+  }})
+  assert.equal(calls.filter(args=>args[1]==='upload').length,1)
+  assert.equal(calls.find(args=>args[1]==='upload').filter(arg=>arg.startsWith(directory)).length,1)
+  assert.ok(calls.every(args=>args[1]!=='edit'))
  })
 })

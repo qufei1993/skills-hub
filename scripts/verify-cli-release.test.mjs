@@ -10,7 +10,7 @@ it('verifies all five fixed version downloads and published manifests without cr
   const urls=[]
   await api.verifyCliRelease({manifests, download: async url => { urls.push(url); return Buffer.from(url.endsWith('.json') ? JSON.stringify(manifests.find(m=>url.endsWith(`cli-manifest-${m.target}.json`))) : 'abc') }})
   assert.equal(urls.length,10)
-  assert.ok(urls.every(url=>url.startsWith('https://github.com/qufei1993/skills-hub-cli/releases/download/v0.11.0/')))
+  assert.ok(urls.every(url=>url.startsWith('https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/')))
 })
 it('refuses incomplete platforms, unavailable bytes and conflicting published identity', async () => {
   assert.equal(typeof api.verifyCliRelease,'function')

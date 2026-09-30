@@ -110,7 +110,14 @@ it('separates five CLI targets from three desktop bundles and gates public deskt
   assert.match(cliSteps[notarization].run, /node scripts\/assert-notarization\.mjs/)
   const publish = workflow.jobs['cli-publish'].steps.map(step => step.run ?? '').join('\n')
   assert.match(publish, /publish-cli-release\.mjs/)
-  assert.match(publish, /verify-cli-release\.mjs/)
+  assert.doesNotMatch(publish, /--publish|verify-cli-release\.mjs/)
+  assert.equal(workflow.jobs['cli-publish'].permissions.contents, 'write')
+  const finalSteps = workflow.jobs['assemble-updater-json'].steps
+  const upload = finalSteps.findIndex(step => step.uses === 'softprops/action-gh-release@v2')
+  assert.equal(finalSteps[upload].with.draft, true)
+  const publication = finalSteps.findIndex(step => /publish-cli-release\.mjs.*--publish/.test(step.run ?? ''))
+  const anonymous = finalSteps.findIndex(step => /verify-cli-release\.mjs/.test(step.run ?? ''))
+  assert.ok(upload < publication && publication < anonymous)
   const desktop = workflow.jobs['desktop-build'].steps
   assert.ok(desktop.some(step => step.uses === 'actions/download-artifact@v4' && step.with.pattern === 'cli-assets-*'))
   assert.ok(desktop.some(step => /verify-desktop-bundle\.mjs/.test(step.run ?? '')))
