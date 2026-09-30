@@ -906,10 +906,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify CLI assets and publish the complete shared release
+      - name: Verify CLI assets in the complete release draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/publish-cli-release.mjs cli-resources --publish
-
-      - name: Verify anonymous CLI downloads from the published release
-        run: node scripts/verify-cli-release.mjs cli-resources
+        run: node scripts/publish-cli-release.mjs cli-resources

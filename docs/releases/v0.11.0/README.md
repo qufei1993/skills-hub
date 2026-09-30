@@ -34,6 +34,8 @@ This record does not imply publication. The current v0.11.0 draft and tag refer 
 - CLI and desktop notarization are independent and must each report `Accepted` when configured. Staple and validate the desktop ticket before regenerating the updater archive and signature. Standalone Mach-O CLI files cannot be stapled; verify their code signature and hash.
 - Stage CLI binaries, checksums, manifests and desktop assets in the same original-repository release draft. Verify remote CLI sizes and digests before publication; check anonymous downloads afterward. Conflicting version assets are not overwritten. Use the original repository GITHUB_TOKEN with Contents write permission; no separate resource repository or npm publishing credentials are required.
 
+The release workflow prepares a draft only; it does not publish automatically. After CLI and desktop asset upload and verification, wait for release-owner approval. Explicit approval is required before publication and anonymous download verification. Public downloads cannot be verified while the release is a draft.
+
 ## Validation records
 
 The compatibility test uses a frozen v0.10.1 shared-schema fixture, performs CLI install/tag/deploy, reopens the desktop service with the same runtime paths, and reads results with v0.10.1-compatible SQL. Shared schema 6 remains unchanged; unknown newer schemas reject writes.
