@@ -6,7 +6,7 @@ v0.11.0 lets you manage Skills through AI conversations using the official `mana
 
 ## Incremental Git installation
 
-Reinstalling a multi-Skill repository updates existing Skills from the same repository, branch selection, and subpath, while installing new Skills. Unchanged Skills retain their records. The desktop picker shows installation/update counts and skips source or name conflicts; individual failures do not block the remaining selections.
+Reinstalling a multi-Skill repository updates existing Skills from the same repository, branch selection, and subpath, while installing new Skills. Unchanged Skills retain their records. The desktop picker shows installation/update counts, uses green, blue, and amber badges for new Skills, update checks, and conflicts, and skips source or name conflicts; individual failures do not block the remaining selections.
 
 Updates preserve Skill IDs, tags, enablement, and existing deployment configuration. Local edits and updates that would remove managed files are held back. Older records without content hashes are checked against their original Git revision; if that revision is no longer available in the cache, reinstallation is held back for manual review. Cross-source overwrite and interactive renaming are not included. Repository content follows the configured Git cache freshness policy.
 

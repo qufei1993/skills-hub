@@ -2411,6 +2411,46 @@
   font-size: 14px;
 }
 
+.git-pick-item-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.git-pick-item-heading .pick-item-title {
+  overflow-wrap: anywhere;
+}
+
+.git-pick-status {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 3px 8px;
+  border: 1px solid;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.git-pick-status-install {
+  color: color-mix(in srgb, var(--status-success) 78%, var(--text-primary));
+  background: var(--success-soft-bg);
+  border-color: var(--success-soft-border);
+}
+
+.git-pick-status-update {
+  color: var(--accent-primary);
+  background: var(--accent-soft-bg);
+  border-color: var(--accent-soft-border);
+}
+
+.git-pick-status-conflict {
+  color: color-mix(in srgb, var(--status-warning) 78%, var(--text-primary));
+  background: var(--warning-soft-bg);
+  border-color: var(--warning-soft-border);
+}
+
 .pick-item-desc {
   color: var(--text-secondary);
   font-size: 12px;

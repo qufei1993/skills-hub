@@ -117,8 +117,17 @@ const GitPickModal = ({
                   />
                 </label>
                 <div className="pick-item-main">
-                  <div className="pick-item-title">{c.name}</div>
-                  {c.status ? <div className="pick-item-desc">{t(`gitInstall.${c.status}`)}</div> : null}
+                  <div className="git-pick-item-heading">
+                    <div className="pick-item-title">{c.name}</div>
+                    {c.status ? (
+                      <span className={`git-pick-status git-pick-status-${c.status}`}>
+                        {t(c.status === 'conflict' ? 'gitInstall.conflictLabel' : `gitInstall.${c.status}`)}
+                      </span>
+                    ) : null}
+                  </div>
+                  {c.status === 'conflict' ? (
+                    <div className="pick-item-desc">{t('gitInstall.conflict')}</div>
+                  ) : null}
                   {c.description ? (
                     <div className="pick-item-desc">{c.description}</div>
                   ) : null}

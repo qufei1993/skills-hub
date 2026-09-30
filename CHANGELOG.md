@@ -20,7 +20,7 @@ All notable changes to this project will be documented in this file.
 - **Clearer Settings**: AI management uses a compact card with installation details available on demand. Background checks preserve the current status and keep View Skill available. Network and storage settings can collapse while keeping their summaries visible.
 
 ### Fixed
-- **Incremental Git installation**: Reinstalling a repository updates same-source Skills in place, skips unchanged content, and installs new Skills. The picker identifies source/name conflicts without blocking other selections; existing settings and locally modified files are preserved.
+- **Incremental Git installation**: Reinstalling a repository updates same-source Skills in place, skips unchanged content, and installs new Skills. The picker uses green, blue, and amber status badges to distinguish new Skills, update checks, and skipped conflicts without blocking other selections; existing settings and locally modified files are preserved.
 - **Cline desktop support**: Cline now uses `~/.cline/skills` for global Skills and `.cline/skills` for project Skills, with installation detection through `~/.cline`. Cline is no longer incorrectly grouped with tools using `.agents/skills`.
 - **Windows AI management setup**: Preparing the bundled CLI can now replace its files while retaining protection against directory replacement.
 - **Skill update sync**: Tool detection and update destinations now use the same runtime home as deployment, so installed copies refresh correctly in isolated environments.
