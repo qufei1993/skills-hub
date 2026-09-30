@@ -330,7 +330,7 @@ jobs:
     environment: release
     runs-on: ubuntu-24.04
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -343,12 +343,10 @@ jobs:
           pattern: cli-assets-*
           path: cli-assets
           merge-multiple: true
-      - name: Publish immutable CLI resources to dedicated repository
+      - name: Stage immutable CLI resources in the desktop release draft
         env:
-          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/publish-cli-release.mjs cli-assets
-      - name: Verify anonymous fixed-version downloads
-        run: node scripts/verify-cli-release.mjs cli-assets
 
   desktop-build:
     needs: [verify, cli-build]
@@ -776,14 +774,12 @@ jobs:
           pattern: release-assets-*
           merge-multiple: true
 
-      - name: Download CLI manifests for final availability check
+      - name: Download CLI resources for shared release verification
         uses: actions/download-artifact@v4
         with:
           pattern: cli-assets-*
           path: cli-resources
           merge-multiple: true
-      - name: Recheck anonymous CLI availability before desktop publication
-        run: node scripts/verify-cli-release.mjs cli-resources
 
       - name: Generate release notes from changelog
         env:
@@ -899,6 +895,7 @@ jobs:
       - name: Create/Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          draft: true
           tag_name: ${{ github.ref_name }}
           name: Skills Hub ${{ github.ref_name }}
           prerelease: ${{ contains(github.ref_name, '-') }}
@@ -908,3 +905,11 @@ jobs:
             updater.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify CLI assets and publish the complete shared release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/publish-cli-release.mjs cli-resources --publish
+
+      - name: Verify anonymous CLI downloads from the published release
+        run: node scripts/verify-cli-release.mjs cli-resources

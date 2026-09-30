@@ -19,14 +19,14 @@ main() {
     echo "Refusing to replace a symlink or non-file: $dest" >&2; return 1
   fi
   echo 'Finding the latest Skills Hub release...'
-  release_url=$(curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL --retry 2 --connect-timeout 15 --max-time 120 -o /dev/null -w '%{url_effective}' 'https://github.com/qufei1993/skills-hub-cli/releases/latest')
-  tag=${release_url#https://github.com/qufei1993/skills-hub-cli/releases/tag/}
+  release_url=$(curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL --retry 2 --connect-timeout 15 --max-time 120 -o /dev/null -w '%{url_effective}' 'https://github.com/qufei1993/skills-hub/releases/latest')
+  tag=${release_url#https://github.com/qufei1993/skills-hub/releases/tag/}
   if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo 'Could not resolve a stable release version.' >&2; return 1
   fi
   version=${tag#v}
   asset="skillshub-cli-$version-$platform"
-  base="https://github.com/qufei1993/skills-hub-cli/releases/download/$tag"
+  base="https://github.com/qufei1993/skills-hub/releases/download/$tag"
   work=$(mktemp -d "${TMPDIR:-/tmp}/skillshub-install.XXXXXX")
   trap 'rm -rf "$work"; if [[ -n "$stage" ]]; then rm -f "$stage"; fi' EXIT
   echo "Downloading $asset..."

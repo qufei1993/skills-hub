@@ -82,7 +82,7 @@ pub fn prepare_cli(
         bail!("CLI_MANIFEST_INVALID");
     }
     let url = format!(
-        "https://github.com/qufei1993/skills-hub-cli/releases/download/v{}/{}",
+        "https://github.com/qufei1993/skills-hub/releases/download/v{}/{}",
         manifest.version, manifest.asset_name
     );
     let client = super::network_proxy::app_download_client(proxy_url, 120)

@@ -98,7 +98,7 @@ Settings keeps app-level preferences such as interface language, appearance, AI 
 
 ### AI Management — Manage Skills Through Conversations (New in v0.11.0)
 
-Click **Settings → AI Management → Enable in one click** to download and verify the matching CLI and install the official Skill and configure the terminal command. Open a new terminal to use `skillshub-cli`; restart the terminal app if needed. No Node.js or npm is required. Terminal configuration supports Bash/Zsh on macOS/Linux and user PATH on Windows. The desktop installer does not include the CLI. First-time setup requires a network connection; a verified matching installation works offline. Updates are applied when you click Update in Settings, rather than during startup. CLI resources are published separately in [skills-hub-cli releases](https://github.com/qufei1993/skills-hub-cli/releases).
+Click **Settings → AI Management → Enable in one click** to download and verify the matching CLI and install the official Skill and configure the terminal command. Open a new terminal to use `skillshub-cli`; restart the terminal app if needed. No Node.js or npm is required. Terminal configuration supports Bash/Zsh on macOS/Linux and user PATH on Windows. The desktop installer does not include the CLI. First-time setup requires a network connection; a verified matching installation works offline. Updates are applied when you click Update in Settings, rather than during startup. CLI resources share the [Skills Hub release](https://github.com/qufei1993/skills-hub/releases) with desktop installers.
 
 ![Enable AI management in Settings](docs/assets/ai-management-setup.png)
 
@@ -195,7 +195,7 @@ curl -fsSL https://raw.githubusercontent.com/qufei1993/skills-hub/main/scripts/i
 irm https://raw.githubusercontent.com/qufei1993/skills-hub/main/scripts/install-cli.ps1 | iex
 ```
 
-The installer selects the latest stable release from the public `qufei1993/skills-hub-cli` resource repository, checks its SHA-256 checksum, and installs to `~/.local/bin` on macOS/Linux or `%LOCALAPPDATA%\SkillsHub\bin` on Windows. It preserves your existing CLI if download or checksum verification fails. The command requires a publicly available CLI release in that repository.
+The installer selects the latest stable release from the public `qufei1993/skills-hub` repository, checks its SHA-256 checksum, and installs to `~/.local/bin` on macOS/Linux or `%LOCALAPPDATA%\SkillsHub\bin` on Windows. It preserves your existing CLI if download or checksum verification fails. The command requires a publicly available CLI release in that repository.
 
 On macOS/Linux, open a new terminal after installation; Bash and Zsh configuration is updated automatically. For other shells, add `~/.local/bin` to PATH yourself. Windows updates both the current PowerShell session and the user PATH.
 
