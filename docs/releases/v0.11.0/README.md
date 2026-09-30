@@ -20,32 +20,25 @@ Global Skill deployment, discovery, and installation detection use `$DSH_HOME/sk
 
 After changing the environment variable, restart Skills Hub (and its launcher if needed) so it inherits the new value. For Skills previously deployed to another directory, cancel their DeepSeek Harness sync and then sync them again. Cancellation uses the saved deployment path, even when the new home is absent, and retains modified copies instead of deleting them. Back up and resolve any reported conflicts before retrying. Startup does not move files or discard records; direct redeployment with a mismatched recorded path remains blocked. Explicit Harness `dshHome` configuration and `customSkillDirs` still require a custom tool in Skills Hub.
 
-## Release status
+## Developer builds
 
-This is release preparation, not evidence of publication. The release workflow builds five CLI targets (macOS arm64/x64, Windows x64, Linux GNU arm64/x64) and three desktop targets (macOS arm64/x64, Windows x64), each on a matching native runner. This work was validated locally on macOS arm64; the other native jobs and configured signing/notarization must pass in CI before release. No release, signing, or notarization was performed during preparation.
+[Local installation test builds](local-test-builds.md) embed a local CLI for testing before publication. They use a separate app identity, development credentials and CLI directory, and disable production updates. Skill data, configuration, caches, recycle bin and write lock remain shared with production; operations affect real tool directories. Production packaging still requires a matching final-byte release CLI manifest and excludes the executable.
 
-The CLI is not published to npm. No npm scope, package ownership, token, or Trusted Publishing configuration is required.
+## Release preparation and gates
 
-## Publication prerequisites
+This record does not imply publication. The current v0.11.0 draft and tag refer to the previous bundled build. A release owner must choose a candidate version/tag containing the final changes before shipping.
 
-- Protect the `release` GitHub environment and restrict it to approved release tags. The workflow only triggers on `v*` tags and checks the tag against every product version.
-- Every release tag independently runs the five-platform native `verify` matrix at that tag's SHA, including CLI/compatibility tests and Windows native bridge tests. Build and publication jobs explicitly depend on this gate; previous PR/main CI results are not used as substitutes.
-- macOS uses the existing imported signing identity and conditionally submits the desktop and CLI for notarization. Windows reuses desktop signing configuration when present and otherwise emits an explicit unsigned warning; updater signatures are not Windows Authenticode signatures.
+- Protect the `release` GitHub environment and restrict it to approved tags. The workflow triggers on `v*` tags and verifies all product versions.
+- Each tag independently runs the five-platform native CLI verification matrix at its SHA: macOS arm64/x64, Windows x64 and Linux GNU arm64/x64. Compatibility and Windows bridge tests are included; prior PR/main CI does not replace this gate. Desktop packaging covers macOS arm64/x64 and Windows x64.
+- Sign the CLI and complete configured notarization before generating its final-byte manifest. Desktop builds consume the matching manifests and exclude CLI binaries. macOS uses the configured signing identity; Windows signs when configured and otherwise reports unsigned artifacts. Updater signatures are separate from Windows Authenticode signatures.
+- CLI and desktop notarization are independent and must each report `Accepted` when configured. Staple and validate the desktop ticket before regenerating the updater archive and signature. Standalone Mach-O CLI files cannot be stapled; verify their code signature and hash.
+- Stage CLI binaries, checksums, manifests and desktop assets in the same original-repository release draft. Verify remote CLI sizes and digests before publication; check anonymous downloads afterward. Conflicting version assets are not overwritten. Use the original repository GITHUB_TOKEN with Contents write permission; no separate resource repository or npm publishing credentials are required.
 
-CLI and desktop notarization run independently and each must report `Accepted`. The desktop ticket is stapled and validated before regenerating the updater archive and signature. Standalone Mach-O executables cannot be stapled; verify the CLI code signature and binary hash instead.
+## Validation records
 
-## Validation
+The compatibility test uses a frozen v0.10.1 shared-schema fixture, performs CLI install/tag/deploy, reopens the desktop service with the same runtime paths, and reads results with v0.10.1-compatible SQL. Shared schema 6 remains unchanged; unknown newer schemas reject writes.
 
-The compatibility test starts with a frozen v0.10.1 shared-schema fixture, performs CLI install/tag/deploy, reopens the desktop service with identical runtime paths, and reads the result with v0.10.1-compatible SQL. It verifies schema 6 stays unchanged and unknown newer schemas fail closed without writes. Full frontend/Rust checks, native CLI smoke, and desktop development startup are recorded in the task report.
-
-References: [GitHub native runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
-
-[Standalone CLI installation](cli-installation.md): one-command setup and upgrades without npm.
-
-## CLI resource publication
-
-Five CLI targets stage binary, SHA-256, and final-byte manifest files in the same `qufei1993/skills-hub` release draft as desktop assets. Desktop builds embed matching manifests and exclude CLI binaries. The workflow verifies CLI asset digests before publishing the complete release and checks anonymous downloads afterward, using the original repository GITHUB_TOKEN with Contents write permission. Existing version assets must match exactly; the pipeline never overwrites a conflicting version.
-
-The existing v0.11.0 desktop draft and tag refer to the previous bundled build. These changes do not publish that draft or rewrite the tag. A release owner must choose the replacement candidate/tag before shipping this implementation.
-
-[On-demand CLI validation](cli-on-demand-download.md)
+- [Current on-demand CLI validation and remaining gates](cli-on-demand-download.md)
+- [Local installation test build validation](local-test-builds.md)
+- [Verified CLI bridge and build modes](verified-cli-bridge.md)
+- [Standalone CLI installation](cli-installation.md)

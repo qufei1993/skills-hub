@@ -7,23 +7,21 @@ All notable changes to this project will be documented in this file.
 ## [0.11.0]
 
 ### Added
-- **Local installation testing**: Add explicit cross-platform local test build commands that prepare and embed the local CLI, retain release optimization, and use development credentials and CLI directories. Missing release manifests now explain the requirement and suggest development or local test builds.
-- **Standalone CLI installer**: Install or upgrade the CLI with one command on macOS, Linux, or Windows x64, with release checksum verification and user-level PATH setup.
-- **AI Skill management**: Enable AI management in Settings to install the official `manage-skills-hub` Skill. Use AI conversations to search, install, import, update, deploy, tag, and safely remove Skills from the same library used by the desktop app.
-- **On-demand CLI**: Desktop installers no longer include `skillshub-cli`. Enable or update AI management in Settings to download the matching platform/version, verify its size and SHA-256, and install it. A verified installation works offline and after the desktop closes; Node.js and npm are not required. CLI resources and desktop installers are published in the same `qufei1993/skills-hub` release.
+
+- **AI Skill management**: Enable the official `manage-skills-hub` Skill in Settings. Use AI conversations to search, install, import, update, deploy, tag, and safely remove Skills from the desktop's shared library.
+- **Smaller installers and on-demand CLI**: Production desktop installers no longer include the CLI. Enabling AI management downloads and verifies the matching version and configures the terminal command. Open a new terminal to use it. First setup requires a connection; verified installations work offline and after the desktop closes. Update the CLI and official Skill explicitly in Settings, with download progress and retry. Failures preserve the working CLI. CLI files share the desktop release; Node.js and npm are not required.
+- **Standalone CLI installer**: Install or upgrade the CLI with one command on macOS, Linux, or Windows x64, with checksum verification and user-level PATH setup.
 
 ### Improved
-- **Terminal command setup**: Desktop AI setup also configures the user command path. Open a new terminal to run `skillshub-cli`; existing AI setups can complete this configuration with the same enable button.
-- **AI management version maintenance**: CLI and official Skill updates require an explicit click in Settings. Startup and status reads do not download or install components. Download progress and retryable errors are shown; failed download, verification, or replacement preserves the previously verified CLI.
-- **Development CLI repair**: The development app now installs the CLI artifact prepared for its own build, so its checksum matches the bundled metadata instead of rejecting an unrelated executable beside the app.
-- **AI management discovery**: A dismissible notice in My Skills introduces AI management before the official Skill is installed. Go to setup opens and highlights the Settings card; dismissed notices stay hidden.
-- **Default tool sync**: AI installations sync to detected, enabled tools by default. Explicit tool choices, library-only requests, and project scope take precedence. Incomplete sync is reported separately from a successful installation.
-- **Shared library refresh**: Skills and tags refresh when returning to the app, entering library or tag pages, or opening tag filters. Existing filters are preserved, so AI changes appear without restarting.
-- **Clearer Settings**: AI management uses a compact card with installation details available on demand. Background checks preserve the current status and keep View Skill available. Network and storage settings can collapse while keeping their summaries visible.
+
+- **AI management guidance and Settings**: A dismissible My Skills notice leads to the AI management card before the official Skill is installed. Installation details are collapsed by default; background checks retain the current status and View Skill action. Network and storage settings can also collapse while retaining summaries.
+- **Default tool sync**: AI installations sync to detected, enabled tools by default. Explicit tool choices, library-only requests, and project scope take precedence. Incomplete sync is reported separately.
+- **Shared library refresh**: Returning to the app, entering library or tag pages, or opening tag filters refreshes Skills and tags while preserving filters. AI changes appear without restarting.
 
 ### Fixed
+
 - **DeepSeek Harness custom home**: Global deployment, discovery, and installation detection now honor `DSH_HOME`, including blank-value fallback and current-user tilde expansion. Existing deployments can be safely unsynced from their recorded directory before redeploying to the new home; modified copies remain protected (fixes [#166](https://github.com/qufei1993/skills-hub/issues/166)).
-- **Incremental Git installation**: Reinstalling a repository updates same-source Skills in place, skips unchanged content, and installs new Skills. The picker uses green, blue, and amber status badges to distinguish new Skills, update checks, and skipped conflicts without blocking other selections; existing settings and locally modified files are preserved. Conflicting items have visibly disabled checkboxes, and descriptions longer than three lines can be expanded or collapsed.
+- **Incremental Git installation**: Reinstalling a repository updates same-source Skills, skips unchanged content, and installs new Skills while preserving settings and local edits. The picker distinguishes new Skills, update checks, and conflicts. Conflicting items are disabled without blocking other selections; long descriptions can be expanded.
 - **Cline desktop support**: Cline now uses `~/.cline/skills` for global Skills and `.cline/skills` for project Skills, with installation detection through `~/.cline`. Cline is no longer incorrectly grouped with tools using `.agents/skills`.
 - **Windows AI management setup**: Preparing the managed CLI can now replace its files while retaining protection against directory replacement.
 - **Skill update sync**: Tool detection and update destinations now use the same runtime home as deployment, so installed copies refresh correctly in isolated environments.
@@ -31,9 +29,14 @@ All notable changes to this project will be documented in this file.
 - **Ambiguous legacy sources**: Checks and updates stop when an older multi-Skill record cannot be matched to a unique source, preserving installed content.
 
 ### Usage notes
-- **Scope and safety**: Project-level deployment is supported for compatible tools on macOS and Linux; Windows supports global scope only. Destructive operations require confirmation. Conflicts, concurrent writes, and unsafe updates stop without forced overwrites; deleted Skills remain recoverable through the desktop recycle bin.
+
+- **Scope and safety**: Compatible tools support project-level deployment on macOS and Linux; Windows supports global scope only. Destructive operations require confirmation. Conflicts, concurrent writes, and unsafe updates do not force overwrites. Deleted Skills remain recoverable through the desktop recycle bin.
 - **Desktop settings**: Device sync, scheduled tasks, credentials, app settings, app updates, recycle-bin restoration, and permanent deletion remain desktop-only. The shared library remains compatible with v0.10.1.
-- **Development builds**: Development and release builds now share the Skill library, configuration, cache, recycle bin, and write lock. Development operations affect real data and tool directories. Credentials and CLI binaries remain separate; previous development data is preserved without automatic merging.
+
+### Developer notes
+
+- **Local installation testing**: New cross-platform local test build commands use the CLI prepared for the current build, development credentials, and CLI directories. Production packaging still requires a matching CLI manifest and provides guidance when it is missing. See [local test builds](https://github.com/qufei1993/skills-hub/blob/main/docs/releases/v0.11.0/local-test-builds.md).
+- **Shared data boundary**: Development and local test builds share the production Skill library, settings, cache, recycle bin, and write lock. Operations affect real data and tool directories. Credentials and CLI files remain separate; previous development data is preserved without automatic merging.
 
 ## [0.10.1] - 2026-09-13
 
