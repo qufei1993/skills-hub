@@ -34,7 +34,7 @@ it('tag release independently verifies every native target before build or publi
   assert.match(commands, /doctor --json/)
   assert.ok(verify.steps.some(step => step.if === "runner.os == 'Windows'" && /cargo test --locked --lib cli_bridge\b/.test(step.run)))
   assert.ok(verify.steps.every(step => !step['continue-on-error']))
-  for (const name of ['release', 'assemble-updater-json']) {
+  for (const name of ['cli-build', 'desktop-build', 'cli-publish', 'assemble-updater-json']) {
     const job = workflow.jobs[name]
     assert.ok(needs(job).includes('verify'), `${name} must require all native verification jobs`)
     assert.equal(job.if, "startsWith(github.ref, 'refs/tags/v')")
@@ -42,17 +42,17 @@ it('tag release independently verifies every native target before build or publi
 })
 
 it('both notarization submissions gate on parsed Accepted results before stapling and asset preparation', () => {
-  const steps = workflow.jobs.release.steps
-  const index = steps.findIndex(step => step.name === 'Notarize macOS desktop and CLI when configured')
+  const steps = workflow.jobs['desktop-build'].steps
+  const index = steps.findIndex(step => step.name === 'Notarize macOS desktop when configured')
   const script = steps[index].run
   const submissions = script.split('\n').filter(line => line.includes('xcrun notarytool submit'))
-  assert.equal(submissions.length, 2)
+  assert.equal(submissions.length, 1)
   for (const submission of submissions) {
     assert.match(submission, /--output-format json/)
     assert.match(submission, /2>\/dev\/null \| node scripts\/assert-notarization\.mjs/)
   }
   assert.match(script, /set -euo pipefail/)
-  assert.equal((script.match(/node scripts\/assert-notarization\.mjs/g) ?? []).length, 2)
+  assert.equal((script.match(/node scripts\/assert-notarization\.mjs/g) ?? []).length, 1)
   assert.ok(script.lastIndexOf('node scripts/assert-notarization.mjs') < script.indexOf('xcrun stapler staple'))
   assert.match(script, /xcrun stapler validate/)
   assert.match(script, /codesign --verify/)
@@ -85,7 +85,7 @@ it('notarization gate accepts only Accepted JSON and never echoes untrusted resp
 })
 
 it('desktop release has no npm publication dependency and retains native CLI preparation', () => {
-  assert.deepEqual(needs(workflow.jobs['assemble-updater-json']), ['verify', 'release'])
+  assert.deepEqual(needs(workflow.jobs['assemble-updater-json']), ['verify', 'desktop-build', 'cli-publish'])
   for (const job of Object.values(workflow.jobs)) {
     assert.ok(needs(job).every(name => Object.hasOwn(workflow.jobs, name)))
     assert.equal(job.permissions?.['id-token'], undefined)
@@ -93,7 +93,26 @@ it('desktop release has no npm publication dependency and retains native CLI pre
       assert.doesNotMatch(step.run ?? '', /npm publish|cli:package|package-cli\.test/)
     }
   }
-  const commands = workflow.jobs.release.steps.map(step => step.run ?? '').join('\n')
+  const commands = workflow.jobs['cli-build'].steps.map(step => step.run ?? '').join('\n')
   assert.match(commands, /npm run cli:prepare/)
-  assert.match(commands, /Bundled CLI changed after metadata was embedded/)
+  assert.match(commands, /cli-manifest/)
+})
+
+it('separates five CLI targets from three desktop bundles and gates public desktop assets on CLI availability', () => {
+  assert.equal(workflow.jobs['cli-build'].strategy.matrix.include.length, 5)
+  assert.equal(workflow.jobs['desktop-build'].strategy.matrix.include.length, 3)
+  assert.ok(needs(workflow.jobs['desktop-build']).includes('cli-build'))
+  assert.ok(needs(workflow.jobs['cli-publish']).includes('cli-build'))
+  const cliSteps = workflow.jobs['cli-build'].steps
+  const notarization = cliSteps.findIndex(step => step.name === 'Notarize macOS CLI when configured')
+  assert.ok(notarization >= 0)
+  assert.ok(notarization < cliSteps.findIndex(step => step.name === 'Generate final CLI manifest and assets'))
+  assert.match(cliSteps[notarization].run, /node scripts\/assert-notarization\.mjs/)
+  const publish = workflow.jobs['cli-publish'].steps.map(step => step.run ?? '').join('\n')
+  assert.match(publish, /publish-cli-release\.mjs/)
+  assert.match(publish, /verify-cli-release\.mjs/)
+  const desktop = workflow.jobs['desktop-build'].steps
+  assert.ok(desktop.some(step => step.uses === 'actions/download-artifact@v4' && step.with.pattern === 'cli-assets-*'))
+  assert.ok(desktop.some(step => /verify-desktop-bundle\.mjs/.test(step.run ?? '')))
+  assert.ok(!desktop.some(step => /npm run cli:prepare/.test(step.run ?? '')))
 })

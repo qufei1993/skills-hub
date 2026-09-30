@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-v0.11.0 支持通过 AI 对话管理 Skills，由官方 `manage-skills-hub` Skill 和 `skillshub-cli` 执行。在「设置 → AI 管理」一键启用后，AI 安装默认同步到已检测、已启用的工具；切换相关页面或切回应用即可刷新列表。CLI 与桌面共用本地库，随桌面端打包；首次安装需主动启用，之后启动新版桌面端会更新已启用且有部署目标的 AI 管理组件。关闭桌面端后 CLI 仍可使用。
+v0.11.0 支持通过 AI 对话管理 Skills，由官方 `manage-skills-hub` Skill 和 `skillshub-cli` 执行。在「设置 → AI 管理」一键启用后，AI 安装默认同步到已检测、已启用的工具；切换相关页面或切回应用即可刷新列表。CLI 与桌面共用本地库，按桌面版本下载安装，安装包不再携带 CLI。首次启用需要联网；已校验通过的对应版本可离线使用，关闭桌面端后仍可运行。CLI 和官方 Skill 更新由设置中的更新按钮触发，启动不自动更新。
 
 详细说明见 [Agent 优先的命令行入口](agent-first-cli.zh.md) 和 [桌面 CLI 桥接](verified-cli-bridge.zh.md)。
 
@@ -26,7 +26,7 @@ v0.11.0 支持通过 AI 对话管理 Skills，由官方 `manage-skills-hub` Skil
 - 每个版本标签都在自身提交上独立运行五平台原生 `verify`，包括 CLI、兼容性及 Windows 原生桥接测试。构建和发布必须等待全部通过，不能用此前 PR 或主分支的检查结果替代。
 - macOS 使用已有导入证书签名，并按凭据配置对桌面应用和 CLI 进行公证。Windows 使用已有桌面签名配置；未配置时明确警告未签名。应用更新签名不等同于 Windows Authenticode 签名。
 
-macOS 两份公证响应都必须为 `Accepted`，才能给应用附加并验证公证票据，重新生成更新归档及签名。独立 Mach-O CLI 不支持附加票据，仍须校验代码签名与二进制哈希。
+CLI 与桌面分别公证，各自响应都必须为 `Accepted`。桌面公证通过后附加并验证应用票据，重新生成更新归档及签名。独立 Mach-O CLI 不支持附加票据，仍须校验代码签名与二进制哈希。
 
 环境保护规则由发布负责人管理，本次未修改远端设置。CLI 不再发布到 npm，无需配置 npm 作用域、包权限、Token 或 Trusted Publishing。
 
@@ -34,8 +34,14 @@ macOS 两份公证响应都必须为 `Accepted`，才能给应用附加并验证
 
 兼容性测试从冻结的 v0.10.1 共享表结构开始，经 CLI 安装、打标签、部署，再用相同运行路径重开桌面服务，并通过旧版兼容 SQL 读取。测试验证共享数据库结构版本 6 不升级，未知新版本拒绝写入。
 
-完整前端与 Rust 检查、本机内置 CLI 冒烟测试和桌面开发版启动证据记录在任务报告中。
+完整前端与 Rust 检查、本机 CLI 冒烟测试和桌面开发版启动证据记录在任务报告中。
 
 参考：[GitHub 原生运行环境](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)。
 
 [独立 CLI 安装](cli-installation.md)：通过一条命令安装和升级，无需 npm。
+
+## CLI 资源发布
+
+五个平台的 CLI 二进制、校验文件和最终字节清单发布到公开的 `qufei1993/skills-hub-cli` 资源仓库。桌面构建只嵌入匹配清单，发布前必须匿名验证对应 CLI 可下载。`GH_RELEASE_TOKEN` 需要资源仓库的 Contents 读写权限，只通过 Actions secret 提供；同名版本资源不同会停止，不会覆盖。
+
+现有 v0.11.0 草稿和标签仍指向此前的内置 CLI 版本。本次不公开草稿、不改写标签；上线前由发布负责人另行确定候选版本和标签。

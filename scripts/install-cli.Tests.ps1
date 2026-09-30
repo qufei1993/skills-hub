@@ -26,11 +26,11 @@ try {
             $sha = [Security.Cryptography.SHA256]::Create()
             try { $hash = ([BitConverter]::ToString($sha.ComputeHash($script:payload))).Replace('-', '').ToLowerInvariant() }
             finally { $sha.Dispose() }
-            $name = 'skillshub-cli-0.11.0-win32-x64.exe'
+            $name = 'skillshub-cli-0.11.0-windows-x64.exe'
             if ($script:failure -eq 'filename') { $name = 'wrong.exe' }
             [IO.File]::WriteAllText($OutFile, "$hash  $name`n")
         } else {
-            Assert ($Uri.EndsWith('skillshub-cli-0.11.0-win32-x64.exe')) 'Wrong release asset'
+            Assert ($Uri.EndsWith('skillshub-cli-0.11.0-windows-x64.exe')) 'Wrong release asset'
             [IO.File]::WriteAllBytes($OutFile, $script:payload)
             if ($script:failure -eq 'checksum') { [IO.File]::AppendAllText($OutFile, 'corrupt') }
         }

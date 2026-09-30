@@ -9,11 +9,11 @@ All notable changes to this project will be documented in this file.
 ### Added
 - **Standalone CLI installer**: Install or upgrade the CLI with one command on macOS, Linux, or Windows x64, with release checksum verification and user-level PATH setup.
 - **AI Skill management**: Enable AI management in Settings to install the official `manage-skills-hub` Skill. Use AI conversations to search, install, import, update, deploy, tag, and safely remove Skills from the same library used by the desktop app.
-- **Bundled CLI**: The native `skillshub-cli` is included with the desktop app and follows its version. Once prepared, it works even when the desktop is closed. Users do not need Node.js, npm, or a separate CLI installation.
+- **On-demand CLI**: Desktop installers no longer include `skillshub-cli`. Enable or update AI management in Settings to download the matching platform/version, verify its size and SHA-256, and install it. A verified installation works offline and after the desktop closes; Node.js and npm are not required. CLI resources are published separately in `qufei1993/skills-hub-cli`.
 
 ### Improved
 - **Terminal command setup**: Desktop AI setup also configures the user command path. Open a new terminal to run `skillshub-cli`; existing AI setups can complete this configuration with the same enable button.
-- **AI management version maintenance**: First-time CLI setup still requires Enable in one click. On later desktop launches, active AI management installations update the bundled CLI and official Skill to the desktop version while preserving deployed targets. Failed CLI replacement restores the previously verified release; Settings shows pending updates and PATH conflicts.
+- **AI management version maintenance**: CLI and official Skill updates require an explicit click in Settings. Startup and status reads do not download or install components. Download progress and retryable errors are shown; failed download, verification, or replacement preserves the previously verified CLI.
 - **Development CLI repair**: The development app now installs the CLI artifact prepared for its own build, so its checksum matches the bundled metadata instead of rejecting an unrelated executable beside the app.
 - **AI management discovery**: A dismissible notice in My Skills introduces AI management before the official Skill is installed. Go to setup opens and highlights the Settings card; dismissed notices stay hidden.
 - **Default tool sync**: AI installations sync to detected, enabled tools by default. Explicit tool choices, library-only requests, and project scope take precedence. Incomplete sync is reported separately from a successful installation.
@@ -23,7 +23,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - **Incremental Git installation**: Reinstalling a repository updates same-source Skills in place, skips unchanged content, and installs new Skills. The picker uses green, blue, and amber status badges to distinguish new Skills, update checks, and skipped conflicts without blocking other selections; existing settings and locally modified files are preserved. Conflicting items have visibly disabled checkboxes, and descriptions longer than three lines can be expanded or collapsed.
 - **Cline desktop support**: Cline now uses `~/.cline/skills` for global Skills and `.cline/skills` for project Skills, with installation detection through `~/.cline`. Cline is no longer incorrectly grouped with tools using `.agents/skills`.
-- **Windows AI management setup**: Preparing the bundled CLI can now replace its files while retaining protection against directory replacement.
+- **Windows AI management setup**: Preparing the managed CLI can now replace its files while retaining protection against directory replacement.
 - **Skill update sync**: Tool detection and update destinations now use the same runtime home as deployment, so installed copies refresh correctly in isolated environments.
 - **Shared tool directories**: Deployment previews list all tools affected by a shared directory. One-click AI setup stops when it would affect tools outside the selected scope, without registering disabled tools as sync targets.
 - **Ambiguous legacy sources**: Checks and updates stop when an older multi-Skill record cannot be matched to a unique source, preserving installed content.
