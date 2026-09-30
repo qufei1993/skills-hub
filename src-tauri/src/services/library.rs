@@ -360,6 +360,8 @@ impl SkillsHubService {
         for installed in installed {
             let skill = self.show_skill(SkillSelector::Id(installed.skill_id.clone()))?;
             adopted.push(InstallOutcome {
+                action: super::install::InstallAction::Installed,
+                pending_targets: Vec::new(),
                 id: skill.id,
                 name: installed.name,
                 central_path: installed.central_path.to_string_lossy().into_owned(),

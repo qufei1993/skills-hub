@@ -1494,19 +1494,34 @@ fn duplicate_local_install_reaches_the_desktop_target_exists_protocol() {
 }
 
 #[test]
-fn duplicate_git_install_reaches_desktop_without_leaking_the_source_url() {
+fn git_reinstall_reuses_records_and_reports_other_source_conflicts_without_leaking_urls() {
     let (_home, _data, paths, service) = make_install_service();
     let secret = "do-not-leak-source-secret";
     let repo_path = paths.app_data_dir.join(secret);
     write_install_test_skill(&repo_path, "duplicate-git");
     init_install_test_git_repo(&repo_path);
     let source_url = format!("file://{}", repo_path.display());
-    service
+    let first = service
         .install(InstallRequest::git(&source_url).with_name(Some("duplicate-git".to_string())))
         .unwrap();
 
-    let error = service
+    let repeated = service
         .install(InstallRequest::git(&source_url).with_name(Some("duplicate-git".to_string())))
+        .unwrap();
+    let dto = super::to_service_install_dto(repeated);
+    assert_eq!(dto.skill_id, first.id);
+    let serialized = serde_json::to_value(dto).unwrap();
+    assert_eq!(serialized["action"], "unchanged");
+    assert!(!serialized.to_string().contains(secret));
+
+    let other_repo = paths.app_data_dir.join("other-private-source");
+    write_install_test_skill(&other_repo, "duplicate-git");
+    init_install_test_git_repo(&other_repo);
+    let error = service
+        .install(InstallRequest::git(format!(
+            "file://{}",
+            other_repo.display()
+        )))
         .unwrap_err();
     let formatted = format_service_error(error);
 
@@ -1519,6 +1534,7 @@ fn duplicate_git_install_reaches_desktop_without_leaking_the_source_url() {
     );
     assert!(!formatted.contains(secret));
     assert!(!formatted.contains(&source_url));
+    assert!(!formatted.contains("other-private-source"));
 }
 
 #[test]

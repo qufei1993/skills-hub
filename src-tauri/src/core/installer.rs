@@ -680,6 +680,32 @@ fn parse_github_url(input: &str) -> ParsedGitSource {
     }
 }
 
+pub(crate) fn same_git_skill_source(
+    source: &str,
+    source_subpath: Option<&str>,
+    reference: &str,
+    subpath: &str,
+) -> bool {
+    fn identity(reference: &str) -> ParsedGitSource {
+        let reference = reference.trim();
+        let normalized = reference
+            .strip_prefix("git@github.com:")
+            .or_else(|| reference.strip_prefix("ssh://git@github.com/"))
+            .map(|path| format!("https://github.com/{path}"));
+        let mut parsed = parse_github_url(normalized.as_deref().unwrap_or(reference));
+        if parsed.clone_url.starts_with("https://github.com/") {
+            parsed.clone_url = parsed.clone_url.to_ascii_lowercase();
+        }
+        parsed
+    }
+    let source = identity(source);
+    let requested = identity(reference);
+    let stored_path = source_subpath.or(source.subpath.as_deref()).unwrap_or(".");
+    source.clone_url == requested.clone_url
+        && source.branch == requested.branch
+        && Path::new(stored_path) == Path::new(subpath)
+}
+
 fn normalize_github_skill_subpath(subpath: &str) -> String {
     let trimmed = subpath.trim_matches('/');
     if trimmed.eq_ignore_ascii_case("SKILL.md") {
@@ -1049,8 +1075,23 @@ pub fn update_managed_skill_from_source(
     store: &SkillStore,
     skill_id: &str,
 ) -> Result<UpdateResult> {
+    update_managed_skill_from_source_with_cancel(paths, store, skill_id, None)
+}
+
+pub(crate) fn update_managed_skill_from_source_with_cancel(
+    paths: &RuntimePaths,
+    store: &SkillStore,
+    skill_id: &str,
+    cancel: Option<&CancelToken>,
+) -> Result<UpdateResult> {
+    ensure_not_cancelled(cancel)?;
     let _update_lock = acquire_skill_update_lock(paths, store)?;
-    update_managed_skill_from_source_with_lock_held(paths, store, skill_id, false)
+    update_managed_skill_with_cancel_and_lock(paths, store, skill_id, false, cancel)
+}
+
+fn ensure_not_cancelled(cancel: Option<&CancelToken>) -> Result<()> {
+    anyhow::ensure!(!cancel.is_some_and(CancelToken::is_cancelled), "CANCELLED|");
+    Ok(())
 }
 
 pub fn check_managed_skill_update(
@@ -1069,7 +1110,7 @@ pub fn check_managed_skill_update(
     if !central_path.exists() {
         anyhow::bail!("central path not found");
     }
-    let (staging_dir, _, _) = stage_skill_source(paths, store, &record)?;
+    let (staging_dir, _, _) = stage_skill_source(paths, store, &record, None)?;
     let result = (|| {
         let previous_hash = hash_dir(&central_path)?;
         let next_hash = hash_dir(&staging_dir)?;
@@ -1168,6 +1209,22 @@ pub(crate) fn update_managed_skill_from_source_with_lock_held(
     skill_id: &str,
     preserve_newer_managed_content: bool,
 ) -> Result<UpdateResult> {
+    update_managed_skill_with_cancel_and_lock(
+        paths,
+        store,
+        skill_id,
+        preserve_newer_managed_content,
+        None,
+    )
+}
+
+fn update_managed_skill_with_cancel_and_lock(
+    paths: &RuntimePaths,
+    store: &SkillStore,
+    skill_id: &str,
+    preserve_newer_managed_content: bool,
+    cancel: Option<&CancelToken>,
+) -> Result<UpdateResult> {
     if store
         .get_skill_by_id(skill_id)?
         .is_some_and(|skill| skill.has_unbound_local_source())
@@ -1181,10 +1238,13 @@ pub(crate) fn update_managed_skill_from_source_with_lock_held(
         skill_id,
         preserve_newer_managed_content,
         &mut source_updated,
+        cancel,
     );
     let non_source_failure = result.as_ref().err().is_some_and(|err| {
         let error = err.to_string();
-        error.starts_with("UPDATE_IN_PROGRESS|") || error.starts_with("UPDATE_HELD_BACK|")
+        error.starts_with("UPDATE_IN_PROGRESS|")
+            || error.starts_with("UPDATE_HELD_BACK|")
+            || error.starts_with("CANCELLED|")
     });
     if result.is_err()
         && !source_updated
@@ -1204,6 +1264,7 @@ fn update_managed_skill_from_source_inner(
     skill_id: &str,
     preserve_newer_managed_content: bool,
     source_updated: &mut bool,
+    cancel: Option<&CancelToken>,
 ) -> Result<UpdateResult> {
     let record = store
         .get_skill_by_id(skill_id)?
@@ -1222,8 +1283,12 @@ fn update_managed_skill_from_source_inner(
 
     let now = now_ms();
     let (staging_dir, new_revision, resolved_source_subpath) =
-        stage_skill_source(paths, store, &record)?;
+        stage_skill_source(paths, store, &record, cancel)?;
 
+    if let Err(error) = ensure_not_cancelled(cancel) {
+        let _ = std::fs::remove_dir_all(&staging_dir);
+        return Err(error);
+    }
     let next_content_hash = match hash_dir(&staging_dir)
         .with_context(|| format!("hash staged central Skill {:?}", staging_dir))
     {
@@ -1300,6 +1365,10 @@ fn update_managed_skill_from_source_inner(
         status: "ok".to_string(),
     };
 
+    if let Err(error) = ensure_not_cancelled(cancel) {
+        let _ = std::fs::remove_dir_all(&staging_dir);
+        return Err(error);
+    }
     if !changed {
         std::fs::remove_dir_all(&staging_dir)
             .with_context(|| format!("remove unchanged staged Skill {:?}", staging_dir))?;
@@ -1323,6 +1392,7 @@ fn update_managed_skill_from_source_inner(
         Some(previous_strict_hash.clone()),
         false,
     )?;
+    ensure_not_cancelled(cancel)?;
     if let Err(err) = central_replacement.activate() {
         if err.to_string().starts_with("TARGET_MODIFIED|") {
             anyhow::bail!("CENTRAL_MODIFIED|{}", central_path.to_string_lossy());
@@ -1435,7 +1505,9 @@ fn stage_skill_source(
     paths: &RuntimePaths,
     store: &SkillStore,
     record: &SkillRecord,
+    cancel: Option<&CancelToken>,
 ) -> Result<(PathBuf, Option<String>, Option<String>)> {
+    ensure_not_cancelled(cancel)?;
     let central_path = PathBuf::from(&record.central_path);
     let central_parent = central_path
         .parent()
@@ -1484,7 +1556,7 @@ fn stage_skill_source(
                     &parsed.clone_url,
                     parsed.branch.as_deref(),
                     subpath,
-                    None,
+                    cancel,
                 )?
             } else {
                 clone_to_cache(
@@ -1492,7 +1564,7 @@ fn stage_skill_source(
                     store,
                     &parsed.clone_url,
                     parsed.branch.as_deref(),
-                    None,
+                    cancel,
                 )?
             };
             let mut resolved_subpath = record
@@ -1950,6 +2022,114 @@ pub fn list_local_skills(base_path: &Path) -> Result<Vec<LocalSkillCandidate>> {
     Ok(out)
 }
 
+pub(crate) fn git_skill_candidate_from_selection(
+    paths: &RuntimePaths,
+    store: &SkillStore,
+    reference: &str,
+    subpath: &str,
+    cancel: Option<&CancelToken>,
+) -> Result<GitSkillCandidate> {
+    let parsed = parse_github_url(reference);
+    let (repo_dir, _) = clone_to_cache(
+        paths,
+        store,
+        &parsed.clone_url,
+        parsed.branch.as_deref(),
+        cancel,
+    )?;
+    let selected = repo_dir.join(subpath);
+    anyhow::ensure!(
+        selected
+            .canonicalize()?
+            .starts_with(repo_dir.canonicalize()?),
+        "path not found in repo"
+    );
+    ensure_installable_skill_dir(&selected)?;
+    let (name, description) = extract_skill_info(&selected, &repo_dir);
+    let normalized = Path::new(subpath)
+        .components()
+        .filter(|component| !matches!(component, std::path::Component::CurDir))
+        .collect::<PathBuf>();
+    let subpath = if normalized.as_os_str().is_empty() {
+        ".".into()
+    } else {
+        normalized.to_string_lossy().replace('\\', "/")
+    };
+    Ok(GitSkillCandidate {
+        name,
+        description,
+        subpath,
+    })
+}
+
+pub(crate) fn git_install_content_is_unmodified(
+    paths: &RuntimePaths,
+    store: &SkillStore,
+    record: &SkillRecord,
+    cancel: Option<&CancelToken>,
+) -> Result<bool> {
+    let current = Path::new(&record.central_path);
+    if let Some(expected) = &record.content_hash {
+        return Ok(hash_dir(current)? == *expected);
+    }
+    let Some(revision) = record.source_revision.as_deref() else {
+        return Ok(false);
+    };
+    let Some(reference) = record.source_ref.as_deref() else {
+        return Ok(false);
+    };
+    let parsed = parse_github_url(reference);
+    let (repo_dir, _) = clone_to_cache(
+        paths,
+        store,
+        &parsed.clone_url,
+        parsed.branch.as_deref(),
+        cancel,
+    )?;
+    let repo = git2::Repository::open(repo_dir)?;
+    let Some(commit) = git2::Oid::from_str(revision)
+        .ok()
+        .and_then(|oid| repo.find_commit(oid).ok())
+    else {
+        return Ok(false);
+    };
+    let tree = commit.tree()?;
+    let subpath = record
+        .source_subpath
+        .as_deref()
+        .or(parsed.subpath.as_deref())
+        .unwrap_or(".");
+    let object = if subpath == "." {
+        tree.into_object()
+    } else {
+        repo.find_object(
+            tree.get_path(Path::new(subpath))?.id(),
+            Some(git2::ObjectType::Tree),
+        )?
+    };
+    let snapshot = tempfile::tempdir()?;
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout
+        .target_dir(snapshot.path())
+        .force()
+        .update_index(false);
+    repo.checkout_tree(&object, Some(&mut checkout))?;
+    let comparison = tempfile::tempdir()?;
+    let baseline = comparison.path().join("baseline");
+    let installed = comparison.path().join("installed");
+    copy_dir_recursive(snapshot.path(), &baseline)?;
+    copy_dir_recursive(current, &installed)?;
+    if subpath == "." {
+        for directory in [&baseline, &installed] {
+            let metadata = directory.join(".skills-hub-cache.json");
+            if metadata.is_file() {
+                std::fs::remove_file(metadata)?;
+            }
+        }
+    }
+    Ok(hash_dir(&baseline)? == hash_dir(&installed)?)
+}
+
 pub fn install_git_skill_from_selection(
     paths: &RuntimePaths,
     store: &SkillStore,
@@ -2023,7 +2203,7 @@ pub fn install_git_skill_from_selection(
     }
 
     let now = now_ms();
-    let content_hash = compute_content_hash(&central_path);
+    let content_hash = Some(hash_dir(&central_path)?);
     let source_subpath = if subpath == "." {
         None
     } else {

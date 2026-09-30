@@ -36,17 +36,21 @@ const GitPickModal = ({
       ),
     )
   }, [gitCandidates, normalizedQuery])
-  const selectedCandidates = filteredCandidates.filter(
+  const selectableCandidates = filteredCandidates.filter((c) => c.status !== 'conflict')
+  const selectedCandidates = selectableCandidates.filter(
     (c) => gitCandidateSelected[c.subpath],
   )
   const selectedCount = selectedCandidates.length
   const allVisibleSelected =
-    filteredCandidates.length > 0 &&
-    filteredCandidates.every((c) => gitCandidateSelected[c.subpath])
+    selectableCandidates.length > 0 &&
+    selectableCandidates.every((c) => gitCandidateSelected[c.subpath])
 
   const toggleVisibleCandidates = (checked: boolean) => {
-    filteredCandidates.forEach((c) => onToggleCandidate(c.subpath, checked))
+    selectableCandidates.forEach((c) => onToggleCandidate(c.subpath, checked))
   }
+
+  const updateCount = selectedCandidates.filter((c) => c.status === 'update').length
+  const conflictCount = filteredCandidates.length - selectableCandidates.length
 
   if (!open) return null
 
@@ -66,6 +70,11 @@ const GitPickModal = ({
         </div>
         <div className="modal-body">
           <p className="label">{t('gitPickBody')}</p>
+          {updateCount > 0 || conflictCount > 0 ? (
+            <p className="label">{t('gitInstall.preview', {
+              install: selectedCount - updateCount, update: updateCount, conflict: conflictCount,
+            })}</p>
+          ) : null}
           <div className="pick-search">
             <Search size={16} className="search-icon-abs" />
             <input
@@ -81,14 +90,14 @@ const GitPickModal = ({
                 type="checkbox"
                 checked={allVisibleSelected}
                 onChange={(e) => toggleVisibleCandidates(e.target.checked)}
-                disabled={filteredCandidates.length === 0}
+                disabled={loading || selectableCandidates.length === 0}
               />
               {t('selectAll')}
             </label>
             <span className="pick-toolbar-count">
               {t('selectedCount', {
                 selected: selectedCount,
-                total: filteredCandidates.length,
+                total: selectableCandidates.length,
               })}
             </span>
           </div>
@@ -101,12 +110,15 @@ const GitPickModal = ({
                 <label className="pick-item-checkbox">
                   <input
                     type="checkbox"
-                    checked={Boolean(gitCandidateSelected[c.subpath])}
+                    checked={c.status !== 'conflict' && Boolean(gitCandidateSelected[c.subpath])}
+                    disabled={loading || c.status === 'conflict'}
+                    aria-label={c.name}
                     onChange={(e) => onToggleCandidate(c.subpath, e.target.checked)}
                   />
                 </label>
                 <div className="pick-item-main">
                   <div className="pick-item-title">{c.name}</div>
+                  {c.status ? <div className="pick-item-desc">{t(`gitInstall.${c.status}`)}</div> : null}
                   {c.description ? (
                     <div className="pick-item-desc">{c.description}</div>
                   ) : null}
@@ -125,7 +137,7 @@ const GitPickModal = ({
             onClick={() => onInstall(selectedCandidates.map((c) => c.subpath))}
             disabled={loading || selectedCount === 0}
           >
-            {t('installSelected')}
+            {t(updateCount > 0 ? 'gitInstall.submit' : 'installSelected')}
           </button>
         </div>
       </div>

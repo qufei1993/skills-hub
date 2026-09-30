@@ -118,3 +118,25 @@ describe.each(['git', 'local'] as const)('%s skill picker', (kind) => {
     })
   }
 })
+
+
+it('keeps same-source updates selectable and excludes conflicts from select all', () => {
+  const onInstall = vi.fn()
+  render(<GitPickModal
+    open loading={false}
+    gitCandidates={[
+      { name: 'existing', subpath: 'a', status: 'update' },
+      { name: 'new', subpath: 'b', status: 'install' },
+      { name: 'conflict', subpath: 'c', status: 'conflict' },
+    ]}
+    gitCandidateSelected={{ a: true, b: true, c: true }}
+    onRequestClose={vi.fn()} onCancel={vi.fn()} onToggleCandidate={vi.fn()}
+    onInstall={onInstall} t={i18n.t}
+  />)
+  expect(screen.getByText('gitInstall.update')).toBeTruthy()
+  expect(screen.getByText('gitInstall.conflict')).toBeTruthy()
+  const checkboxes = screen.getAllByRole('checkbox') as HTMLInputElement[]
+  expect(checkboxes[3].disabled).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'gitInstall.submit' }))
+  expect(onInstall).toHaveBeenCalledExactlyOnceWith(['a', 'b'])
+})

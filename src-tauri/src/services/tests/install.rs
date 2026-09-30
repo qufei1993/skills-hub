@@ -12,7 +12,7 @@ use crate::core::network_proxy::set_github_proxy_url;
 use crate::core::runtime_paths::{RuntimePaths, RuntimeProfile};
 use crate::core::skill_store::SkillTargetRecord;
 use crate::services::error::ErrorCode;
-use crate::services::install::InstallRequest;
+use crate::services::install::{InstallAction, InstallRequest};
 use crate::services::operation_lock::{OperationKind, OperationLock};
 use crate::services::skills_hub::SkillsHubService;
 
@@ -547,4 +547,317 @@ fn non_destructive_update_returns_the_shared_outcome() {
     assert!(Path::new(&installed.central_path)
         .join("new-file.txt")
         .exists());
+}
+
+fn commit_git_changes(dir: &Path) {
+    let repo = git2::Repository::open(dir).unwrap();
+    let signature = git2::Signature::now("Skills Hub Test", "test@example.com").unwrap();
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let parent = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        "update",
+        &tree,
+        &[&parent],
+    )
+    .unwrap();
+}
+
+#[test]
+fn git_incremental_install_updates_existing_and_installs_new_skills() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("incremental-source");
+    write_skill(&repo.join("skills/alpha-dir"), "alpha");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    service
+        .store()
+        .set_setting("git_cache_ttl_secs", "0")
+        .unwrap();
+    let url = format!("file://{}", repo.display());
+    let request = InstallRequest::git(&url).with_subpath("skills/alpha-dir");
+    let first = service.install(request.clone()).unwrap();
+    assert_eq!(first.action, InstallAction::Installed);
+    let tag = service.store().create_tag("retained").unwrap();
+    service
+        .store()
+        .set_skill_tags(&first.id, &[tag.id])
+        .unwrap();
+    let before = service.store().get_skill_by_id(&first.id).unwrap().unwrap();
+    let mut disabled = before.clone();
+    disabled.enabled = false;
+    service.store().upsert_skill(&disabled).unwrap();
+    fs::write(repo.join("skills/alpha-dir/new.txt"), "updated").unwrap();
+    write_skill(&repo.join("skills/beta"), "beta");
+    commit_git_changes(&repo);
+
+    let updated = service.install(request.clone()).unwrap();
+    assert_eq!(updated.id, first.id);
+    assert_eq!(updated.action, InstallAction::Updated);
+    assert_eq!(
+        service.show_skill(first.id.clone().into()).unwrap().tags[0].name,
+        "retained"
+    );
+    assert_eq!(
+        fs::read_to_string(Path::new(&updated.central_path).join("new.txt")).unwrap(),
+        "updated"
+    );
+    let after = service.store().get_skill_by_id(&first.id).unwrap().unwrap();
+    assert_eq!(after.created_at, before.created_at);
+    assert!(!after.enabled);
+    let unchanged = service.install(request).unwrap();
+    assert_eq!(unchanged.id, first.id);
+    assert_eq!(unchanged.action, InstallAction::Unchanged);
+    let added = service
+        .install(InstallRequest::git(url).with_subpath("skills/beta"))
+        .unwrap();
+    assert_ne!(added.id, first.id);
+    assert_eq!(service.store().list_skills().unwrap().len(), 2);
+    assert!(!fixture
+        .paths
+        .default_central_repo
+        .join("alpha-dir")
+        .exists());
+}
+
+#[test]
+fn git_incremental_install_rejects_same_name_from_another_path_or_source() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("conflict-source");
+    write_skill(&repo.join("skills/one"), "shared-name");
+    write_skill(&repo.join("skills/two"), "shared-name");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    let url = format!("file://{}", repo.display());
+    let first = service
+        .install(InstallRequest::git(&url).with_subpath("skills/one"))
+        .unwrap();
+    let error = service
+        .install(InstallRequest::git(&url).with_subpath("skills/two"))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::TargetConflict);
+    let other = fixture.paths.app_data_dir.join("other-source");
+    write_skill(&other, "shared-name");
+    init_git_repo(&other);
+    let error = service
+        .install(InstallRequest::git(format!("file://{}", other.display())))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::TargetConflict);
+    assert_eq!(service.store().list_skills().unwrap().len(), 1);
+    assert!(Path::new(&first.central_path).join("SKILL.md").exists());
+}
+
+#[test]
+fn git_incremental_install_preserves_local_edits_and_allows_other_skills() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("edited-source");
+    write_skill(&repo.join("alpha"), "alpha");
+    write_skill(&repo.join("beta"), "beta");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    let url = format!("file://{}", repo.display());
+    let request = InstallRequest::git(&url).with_subpath("alpha");
+    let first = service.install(request.clone()).unwrap();
+    let edited = Path::new(&first.central_path).join("SKILL.md");
+    fs::write(&edited, "my local changes").unwrap();
+    let error = service.install(request).unwrap_err();
+    assert_eq!(error.code, ErrorCode::TargetConflict);
+    assert_eq!(error.details["reason"], "target_modified");
+    assert_eq!(fs::read_to_string(edited).unwrap(), "my local changes");
+    service
+        .install(InstallRequest::git(url).with_subpath("beta"))
+        .unwrap();
+    assert_eq!(service.store().list_skills().unwrap().len(), 2);
+}
+
+#[test]
+fn git_incremental_preview_classifies_sources_and_revalidates_on_install() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("preview-source");
+    write_skill(&repo.join("alpha"), "alpha");
+    write_skill(&repo.join("beta"), "beta");
+    write_skill(&repo.join("gamma"), "gamma");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    let url = format!("file://{}", repo.display());
+    service
+        .install(InstallRequest::git(&url).with_subpath("alpha"))
+        .unwrap();
+    let local = fixture.paths.app_data_dir.join("local-beta");
+    write_skill(&local, "beta");
+    service.install(InstallRequest::local(&local)).unwrap();
+    let preview = service
+        .git_install_preview_with_cancel(&url, None, None)
+        .unwrap();
+    assert_eq!(
+        preview
+            .iter()
+            .map(|item| (item.candidate.name.as_str(), item.status))
+            .collect::<Vec<_>>(),
+        vec![
+            ("alpha", "update"),
+            ("beta", "conflict"),
+            ("gamma", "install")
+        ]
+    );
+    let local_gamma = fixture.paths.app_data_dir.join("local-gamma");
+    write_skill(&local_gamma, "gamma");
+    let local_installed = service.install(InstallRequest::local(local_gamma)).unwrap();
+    let error = service
+        .install(InstallRequest::git(&url).with_subpath("gamma"))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::TargetConflict);
+    assert_eq!(
+        service
+            .show_skill(local_installed.id.into())
+            .unwrap()
+            .source
+            .kind,
+        "local"
+    );
+}
+
+#[test]
+fn git_incremental_install_reuses_renamed_skills_and_honors_explicit_names() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("renamed-source");
+    write_skill(&repo, "original");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    let url = format!("file://{}", repo.display());
+    let first = service
+        .install(InstallRequest::git(&url).with_name(Some("custom".into())))
+        .unwrap();
+    let repeated = service.install(InstallRequest::git(&url)).unwrap();
+    assert_eq!(repeated.id, first.id);
+    assert_eq!(repeated.name, "custom");
+    assert_eq!(repeated.action, InstallAction::Unchanged);
+    let separate = service
+        .install(InstallRequest::git(&url).with_name(Some("separate".into())))
+        .unwrap();
+    assert_ne!(separate.id, first.id);
+    assert_eq!(separate.name, "separate");
+}
+
+#[test]
+fn git_incremental_install_keeps_destructive_updates_held_back() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("destructive-source");
+    write_skill(&repo.join("alpha"), "alpha");
+    fs::write(repo.join("alpha/keep.txt"), "keep").unwrap();
+    init_git_repo(&repo);
+    let service = fixture.open();
+    service
+        .store()
+        .set_setting("git_cache_ttl_secs", "0")
+        .unwrap();
+    let request = InstallRequest::git(format!("file://{}", repo.display())).with_subpath("alpha");
+    let first = service.install(request.clone()).unwrap();
+    fs::remove_file(repo.join("alpha/keep.txt")).unwrap();
+    commit_git_changes(&repo);
+    let error = service.install(request).unwrap_err();
+    assert_eq!(error.code, ErrorCode::UpdateHeldBack);
+    assert!(Path::new(&first.central_path).join("keep.txt").exists());
+}
+
+#[test]
+fn git_incremental_install_supports_release_records_without_a_content_hash() {
+    for locally_modified in [false, true] {
+        let fixture = Fixture::new();
+        let repo = fixture.paths.app_data_dir.join("release-source");
+        write_skill(&repo.join("alpha"), "alpha");
+        init_git_repo(&repo);
+        let service = fixture.open();
+        service
+            .store()
+            .set_setting("git_cache_ttl_secs", "0")
+            .unwrap();
+        let request =
+            InstallRequest::git(format!("file://{}", repo.display())).with_subpath("alpha");
+        let first = service.install(request.clone()).unwrap();
+        let mut record = service.store().get_skill_by_id(&first.id).unwrap().unwrap();
+        record.content_hash = None;
+        service.store().upsert_skill(&record).unwrap();
+        if locally_modified {
+            fs::write(
+                Path::new(&first.central_path).join("SKILL.md"),
+                "local edit",
+            )
+            .unwrap();
+        }
+        fs::write(repo.join("alpha/new.txt"), "upstream addition").unwrap();
+        commit_git_changes(&repo);
+        let result = service.install(request);
+        if locally_modified {
+            assert_eq!(result.unwrap_err().code, ErrorCode::TargetConflict);
+            assert_eq!(
+                fs::read_to_string(Path::new(&first.central_path).join("SKILL.md")).unwrap(),
+                "local edit"
+            );
+        } else {
+            let updated = result.unwrap();
+            assert_eq!(updated.id, first.id);
+            assert_eq!(updated.action, InstallAction::Updated);
+            assert!(service
+                .store()
+                .get_skill_by_id(&first.id)
+                .unwrap()
+                .unwrap()
+                .content_hash
+                .is_some());
+        }
+    }
+}
+
+#[test]
+fn git_incremental_install_accepts_explicit_unscanned_subpaths() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("deep-source");
+    write_skill(&repo.join("packages/foo"), "foo");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    let url = format!("file://{}", repo.display());
+    let first = service
+        .install(InstallRequest::git(&url).with_subpath("./packages/foo"))
+        .unwrap();
+    let repeated = service
+        .install(InstallRequest::git(&url).with_subpath("packages/foo"))
+        .unwrap();
+    assert_eq!(first.id, repeated.id);
+    assert_eq!(repeated.action, InstallAction::Unchanged);
+}
+
+#[test]
+fn cancelled_git_update_does_not_change_content_or_source_health() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("cancelled-update-source");
+    write_skill(&repo.join("alpha"), "alpha");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    let first = service
+        .install(InstallRequest::git(format!("file://{}", repo.display())).with_subpath("alpha"))
+        .unwrap();
+    let cancel = CancelToken::new();
+    cancel.cancel();
+    let result = crate::core::installer::update_managed_skill_from_source_with_cancel(
+        service.paths(),
+        service.store(),
+        &first.id,
+        Some(&cancel),
+    );
+    assert!(matches!(result, Err(error) if error.to_string().starts_with("CANCELLED|")));
+    let after = service.show_skill(first.id.into()).unwrap();
+    assert_eq!(after.content_status, "ok");
+    assert!(after.source_error.is_none());
+    assert_eq!(
+        crate::core::content_hash::hash_dir(Path::new(&first.central_path)).unwrap(),
+        first.content_hash.unwrap()
+    );
 }

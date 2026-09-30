@@ -43,7 +43,7 @@ use crate::core::github_token::{
     has_github_token, resolve_github_token, set_github_token as set_github_token_core,
     SystemGithubTokenStore,
 };
-use crate::core::installer::{GitSkillCandidate, LocalSkillCandidate};
+use crate::core::installer::LocalSkillCandidate;
 use crate::core::network_proxy::{
     app_http_client, get_github_proxy_config as get_github_proxy_config_core,
     get_github_proxy_url as get_github_proxy_url_core,
@@ -72,7 +72,9 @@ use crate::core::tool_adapters::{
     is_builtin_tool_enabled, is_tool_installed, load_tool_config, project_relative_skills_dir,
     resolve_default_path, save_tool_config, supports_project_scope, CustomToolConfig, ToolConfig,
 };
-use crate::services::install::{InstallOutcome, InstallRequest};
+use crate::services::install::{
+    GitInstallCandidate, InstallAction, InstallOutcome, InstallRequest,
+};
 use crate::services::library::{AdoptRequest, RemoveRequest, TagAction, TagSelector};
 use crate::services::operation_lock::{OperationKind, OperationLock};
 use crate::services::skills_hub::SkillsHubService;
@@ -966,6 +968,8 @@ pub async fn trigger_auto_update_task_now_cmd(store: State<'_, SkillStore>) -> R
 
 #[derive(Debug, Serialize)]
 pub struct InstallResultDto {
+    pub action: InstallAction,
+    pub pending_targets: Vec<String>,
     pub skill_id: String,
     pub name: String,
     pub central_path: String,
@@ -1369,12 +1373,13 @@ pub async fn list_git_skills_cmd(
     service: State<'_, SkillsHubService>,
     cancel: State<'_, Arc<CancelToken>>,
     repoUrl: String,
-) -> Result<Vec<GitSkillCandidate>, String> {
+    name: Option<String>,
+) -> Result<Vec<GitInstallCandidate>, String> {
     let service = service.inner().clone();
     cancel.reset();
     let cancel_token = Arc::clone(cancel.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        service.git_install_candidates_with_cancel(&repoUrl, Some(&cancel_token))
+        service.git_install_preview_with_cancel(&repoUrl, name.as_deref(), Some(&cancel_token))
     })
     .await
     .map_err(|err| err.to_string())?
@@ -2081,6 +2086,8 @@ fn remove_path_any(path: &str) -> Result<(), String> {
 
 fn to_service_install_dto(result: InstallOutcome) -> InstallResultDto {
     InstallResultDto {
+        action: result.action,
+        pending_targets: result.pending_targets,
         skill_id: result.id,
         name: result.name,
         central_path: result.central_path,

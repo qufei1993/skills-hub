@@ -101,6 +101,7 @@ export type ManagedSkill = {
 }
 
 export type GitSkillCandidate = {
+  status?: 'install' | 'update' | 'conflict'
   name: string
   description?: string | null
   subpath: string
@@ -115,6 +116,8 @@ export type LocalSkillCandidate = {
 }
 
 export type InstallResultDto = {
+  action?: 'installed' | 'updated' | 'unchanged'
+  pending_targets?: string[]
   skill_id: string
   name: string
   central_path: string

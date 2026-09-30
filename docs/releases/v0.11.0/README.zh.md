@@ -6,6 +6,12 @@ v0.11.0 支持通过 AI 对话管理 Skills，由官方 `manage-skills-hub` Skil
 
 详细说明见 [Agent 优先的命令行入口](agent-first-cli.zh.md) 和 [桌面 CLI 桥接](verified-cli-bridge.zh.md)。
 
+## Git 仓库增量安装
+
+再次安装多 Skill 仓库时，按仓库、分支选择和子路径识别同源技能，原位更新已有项并安装新增项；内容无变化则保留原记录。桌面选择列表展示新增和更新数量，跳过来源或名称冲突，单项失败不影响其他选中项继续执行。
+
+更新保留技能 ID、标签、启用状态及原有同步配置。本地修改以及会删除受管理文件的更新会被拦住。旧记录缺少内容指纹时，根据原 Git 提交验证；若缓存中已无法找回原提交，则暂停该项，交由用户检查。本次不包含跨来源覆盖或交互式重命名；仓库内容遵循已配置的 Git 缓存有效期。
+
 ## Cline 桌面版支持
 
 更新现有 Cline 适配：通过 `~/.cline` 检测安装状态，全局同步到 `~/.cline/skills`，项目同步到 `.cline/skills`，与 [Cline 官方目录说明](https://docs.cline.bot/customization/skills)一致。共享目录预览不再将 Cline 与 `.agents/skills` 工具归为一组。已有 `.agents/skills` 文件不会迁移或删除；请将所需 Skills 重新同步到 Cline，写入其原生目录。

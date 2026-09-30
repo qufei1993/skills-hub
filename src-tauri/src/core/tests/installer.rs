@@ -1807,3 +1807,50 @@ fn issue_129_discovers_and_installs_skills_across_categories() {
         assert_eq!(record.description, candidate.description);
     }
 }
+
+#[test]
+fn git_source_identity_normalizes_equivalent_urls_but_preserves_branch_and_path() {
+    for reference in [
+        "owner/repo",
+        "https://github.com/owner/repo.git/",
+        "git@github.com:owner/repo.git",
+        "ssh://git@github.com/owner/repo.git",
+    ] {
+        assert!(super::same_git_skill_source(
+            "https://github.com/Owner/Repo",
+            Some("skills/a"),
+            reference,
+            "skills/a"
+        ));
+    }
+    assert!(super::same_git_skill_source(
+        "https://github.com/owner/repo/blob/main/skills/a/SKILL.md",
+        None,
+        "https://github.com/owner/repo/tree/main/skills",
+        "skills/a"
+    ));
+    for (reference, subpath) in [
+        ("owner/other", "skills/a"),
+        ("owner/repo", "skills/b"),
+        ("owner/repo/tree/main/skills/a", "skills/a"),
+    ] {
+        assert!(!super::same_git_skill_source(
+            "owner/repo",
+            Some("skills/a"),
+            reference,
+            subpath
+        ));
+    }
+    assert!(!super::same_git_skill_source(
+        "owner/repo/tree/main/skills/a",
+        Some("skills/a"),
+        "owner/repo/tree/dev/skills/a",
+        "skills/a"
+    ));
+    assert!(super::same_git_skill_source(
+        "owner/repo",
+        None,
+        "owner/repo.git",
+        "."
+    ));
+}
