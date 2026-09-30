@@ -20,6 +20,28 @@ pub const VERSION_STAMP: &str = "skillshub-cli.version";
 pub const HASH_STAMP: &str = "skillshub-cli.sha256";
 const LOCK_FILE: &str = ".skillshub-cli.lock";
 
+fn bundled_cli_source_for_profile(
+    executable: &Path,
+    development: bool,
+    prepared_source: Option<&Path>,
+) -> Option<PathBuf> {
+    if development {
+        prepared_source.map(Path::to_path_buf)
+    } else {
+        executable
+            .parent()
+            .map(|directory| directory.join(BINARY_NAME))
+    }
+}
+
+pub fn bundled_cli_source(executable: &Path) -> Option<PathBuf> {
+    bundled_cli_source_for_profile(
+        executable,
+        cfg!(debug_assertions),
+        option_env!("SKILLS_HUB_BUNDLED_CLI_SOURCE_PATH").map(Path::new),
+    )
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CliBridgeHealth {
@@ -194,26 +216,93 @@ pub fn publish_cli_bridge(
     version: &str,
     expected_hash: &str,
 ) -> Result<CliBridgeStatus> {
+    publish_cli_bridge_with_hook(source, destination, version, expected_hash, || Ok(()))
+}
+
+struct PreviousBridge {
+    binary: Vec<u8>,
+    version: String,
+    hash: String,
+    permissions: fs::Permissions,
+}
+
+fn previous_bridge(directory: &BridgeDirectory) -> Option<PreviousBridge> {
+    let mut binary_file = directory
+        .open_file(OsStr::new(BINARY_NAME), false, false)
+        .ok()?;
+    let permissions = binary_file.metadata().ok()?.permissions();
+    let read_stamp = |name| -> Option<String> {
+        let mut value = String::new();
+        directory
+            .open_file(OsStr::new(name), false, false)
+            .ok()?
+            .take(1024)
+            .read_to_string(&mut value)
+            .ok()?;
+        Some(value)
+    };
+    let version = read_stamp(VERSION_STAMP)?;
+    let hash = read_stamp(HASH_STAMP)?;
+    let version = version.trim().to_string();
+    let hash = hash.trim().to_string();
+    if !metadata_valid(&version, &hash) || hash_open_file(&mut binary_file).ok()? != hash {
+        return None;
+    }
+    let mut binary = Vec::new();
+    binary_file.seek(SeekFrom::Start(0)).ok()?;
+    binary_file.read_to_end(&mut binary).ok()?;
+    if hex::encode(Sha256::digest(&binary)) != hash {
+        return None;
+    }
+    Some(PreviousBridge {
+        binary,
+        version,
+        hash,
+        permissions,
+    })
+}
+
+fn restore_previous_bridge(directory: &BridgeDirectory, previous: PreviousBridge) -> Result<()> {
+    let mut temp = directory.temp().map_err(io_error)?;
+    temp.file.write_all(&previous.binary).map_err(io_error)?;
+    temp.file
+        .set_permissions(previous.permissions)
+        .map_err(io_error)?;
+    temp.file.sync_all().map_err(io_error)?;
+    temp.persist(BINARY_NAME).map_err(io_error)?;
+    atomic_stamp(directory, HASH_STAMP, &previous.hash)?;
+    atomic_stamp(directory, VERSION_STAMP, &previous.version)?;
+    Ok(())
+}
+
+fn publish_cli_bridge_with_hook(
+    source: &Path,
+    destination: &Path,
+    version: &str,
+    expected_hash: &str,
+    after_replace: impl FnOnce() -> Result<()>,
+) -> Result<CliBridgeStatus> {
     let directory = BridgeDirectory::open(destination, true).map_err(io_error)?;
     let lock = directory
         .open_file(OsStr::new(LOCK_FILE), true, false)
         .map_err(io_error)?;
     lock.try_lock_exclusive()
         .map_err(|_| anyhow::anyhow!(CliBridgeReason::PublicationInProgress.code()))?;
-    invalidate_stamps(&directory)?;
+    if !hash_valid(expected_hash) {
+        bail!(CliBridgeReason::HashMismatch.code());
+    }
+    if !metadata_valid(version, expected_hash) {
+        bail!(CliBridgeReason::InvalidMetadata.code());
+    }
+    if !regular_file(source) {
+        bail!(CliBridgeReason::SourceMissing.code());
+    }
+    if hash_file(source)? != expected_hash {
+        bail!(CliBridgeReason::HashMismatch.code());
+    }
+    let previous = previous_bridge(&directory);
+    let mut changed = false;
     let result = (|| {
-        if !hash_valid(expected_hash) {
-            bail!(CliBridgeReason::HashMismatch.code());
-        }
-        if !metadata_valid(version, expected_hash) {
-            bail!(CliBridgeReason::InvalidMetadata.code());
-        }
-        if !regular_file(source) {
-            bail!(CliBridgeReason::SourceMissing.code());
-        }
-        if hash_file(source)? != expected_hash {
-            bail!(CliBridgeReason::HashMismatch.code());
-        }
         let mut temp = directory.temp().map_err(io_error)?;
         let mut input = File::open(source).map_err(io_error)?;
         std::io::copy(&mut input, &mut temp.file).map_err(io_error)?;
@@ -228,7 +317,10 @@ pub fn publish_cli_bridge(
         if hash_open_file(&mut temp.file)? != expected_hash {
             bail!(CliBridgeReason::HashMismatch.code());
         }
+        changed = true;
+        invalidate_stamps(&directory)?;
         temp.persist(BINARY_NAME).map_err(io_error)?;
+        after_replace()?;
         atomic_stamp(&directory, HASH_STAMP, expected_hash)?;
         atomic_stamp(&directory, VERSION_STAMP, version)?;
         directory.verify().map_err(io_error)?;
@@ -239,8 +331,14 @@ pub fn publish_cli_bridge(
             version: Some(version.to_string()),
         })
     })();
-    if result.is_err() {
-        let _ = invalidate_stamps(&directory);
+    if result.is_err() && changed {
+        if let Some(previous) = previous {
+            if restore_previous_bridge(&directory, previous).is_err() {
+                let _ = invalidate_stamps(&directory);
+            }
+        } else {
+            let _ = invalidate_stamps(&directory);
+        }
     }
     result
 }

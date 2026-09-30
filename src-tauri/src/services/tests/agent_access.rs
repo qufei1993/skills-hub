@@ -350,6 +350,99 @@ fn agent_access_upgrades_intact_library_without_redeploying_other_agents() {
 }
 
 #[test]
+fn automatic_management_update_keeps_existing_targets_only() {
+    let f = Fixture::new();
+    f.old_bundle();
+    let result = f.service.refresh_installed_ai_management().unwrap();
+    assert!(result);
+    assert_eq!(
+        f.service
+            .agent_access_status()
+            .unwrap()
+            .installed_version
+            .as_deref(),
+        Some(env!("CARGO_PKG_VERSION"))
+    );
+    assert!(f.target("cursor").exists());
+    assert!(!f.target("codex").exists());
+}
+
+#[test]
+fn automatic_management_update_does_not_install_for_unenrolled_users() {
+    let f = Fixture::new();
+    assert!(!f.service.refresh_installed_ai_management().unwrap());
+    assert!(f.service.list_skills().unwrap().is_empty());
+}
+
+#[test]
+fn automatic_management_update_requires_an_enabled_deployment() {
+    let f = Fixture::new();
+    assert!(!f
+        .service
+        .agent_access_status()
+        .unwrap()
+        .auto_update_eligible());
+    f.old_bundle();
+    let status = f.service.agent_access_status().unwrap();
+    assert!(status.auto_update_eligible());
+    f.service
+        .store()
+        .set_skill_enabled(status.skill_id.as_deref().unwrap(), false)
+        .unwrap();
+    assert!(!f
+        .service
+        .agent_access_status()
+        .unwrap()
+        .auto_update_eligible());
+
+    let other = Fixture::new();
+    let bundled = other
+        .service
+        .prepare_bundled_install(
+            "manage-skills-hub",
+            super::super::agent_access::OFFICIAL_SKILL_MD,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .unwrap();
+    other
+        .service
+        .apply_bundled_install(bundled, || Ok(()))
+        .unwrap();
+    assert!(!other
+        .service
+        .agent_access_status()
+        .unwrap()
+        .auto_update_eligible());
+}
+
+#[test]
+fn automatic_management_update_refreshes_changed_bundle_at_same_version() {
+    let f = Fixture::new();
+    let bundled = f
+        .service
+        .prepare_bundled_install(
+            "manage-skills-hub",
+            "---\nname: manage-skills-hub\n---\nPrevious content\n",
+            env!("CARGO_PKG_VERSION"),
+        )
+        .unwrap();
+    f.service.apply_bundled_install(bundled, || Ok(())).unwrap();
+    assert!(f.service.refresh_installed_ai_management().unwrap());
+    assert_eq!(
+        fs::read_to_string(
+            f.service
+                .show_skill("manage-skills-hub".into())
+                .unwrap()
+                .central_path
+                + "/SKILL.md"
+        )
+        .unwrap(),
+        super::super::agent_access::OFFICIAL_SKILL_MD
+    );
+    assert!(!f.target("codex").exists());
+}
+
+#[test]
 fn agent_access_official_bundle_works_with_normal_check_and_update_workflows() {
     let f = Fixture::new();
     f.old_bundle();

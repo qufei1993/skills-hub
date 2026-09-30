@@ -13,7 +13,8 @@ All notable changes to this project will be documented in this file.
 
 ### Improved
 - **Terminal command setup**: Desktop AI setup also configures the user command path. Open a new terminal to run `skillshub-cli`; existing AI setups can complete this configuration with the same enable button.
-- **On-demand AI setup**: The bundled CLI is installed, updated, or repaired only when you explicitly enable AI management. App startup and Settings status checks leave existing CLI files untouched.
+- **AI management version maintenance**: First-time CLI setup still requires Enable in one click. On later desktop launches, active AI management installations update the bundled CLI and official Skill to the desktop version while preserving deployed targets. Failed CLI replacement restores the previously verified release; Settings shows pending updates and PATH conflicts.
+- **Development CLI repair**: The development app now installs the CLI artifact prepared for its own build, so its checksum matches the bundled metadata instead of rejecting an unrelated executable beside the app.
 - **AI management discovery**: A dismissible notice in My Skills introduces AI management before the official Skill is installed. Go to setup opens and highlights the Settings card; dismissed notices stay hidden.
 - **Default tool sync**: AI installations sync to detected, enabled tools by default. Explicit tool choices, library-only requests, and project scope take precedence. Incomplete sync is reported separately from a successful installation.
 - **Shared library refresh**: Skills and tags refresh when returning to the app, entering library or tag pages, or opening tag filters. Existing filters are preserved, so AI changes appear without restarting.

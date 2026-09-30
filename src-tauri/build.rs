@@ -86,7 +86,8 @@ fn prepare_cli_bridge_metadata() {
         Some(target.as_str()),
         "CLI sidecar target mismatch"
     );
-    let binary = fs::read(binary_path).expect("prepare CLI sidecar binary before building desktop");
+    let binary =
+        fs::read(&binary_path).expect("prepare CLI sidecar binary before building desktop");
     let hash = format!("{:x}", Sha256::digest(binary));
     assert_eq!(
         metadata["sha256"].as_str(),
@@ -94,5 +95,9 @@ fn prepare_cli_bridge_metadata() {
         "CLI sidecar hash mismatch"
     );
     println!("cargo:rustc-env=SKILLS_HUB_BUNDLED_CLI_SHA256={hash}");
+    println!(
+        "cargo:rustc-env=SKILLS_HUB_BUNDLED_CLI_SOURCE_PATH={}",
+        env::current_dir().unwrap().join(binary_path).display()
+    );
 }
 mod cli_sidecar_profile;

@@ -94,7 +94,32 @@ pub struct AgentAccessStatus {
     pub plan: Option<DeploymentPlan>,
 }
 
+impl AgentAccessStatus {
+    pub fn auto_update_eligible(&self) -> bool {
+        self.installed
+            && self.skill.as_ref().is_some_and(|skill| skill.enabled)
+            && self.health.iter().any(|target| target.deployed)
+    }
+}
+
 impl SkillsHubService {
+    pub fn refresh_installed_ai_management(&self) -> Result<bool, ServiceError> {
+        let skill = match self.show_skill(OFFICIAL_SKILL_NAME.into()) {
+            Ok(skill) if skill.source.kind == "bundled" => skill,
+            Ok(_) => return Ok(false),
+            Err(error) if error.code == ErrorCode::SkillNotFound => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        if !self
+            .check_updates(skill.id.clone().into())?
+            .update_available
+        {
+            return Ok(false);
+        }
+        self.update(skill.id.into())?;
+        Ok(true)
+    }
+
     pub fn enable_ai_management(&self) -> Result<AgentAccessStatus, ServiceError> {
         let agents: Vec<String> = self
             .list_agents()?
