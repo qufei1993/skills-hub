@@ -21,16 +21,14 @@ pub const HASH_STAMP: &str = "skillshub-cli.sha256";
 const LOCK_FILE: &str = ".skillshub-cli.lock";
 
 fn bundled_cli_source_for_profile(
-    executable: &Path,
+    _executable: &Path,
     development: bool,
     prepared_source: Option<&Path>,
 ) -> Option<PathBuf> {
     if development {
         prepared_source.map(Path::to_path_buf)
     } else {
-        executable
-            .parent()
-            .map(|directory| directory.join(BINARY_NAME))
+        None
     }
 }
 

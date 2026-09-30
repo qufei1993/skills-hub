@@ -1,6 +1,6 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use tauri::{Manager, State};
+use tauri::{AppHandle, Manager, State};
 
 use std::sync::Arc;
 
@@ -160,11 +160,17 @@ fn agent_access_dto(
 
 fn enable_ai_management_impl(
     service: &SkillsHubService,
-    source: &std::path::Path,
+    prepare: &dyn Fn() -> Result<crate::core::cli_bridge::CliBridgeStatus, String>,
 ) -> Result<AgentAccessStatusDto, String> {
-    use crate::core::cli_bridge::{publish_bundled_cli_bridge, CliBridgeHealth};
-    let bridge = publish_bundled_cli_bridge(source, &service.paths().cli_bridge_dir);
-    if bridge.status != CliBridgeHealth::Valid {
+    service.preflight_ai_management().map_err(|error| {
+        if error.code == crate::services::error::ErrorCode::AgentNotFound {
+            "AGENT_NOT_FOUND".to_string()
+        } else {
+            format_service_error(error)
+        }
+    })?;
+    let bridge = prepare()?;
+    if bridge.status != crate::core::cli_bridge::CliBridgeHealth::Valid {
         return Err("CLI_UNAVAILABLE".into());
     }
     let status = service
@@ -182,17 +188,71 @@ fn enable_ai_management_impl(
     Ok(agent_access_dto(status, bridge, true))
 }
 
+static AI_MANAGEMENT_OPERATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[tauri::command]
 pub async fn enable_ai_management(
+    app: AppHandle,
     service: State<'_, SkillsHubService>,
+    operation_id: String,
 ) -> Result<AgentAccessStatusDto, String> {
+    use crate::core::cli_distribution::{
+        embedded_cli_manifest, prepare_cli, CliPreparationPhase, CliPreparationProgress,
+    };
+    use tauri::Emitter;
+    if uuid::Uuid::parse_str(&operation_id).is_err() {
+        return Err("INVALID_ARGUMENT".into());
+    }
     let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let source = tauri::utils::platform::current_exe()
-            .ok()
-            .and_then(|exe| crate::core::cli_bridge::bundled_cli_source(&exe))
-            .ok_or_else(|| "CLI_UNAVAILABLE".to_string())?;
-        enable_ai_management_impl(&service, &source)
+        let _operation = AI_MANAGEMENT_OPERATION
+            .try_lock()
+            .map_err(|_| "BUSY".to_string())?;
+        enable_ai_management_impl(&service, &|| {
+            let manifest = embedded_cli_manifest().map_err(|_| "CLI_UNAVAILABLE".to_string())?;
+            let existing = crate::core::cli_bridge::cli_bridge_status(
+                &service.paths().cli_bridge_dir,
+                &manifest.version,
+                &manifest.sha256,
+            );
+            if existing.status == crate::core::cli_bridge::CliBridgeHealth::Valid {
+                return Ok(existing);
+            }
+            let proxy_url = crate::core::network_proxy::get_github_proxy_url(service.store())
+                .map_err(|_| "CLI_DOWNLOAD_FAILED".to_string())?;
+            let progress = |phase, downloaded_bytes, total_bytes| {
+                let _ = app.emit(
+                    "ai-management-progress",
+                    CliPreparationProgress {
+                        operation_id: operation_id.clone(),
+                        phase,
+                        downloaded_bytes,
+                        total_bytes,
+                    },
+                );
+            };
+            let bridge = prepare_cli(
+                &manifest,
+                &service.paths().cli_bridge_dir,
+                Some(&proxy_url),
+                &progress,
+            )
+            .map_err(|error| {
+                match error.to_string().as_str() {
+                    "CLI_DOWNLOAD_FAILED" => "CLI_DOWNLOAD_FAILED",
+                    "CLI_DOWNLOAD_UNAVAILABLE" => "CLI_DOWNLOAD_UNAVAILABLE",
+                    "CLI_INTEGRITY_FAILED" => "CLI_INTEGRITY_FAILED",
+                    _ => "CLI_UNAVAILABLE",
+                }
+                .to_string()
+            })?;
+            progress(
+                CliPreparationPhase::Configuring,
+                manifest.size,
+                Some(manifest.size),
+            );
+            Ok(bridge)
+        })
     })
     .await
     .map_err(|_| "INTERNAL_ERROR".to_string())?

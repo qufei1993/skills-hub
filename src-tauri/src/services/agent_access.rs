@@ -121,6 +121,14 @@ impl SkillsHubService {
     }
 
     pub fn enable_ai_management(&self) -> Result<AgentAccessStatus, ServiceError> {
+        self.prepare_ai_management(false)
+    }
+
+    pub fn preflight_ai_management(&self) -> Result<AgentAccessStatus, ServiceError> {
+        self.prepare_ai_management(true)
+    }
+
+    fn prepare_ai_management(&self, dry_run: bool) -> Result<AgentAccessStatus, ServiceError> {
         let agents: Vec<String> = self
             .list_agents()?
             .agents
@@ -139,7 +147,7 @@ impl SkillsHubService {
             SetupAgentRequest {
                 agents,
                 remove: false,
-                dry_run: false,
+                dry_run,
                 confirmed: false,
             },
             true,

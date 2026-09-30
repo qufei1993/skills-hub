@@ -138,36 +138,6 @@ pub fn run() {
                 Err(err) => log::warn!("same-device sync baseline recovery skipped: {err:#}"),
             }
 
-            let maintenance_service = &service;
-            {
-                let result = (|| -> anyhow::Result<()> {
-                    let status = maintenance_service.agent_access_status()?;
-                    if !status.auto_update_eligible() {
-                        return Ok(());
-                    }
-                    if let Err(error) = maintenance_service.refresh_installed_ai_management() {
-                        log::warn!("official AI Skill update pending: {error:#}");
-                    }
-                    let bridge_dir = &maintenance_service.paths().cli_bridge_dir;
-                    let bridge = core::cli_bridge::bundled_cli_bridge_status(bridge_dir);
-                    if bridge.reason == Some(core::cli_bridge::CliBridgeReason::VersionMismatch) {
-                        let source = tauri::utils::platform::current_exe()
-                            .ok()
-                            .and_then(|exe| core::cli_bridge::bundled_cli_source(&exe))
-                            .ok_or_else(|| anyhow::anyhow!("bundled CLI path unavailable"))?;
-                        let published =
-                            core::cli_bridge::publish_bundled_cli_bridge(&source, bridge_dir);
-                        if published.status != core::cli_bridge::CliBridgeHealth::Valid {
-                            anyhow::bail!("CLI update failed: {:?}", published.reason);
-                        }
-                    }
-                    Ok(())
-                })();
-                if let Err(error) = result {
-                    log::warn!("AI management update pending: {error:#}");
-                }
-            }
-
             if let Ok(Some(config)) = store.get_device_sync_config() {
                 if config.auto_check
                     && !config.needs_visibility_confirmation()

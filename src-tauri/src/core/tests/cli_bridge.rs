@@ -17,7 +17,7 @@ fn bundled_cli_source_uses_the_prepared_sidecar_in_development() {
     assert_eq!(bundled_cli_source_for_profile(executable, true, None), None);
     assert_eq!(
         bundled_cli_source_for_profile(executable, false, Some(prepared)),
-        Some(executable.parent().unwrap().join(BINARY_NAME))
+        None
     );
 }
 

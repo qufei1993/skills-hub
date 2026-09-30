@@ -96,6 +96,29 @@ pub fn app_http_client_no_redirects(proxy_url: &str, timeout_secs: Option<u64>) 
         .context("build HTTP client")
 }
 
+fn download_redirect_allowed(url: &str, previous: usize) -> bool {
+    reqwest::Url::parse(url).is_ok_and(|url| {
+        url.scheme() == "https"
+            && url.username().is_empty()
+            && url.password().is_none()
+            && previous <= 5
+    })
+}
+
+pub fn app_download_client(proxy_url: Option<&str>, timeout_secs: u64) -> Result<Client> {
+    http_client_builder(proxy_url.unwrap_or(""), Some(timeout_secs))?
+        .https_only(true)
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if download_redirect_allowed(attempt.url().as_str(), attempt.previous().len()) {
+                attempt.follow()
+            } else {
+                attempt.error("CLI_DOWNLOAD_REDIRECT_REJECTED")
+            }
+        }))
+        .build()
+        .context("build CLI download client")
+}
+
 fn http_client_builder(proxy_url: &str, timeout_secs: Option<u64>) -> Result<ClientBuilder> {
     let mut builder = ClientBuilder::new().no_proxy();
     if let Some(secs) = timeout_secs {
@@ -179,6 +202,23 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::Mutex;
+
+    #[test]
+    fn cli_download_redirects_reject_downgrades_and_excess_hops() {
+        assert!(download_redirect_allowed(
+            "https://release-assets.githubusercontent.com/file",
+            5
+        ));
+        assert!(!download_redirect_allowed(
+            "http://release-assets.githubusercontent.com/file",
+            1
+        ));
+        assert!(!download_redirect_allowed("https://github.com/file", 6));
+        assert!(!download_redirect_allowed(
+            "https://user:secret@github.com/file",
+            1
+        ));
+    }
 
     static PROXY_ENV_LOCK: Mutex<()> = Mutex::new(());
 
