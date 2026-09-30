@@ -31,3 +31,9 @@ The complete implementation decision ledger and tradeoffs are recorded in [the C
 Following the user's clarification, CLI and desktop assets share the original repository release. CLI assets are staged in a draft and verified by remote digests; desktop assets are added to that draft before an explicit publication step, followed by anonymous download verification. Draft retries add only missing CLI files and reject conflicting bytes; public releases missing CLI assets are not modified. The previously created empty repository is unused and retained pending explicit deletion authorization.
 
 Correction validation: regressions failed before the fix and passed afterward. Final `npm run check` passed (285 frontend, 623 Rust unit, 2 compatibility and 19 CLI integration tests), with network boundary, version and workflow checks passing.
+
+## PR #169 CI timeout correction
+
+The Cargo metadata test exceeded the default five-second timeout; this differs from PR #168's device-sync credential recovery loading race. A six-second startup delay around real Cargo reproduced the original error and passed after the fix. Metadata reads are offline and locked, the child process is limited to 20 seconds, and only this Vitest test receives a 30-second timeout. Offline metadata also passed with an empty Cargo cache. Latest main was merged; local development CLI metadata was regenerated to match the merge commit before the final checks.
+
+Final merged-branch `npm run check` passed: 290 frontend, 629 Rust unit, 2 compatibility and 19 CLI integration tests.

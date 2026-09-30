@@ -9,13 +9,14 @@ import { desktopSidecarOptions, prepareCliSidecar, resolveSidecarTarget } from '
 
 describe('CLI sidecar preparation', () => {
   it('keeps the desktop as Cargo default executable when the CLI is also present', () => {
-    const result = spawnSync('cargo', ['metadata', '--no-deps', '--format-version', '1'], { cwd: new URL('../src-tauri', import.meta.url), encoding: 'utf8' })
+    const result = spawnSync('cargo', ['metadata', '--offline', '--locked', '--no-deps', '--format-version', '1'], { cwd: new URL('../src-tauri', import.meta.url), encoding: 'utf8', timeout: 20_000 })
+    assert.ifError(result.error)
     assert.equal(result.status, 0, result.stderr)
     const app = JSON.parse(result.stdout).packages.find(item => item.name === 'app')
     assert.equal(app.default_run, 'app')
     assert.deepEqual(app.targets.find(target => target.name === 'skillshub-cli')['required-features'], ['cli'])
     assert.deepEqual(app.features.cli, [])
-  })
+  }, process.env.VITEST ? 30_000 : undefined)
   it('maps only the five explicitly supported targets and rejects shell input', () => {
     for (const [target, triple] of [
       ['darwin-arm64', 'aarch64-apple-darwin'], ['darwin-x64', 'x86_64-apple-darwin'],
