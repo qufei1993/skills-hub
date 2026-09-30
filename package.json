@@ -30,7 +30,15 @@
     "tauri:build:win:all": "npm run tauri:build -- --bundles msi,nsis",
     "tauri:build:linux:deb": "npm run tauri:build -- --bundles deb",
     "tauri:build:linux:appimage": "npm run tauri:build -- --bundles appimage",
-    "tauri:build:linux:all": "npm run tauri:build -- --bundles deb,appimage"
+    "tauri:build:linux:all": "npm run tauri:build -- --bundles deb,appimage",
+    "tauri:build:local": "npm run tauri:build -- --local-test",
+    "tauri:build:local:mac:dmg": "npm run tauri:build:local -- --bundles dmg",
+    "tauri:build:local:win:exe": "npm run tauri:build:local -- --bundles nsis",
+    "tauri:build:local:win:msi": "npm run tauri:build:local -- --bundles msi",
+    "tauri:build:local:win:all": "npm run tauri:build:local -- --bundles msi,nsis",
+    "tauri:build:local:linux:deb": "npm run tauri:build:local -- --bundles deb",
+    "tauri:build:local:linux:appimage": "npm run tauri:build:local -- --bundles appimage",
+    "tauri:build:local:linux:all": "npm run tauri:build:local -- --bundles deb,appimage"
   },
   "dependencies": {
     "@lobehub/icons-static-svg": "^1.91.0",

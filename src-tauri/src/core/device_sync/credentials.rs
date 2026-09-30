@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use super::types::{CredentialUsage, ProviderId};
 use crate::core::network_proxy::app_http_client_no_redirects;
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, feature = "local-test"))]
 pub(crate) const DEVICE_SYNC_KEYRING_SERVICE: &str = "com.skills-hub.device-sync.dev";
-#[cfg(not(debug_assertions))]
+#[cfg(not(any(debug_assertions, feature = "local-test")))]
 pub(crate) const DEVICE_SYNC_KEYRING_SERVICE: &str = "com.skills-hub.device-sync";
 pub(crate) const GITHUB_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
 pub(crate) const GITLAB_TOKEN_URL: &str = "https://gitlab.com/oauth/token";
@@ -499,7 +499,7 @@ mod tests {
 
     #[test]
     fn shared_application_data_does_not_share_development_credentials() {
-        let expected = if cfg!(debug_assertions) {
+        let expected = if cfg!(any(debug_assertions, feature = "local-test")) {
             "com.skills-hub.device-sync.dev"
         } else {
             "com.skills-hub.device-sync"

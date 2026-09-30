@@ -195,7 +195,7 @@ mod tests {
     fn default_cli_paths_use_the_build_namespace_without_opening_directories() {
         let paths =
             RuntimePaths::from_roots(default_runtime_profile(), "/fixture/home", "/fixture/data");
-        let (identifier, central, bridge) = if cfg!(debug_assertions) {
+        let (identifier, central, bridge) = if cfg!(any(debug_assertions, feature = "local-test")) {
             ("com.qufei1993.skillshub", ".skillshub", ".skills-hub-dev")
         } else {
             ("com.qufei1993.skillshub", ".skillshub", ".skills-hub")

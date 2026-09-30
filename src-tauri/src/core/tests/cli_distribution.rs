@@ -144,3 +144,81 @@ fn cli_distribution_timeout_preserves_old_installation() {
         CliBridgeHealth::Valid
     );
 }
+
+#[test]
+fn local_test_cli_installs_verified_embedded_bytes_without_downloading() {
+    let root = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+    let bridge = root.path().join("dev-bridge");
+    let phases = std::sync::Mutex::new(Vec::new());
+    let status = prepare_local_cli(&manifest(), b"abc", &bridge, &|phase, _, _| {
+        phases.lock().unwrap().push(phase)
+    })
+    .unwrap();
+    assert_eq!(status.status, CliBridgeHealth::Valid);
+    assert_eq!(std::fs::read(status.path).unwrap(), b"abc");
+    let phases = phases.lock().unwrap();
+    assert!(phases.contains(&CliPreparationPhase::Verifying));
+    assert!(phases.contains(&CliPreparationPhase::Installing));
+    assert!(!phases.contains(&CliPreparationPhase::Downloading));
+}
+
+#[test]
+fn local_test_cli_integrity_failures_preserve_existing_cli() {
+    let root = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+    let source = root.path().join("old");
+    std::fs::write(&source, b"abc").unwrap();
+    let bridge = root.path().join("dev-bridge");
+    publish_cli_bridge(&source, &bridge, "0.10.1", HASH).unwrap();
+    for bytes in [b"ab".as_slice(), b"xyz".as_slice()] {
+        assert_eq!(
+            prepare_local_cli(&manifest(), bytes, &bridge, &|_, _, _| {})
+                .unwrap_err()
+                .to_string(),
+            "CLI_INTEGRITY_FAILED"
+        );
+        assert_eq!(
+            cli_bridge_status(&bridge, "0.10.1", HASH).status,
+            CliBridgeHealth::Valid
+        );
+    }
+}
+
+#[cfg(skills_hub_local_bundle)]
+#[test]
+fn release_local_test_installs_embedded_cli_without_network() {
+    let root = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+    let manifest = embedded_cli_manifest().unwrap();
+    let phases = std::sync::Mutex::new(Vec::new());
+    let status = prepare_cli(
+        &manifest,
+        &root.path().join("bridge"),
+        Some("http://127.0.0.1:9"),
+        &|phase, _, _| phases.lock().unwrap().push(phase),
+    )
+    .unwrap();
+    assert_eq!(status.status, CliBridgeHealth::Valid);
+    assert!(!phases
+        .lock()
+        .unwrap()
+        .contains(&CliPreparationPhase::Downloading));
+    let result = std::process::Command::new(&status.path)
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    assert!(String::from_utf8_lossy(&result.stdout).contains(&manifest.version));
+    let paths = crate::core::runtime_paths::RuntimePaths::from_roots(
+        crate::core::runtime_paths::RuntimeProfile::current(),
+        root.path(),
+        root.path(),
+    );
+    assert_eq!(
+        paths.profile,
+        crate::core::runtime_paths::RuntimeProfile::Development
+    );
+    assert!(paths.cli_bridge_dir.ends_with(".skills-hub-dev/bin"));
+    assert_eq!(
+        crate::core::github_token::GITHUB_TOKEN_KEYRING_SERVICE,
+        "com.skills-hub.github-token.dev"
+    );
+}

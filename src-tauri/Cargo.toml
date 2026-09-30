@@ -30,6 +30,7 @@ required-features = ["cli"]
 
 [features]
 cli = []
+local-test = []
 
 [build-dependencies]
 serde_json = "1.0"

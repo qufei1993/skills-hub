@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ## [0.11.0]
 
 ### Added
+- **Local installation testing**: Add explicit cross-platform local test build commands that prepare and embed the local CLI, retain release optimization, and use development credentials and CLI directories. Missing release manifests now explain the requirement and suggest development or local test builds.
 - **Standalone CLI installer**: Install or upgrade the CLI with one command on macOS, Linux, or Windows x64, with release checksum verification and user-level PATH setup.
 - **AI Skill management**: Enable AI management in Settings to install the official `manage-skills-hub` Skill. Use AI conversations to search, install, import, update, deploy, tag, and safely remove Skills from the same library used by the desktop app.
 - **On-demand CLI**: Desktop installers no longer include `skillshub-cli`. Enable or update AI management in Settings to download the matching platform/version, verify its size and SHA-256, and install it. A verified installation works offline and after the desktop closes; Node.js and npm are not required. CLI resources are published separately in `qufei1993/skills-hub-cli`.

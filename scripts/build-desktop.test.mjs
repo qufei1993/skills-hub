@@ -160,8 +160,10 @@ describe('desktop OAuth build configuration', () => {
     }
   })
 
-  for (const modeArgs of [[], ['--dev']]) {
-  it(`passes both IDs and the ${modeArgs.length ? 'dev' : 'build'} subcommand to Tauri without importing file secrets`, () => {
+  for (const modeArgs of [[], ['--dev'], ['--local-test']]) {
+  const devMode = modeArgs.includes('--dev')
+  const localMode = modeArgs.includes('--local-test')
+  it(`passes both IDs and the ${devMode ? 'dev' : localMode ? 'local test build' : 'build'} subcommand to Tauri without importing file secrets`, () => {
     const root = mkdtempSync(path.join(tmpdir(), 'skills-hub-build-'))
     const scripts = path.join(root, 'scripts')
     const cliDir = path.join(root, 'node_modules', '@tauri-apps', 'cli')
@@ -169,6 +171,8 @@ describe('desktop OAuth build configuration', () => {
     try {
       mkdirSync(scripts, { recursive: true })
       mkdirSync(cliDir, { recursive: true })
+      mkdirSync(path.join(root, 'src-tauri'))
+      writeFileSync(path.join(root, 'src-tauri/tauri.conf.json'), JSON.stringify({ app: { windows: [{ width: 1180, title: 'Skills Hub' }] } }))
       copyFileSync(fileURLToPath(new URL('./build-desktop.mjs', import.meta.url)), copied)
       writeFileSync(path.join(root, '.env'), [
         `${githubKey}=${githubId}`,
@@ -180,7 +184,7 @@ describe('desktop OAuth build configuration', () => {
         "import { writeFileSync } from 'node:fs'",
         "import path from 'node:path'",
         "export function desktopSidecarOptions(args) { return { target: 'aarch64-apple-darwin', debug: args.includes('--dev') } }",
-        "export function prepareCliSidecar({ root, target, debug }) { writeFileSync(path.join(root, 'prepared.json'), JSON.stringify({ target, debug })); return { metadataPath: 'debug-manifest.json' } }",
+        "export function prepareCliSidecar({ root, target, debug, localTest }) { writeFileSync(path.join(root, 'prepared.json'), JSON.stringify({ target, debug, localTest })); return { metadataPath: 'debug-manifest.json' } }",
       ].join('\n'))
       writeFileSync(path.join(cliDir, 'package.json'), '{"name":"@tauri-apps/cli","version":"0.0.0"}')
       writeFileSync(path.join(cliDir, 'tauri.js'), [
@@ -201,11 +205,11 @@ describe('desktop OAuth build configuration', () => {
         encoding: 'utf8',
       })
       assert.equal(result.status, 0, result.stderr)
-      assert.deepEqual(JSON.parse(result.stdout.trim()), {
-        args: [modeArgs.length ? 'dev' : 'build', '--config', 'test.json', ...(modeArgs.length ? [] : ['--target', 'aarch64-apple-darwin', '--', '--bin', 'app'])],
+      assert.deepEqual(JSON.parse(result.stdout.trim().split('\n').at(-1)), {
+        args: [devMode ? 'dev' : 'build', '--config', 'test.json', ...(localMode ? ['--features', 'local-test', '--config', JSON.stringify(desktopBuild.localTestBuildConfig([{ width: 1180, title: 'Skills Hub' }]))] : []), ...(devMode ? [] : ['--target', 'aarch64-apple-darwin', '--', '--bin', 'app'])],
         github: githubId,
         gitlab: gitlabId,
-        prepared: modeArgs.length ? { target: 'aarch64-apple-darwin', debug: true } : null,
+        prepared: modeArgs.length ? { target: 'aarch64-apple-darwin', debug: devMode, ...(localMode ? { localTest: true } : {}) } : null,
         manifest: modeArgs.length ? 'debug-manifest.json' : path.resolve(realpathSync(root), 'release-manifest.json'),
       })
     } finally {
@@ -228,5 +232,60 @@ it('clears stale bundle contents before packaging without deleting compiled exec
     assert.equal(existsSync(path.join(output, 'bundle')), false)
     assert.equal(existsSync(path.join(output, 'app')), true)
     assert.throws(() => desktopBuild.clearDesktopBundle({ root, target: '../../unsafe', debug: false }))
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+
+describe('local test packaging', () => {
+  it('keeps platform-specific recovery instructions for release builds', () => {
+    for (const [platform, command] of [['darwin', 'mac:dmg'], ['win32', 'win:exe'], ['linux', 'linux:appimage']]) {
+      assert.equal(typeof desktopBuild.missingCliManifestMessage, 'function')
+      const message = desktopBuild.missingCliManifestMessage(platform)
+      assert.match(message, /--cli-manifest/)
+      assert.match(message, /npm run tauri:dev/)
+      assert.ok(message.includes(`npm run tauri:build:local:${command}`))
+    }
+  })
+
+  it('uses an explicit release test mode with separate identity and no production updater', () => {
+    assert.equal(typeof desktopBuild.localTestBuildConfig, 'function')
+    const config = desktopBuild.localTestBuildConfig()
+    assert.equal(config.productName, 'Skills Hub Local Test')
+    assert.equal(config.mainBinaryName, 'skills-hub-local-test')
+    assert.equal(config.identifier, 'com.qufei1993.skillshub.local-test')
+    assert.equal(config.app.windows[0].title, 'Skills Hub Local Test')
+    assert.equal(config.bundle.createUpdaterArtifacts, false)
+    assert.deepEqual(config.plugins.updater.endpoints, [])
+  })
+})
+
+
+it('rejects conflicting local test modes before preparing a CLI or launching Tauri', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'local-test-invalid-'))
+  try {
+    mkdirSync(path.join(root, 'scripts'))
+    const copied = path.join(root, 'scripts/build-desktop.mjs')
+    copyFileSync(fileURLToPath(new URL('./build-desktop.mjs', import.meta.url)), copied)
+    copyFileSync(fileURLToPath(new URL('./prepare-cli-sidecar.mjs', import.meta.url)), path.join(root, 'scripts/prepare-cli-sidecar.mjs'))
+    copyFileSync(fileURLToPath(new URL('./cli-manifest.mjs', import.meta.url)), path.join(root, 'scripts/cli-manifest.mjs'))
+    const env = { PATH: process.env.PATH, [githubKey]: githubId, [gitlabKey]: gitlabId }
+    for (const extra of [['--dev'], ['--debug'], ['-d'], ['--local-test'], ['--cli-manifest', 'release.json']]) {
+      const result = spawnSync(process.execPath, [realpathSync(copied), '--local-test', ...extra], { env, encoding: 'utf8' })
+      assert.equal(result.status, 1)
+      assert.match(result.stderr, /Local test/)
+      assert.equal(existsSync(path.join(root, 'src-tauri')), false)
+    }
+    const result = spawnSync(process.execPath, [realpathSync(copied), '--local-test'], { env: { ...env, SKILLS_HUB_CLI_MANIFEST_PATH: 'release.json' }, encoding: 'utf8' })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /remove --cli-manifest/)
+    for (const featureArgs of [['--features', 'local-test'], ['--features=local-test'], ['-f', 'cli,local-test']]) {
+      const bypass = spawnSync(process.execPath, [realpathSync(copied), ...featureArgs, '--cli-manifest', 'local.json'], { env, encoding: 'utf8' })
+      assert.equal(bypass.status, 1)
+      assert.match(bypass.stderr, /local-test feature requires npm run tauri:build:local/)
+    }
+    const release = spawnSync(process.execPath, [realpathSync(copied)], { env, encoding: 'utf8' })
+    assert.equal(release.status, 1)
+    assert.match(release.stderr, /CLI_MANIFEST_REQUIRED/)
+    assert.ok(release.stderr.includes(desktopBuild.missingCliManifestMessage()))
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
