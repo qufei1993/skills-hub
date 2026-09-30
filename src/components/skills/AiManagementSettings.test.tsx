@@ -9,6 +9,9 @@ import type { AgentAccessStatusDto } from './types'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+const eventMock = vi.hoisted(() => ({ listen: vi.fn().mockResolvedValue(() => {}) }))
+vi.mock('@tauri-apps/api/event', () => eventMock)
+
 const t = ((key: string) => key) as TFunction
 const fixture = (): AgentAccessStatusDto => ({
   officialState: 'missing', conflict: null, skillId: null, skillEnabled: true, terminalReady: true, terminalPathConflict: false,
@@ -186,7 +189,7 @@ it.each(['missing', 'damaged'] as const)('only installs the CLI after an explici
   const button = await screen.findByRole('button', { name: 'aiManagement.enable' })
   expect(invoke.mock.calls.every(args => args[0] === 'get_agent_access_status')).toBe(true)
   fireEvent.click(button)
-  await waitFor(() => expect(invoke).toHaveBeenCalledWith('enable_ai_management'))
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('enable_ai_management', { operationId: expect.any(String) }))
 })
 
 it('marks a previously enabled older CLI as pending update', async () => {
@@ -261,4 +264,46 @@ it('refreshes the installed state after a later setup step fails', async () => {
   await screen.findByRole('button', { name: 'aiManagement.viewSkill' })
   expect(screen.getByRole('alert').textContent).toContain('aiManagement.errors.terminal')
   expect(changed).toHaveBeenCalledOnce()
+})
+
+it('subscribes only on click and ignores unrelated download progress', async () => {
+  let handler!: (event: { payload: { operationId: string; phase: string; downloadedBytes: number; totalBytes: number | null } }) => void
+  const unsubscribe = vi.fn()
+  eventMock.listen.mockImplementationOnce(async (_event: string, callback: typeof handler) => { handler = callback; return unsubscribe })
+  let finish!: (value: AgentAccessStatusDto) => void
+  const invoke = vi.fn<(command: string, args?: Record<string, unknown>) => Promise<AgentAccessStatusDto>>((command) => command === 'enable_ai_management' ? new Promise<AgentAccessStatusDto>(resolve => { finish = resolve }) : Promise.resolve(fixture()))
+  const { unmount } = render(<AiManagementSettings isTauri invokeTauri={invoke} onChanged={() => {}} onOpenSkill={() => {}} t={t} />)
+  const button = await screen.findByRole('button', { name: 'aiManagement.enable' })
+  const previousCalls = eventMock.listen.mock.calls.length
+  fireEvent.click(button)
+  fireEvent.click(button)
+  await waitFor(() => expect(invoke.mock.calls.filter(([name]) => name === 'enable_ai_management')).toHaveLength(1))
+  expect(eventMock.listen.mock.calls.length).toBe(previousCalls + 1)
+  const operationId = invoke.mock.calls.find(([name]) => name === 'enable_ai_management')![1]!.operationId as string
+  expect(operationId).toMatch(/^[0-9a-f-]{36}$/)
+  await act(async () => handler({ payload: { operationId: 'other', phase: 'downloading', downloadedBytes: 50, totalBytes: 100 } }))
+  expect(screen.queryByText('aiManagement.progress.downloading')).toBeNull()
+  await act(async () => handler({ payload: { operationId, phase: 'downloading', downloadedBytes: 50, totalBytes: 100 } }))
+  expect(screen.getByRole('progressbar').getAttribute('value')).toBe('50')
+  expect((screen.getByRole('button', { name: 'aiManagement.enabling' }) as HTMLButtonElement).disabled).toBe(true)
+  await act(async () => handler({ payload: { operationId, phase: 'downloading', downloadedBytes: 50, totalBytes: null } }))
+  expect(screen.queryByRole('progressbar')).toBeNull()
+  expect(screen.getByRole('status').textContent).toContain('aiManagement.progress.bytes')
+  unmount()
+  expect(unsubscribe).toHaveBeenCalledOnce()
+  await act(async () => { finish(fixture()) })
+  expect(unsubscribe).toHaveBeenCalledOnce()
+})
+
+it.each(['CLI_DOWNLOAD_FAILED', 'CLI_DOWNLOAD_UNAVAILABLE', 'CLI_INTEGRITY_FAILED'])('offers retry after %s without reporting ready', async code => {
+  const invoke = vi.fn(async (command: string) => {
+    if (command === 'enable_ai_management') throw new Error(code)
+    return fixture()
+  })
+  render(<AiManagementSettings isTauri invokeTauri={invoke} onChanged={() => {}} onOpenSkill={() => {}} t={t} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'aiManagement.enable' }))
+  expect((await screen.findByRole('alert')).textContent).toContain(code === 'CLI_INTEGRITY_FAILED' ? 'aiManagement.errors.integrity' : code === 'CLI_DOWNLOAD_UNAVAILABLE' ? 'aiManagement.errors.unavailable' : 'aiManagement.errors.download')
+  expect(screen.queryByText('aiManagement.ready')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'aiManagement.enable' }))
+  await waitFor(() => expect(invoke.mock.calls.filter(([name]) => name === 'enable_ai_management')).toHaveLength(2))
 })

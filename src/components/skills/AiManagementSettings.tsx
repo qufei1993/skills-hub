@@ -1,7 +1,8 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { Bot, CheckCircle2 } from 'lucide-react'
 import type { TFunction } from 'i18next'
-import type { AgentAccessStatusDto } from './types'
+import type { AgentAccessStatusDto, CliPreparationProgress } from './types'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 type Props = {
   focusOnMount?: boolean
@@ -25,6 +26,8 @@ const AiManagementSettings = ({ focusOnMount = false, initialStatus = null, onSt
   const [pending, setPending] = useState(false)
   const [enabling, setEnabling] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [progress, setProgress] = useState<CliPreparationProgress | null>(null)
+  const activeOperation = useRef<{ id: string; unlisten?: UnlistenFn } | null>(null)
   const busy = useRef(false)
   const mounted = useRef(false)
   const read = useCallback(async () => {
@@ -48,7 +51,11 @@ const AiManagementSettings = ({ focusOnMount = false, initialStatus = null, onSt
   useEffect(() => {
     mounted.current = true
     void read()
-    return () => { mounted.current = false }
+    return () => {
+      mounted.current = false
+      activeOperation.current?.unlisten?.()
+      activeOperation.current = null
+    }
   }, [read])
 
   const enable = async () => {
@@ -57,8 +64,17 @@ const AiManagementSettings = ({ focusOnMount = false, initialStatus = null, onSt
     setEnabling(true)
     setPending(true)
     setError(null)
+    const operationId = crypto.randomUUID()
+    const operation: { id: string; unlisten?: UnlistenFn } = { id: operationId }
+    activeOperation.current = operation
+    setProgress({ operationId, phase: 'preparing', downloadedBytes: 0, totalBytes: null })
     try {
-      const result = await invokeTauri('enable_ai_management') as AgentAccessStatusDto
+      const unsubscribe = await listen<CliPreparationProgress>('ai-management-progress', event => {
+        if (mounted.current && activeOperation.current?.id === event.payload.operationId) setProgress(event.payload)
+      })
+      if (!mounted.current || activeOperation.current !== operation) { unsubscribe(); return }
+      operation.unlisten = unsubscribe
+      const result = await invokeTauri('enable_ai_management', { operationId }) as AgentAccessStatusDto
       if (mounted.current) {
         setStatus(result)
         onStatusChanged?.(result)
@@ -67,9 +83,12 @@ const AiManagementSettings = ({ focusOnMount = false, initialStatus = null, onSt
     } catch (cause) {
       const message = String(cause)
       if (mounted.current) setError(message.includes('CLI_TERMINAL_UNAVAILABLE') ? 'terminal'
+        : message.includes('CLI_DOWNLOAD_UNAVAILABLE') ? 'unavailable'
+        : message.includes('CLI_DOWNLOAD_FAILED') ? 'download'
+        : message.includes('CLI_INTEGRITY_FAILED') ? 'integrity'
         : message.includes('CLI_UNAVAILABLE') ? 'cli'
         : message.includes('AGENT_NOT_FOUND') ? 'noTools'
-          : message.includes('OPERATION_BUSY') ? 'busy'
+          : message.includes('BUSY') ? 'busy'
             : message.includes('SHARED_DIRECTORY_SCOPE_EXPANSION') ? 'sharedDirectory'
               : message.includes('TARGET_CONFLICT') ? 'conflict' : 'action')
       try {
@@ -83,8 +102,13 @@ const AiManagementSettings = ({ focusOnMount = false, initialStatus = null, onSt
         return
       }
     } finally {
+      if (activeOperation.current === operation) {
+        operation.unlisten?.()
+        activeOperation.current = null
+      }
       busy.current = false
       if (mounted.current) {
+        setProgress(null)
         setPending(false)
         setEnabling(false)
       }
@@ -121,6 +145,13 @@ const AiManagementSettings = ({ focusOnMount = false, initialStatus = null, onSt
       {status?.terminalPathConflict ? <p className="settings-helper">{t('aiManagement.pathConflict')}</p> : null}
       {inactive ? <p className="settings-helper">{t('aiManagement.inactive')}</p> : null}
       {conflict ? <p role="alert">{t('aiManagement.errors.conflict')}</p> : null}
+      {enabling && progress ? <div role="status" aria-live="polite" className="ai-management-progress">
+        <span>{t(`aiManagement.progress.${progress.phase}`)}</span>
+        {progress.phase === 'downloading' ? <>
+          <span>{progress.totalBytes ? t('aiManagement.progress.bytesTotal', { downloaded: (progress.downloadedBytes / 1048576).toFixed(1), total: (progress.totalBytes / 1048576).toFixed(1) }) : t('aiManagement.progress.bytes', { downloaded: (progress.downloadedBytes / 1048576).toFixed(1) })}</span>
+          {progress.totalBytes ? <progress aria-label={t('aiManagement.progress.downloading')} max={100} value={Math.min(100, Math.floor(progress.downloadedBytes * 100 / progress.totalBytes))} /> : null}
+        </> : null}
+      </div> : null}
       {error ? <p role="alert" className="ai-management-error">{t(`aiManagement.errors.${error}`)}</p> : null}
       {status ? <details className="ai-management-details">
         <summary>{t('aiManagement.details')}</summary>

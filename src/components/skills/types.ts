@@ -456,3 +456,10 @@ export type RecycleBinLocations = {
   manual_backup: string
   sync_backup: string
 }
+
+export type CliPreparationProgress = {
+  operationId: string
+  phase: 'preparing' | 'downloading' | 'verifying' | 'installing' | 'configuring'
+  downloadedBytes: number
+  totalBytes: number | null
+}
