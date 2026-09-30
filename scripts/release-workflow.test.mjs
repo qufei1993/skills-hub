@@ -98,7 +98,13 @@ it('desktop release has no npm publication dependency and retains native CLI pre
   assert.match(commands, /cli-manifest/)
 })
 
-it('separates five CLI targets from three desktop bundles and gates public desktop assets on CLI availability', () => {
+it('release notes generate bilingual download tables from actual desktop assets', () => {
+  const step = workflow.jobs['assemble-updater-json'].steps.find(item => item.name === 'Generate release notes from changelog')
+  assert.match(step.run, /extract-changelog\.mjs "\$TAG" docs\/CHANGELOG\.zh\.md --assets dl --language zh/)
+  assert.match(step.run, /extract-changelog\.mjs "\$TAG" CHANGELOG\.md --assets dl --language en/)
+})
+
+it('separates CLI and desktop builds and keeps the complete release as a draft', () => {
   assert.equal(workflow.jobs['cli-build'].strategy.matrix.include.length, 5)
   assert.equal(workflow.jobs['desktop-build'].strategy.matrix.include.length, 3)
   assert.ok(needs(workflow.jobs['desktop-build']).includes('cli-build'))
@@ -115,9 +121,15 @@ it('separates five CLI targets from three desktop bundles and gates public deskt
   const finalSteps = workflow.jobs['assemble-updater-json'].steps
   const upload = finalSteps.findIndex(step => step.uses === 'softprops/action-gh-release@v2')
   assert.equal(finalSteps[upload].with.draft, true)
-  const publication = finalSteps.findIndex(step => /publish-cli-release\.mjs.*--publish/.test(step.run ?? ''))
-  const anonymous = finalSteps.findIndex(step => /verify-cli-release\.mjs/.test(step.run ?? ''))
-  assert.ok(upload < publication && publication < anonymous)
+  const verification = finalSteps.findIndex(step => /publish-cli-release\.mjs/.test(step.run ?? ''))
+  assert.ok(upload < verification)
+  for (const job of Object.values(workflow.jobs)) {
+    for (const step of job.steps ?? []) {
+      assert.doesNotMatch(step.run ?? '', /--publish|--draft=false/)
+      if (step.uses === 'softprops/action-gh-release@v2') assert.equal(step.with.draft, true)
+    }
+  }
+  assert.ok(!finalSteps.some(step => /verify-cli-release\.mjs/.test(step.run ?? '')))
   const desktop = workflow.jobs['desktop-build'].steps
   assert.ok(desktop.some(step => step.uses === 'actions/download-artifact@v4' && step.with.pattern === 'cli-assets-*'))
   assert.ok(desktop.some(step => /verify-desktop-bundle\.mjs/.test(step.run ?? '')))

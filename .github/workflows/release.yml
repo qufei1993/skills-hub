@@ -790,7 +790,7 @@ jobs:
           {
             echo '## 中文'
             echo
-            node scripts/extract-changelog.mjs "$TAG" docs/CHANGELOG.zh.md
+            node scripts/extract-changelog.mjs "$TAG" docs/CHANGELOG.zh.md --assets dl --language zh
             echo
             echo '**Windows 提示：** Windows SmartScreen 可能会在安装时显示警告。这是未签名可执行文件的正常提示，应用可以安全使用。'
             echo
@@ -798,7 +798,7 @@ jobs:
             echo
             echo '## English'
             echo
-            node scripts/extract-changelog.mjs "$TAG" CHANGELOG.md
+            node scripts/extract-changelog.mjs "$TAG" CHANGELOG.md --assets dl --language en
             echo
             echo '**Windows Note:** Windows SmartScreen may show a warning during installation. This is normal for unsigned executables. The application is safe to use.'
             echo
@@ -906,10 +906,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify CLI assets and publish the complete shared release
+      - name: Verify CLI assets in the complete release draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/publish-cli-release.mjs cli-resources --publish
-
-      - name: Verify anonymous CLI downloads from the published release
-        run: node scripts/verify-cli-release.mjs cli-resources
+        run: node scripts/publish-cli-release.mjs cli-resources
