@@ -248,3 +248,19 @@ fn development_reopens_production_data_without_importing_the_old_development_dat
     );
     assert_eq!(file_snapshot(old_dev.parent().unwrap()), before);
 }
+
+#[test]
+fn local_test_feature_keeps_development_bridge_with_shared_application_data() {
+    let expected = if cfg!(any(debug_assertions, feature = "local-test")) {
+        RuntimeProfile::Development
+    } else {
+        RuntimeProfile::Production
+    };
+    assert_eq!(RuntimeProfile::current(), expected);
+    let paths =
+        RuntimePaths::from_roots(RuntimeProfile::current(), "/fixture/home", "/fixture/data");
+    assert!(paths.app_data_dir.ends_with("com.qufei1993.skillshub"));
+    if cfg!(feature = "local-test") {
+        assert!(paths.cli_bridge_dir.ends_with(".skills-hub-dev/bin"));
+    }
+}

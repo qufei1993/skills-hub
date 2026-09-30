@@ -123,7 +123,7 @@ Explore 汇总精选仓库中的 Skill，并支持在线搜索。点击 Install 
 | `cursor` | Cursor | `.cursor/skills` | `.agents/skills` | `.cursor` |
 | `claude_code` | Claude Code | `.claude/skills` | `.claude/skills` | `.claude` |
 | `codex` | Codex | `.codex/skills` | `.agents/skills` | `.codex` |
-| `deepseek_harness` | DeepSeek Harness | `.dsh/skills` | `.dsh/skills` | `.dsh` |
+| `deepseek_harness` | DeepSeek Harness | `.dsh/skills`（或 `$DSH_HOME/skills`） | `.dsh/skills` | `.dsh`（或 `$DSH_HOME`） |
 | `zcode` | ZCode | `.zcode/skills` | `.zcode/skills` | `.zcode` |
 | `opencode` | OpenCode | `.config/opencode/skills` | `.agents/skills` | `.config/opencode` |
 | `antigravity` | Antigravity | `.gemini/config/skills` | `.agents/skills` | `.gemini/config` |
@@ -234,15 +234,31 @@ npm run tauri:dev
 
 ### 构建
 
+本地安装测试请在对应操作系统上执行：
+
 ```bash
-npm run lint
-npm run build
-# 示例：macOS ARM；其他平台请使用对应的目标三元组。
-node scripts/prepare-cli-sidecar.mjs --target aarch64-apple-darwin
-npm run tauri:build -- --target aarch64-apple-darwin --cli-manifest src-tauri/binaries/skillshub-cli-aarch64-apple-darwin.json
+# 自动选择当前系统和架构。
+npm run tauri:build:local
+# 或指定安装包格式。
+npm run tauri:build:local:mac:dmg
+npm run tauri:build:local:win:exe
+npm run tauri:build:local:win:msi
+npm run tauri:build:local:win:all
+npm run tauri:build:local:linux:deb
+npm run tauri:build:local:linux:appimage
+npm run tauri:build:local:linux:all
 ```
 
-正式构建必须提供与桌面版本、提交和平台一致的 release CLI 清单。上述命令生成本地验证用清单；正式发布由工作流先签名 CLI，再根据最终文件生成清单。所有下方平台命令也必须追加 `-- --cli-manifest <清单路径>`，或设置 `SKILLS_HUB_CLI_MANIFEST_PATH`。开发启动会自动准备本地 CLI，无需此参数。
+本地测试打包只编译所选目标平台的一份 CLI，默认使用本机系统和架构，也可通过 `--target` 指定支持的目标。CLI 原始文件嵌入经过 release 优化的桌面程序。安装后的 **Skills Hub Local Test** 在一键启用 AI 管理时校验并安装这份本地 CLI，无需下载 CLI，也不依赖源码目录。应用标识和安装包名称独立，禁用正式版更新地址和 updater 产物；桌面与 CLI 均使用开发凭据和 CLI bridge 命名空间。技能库、配置、缓存、回收站和写锁仍与正式版共用，启用 AI 管理会影响真实 Agent 目录和终端 PATH。此模式不能同时传入 `--cli-manifest`、`SKILLS_HUB_CLI_MANIFEST_PATH`、`--dev` 或 debug 参数。暂不支持 macOS universal 和 Windows ARM 目标，请使用已支持的原生目标。
+
+常规正式打包需提供已发布 CLI 的清单，版本、源码提交和目标平台必须与桌面构建一致：
+
+```bash
+# 示例：macOS ARM，先另行下载配套的官方发布清单。
+npm run tauri:build:mac:dmg -- --target aarch64-apple-darwin --cli-manifest /path/to/cli-manifest-aarch64-apple-darwin.json
+```
+
+下方所有常规平台命令都需追加 `-- --cli-manifest <清单路径>`，或设置 `SKILLS_HUB_CLI_MANIFEST_PATH`。本地生成的清单可能与线上签名后的 CLI 不同，导致启用时下载校验失败；未发布的代码请使用本地测试模式。缺少清单时会给出当前平台的替代命令，不会自动切换为测试包。`npm run tauri:dev` 继续自动准备本地 debug CLI。本地测试包用于验证安装和本地 CLI 联动；正式包的线上 CLI 下载、校验和安装流程仍需单独验证。两种构建模式均需配置前文的 OAuth 公开 Client ID。
 
 #### 各系统构建命令（来自 `package.json`）
 

@@ -103,3 +103,29 @@ describe('CLI sidecar preparation', () => {
     }
   })
 })
+
+
+it('prepares one release CLI with the local-test credential and bridge identity', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'local-test-cli-'))
+  try {
+    mkdirSync(path.join(root, 'src-tauri'))
+    writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '0.11.0' }))
+    writeFileSync(path.join(root, 'src-tauri/tauri.conf.json'), JSON.stringify({ version: '0.11.0' }))
+    mkdirSync(path.join(root, 'src-tauri/binaries'), { recursive: true })
+    const devManifest = path.join(root, 'src-tauri/binaries/skillshub-cli-x86_64-unknown-linux-gnu.json')
+    writeFileSync(devManifest, 'existing development metadata')
+    let calls = 0
+    const prepared = prepareCliSidecar({ root, target: 'linux-x64', localTest: true, sourceCommit: 'a'.repeat(40), run: (_, args) => {
+      calls++
+      assert.equal(args[args.indexOf('--features') + 1], 'cli,local-test')
+      assert.ok(args.includes('--release'))
+      const executable = path.join(root, 'src-tauri/target/x86_64-unknown-linux-gnu/release/skillshub-cli')
+      mkdirSync(path.dirname(executable), { recursive: true })
+      writeFileSync(executable, 'abc')
+      return { status: 0, stdout: JSON.stringify({ reason: 'compiler-artifact', target: { name: 'skillshub-cli', kind: ['bin'] }, executable, profile: { debug_assertions: false } }) }
+    } })
+    assert.equal(calls, 1)
+    assert.ok(prepared.metadataPath.endsWith('skillshub-cli-local-test-x86_64-unknown-linux-gnu.json'))
+    assert.equal(readFileSync(devManifest, 'utf8'), 'existing development metadata')
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})

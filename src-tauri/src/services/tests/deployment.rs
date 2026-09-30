@@ -1091,3 +1091,142 @@ fn project_scope_fails_closed_without_descriptor_relative_operations() {
         assert_eq!(f.rows(), 0);
     }
 }
+
+#[test]
+fn deepseek_harness_environment_and_legacy_recovery() {
+    const CHILD: &str = "SKILLS_HUB_TEST_DSH_HOME_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let root = TempDir::new().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "services::tests::deployment::deepseek_harness_environment_and_legacy_recovery",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env_remove("KIMI_CODE_HOME")
+            .env("CLAUDE_CONFIG_DIR", root.path().join("claude"))
+            .env("DSH_HOME", root.path().join("DeepSeek Harness 数据"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+        return;
+    }
+    use crate::core::skill_store::SkillTargetRecord;
+    let f = Fixture::new();
+    let dsh_home = PathBuf::from(std::env::var_os("DSH_HOME").unwrap());
+    fs::create_dir_all(&dsh_home).unwrap();
+    let agent = f
+        .service
+        .list_agents()
+        .unwrap()
+        .agents
+        .into_iter()
+        .find(|agent| agent.key == "deepseek_harness")
+        .unwrap();
+    assert!(agent.detected);
+    assert_eq!(PathBuf::from(agent.skills_dir), dsh_home.join("skills"));
+    assert!(!f.home.path().join(".dsh").exists());
+
+    let skill = f.service.show_skill("demo".into()).unwrap();
+    let old = f.home.path().join(".dsh/skills/demo");
+    fs::create_dir_all(&old).unwrap();
+    fs::copy(
+        PathBuf::from(&skill.central_path).join("SKILL.md"),
+        old.join("SKILL.md"),
+    )
+    .unwrap();
+    let record = SkillTargetRecord {
+        id: "legacy-dsh".into(),
+        skill_id: skill.id,
+        tool: "deepseek_harness".into(),
+        scope: "global".into(),
+        project_path: None,
+        target_path: old.to_string_lossy().into_owned(),
+        mode: "copy".into(),
+        status: "ok".into(),
+        last_error: None,
+        synced_at: Some(1),
+    };
+    f.service.store().upsert_skill_target(&record).unwrap();
+    let request = DeploymentRequest::global("demo", ["deepseek_harness"]);
+    let new = dsh_home.join("skills/demo");
+    let error = f.service.deploy(request.clone()).unwrap_err();
+    assert_eq!(error.details["reason"], "registered_path_changed");
+    assert!(!new.exists());
+
+    fs::write(old.join("local.txt"), "keep my changes").unwrap();
+    assert_eq!(
+        f.service.undeploy(request.clone()).unwrap_err().details["reason"],
+        "target_modified"
+    );
+    assert_eq!(f.rows(), 1);
+    assert!(old.join("local.txt").exists());
+    fs::remove_file(old.join("local.txt")).unwrap();
+
+    let connection = Connection::open(&f.service.paths().database_path).unwrap();
+    connection.execute_batch("CREATE TRIGGER reject_dsh_removal BEFORE DELETE ON skill_targets BEGIN SELECT RAISE(FAIL, 'injected failure'); END;").unwrap();
+    assert!(f.service.undeploy(request.clone()).is_err());
+    assert!(old.join("SKILL.md").is_file());
+    assert_eq!(f.rows(), 1);
+    connection
+        .execute_batch("DROP TRIGGER reject_dsh_removal;")
+        .unwrap();
+
+    fs::remove_dir(&dsh_home).unwrap();
+    let stale_plan = f.service.plan_undeploy(request.clone()).unwrap();
+    fs::write(old.join("changed-after-preview.txt"), "keep").unwrap();
+    assert_eq!(
+        f.service
+            .apply_deployment_plan(stale_plan)
+            .unwrap_err()
+            .code,
+        ErrorCode::PlanStale
+    );
+    assert_eq!(f.rows(), 1);
+    fs::remove_file(old.join("changed-after-preview.txt")).unwrap();
+    let plan = f.service.plan_undeploy(request.clone()).unwrap();
+    assert_eq!(
+        fs::canonicalize(plan.targets[0].path.parent().unwrap()).unwrap(),
+        fs::canonicalize(old.parent().unwrap()).unwrap()
+    );
+    assert!(old.exists());
+    assert_eq!(f.rows(), 1);
+    f.service.apply_deployment_plan(plan).unwrap();
+    assert!(!old.exists());
+    assert_eq!(f.rows(), 0);
+    fs::create_dir_all(&dsh_home).unwrap();
+    f.service.deploy(request.clone()).unwrap();
+    assert!(new.join("SKILL.md").is_file());
+    assert!(!old.exists());
+    assert_eq!(f.rows(), 1);
+    assert_eq!(
+        fs::canonicalize(&f.service.show_skill("demo".into()).unwrap().targets[0].target_path)
+            .unwrap(),
+        fs::canonicalize(&new).unwrap()
+    );
+    f.service.undeploy(request).unwrap();
+    assert!(!new.exists());
+    let discovered = dsh_home.join("skills/discovered");
+    fs::create_dir_all(&discovered).unwrap();
+    fs::write(discovered.join("SKILL.md"), "# Discover me").unwrap();
+    let scan = crate::core::onboarding::build_onboarding_plan_for_runtime(
+        f.service.paths(),
+        f.service.store(),
+        f.home.path(),
+    )
+    .unwrap();
+    let group = scan
+        .groups
+        .iter()
+        .find(|group| group.name == "discovered")
+        .unwrap();
+    assert_eq!(group.variants[0].tool, "deepseek_harness");
+    assert_eq!(group.variants[0].path, discovered);
+}

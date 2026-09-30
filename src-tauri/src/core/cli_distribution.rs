@@ -2,7 +2,9 @@ use super::cli_bridge::{cli_bridge_status, publish_cli_bridge, CliBridgeHealth, 
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::io::{Read, Write};
+#[cfg(any(test, not(skills_hub_local_bundle)))]
+use std::io::Read;
+use std::io::Write;
 use std::path::Path;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -81,6 +83,57 @@ pub fn prepare_cli(
     if manifest.profile != "release" {
         bail!("CLI_MANIFEST_INVALID");
     }
+    #[cfg(skills_hub_local_bundle)]
+    {
+        let _ = proxy_url;
+        let bytes = include_bytes!(env!("SKILLS_HUB_BUNDLED_CLI_SOURCE_PATH"));
+        prepare_local_cli(manifest, bytes, destination, on_progress)
+    }
+    #[cfg(not(skills_hub_local_bundle))]
+    prepare_release_cli(manifest, destination, proxy_url, on_progress)
+}
+
+#[cfg(any(test, skills_hub_local_bundle))]
+fn prepare_local_cli(
+    manifest: &CliManifest,
+    bytes: &[u8],
+    destination: &Path,
+    on_progress: &dyn Fn(CliPreparationPhase, u64, Option<u64>),
+) -> Result<CliBridgeStatus> {
+    on_progress(
+        CliPreparationPhase::Verifying,
+        bytes.len() as u64,
+        Some(manifest.size),
+    );
+    if bytes.len() as u64 != manifest.size || hex::encode(Sha256::digest(bytes)) != manifest.sha256
+    {
+        bail!("CLI_INTEGRITY_FAILED");
+    }
+    let mut source =
+        tempfile::NamedTempFile::new().map_err(|_| anyhow::anyhow!("CLI_UNAVAILABLE"))?;
+    source
+        .write_all(bytes)
+        .map_err(|_| anyhow::anyhow!("CLI_UNAVAILABLE"))?;
+    on_progress(
+        CliPreparationPhase::Installing,
+        manifest.size,
+        Some(manifest.size),
+    );
+    publish_cli_bridge(
+        source.path(),
+        destination,
+        &manifest.version,
+        &manifest.sha256,
+    )
+}
+
+#[cfg(not(skills_hub_local_bundle))]
+fn prepare_release_cli(
+    manifest: &CliManifest,
+    destination: &Path,
+    proxy_url: Option<&str>,
+    on_progress: &dyn Fn(CliPreparationPhase, u64, Option<u64>),
+) -> Result<CliBridgeStatus> {
     let url = format!(
         "https://github.com/qufei1993/skills-hub/releases/download/v{}/{}",
         manifest.version, manifest.asset_name
@@ -89,6 +142,7 @@ pub fn prepare_cli(
         .map_err(|_| anyhow::anyhow!("CLI_DOWNLOAD_FAILED"))?;
     download_and_publish(manifest, destination, &url, &client, on_progress)
 }
+#[cfg(any(test, not(skills_hub_local_bundle)))]
 fn download_and_publish(
     manifest: &CliManifest,
     destination: &Path,

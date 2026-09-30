@@ -268,15 +268,27 @@ impl SkillsHubService {
                     json!({"agent":key,"reason":"not_installed"}),
                 ));
             }
-            let root = agent_root(agent, project.as_deref())?;
-            let path = root.join(&skill.name);
-            let group = groups.entry(path).or_default();
+            let saved_target = records.iter().find(|record| {
+                undeploy
+                    && key == "deepseek_harness"
+                    && project.is_none()
+                    && record.tool == *key
+                    && record.scope == "global"
+                    && record.project_path.is_none()
+            });
+            let path = if let Some(record) = saved_target {
+                let saved = Path::new(&record.target_path);
+                target_location(saved).map_err(|_| conflict(key, saved, "path_resolution"))?
+            } else {
+                agent_root(agent, project.as_deref())?.join(&skill.name)
+            };
+            let group = groups.entry(path.clone()).or_default();
             for other in &agents {
                 if (other.key == *key
                     || (other.enabled
                         && other.detected
                         && (project.is_none() || other.supports_project_scope)
-                        && agent_root(other, project.as_deref())? == root))
+                        && agent_root(other, project.as_deref())?.join(&skill.name) == path))
                     && !group.iter().any(|existing| existing.key == other.key)
                 {
                     group.push(other.clone());

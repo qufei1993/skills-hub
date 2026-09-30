@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ## [0.11.0]
 
 ### Added
+- **Local installation testing**: Add explicit cross-platform local test build commands that prepare and embed the local CLI, retain release optimization, and use development credentials and CLI directories. Missing release manifests now explain the requirement and suggest development or local test builds.
 - **Standalone CLI installer**: Install or upgrade the CLI with one command on macOS, Linux, or Windows x64, with release checksum verification and user-level PATH setup.
 - **AI Skill management**: Enable AI management in Settings to install the official `manage-skills-hub` Skill. Use AI conversations to search, install, import, update, deploy, tag, and safely remove Skills from the same library used by the desktop app.
 - **On-demand CLI**: Desktop installers no longer include `skillshub-cli`. Enable or update AI management in Settings to download the matching platform/version, verify its size and SHA-256, and install it. A verified installation works offline and after the desktop closes; Node.js and npm are not required. CLI resources and desktop installers are published in the same `qufei1993/skills-hub` release.
@@ -21,6 +22,7 @@ All notable changes to this project will be documented in this file.
 - **Clearer Settings**: AI management uses a compact card with installation details available on demand. Background checks preserve the current status and keep View Skill available. Network and storage settings can collapse while keeping their summaries visible.
 
 ### Fixed
+- **DeepSeek Harness custom home**: Global deployment, discovery, and installation detection now honor `DSH_HOME`, including blank-value fallback and current-user tilde expansion. Existing deployments can be safely unsynced from their recorded directory before redeploying to the new home; modified copies remain protected (fixes [#166](https://github.com/qufei1993/skills-hub/issues/166)).
 - **Incremental Git installation**: Reinstalling a repository updates same-source Skills in place, skips unchanged content, and installs new Skills. The picker uses green, blue, and amber status badges to distinguish new Skills, update checks, and skipped conflicts without blocking other selections; existing settings and locally modified files are preserved. Conflicting items have visibly disabled checkboxes, and descriptions longer than three lines can be expanded or collapsed.
 - **Cline desktop support**: Cline now uses `~/.cline/skills` for global Skills and `.cline/skills` for project Skills, with installation detection through `~/.cline`. Cline is no longer incorrectly grouped with tools using `.agents/skills`.
 - **Windows AI management setup**: Preparing the managed CLI can now replace its files while retaining protection against directory replacement.

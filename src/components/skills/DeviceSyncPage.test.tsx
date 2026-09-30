@@ -31,9 +31,13 @@ describe('DeviceSyncPage', () => {
   it('offers credential recovery after manual sync without reading credentials on page load', async () => {
     const error = 'DEVICE_SYNC_READ_CREDENTIAL_REQUIRED'
     const config = { provider: 'gitee', remote_url: 'https://gitee.com/example/sync.git', branch: 'main', has_credential: true, visibility: 'private', auto_check: false, auto_sync: false }
+    let completeRepositoryLoad: () => void = () => undefined
+    const repositoryRequest = new Promise<Array<{ name: string; clone_url: string; web_url: string; visibility: string; private: boolean }>>((resolve) => {
+      completeRepositoryLoad = () => resolve([{ name: 'sync', clone_url: config.remote_url, web_url: config.remote_url, visibility: 'private', private: true }])
+    })
     invokeMock.mockImplementation((command: string) => {
       if (command === 'get_device_sync_config' || command === 'save_device_sync_config') return Promise.resolve(config)
-      if (command === 'list_device_sync_repositories') return Promise.resolve([{ name: 'sync', clone_url: config.remote_url, web_url: config.remote_url, visibility: 'private', private: true }])
+      if (command === 'list_device_sync_repositories') return repositoryRequest
       if (command === 'get_device_sync_status') return Promise.resolve({ configured: true, is_running: false, last_run_status: 'failed', last_run_at: 2000, conflict_count: 0 })
       if (command === 'get_device_sync_history') return Promise.resolve([{ id: 'failure', started_at: 1000, finished_at: 2000, status: 'failed', error: 'DEVICE_SYNC_FAILURE_credentialMissing', added: 0, updated: 0, deleted: 0, conflicted: 0 }])
       if (command === 'get_device_sync_pending_oauth') return Promise.resolve(null)
@@ -51,7 +55,10 @@ describe('DeviceSyncPage', () => {
     expect(invokeMock.mock.calls.some(([command]) => ['list_device_sync_repositories', 'start_device_sync_oauth', 'disconnect_device_sync'].includes(command))).toBe(false)
     fireEvent.change(within(dialog).getByPlaceholderText('deviceSync.tokenPlaceholder'), { target: { value: 'replacement-test-token' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'deviceSync.loadRepositories' }))
-    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'deviceSync.saveChanges' }).hasAttribute('disabled')).toBe(false))
+    expect(within(dialog).getByText('deviceSync.loadingRepositories')).toBeTruthy()
+    expect(invokeMock.mock.calls.some(([command]) => command === 'save_device_sync_config')).toBe(false)
+    await act(async () => completeRepositoryLoad())
+    expect(await within(dialog).findByRole('radio', { name: 'sync' })).toBeTruthy()
     fireEvent.click(within(dialog).getByRole('button', { name: 'deviceSync.saveChanges' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(screen.queryByRole('button', { name: 'deviceSync.configureCredentials' })).toBeNull()

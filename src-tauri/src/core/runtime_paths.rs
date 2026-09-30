@@ -20,7 +20,7 @@ pub enum RuntimeProfile {
 
 impl RuntimeProfile {
     pub const fn current() -> Self {
-        Self::for_build(cfg!(debug_assertions))
+        Self::for_build(cfg!(any(debug_assertions, feature = "local-test")))
     }
 
     pub(crate) const fn for_build(debug_assertions: bool) -> Self {
