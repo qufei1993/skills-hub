@@ -412,7 +412,80 @@ pub fn metadata_hash(skill: &PortableSkill) -> String {
     hex::encode(hasher.finalize())
 }
 
-pub fn record_from_portable(skill: &PortableSkill, central_path: &Path, now: i64) -> SkillRecord {
+pub(crate) fn recover_bundled_sync_hash(
+    store: &SkillStore,
+    record: &mut SkillRecord,
+) -> Result<bool> {
+    use crate::core::content_hash::hash_dir_strict;
+    if record.source_type != "bundled"
+        || record.name != "manage-skills-hub"
+        || record.source_ref.is_some()
+        || record.source_subpath.is_some()
+        || record.content_hash.is_none()
+    {
+        return Ok(false);
+    }
+    let root = Path::new(&record.central_path);
+    let metadata = fs::symlink_metadata(root)?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Ok(false);
+    }
+    let local_hash = hash_dir_strict(root)?;
+    if record.content_hash.as_ref() == Some(&local_hash) {
+        return Ok(false);
+    }
+    // The official bundle has exactly one regular, non-executable document.
+    // Legacy portable hashes cannot prove ownership of extra entries or file modes.
+    let entries = fs::read_dir(root)?.collect::<std::io::Result<Vec<_>>>()?;
+    if entries.len() != 1 || entries[0].file_name() != "SKILL.md" {
+        return Ok(false);
+    }
+    let metadata = fs::symlink_metadata(entries[0].path())?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Ok(false);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o7777 != 0o644 {
+            return Ok(false);
+        }
+    }
+    #[cfg(not(unix))]
+    if metadata.permissions().readonly() {
+        return Ok(false);
+    }
+    let portable = PortableSkill {
+        id: record.id.clone(),
+        name: record.name.clone(),
+        description: record.description.clone(),
+        source_type: record.source_type.clone(),
+        source_ref: record.source_ref.clone(),
+        source_subpath: record.source_subpath.clone(),
+        source_revision: record.source_revision.clone(),
+        tags: store
+            .get_skill_tags(&record.id)?
+            .into_iter()
+            .map(|tag| tag.name)
+            .collect(),
+        content_hash: String::new(),
+        files: hash_files(root)?,
+    };
+    if record.content_hash.as_ref() != Some(&portable_hash(&portable))
+        || hash_dir_strict(root)? != local_hash
+    {
+        return Ok(false);
+    }
+    record.content_hash = Some(local_hash);
+    Ok(true)
+}
+
+pub fn record_from_portable(
+    skill: &PortableSkill,
+    central_path: &Path,
+    local_content_hash: String,
+    now: i64,
+) -> SkillRecord {
     SkillRecord {
         id: skill.id.clone(),
         name: skill.name.clone(),
@@ -434,7 +507,7 @@ pub fn record_from_portable(skill: &PortableSkill, central_path: &Path, now: i64
             skill.source_revision.clone()
         },
         central_path: central_path.to_string_lossy().to_string(),
-        content_hash: Some(skill.content_hash.clone()),
+        content_hash: Some(local_content_hash),
         created_at: now,
         updated_at: now,
         last_sync_at: Some(now),
@@ -495,7 +568,12 @@ mod tests {
         assert_eq!(skill.content_hash, portable_hash(skill));
         let serialized = serde_json::to_string(&normalized).unwrap();
         assert!(!serialized.contains("alice"));
-        let imported = record_from_portable(skill, Path::new("/device-b/central/one"), 1);
+        let imported = record_from_portable(
+            skill,
+            Path::new("/device-b/central/one"),
+            "local-hash".into(),
+            1,
+        );
         assert_eq!(imported.source_ref.as_deref(), None);
     }
 

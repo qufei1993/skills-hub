@@ -48,6 +48,48 @@ fn ai_management_does_not_install_when_bundled_cli_is_unavailable() {
 }
 
 #[test]
+fn ai_management_legacy_sync_preflight_reaches_cli_download_without_mutating_skill_on_failure() {
+    use crate::core::device_sync::manifest::export_library;
+    use crate::core::runtime_paths::{RuntimePaths, RuntimeProfile};
+    let home = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(home.path().join(".codex")).unwrap();
+    let service = SkillsHubService::open(RuntimePaths::from_roots(
+        RuntimeProfile::Test,
+        home.path(),
+        data.path(),
+    ))
+    .unwrap();
+    service.enable_ai_management().unwrap();
+    let exported = tempfile::tempdir().unwrap();
+    let manifest = export_library(service.store(), exported.path()).unwrap();
+    let mut record = service.store().list_skills().unwrap().remove(0);
+    record.content_hash = Some(manifest.skills[&record.id].content_hash.clone());
+    service.store().upsert_skill(&record).unwrap();
+    let before = std::fs::read(Path::new(&record.central_path).join("SKILL.md")).unwrap();
+    let called = AtomicBool::new(false);
+    let result = enable_ai_management_impl(&service, &|| {
+        called.store(true, Ordering::SeqCst);
+        Err("CLI_DOWNLOAD_UNAVAILABLE".into())
+    });
+    assert!(called.load(Ordering::SeqCst));
+    assert_eq!(result.unwrap_err(), "CLI_DOWNLOAD_UNAVAILABLE");
+    assert_eq!(
+        service
+            .store()
+            .get_skill_by_id(&record.id)
+            .unwrap()
+            .unwrap()
+            .content_hash,
+        record.content_hash
+    );
+    assert_eq!(
+        std::fs::read(Path::new(&record.central_path).join("SKILL.md")).unwrap(),
+        before
+    );
+}
+
+#[test]
 fn agent_access_status_does_not_install_or_repair_the_cli() {
     use crate::core::cli_bridge::{bundled_cli_bridge_status, CliBridgeHealth, BINARY_NAME};
     let directory = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();

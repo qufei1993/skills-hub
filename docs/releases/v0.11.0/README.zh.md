@@ -44,3 +44,5 @@ Skills Hub 继承的 `DSH_HOME` 非空白时，全局同步和扫描使用 `$DSH
 - [本地安装测试构建验证](local-test-builds.zh.md)
 - [CLI 桥接与构建模式](verified-cli-bridge.zh.md)
 - [独立 CLI 安装](cli-installation.md)
+
+- [设备同步后的 AI 一键管理修复](ai-management-sync-hash.zh.md)

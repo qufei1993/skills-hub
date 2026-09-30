@@ -1006,3 +1006,200 @@ fn agent_access_official_skill_covers_the_automation_safety_contract() {
     }
     assert!(content.lines().count() < 500);
 }
+
+fn legacy_device_sync_bundle(f: &Fixture) -> crate::core::skill_store::SkillRecord {
+    use crate::core::device_sync::manifest::export_library;
+    let mut record = f.service.store().list_skills().unwrap().remove(0);
+    let exported = tempfile::tempdir().unwrap();
+    let manifest = export_library(f.service.store(), exported.path()).unwrap();
+    record.content_hash = Some(manifest.skills[&record.id].content_hash.clone());
+    f.service.store().upsert_skill(&record).unwrap();
+    record
+}
+
+#[test]
+fn one_click_management_recovers_legacy_device_sync_hash_without_preflight_writes() {
+    let f = Fixture::new();
+    f.service.enable_ai_management().unwrap();
+    let id = f.service.store().list_skills().unwrap()[0].id.clone();
+    f.service
+        .store()
+        .set_skill_tag_names(&id, &["official".into(), "management".into()])
+        .unwrap();
+    let original = legacy_device_sync_bundle(&f);
+    let schema_before = rusqlite::Connection::open(f.service.store().db_path())
+        .unwrap()
+        .pragma_query_value(None, "user_version", |row| row.get::<_, i32>(0))
+        .unwrap();
+    f.service.preflight_ai_management().unwrap();
+    assert_eq!(
+        f.service
+            .store()
+            .get_skill_by_id(&original.id)
+            .unwrap()
+            .unwrap()
+            .content_hash,
+        original.content_hash
+    );
+    let status = f.service.enable_ai_management().unwrap();
+    assert_eq!(status.central_reason, None);
+    assert!(status.health.iter().all(|health| !health.needs_repair));
+    let repaired = f
+        .service
+        .store()
+        .get_skill_by_id(&original.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(repaired.id, original.id);
+    assert_eq!(repaired.created_at, original.created_at);
+    assert_eq!(
+        repaired.content_hash,
+        Some(
+            crate::core::content_hash::hash_dir_strict(std::path::Path::new(
+                &repaired.central_path
+            ))
+            .unwrap()
+        )
+    );
+    assert_ne!(repaired.content_hash, original.content_hash);
+    assert_eq!(
+        f.service
+            .store()
+            .get_skill_tags(&id)
+            .unwrap()
+            .into_iter()
+            .map(|tag| tag.name)
+            .collect::<Vec<_>>(),
+        ["management", "official"]
+    );
+    assert_eq!(
+        rusqlite::Connection::open(f.service.store().db_path())
+            .unwrap()
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i32>(0))
+            .unwrap(),
+        schema_before
+    );
+    f.service.enable_ai_management().unwrap();
+    assert_eq!(f.service.store().list_skills().unwrap().len(), 1);
+}
+
+#[test]
+fn official_skill_update_recovers_legacy_device_sync_hash_and_upgrades_old_content() {
+    let f = Fixture::new();
+    f.old_bundle();
+    let original = legacy_device_sync_bundle(&f);
+    assert!(f.service.refresh_installed_ai_management().unwrap());
+    assert_eq!(
+        fs::read_to_string(PathBuf::from(original.central_path).join("SKILL.md")).unwrap(),
+        super::super::agent_access::OFFICIAL_SKILL_MD
+    );
+    assert_eq!(
+        f.service.agent_access_status().unwrap().central_reason,
+        None
+    );
+    assert!(!f.target("codex").exists());
+}
+
+#[test]
+fn legacy_device_sync_recovery_preserves_modified_or_untrusted_official_files() {
+    for change in ["edited", "extra_file", "extra_directory", "wrong_hash"] {
+        let f = Fixture::new();
+        f.service.enable_ai_management().unwrap();
+        let mut original = legacy_device_sync_bundle(&f);
+        let central = PathBuf::from(&original.central_path);
+        match change {
+            "edited" => fs::write(central.join("SKILL.md"), "user edit").unwrap(),
+            "extra_file" => fs::write(central.join("notes.txt"), "user notes").unwrap(),
+            "extra_directory" => fs::create_dir(central.join("notes")).unwrap(),
+            "wrong_hash" => {
+                original.content_hash = Some("unknown-baseline".into());
+                f.service.store().upsert_skill(&original).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let before = crate::core::content_hash::hash_dir_strict(&central).unwrap();
+        assert!(f.service.preflight_ai_management().is_err(), "{change}");
+        assert!(f.service.enable_ai_management().is_err(), "{change}");
+        assert!(
+            f.service.refresh_installed_ai_management().is_err(),
+            "{change}"
+        );
+        assert_eq!(
+            crate::core::content_hash::hash_dir_strict(&central).unwrap(),
+            before
+        );
+        assert_eq!(
+            f.service
+                .store()
+                .get_skill_by_id(&original.id)
+                .unwrap()
+                .unwrap()
+                .content_hash,
+            original.content_hash
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn legacy_device_sync_recovery_rejects_skill_symlinks_and_executable_files() {
+    use std::os::unix::{fs::symlink, fs::PermissionsExt};
+    for link in [false, true] {
+        let f = Fixture::new();
+        f.service.enable_ai_management().unwrap();
+        let original = legacy_device_sync_bundle(&f);
+        let file = PathBuf::from(original.central_path).join("SKILL.md");
+        if link {
+            let external = f.home.path().join("external.md");
+            fs::rename(&file, &external).unwrap();
+            symlink(external, &file).unwrap();
+        } else {
+            fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert!(f.service.enable_ai_management().is_err());
+        assert_eq!(
+            f.service
+                .store()
+                .get_skill_by_id(&original.id)
+                .unwrap()
+                .unwrap()
+                .content_hash,
+            original.content_hash
+        );
+    }
+}
+
+#[test]
+fn legacy_device_sync_recovery_rolls_back_original_record_when_deployment_fails() {
+    let f = Fixture::new();
+    f.service.enable_ai_management().unwrap();
+    let original = legacy_device_sync_bundle(&f);
+    let before = fs::read(PathBuf::from(&original.central_path).join("SKILL.md")).unwrap();
+    let bundled = f
+        .service
+        .prepare_bundled_install(
+            "manage-skills-hub",
+            super::super::agent_access::OFFICIAL_SKILL_MD,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .unwrap();
+    let result: Result<(), _> = f.service.apply_bundled_install(bundled, || {
+        Err(crate::services::error::ServiceError::internal(
+            "deployment failed",
+        ))
+    });
+    assert!(result.is_err());
+    assert_eq!(
+        f.service
+            .store()
+            .get_skill_by_id(&original.id)
+            .unwrap()
+            .unwrap()
+            .content_hash,
+        original.content_hash
+    );
+    assert_eq!(
+        fs::read(PathBuf::from(&original.central_path).join("SKILL.md")).unwrap(),
+        before
+    );
+}

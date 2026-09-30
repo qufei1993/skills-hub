@@ -42,3 +42,5 @@ The compatibility test uses a frozen v0.10.1 shared-schema fixture, performs CLI
 - [Local installation test build validation](local-test-builds.md)
 - [Verified CLI bridge and build modes](verified-cli-bridge.md)
 - [Standalone CLI installation](cli-installation.md)
+
+- [AI management after device sync](ai-management-sync-hash.md)

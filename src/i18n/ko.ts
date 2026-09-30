@@ -202,15 +202,15 @@ export const ko = {
         "damaged": "확인 필요"
       },
       "reason": {
-        "DIRECTORY_MISSING": "CLI 폴더가 없습니다. 데스크톱 앱을 다시 시작하여 내장 CLI를 게시하세요.",
-        "BINARY_MISSING": "CLI 파일이 없습니다. 데스크톱 앱을 다시 시작하세요.",
-        "STAMP_MISSING": "검증 정보가 없습니다. 데스크톱 앱을 다시 시작하세요.",
-        "VERSION_MISMATCH": "CLI 버전이 앱과 다릅니다. 데스크톱 앱을 다시 시작하거나 재설치하세요.",
-        "HASH_MISMATCH": "CLI 체크섬이 일치하지 않습니다. 앱을 다시 시작하거나 재설치하세요.",
-        "NOT_EXECUTABLE": "CLI를 실행할 수 없습니다. 폴더 권한을 확인하고 앱을 다시 시작하세요.",
+        "DIRECTORY_MISSING": "CLI가 설치되지 않았습니다. 활성화를 눌러 다운로드하고 검증하세요.",
+        "BINARY_MISSING": "CLI 파일이 없습니다. 활성화를 눌러 다운로드하고 검증하세요.",
+        "STAMP_MISSING": "CLI 검증 정보가 없습니다. 활성화를 눌러 다시 설치하고 검증하세요.",
+        "VERSION_MISMATCH": "CLI 버전이 앱과 다릅니다. 활성화를 눌러 일치하는 CLI를 설치하세요.",
+        "HASH_MISMATCH": "CLI 파일이 현재 앱의 요구 사항과 다릅니다. 활성화를 눌러 일치하는 CLI를 설치하고 검증하세요.",
+        "NOT_EXECUTABLE": "CLI를 실행할 수 없습니다. 폴더 권한을 확인한 후 활성화를 눌러 다시 설치하세요.",
         "INVALID_METADATA": "CLI 메타데이터가 유효하지 않습니다. 앱을 재설치하세요.",
         "SOURCE_MISSING": "앱에 내장 CLI가 없습니다. 데스크톱 앱을 재설치하세요.",
-        "IO_ERROR": "CLI 파일을 읽거나 게시할 수 없습니다. 폴더 권한을 확인하고 앱을 다시 시작하세요.",
+        "IO_ERROR": "CLI 파일에 접근할 수 없습니다. 폴더 권한을 확인한 후 활성화를 눌러 다시 시도하세요.",
         "PUBLICATION_IN_PROGRESS": "CLI 게시 중입니다. 완료된 후 새로고침하세요."
       },
       "healthReason": {

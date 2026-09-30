@@ -201,15 +201,15 @@ export const resources = {
           "damaged": "Needs attention"
         },
         "reason": {
-          "DIRECTORY_MISSING": "CLI folder is missing. Restart the desktop app to publish the bundled CLI.",
-          "BINARY_MISSING": "CLI binary is missing. Restart the desktop app.",
-          "STAMP_MISSING": "Verification metadata is missing. Restart the desktop app.",
-          "VERSION_MISMATCH": "CLI version does not match this app. Restart or reinstall the desktop app.",
-          "HASH_MISMATCH": "CLI checksum failed. Restart or reinstall the desktop app.",
-          "NOT_EXECUTABLE": "CLI cannot be executed. Check folder permissions and restart the app.",
+          "DIRECTORY_MISSING": "CLI is not installed. Click Enable to download and verify it.",
+          "BINARY_MISSING": "CLI file is missing. Click Enable to download and verify it.",
+          "STAMP_MISSING": "CLI verification information is missing. Click Enable to reinstall and verify it.",
+          "VERSION_MISMATCH": "CLI version does not match this app. Click Enable to install the matching CLI.",
+          "HASH_MISMATCH": "CLI file does not match this app. Click Enable to install and verify the matching CLI.",
+          "NOT_EXECUTABLE": "CLI cannot be executed. Check folder permissions, then click Enable to reinstall it.",
           "INVALID_METADATA": "CLI metadata is invalid. Reinstall the desktop app.",
           "SOURCE_MISSING": "The bundled CLI is missing from the app. Reinstall the desktop app.",
-          "IO_ERROR": "CLI files could not be read or published. Check folder permissions and restart the app.",
+          "IO_ERROR": "CLI files cannot be accessed. Check folder permissions, then click Enable to retry.",
           "PUBLICATION_IN_PROGRESS": "CLI publication is in progress. Refresh after it finishes."
         },
         "healthReason": {
@@ -1450,15 +1450,15 @@ export const resources = {
           "damaged": "需要处理"
         },
         "reason": {
-          "DIRECTORY_MISSING": "CLI 目录不存在。请重启桌面应用以发布内置 CLI。",
-          "BINARY_MISSING": "CLI 文件缺失。请重启桌面应用。",
-          "STAMP_MISSING": "校验信息缺失。请重启桌面应用。",
-          "VERSION_MISMATCH": "CLI 与应用版本不一致。请重启或重新安装桌面应用。",
-          "HASH_MISMATCH": "CLI 校验值不匹配。请重启或重新安装桌面应用。",
-          "NOT_EXECUTABLE": "CLI 无执行权限。请检查目录权限后重启应用。",
+          "DIRECTORY_MISSING": "CLI 尚未安装。请点击一键启用，下载并校验 CLI。",
+          "BINARY_MISSING": "CLI 文件缺失。请点击一键启用，下载并校验 CLI。",
+          "STAMP_MISSING": "CLI 校验信息缺失。请点击一键启用，重新安装并校验 CLI。",
+          "VERSION_MISMATCH": "CLI 与应用版本不一致。请点击一键启用，安装匹配的 CLI。",
+          "HASH_MISMATCH": "CLI 文件与当前应用要求不一致。请点击一键启用，安装并校验匹配的 CLI。",
+          "NOT_EXECUTABLE": "CLI 无执行权限。请检查目录权限后点击一键启用，重新安装 CLI。",
           "INVALID_METADATA": "CLI 元数据无效。请重新安装桌面应用。",
           "SOURCE_MISSING": "应用内置的 CLI 缺失。请重新安装桌面应用。",
-          "IO_ERROR": "无法读取或发布 CLI 文件。请检查目录权限后重启应用。",
+          "IO_ERROR": "无法访问 CLI 文件。请检查目录权限后点击一键启用重试。",
           "PUBLICATION_IN_PROGRESS": "正在发布 CLI，请稍后刷新。"
         },
         "healthReason": {

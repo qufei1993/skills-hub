@@ -950,7 +950,8 @@ impl<'a> DeviceSyncService<'a> {
                     true,
                 )?);
             }
-            let mut record = manifest::record_from_portable(skill, &destination, now_ms());
+            let mut record =
+                manifest::record_from_portable(skill, &destination, new_hash, now_ms());
             if let Some(existing) = existing {
                 if existing
                     .source_ref
@@ -1357,6 +1358,42 @@ mod tests {
     use git2::Repository;
 
     static TEST_SYNC_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn device_sync_import_records_local_hash_for_official_skill_enable() {
+        use crate::core::runtime_paths::{RuntimePaths, RuntimeProfile};
+        use crate::services::skills_hub::SkillsHubService;
+        let home = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        fs::create_dir(home.path().join(".codex")).unwrap();
+        let paths = RuntimePaths::from_roots(RuntimeProfile::Test, home.path(), data.path());
+        let app = SkillsHubService::open(paths.clone()).unwrap();
+        app.enable_ai_management().unwrap();
+        let incoming = tempfile::tempdir().unwrap();
+        let remote = manifest::export_library(app.store(), incoming.path()).unwrap();
+        let credentials = MemoryCredentialStore::default();
+        let sync = DeviceSyncService::new(
+            app.store(),
+            &credentials,
+            data.path().join("workspace"),
+            paths.default_central_repo,
+        );
+        sync.apply_repository_to_library(&remote, incoming.path(), &BTreeSet::new())
+            .unwrap();
+        let skill = app.store().list_skills().unwrap().remove(0);
+        assert_eq!(
+            skill.content_hash,
+            Some(
+                crate::core::content_hash::hash_dir_strict(Path::new(&skill.central_path)).unwrap()
+            )
+        );
+        assert_ne!(
+            skill.content_hash.as_ref(),
+            Some(&remote.skills[&skill.id].content_hash)
+        );
+        app.preflight_ai_management().unwrap();
+        assert_eq!(app.enable_ai_management().unwrap().central_reason, None);
+    }
 
     #[test]
     fn repository_visibility_controls_read_credentials_but_not_write_credentials() {
