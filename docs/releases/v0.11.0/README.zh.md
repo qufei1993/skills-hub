@@ -16,6 +16,12 @@ v0.11.0 支持通过 AI 对话管理 Skills，由官方 `manage-skills-hub` Skil
 
 更新现有 Cline 适配：通过 `~/.cline` 检测安装状态，全局同步到 `~/.cline/skills`，项目同步到 `.cline/skills`，与 [Cline 官方目录说明](https://docs.cline.bot/customization/skills)一致。共享目录预览不再将 Cline 与 `.agents/skills` 工具归为一组。已有 `.agents/skills` 文件不会迁移或删除；请将所需 Skills 重新同步到 Cline，写入其原生目录。
 
+## DeepSeek Harness 自定义目录
+
+Skills Hub 继承的 `DSH_HOME` 非空白时，全局同步和扫描使用 `$DSH_HOME/skills`，安装检测使用 `$DSH_HOME`。未设置或值为空白时回退到 `~/.dsh`；支持将 `~`、`~/` 和 `~\` 展开为当前用户主目录。项目同步仍使用 `<project>/.dsh/skills`。
+
+修改环境变量后，请重启 Skills Hub，必要时也重启启动它的程序，以便读取新值。对于已同步到旧目录的 Skills，先取消 DeepSeek Harness 同步，再重新同步。取消操作使用已保存的部署路径，即使新目录尚不存在也能处理；用户修改过的副本会被保护，请备份并解决提示的冲突后重试。启动时不搬动文件、不丢弃记录；旧记录路径不匹配时仍会阻止直接重新部署。Harness 显式 `dshHome` 配置和 `customSkillDirs` 仍需在 Skills Hub 中配置自定义工具。
+
 ## 发布状态
 
 当前是发布准备记录，不代表已发布。发布矩阵覆盖 macOS arm64/x64、Windows x64、Linux GNU arm64/x64，各自使用匹配架构的原生运行环境。本次本地验证仅覆盖 macOS arm64；其余原生平台和已配置的签名、公证仍须在 CI 通过。本次准备未执行正式发布、签名或公证。

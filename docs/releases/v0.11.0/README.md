@@ -14,6 +14,12 @@ Updates preserve Skill IDs, tags, enablement, and existing deployment configurat
 
 The existing Cline adapter now detects `~/.cline` and syncs global Skills to `~/.cline/skills` and project Skills to `.cline/skills`, matching [Cline’s documented directories](https://docs.cline.bot/customization/skills). Shared-directory previews no longer group Cline with `.agents/skills` tools. Existing files in `.agents/skills` are not moved or deleted; deploy the desired Skills to Cline again to populate its native directory.
 
+## DeepSeek Harness custom home
+
+Global Skill deployment, discovery, and installation detection use `$DSH_HOME/skills` and `$DSH_HOME` when a nonblank `DSH_HOME` is inherited by Skills Hub. Unset or blank values fall back to `~/.dsh`; `~`, `~/`, and `~\` expand to the current user's home. Project deployment continues to use `<project>/.dsh/skills`.
+
+After changing the environment variable, restart Skills Hub (and its launcher if needed) so it inherits the new value. For Skills previously deployed to another directory, cancel their DeepSeek Harness sync and then sync them again. Cancellation uses the saved deployment path, even when the new home is absent, and retains modified copies instead of deleting them. Back up and resolve any reported conflicts before retrying. Startup does not move files or discard records; direct redeployment with a mismatched recorded path remains blocked. Explicit Harness `dshHome` configuration and `customSkillDirs` still require a custom tool in Skills Hub.
+
 ## Release status
 
 This is release preparation, not evidence of publication. The release workflow builds five CLI targets (macOS arm64/x64, Windows x64, Linux GNU arm64/x64) and three desktop targets (macOS arm64/x64, Windows x64), each on a matching native runner. This work was validated locally on macOS arm64; the other native jobs and configured signing/notarization must pass in CI before release. No release, signing, or notarization was performed during preparation.
