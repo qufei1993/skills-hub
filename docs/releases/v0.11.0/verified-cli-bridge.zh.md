@@ -2,25 +2,31 @@
 
 [English](verified-cli-bridge.md) · [版本概览](README.zh.md)
 
-桌面构建内置同版本的原生 `skillshub-cli`。首次安装需用户主动启用 AI 管理；之后启动新版桌面端时，若官方 Skill 已启用且有部署目标、CLI 桥接仍是旧版，就会自动更新。发布桥接文件前使用构建时嵌入的元数据验证二进制，将其复制到同目录临时文件并原子替换，最后发布 SHA-256 和版本校验戳。替换失败时尽可能恢复之前校验通过的 CLI，用户也可通过「一键启用」重试。状态检查只读取桥接文件，不执行 CLI，也不读取凭据或复制数据库、配置。
+正式桌面安装包只携带匹配的 CLI 清单，不携带 CLI 可执行文件。点击启用或更新 AI 管理时，从 Skills Hub 同一个 Release 下载固定版本、对应平台的文件，验证内嵌的长度与 SHA-256 后安装。已校验的匹配桥接可离线复用；启动和状态查询不下载或更新组件。
 
-正式版发布到 `~/.skills-hub/bin`，开发版发布到 `~/.skills-hub-dev/bin`。二进制名为 `skillshub-cli`，Windows 使用 `skillshub-cli.exe`；校验戳始终为 `skillshub-cli.version` 和 `skillshub-cli.sha256`。
+桥接安装通过同目录临时文件和受保护的原子替换发布，随后写入版本和 SHA-256 校验戳。替换失败时尽可能恢复原来已校验的 CLI。状态检查只读取桥接文件，不执行 CLI、不读取凭据。创建目录前检查目标上级目录中的符号链接或 Windows 重解析点，后续操作绑定到已验证的目录。
 
-内置 CLI 元数据记录实际开发或正式构建模式，并根据 Cargo 编译产物验证。桌面构建会拒绝任一方向的模式不匹配，包括冲突的 `debug_assertions`；不支持自定义 Cargo 构建配置。桥接发布在创建目录前拒绝目标上级目录中的符号链接或 Windows 重解析点，后续文件操作绑定到已验证的目录。
+正式版使用 `~/.skills-hub/bin`，开发版和本地测试版使用 `~/.skills-hub-dev/bin`。二进制为 `skillshub-cli`，Windows 为 `skillshub-cli.exe`；校验戳为 `skillshub-cli.version` 和 `skillshub-cli.sha256`。
 
-## 本地验证
+## 构建模式
 
-执行本地 Rust 检查前，先准备与当前机器匹配的 CLI。例如，在 macOS arm64 上：
+- 正式打包使用版本、源提交及平台匹配的 release CLI 清单，不将 CLI 文件放入安装包。
+- 开发启动自动准备本地 debug CLI，并校验构建模式和文件字节。
+- [本地安装测试构建](local-test-builds.zh.md)内嵌本地 release CLI，使用开发凭据和桥接目录，禁用正式更新地址。技能数据与工具目录仍与正式版共享，操作会影响真实数据。
+
+不支持自定义 Cargo profile 或冲突的 `debug_assertions`。CLI 准备支持 `darwin-arm64`、`darwin-x64`、`win32-x64`、`linux-x64`、`linux-arm64` 及对应 Rust 三元组。编译工具链须提前安装，不支持 macOS universal 准备。
+
+在 macOS arm64 上执行本地 Rust 检查：
 
 ```sh
 npm run cli:prepare -- --target darwin-arm64 --debug
 npm run check
 ```
 
-支持显式指定 `darwin-arm64`、`darwin-x64`、`win32-x64`、`linux-x64`、`linux-arm64`，或对应的 Rust 目标三元组。`tauri:dev` 和 `tauri:build` 会自动准备内置 CLI。交叉编译工具链必须预先安装，脚本不会下载工具链；此准备步骤不支持 macOS 通用二进制构建。
+`tauri:dev` 和 `tauri:build:local` 自动准备本地 CLI；常规 `tauri:build` 必须提供匹配的 release 清单，详见[构建说明](../../README.zh.md#构建)。
 
 ## 发布验证
 
-发布工作流先对 macOS CLI 签名，再重新计算 SHA-256 元数据并编译桌面应用。已签名 CLI 通过 `bundle.macOS.files` 放入 `Contents/MacOS/skillshub-cli`，该次发布构建禁用 `externalBin`，避免再次签名改变文件字节。
+工作流先对独立 CLI 签名，并按配置完成公证，再根据最终字节生成清单。正式桌面构建嵌入清单，排除 CLI 可执行文件。实物检查覆盖 macOS 应用目录和实际 Windows NSIS 安装指令；缺少安装指令或发现 CLI 载荷均失败。
 
-最终应用包必须恰好包含一个可执行 CLI，其哈希与元数据一致；配置签名身份时，应用和 CLI 的代码签名都必须有效。可选公证同时提交应用与独立 CLI。原生签名发布验证仍依赖受保护的 CI 环境，这里的准备与本地检查不代表已签名或已发布。
+CLI 与桌面产物进入原仓库同一个 Release 草稿，公开前核对 CLI 长度和摘要，完整发布后验证固定版本匿名下载。相同版本的冲突资源不覆盖。CLI 与桌面的签名、公证分别验证，详见[当前验证结论与发布前置条件](cli-on-demand-download.zh.md)。

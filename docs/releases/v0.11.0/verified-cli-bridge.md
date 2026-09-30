@@ -2,19 +2,31 @@
 
 [中文](verified-cli-bridge.zh.md) · [Release overview](README.md)
 
-Desktop builds include the same-version native `skillshub-cli`. First-time installation requires an explicit AI management enable action. Later desktop launches update the CLI when the official Skill is enabled and deployed and the bridge reports an older version. Publication verifies the bundled binary against embedded build metadata, copies it to a sibling temporary file, and atomically replaces the bridge binary before publishing SHA-256 and version stamps. A failed replacement restores the previously verified CLI when possible; users can retry through the enable action. Status inspection only reads bridge files; it never executes the CLI or accesses credentials.
+Production desktop installers contain the matching CLI manifest, not the CLI executable. Enabling or updating AI management downloads the fixed version and platform file from the same Skills Hub release. Embedded size and SHA-256 values are verified before installation. A verified matching bridge can be reused offline; startup and status reads do not download or update components.
 
-Production publishes to `~/.skills-hub/bin`; debug builds publish to `~/.skills-hub-dev/bin`. The binary is `skillshub-cli` (`skillshub-cli.exe` on Windows), while stamps are always `skillshub-cli.version` and `skillshub-cli.sha256`.
+Bridge installation uses a sibling temporary file and protected atomic replacement, followed by version and SHA-256 stamps. Failed replacement restores the previously verified CLI when possible. Status inspection only reads bridge files; it never executes the CLI or accesses credentials. Existing destination ancestors must pass symlink/Windows reparse-point checks before directories are created, and subsequent operations use validated directories.
 
-Sidecar metadata includes its actual debug/release profile, verified from Cargo's compiler artifact. Desktop builds reject either direction of profile mismatch, including conflicting `debug_assertions`; custom Cargo profiles are unsupported. Bridge publication rejects symlinks or Windows reparse points in any existing destination ancestor before creating directories, and pins validated directories for subsequent file operations.
+Production uses `~/.skills-hub/bin`; development and local test builds use `~/.skills-hub-dev/bin`. The binary is `skillshub-cli` (`skillshub-cli.exe` on Windows). Stamps are `skillshub-cli.version` and `skillshub-cli.sha256`.
 
-For local Rust checks, first prepare the host sidecar, for example:
+## Build modes
+
+- Production packaging consumes a release CLI manifest matching the version, source commit, and target. CLI bytes are not bundled.
+- Development startup prepares a local debug CLI and verifies its build profile and bytes.
+- [Local installation test builds](local-test-builds.md) embed a local release CLI, use development credentials and bridge directories, and disable production updater endpoints. Shared Skill data and tool directories are still affected.
+
+Custom Cargo profiles and conflicting `debug_assertions` are rejected. CLI preparation supports `darwin-arm64`, `darwin-x64`, `win32-x64`, `linux-x64`, `linux-arm64`, or the corresponding Rust triples. Toolchains must already be installed; macOS universal preparation is unsupported.
+
+For local Rust checks on macOS arm64:
 
 ```sh
 npm run cli:prepare -- --target darwin-arm64 --debug
 npm run check
 ```
 
-Supported explicit targets: `darwin-arm64`, `darwin-x64`, `win32-x64`, `linux-x64`, `linux-arm64`, or their corresponding Rust triples. `tauri:dev` and `tauri:build` prepare the sidecar automatically. Cross-compilation toolchains must already be installed; the script does not download them. Universal macOS builds are not supported by this preparation step.
+`tauri:dev` and `tauri:build:local` prepare their local CLI automatically. Regular `tauri:build` requires the matching release manifest; see the [build guide](../../../README.md#build).
 
-The release workflow signs the macOS CLI before recomputing its SHA-256 metadata and compiling the desktop. It supplies the already signed binary through `bundle.macOS.files` at `Contents/MacOS/skillshub-cli`, with `externalBin` disabled for that release invocation, to prevent a second signature changing the bytes. Final bundle checks require exactly one executable CLI, the same hash as the metadata, and valid app/CLI signatures when an identity is configured. Optional notarization submits both app and standalone CLI. Native signed release validation still requires the protected CI environment; no local signing or publication is implied.
+## Release validation
+
+The workflow signs and, when configured, notarizes the standalone CLI before generating its final-byte manifest. Production desktop builds embed that manifest and exclude the CLI executable. Package checks inspect macOS app contents and the actual Windows NSIS instructions; missing NSIS instructions or any CLI payload fail validation.
+
+CLI and desktop assets enter the same original-repository release draft. Remote CLI sizes and digests must match before publication; anonymous fixed-version downloads are checked after the complete release is published. Conflicting version assets are never overwritten. CLI and desktop signing/notarization are validated independently. See [current validation and release gates](cli-on-demand-download.md).

@@ -1,6 +1,6 @@
 # 本地安装测试构建
 
-常规正式打包仍需匹配的已发布 CLI 清单。缺少清单时说明原因，同时提示 `tauri:dev` 和当前平台的本地测试打包命令，不自动切换构建模式。
+常规正式打包仍需版本、提交及平台匹配的最终 release CLI 清单。缺少清单时说明原因，同时提示 `tauri:dev` 和当前平台的本地测试打包命令，不自动切换构建模式。
 
 新增 `npm run tauri:build:local`，并提供 macOS DMG、Windows MSI/NSIS、Linux DEB/AppImage 快捷入口。只编译所选目标的一份 CLI，将其原始字节嵌入经过 release 优化的桌面程序。启用 AI 管理时校验并安装这份文件，无需依赖源码目录或线上 CLI 发布。dev 与本地 release 的中间文件独立。
 

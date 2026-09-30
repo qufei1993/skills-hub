@@ -1,6 +1,6 @@
 # Local installation test builds
 
-Regular release packaging requires a matching published CLI manifest. It now explains that requirement and suggests `tauri:dev` or the current platform's local test build command. It never silently switches build modes.
+Regular release packaging requires a matching final-byte release CLI manifest. It now explains that requirement and suggests `tauri:dev` or the current platform's local test build command. It never silently switches build modes.
 
 `npm run tauri:build:local` and the macOS DMG, Windows MSI/NSIS, and Linux DEB/AppImage shortcuts compile one CLI for the selected target and embed its exact bytes in a release-optimized desktop executable. Enabling AI management verifies and publishes those bytes locally. The app no longer needs the checkout or a published CLI to exercise this path. Debug and local-release staging files are separate.
 
