@@ -884,23 +884,124 @@ fn agent_access_unmanaged_conflict_preserves_entire_batch() {
 }
 
 #[test]
-fn agent_access_modified_central_copy_is_never_overwritten() {
+fn agent_access_modified_managed_official_central_copy_is_replaced() {
+    for missing_hash in [false, true] {
+        let f = Fixture::new();
+        f.service.enable_ai_management().unwrap();
+        let skill = f.service.show_skill("manage-skills-hub".into()).unwrap();
+        let manifest = PathBuf::from(&skill.central_path).join("SKILL.md");
+        fs::write(&manifest, "previous development content").unwrap();
+        if missing_hash {
+            let mut record = f
+                .service
+                .store()
+                .get_skill_by_id(&skill.id)
+                .unwrap()
+                .unwrap();
+            record.content_hash = None;
+            f.service.store().upsert_skill(&record).unwrap();
+        }
+        f.service.enable_ai_management().unwrap();
+        assert_eq!(
+            fs::read_to_string(manifest).unwrap(),
+            super::super::agent_access::OFFICIAL_SKILL_MD
+        );
+        assert_eq!(
+            f.service.agent_access_status().unwrap().central_reason,
+            None
+        );
+    }
+}
+
+#[test]
+fn official_content_update_status_is_read_only_and_detects_same_version_changes() {
     let f = Fixture::new();
-    f.service
-        .setup_agent_access(SetupAgentRequest::install("codex"))
+    let bundled = f
+        .service
+        .prepare_bundled_install(
+            "manage-skills-hub",
+            "---\nname: manage-skills-hub\n---\nOld development content\n",
+            env!("CARGO_PKG_VERSION"),
+        )
         .unwrap();
-    let skill = f.service.show_skill("manage-skills-hub".into()).unwrap();
-    let manifest = PathBuf::from(skill.central_path).join("SKILL.md");
-    fs::write(&manifest, "user changed this").unwrap();
+    f.service.apply_bundled_install(bundled, || Ok(())).unwrap();
+    let record = f.service.store().list_skills().unwrap().pop().unwrap();
+    let before = fs::read(PathBuf::from(&record.central_path).join("SKILL.md")).unwrap();
+    for _ in 0..2 {
+        let status = f.service.agent_access_status().unwrap();
+        assert_eq!(status.central_reason, None);
+        assert_eq!(
+            serde_json::to_value(status).unwrap()["skill_update_available"],
+            true
+        );
+        assert_eq!(
+            f.service
+                .store()
+                .get_skill_by_id(&record.id)
+                .unwrap()
+                .unwrap(),
+            record
+        );
+        assert_eq!(
+            fs::read(PathBuf::from(&record.central_path).join("SKILL.md")).unwrap(),
+            before
+        );
+    }
+    f.service.enable_ai_management().unwrap();
+    assert_eq!(
+        serde_json::to_value(f.service.agent_access_status().unwrap()).unwrap()
+            ["skill_update_available"],
+        false
+    );
+}
+
+#[test]
+fn official_central_recovery_rolls_back_modified_bytes_and_original_record() {
+    let f = Fixture::new();
+    f.service.enable_ai_management().unwrap();
+    let original = f.service.store().list_skills().unwrap().pop().unwrap();
+    let manifest = PathBuf::from(&original.central_path).join("SKILL.md");
+    fs::write(&manifest, "development edits").unwrap();
+    let bundled = f
+        .service
+        .prepare_bundled_install(
+            "manage-skills-hub",
+            super::super::agent_access::OFFICIAL_SKILL_MD,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .unwrap();
+    let result: Result<(), _> = f.service.apply_bundled_install(bundled, || {
+        Err(crate::services::error::ServiceError::internal(
+            "deployment failed",
+        ))
+    });
+    assert!(result.is_err());
+    assert_eq!(fs::read_to_string(manifest).unwrap(), "development edits");
     assert_eq!(
         f.service
-            .setup_agent_access(SetupAgentRequest::install("cursor"))
-            .unwrap_err()
-            .code,
-        ErrorCode::TargetConflict
+            .store()
+            .get_skill_by_id(&original.id)
+            .unwrap()
+            .unwrap(),
+        original
     );
-    assert_eq!(fs::read_to_string(manifest).unwrap(), "user changed this");
-    assert!(!f.target("cursor").exists());
+}
+
+#[test]
+fn official_recovery_rejects_a_record_outside_the_owned_library() {
+    let f = Fixture::new();
+    f.service.enable_ai_management().unwrap();
+    let mut record = f.service.store().list_skills().unwrap().pop().unwrap();
+    let outside = f.home.path().join("outside/manage-skills-hub");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("SKILL.md"), "user content").unwrap();
+    record.central_path = outside.to_string_lossy().into_owned();
+    f.service.store().upsert_skill(&record).unwrap();
+    assert!(f.service.enable_ai_management().is_err());
+    assert_eq!(
+        fs::read_to_string(outside.join("SKILL.md")).unwrap(),
+        "user content"
+    );
 }
 
 #[test]
@@ -1136,7 +1237,7 @@ fn official_skill_update_recovers_legacy_device_sync_hash_and_upgrades_old_conte
 }
 
 #[test]
-fn legacy_device_sync_recovery_preserves_modified_or_untrusted_official_files() {
+fn legacy_device_sync_official_recovery_replaces_owned_regular_content() {
     for change in ["edited", "extra_file", "extra_directory", "wrong_hash"] {
         let f = Fixture::new();
         f.service.enable_ai_management().unwrap();
@@ -1153,8 +1254,7 @@ fn legacy_device_sync_recovery_preserves_modified_or_untrusted_official_files() 
             _ => unreachable!(),
         }
         let before = crate::core::content_hash::hash_dir_strict(&central).unwrap();
-        assert!(f.service.preflight_ai_management().is_err(), "{change}");
-        assert!(f.service.enable_ai_management().is_err(), "{change}");
+        f.service.preflight_ai_management().unwrap();
         assert!(
             f.service.refresh_installed_ai_management().is_err(),
             "{change}"
@@ -1172,34 +1272,71 @@ fn legacy_device_sync_recovery_preserves_modified_or_untrusted_official_files() 
                 .content_hash,
             original.content_hash
         );
+        f.service.enable_ai_management().unwrap();
+        assert_eq!(
+            fs::read_to_string(central.join("SKILL.md")).unwrap(),
+            super::super::agent_access::OFFICIAL_SKILL_MD
+        );
+        assert!(!central.join("notes.txt").exists());
+        assert!(!central.join("notes").exists());
     }
 }
 
 #[cfg(unix)]
 #[test]
-fn legacy_device_sync_recovery_rejects_skill_symlinks_and_executable_files() {
-    use std::os::unix::{fs::symlink, fs::PermissionsExt};
-    for link in [false, true] {
+fn legacy_device_sync_recovery_rejects_skill_symlinks() {
+    use std::os::unix::fs::symlink;
+    let f = Fixture::new();
+    f.service.enable_ai_management().unwrap();
+    let original = legacy_device_sync_bundle(&f);
+    let file = PathBuf::from(&original.central_path).join("SKILL.md");
+    let external = f.home.path().join("external.md");
+    fs::rename(&file, &external).unwrap();
+    symlink(&external, &file).unwrap();
+    let original_bytes = fs::read(&external).unwrap();
+    assert!(f.service.enable_ai_management().is_err());
+    assert!(fs::symlink_metadata(&file)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(fs::read(external).unwrap(), original_bytes);
+    assert_eq!(
+        f.service
+            .store()
+            .get_skill_by_id(&original.id)
+            .unwrap()
+            .unwrap()
+            .content_hash,
+        original.content_hash
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn official_recovery_replaces_owned_regular_executable_files() {
+    use std::os::unix::fs::PermissionsExt;
+    for executable_manifest in [false, true] {
         let f = Fixture::new();
         f.service.enable_ai_management().unwrap();
         let original = legacy_device_sync_bundle(&f);
-        let file = PathBuf::from(original.central_path).join("SKILL.md");
-        if link {
-            let external = f.home.path().join("external.md");
-            fs::rename(&file, &external).unwrap();
-            symlink(external, &file).unwrap();
+        let central = PathBuf::from(&original.central_path);
+        let file = if executable_manifest {
+            central.join("SKILL.md")
         } else {
-            fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        assert!(f.service.enable_ai_management().is_err());
+            let script = central.join("old-helper.sh");
+            fs::write(&script, "#!/bin/sh\necho old-development-helper\n").unwrap();
+            script
+        };
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).unwrap();
+        f.service.enable_ai_management().unwrap();
         assert_eq!(
-            f.service
-                .store()
-                .get_skill_by_id(&original.id)
-                .unwrap()
-                .unwrap()
-                .content_hash,
-            original.content_hash
+            fs::read_to_string(central.join("SKILL.md")).unwrap(),
+            super::super::agent_access::OFFICIAL_SKILL_MD
+        );
+        assert!(!central.join("old-helper.sh").exists());
+        assert_eq!(
+            f.service.agent_access_status().unwrap().central_reason,
+            None
         );
     }
 }
@@ -1237,4 +1374,84 @@ fn legacy_device_sync_recovery_rolls_back_original_record_when_deployment_fails(
         fs::read(PathBuf::from(&original.central_path).join("SKILL.md")).unwrap(),
         before
     );
+}
+
+#[test]
+fn official_recovery_preserves_the_disabled_skill_setting() {
+    let f = Fixture::new();
+    f.old_bundle();
+    let mut record = f.service.store().list_skills().unwrap().pop().unwrap();
+    record.enabled = false;
+    f.service.store().upsert_skill(&record).unwrap();
+    fs::write(
+        PathBuf::from(&record.central_path).join("SKILL.md"),
+        "development edits",
+    )
+    .unwrap();
+    let status = f.service.enable_ai_management().unwrap();
+    assert!(!status.skill.unwrap().enabled);
+    assert!(!status.skill_update_available);
+}
+
+#[test]
+fn official_recovery_rejects_paths_shared_with_another_managed_skill() {
+    let f = Fixture::new();
+    f.service.enable_ai_management().unwrap();
+    let mut record = f.service.store().list_skills().unwrap().pop().unwrap();
+    record.id = "another-skill".into();
+    record.name = "another-skill".into();
+    record.source_type = "local".into();
+    let manifest = PathBuf::from(&record.central_path).join("SKILL.md");
+    record.central_path = PathBuf::from(&record.central_path)
+        .join("another-skill")
+        .to_string_lossy()
+        .into_owned();
+    fs::create_dir(&record.central_path).unwrap();
+    f.service.store().upsert_skill(&record).unwrap();
+    fs::write(&manifest, "shared content").unwrap();
+    assert!(f.service.enable_ai_management().is_err());
+    assert_eq!(fs::read_to_string(manifest).unwrap(), "shared content");
+}
+
+#[cfg(unix)]
+#[test]
+fn official_recovery_rejects_a_symlinked_central_directory() {
+    let f = Fixture::new();
+    f.service.enable_ai_management().unwrap();
+    let record = f.service.store().list_skills().unwrap().pop().unwrap();
+    let central = PathBuf::from(&record.central_path);
+    let external = f.home.path().join("external-official");
+    fs::rename(&central, &external).unwrap();
+    std::os::unix::fs::symlink(&external, &central).unwrap();
+    assert_eq!(
+        f.service.agent_access_status().unwrap().central_reason,
+        Some(super::super::agent_access::AgentAccessReason::CentralUnsafePath)
+    );
+    assert!(f.service.enable_ai_management().is_err());
+    assert!(fs::symlink_metadata(central)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(
+        fs::read_to_string(external.join("SKILL.md")).unwrap(),
+        super::super::agent_access::OFFICIAL_SKILL_MD
+    );
+}
+
+#[test]
+fn official_status_distinguishes_content_edits_from_bundle_updates() {
+    let f = Fixture::new();
+    f.service.enable_ai_management().unwrap();
+    let record = f.service.store().list_skills().unwrap().pop().unwrap();
+    fs::write(
+        PathBuf::from(&record.central_path).join("SKILL.md"),
+        "local edits",
+    )
+    .unwrap();
+    let status = f.service.agent_access_status().unwrap();
+    assert_eq!(
+        status.central_reason,
+        Some(super::super::agent_access::AgentAccessReason::CentralModified)
+    );
+    assert!(!status.skill_update_available);
 }

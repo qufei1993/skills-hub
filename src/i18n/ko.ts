@@ -218,7 +218,9 @@ export const ko = {
       },
       "healthReason": {
         "CENTRAL_MISSING": "공식 라이브러리 사본이 없습니다. 사본을 복원한 후 연결을 복구하세요.",
-        "CENTRAL_MODIFIED": "공식 라이브러리 사본이 변경되었습니다. 변경 사항을 백업하고 원본을 복원한 후 복구하세요.",
+        "CENTRAL_MODIFIED": "관리되는 공식 Skill이 변경되었습니다. 활성화를 클릭하여 앱에 포함된 버전으로 교체하세요.",
+        "CENTRAL_IO_ERROR": "공식 Skill을 읽을 수 없습니다. 폴더 권한을 확인한 후 다시 시도하세요.",
+        "CENTRAL_UNSAFE_PATH": "공식 Skill 경로가 일반 관리 디렉터리가 아닙니다. 위치를 복원한 후 다시 시도하세요.",
         "RECORD_ERROR": "마지막 배포에 오류가 기록되었습니다. 대상 폴더를 확인하고 복구하세요.",
         "TARGET_MISSING": "배포 파일이 없거나 링크가 끊어졌습니다. 복구를 시도하세요.",
         "TARGET_MODIFIED": "배포 파일이 공식 사본과 다릅니다. 변경 사항을 백업한 후 복구하세요.",

@@ -24,6 +24,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **AI management updates and rollback**: Same-version official Skill changes now offer an update. Enable repairs the managed official central copy directly, while preserving tool-target and path protections. Failed CLI replacement preserves the previous verified installation; switching between development and production restores the correct terminal command priority. CLI staging cannot publish an incomplete release. Linux packages declare the glibc 2.39 minimum and verify actual installation and package upgrade.
+
 - **AI management recovery**: Explain that draft releases cannot provide automatic CLI downloads, and show the installation failure alongside local CLI status. Keep terminal repair available with a PATH conflict, ignore inactive historical targets when determining readiness, and distinguish successful setup from a failed library refresh. Correct the official Skill guidance to require explicit updates.
 
 - Preserve generated release notes and download tables when CLI resources pre-create a shared draft.

@@ -261,13 +261,20 @@ fn previous_bridge(directory: &BridgeDirectory) -> Option<PreviousBridge> {
 }
 
 fn restore_previous_bridge(directory: &BridgeDirectory, previous: PreviousBridge) -> Result<()> {
-    let mut temp = directory.temp().map_err(io_error)?;
-    temp.file.write_all(&previous.binary).map_err(io_error)?;
-    temp.file
-        .set_permissions(previous.permissions)
-        .map_err(io_error)?;
-    temp.file.sync_all().map_err(io_error)?;
-    temp.persist(BINARY_NAME).map_err(io_error)?;
+    let binary_unchanged = directory
+        .open_file(OsStr::new(BINARY_NAME), false, false)
+        .ok()
+        .and_then(|mut file| hash_open_file(&mut file).ok())
+        .is_some_and(|hash| hash == previous.hash);
+    if !binary_unchanged {
+        let mut temp = directory.temp().map_err(io_error)?;
+        temp.file.write_all(&previous.binary).map_err(io_error)?;
+        temp.file
+            .set_permissions(previous.permissions)
+            .map_err(io_error)?;
+        temp.file.sync_all().map_err(io_error)?;
+        temp.persist(BINARY_NAME).map_err(io_error)?;
+    }
     atomic_stamp(directory, HASH_STAMP, &previous.hash)?;
     atomic_stamp(directory, VERSION_STAMP, &previous.version)?;
     Ok(())

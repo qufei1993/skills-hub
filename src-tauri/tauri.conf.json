@@ -33,6 +33,11 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "linux": {
+      "deb": {
+        "depends": ["libc6 (>= 2.39)"]
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

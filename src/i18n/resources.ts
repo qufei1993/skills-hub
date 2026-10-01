@@ -217,7 +217,9 @@ export const resources = {
         },
         "healthReason": {
           "CENTRAL_MISSING": "The official library copy is missing. Restore it before repairing access.",
-          "CENTRAL_MODIFIED": "The official library copy has changed. Back up your edits and restore the original before repairing.",
+          "CENTRAL_MODIFIED": "The managed official Skill has changed. Click Enable to replace it with the bundled version.",
+          "CENTRAL_IO_ERROR": "The official Skill cannot be read. Check folder permissions and retry.",
+          "CENTRAL_UNSAFE_PATH": "The official Skill path is not a regular managed directory. Restore its location and retry.",
           "RECORD_ERROR": "The last deployment reported an error. Review the target and try repair.",
           "TARGET_MISSING": "The deployment is missing or its link is broken. Try repair.",
           "TARGET_MODIFIED": "Deployment files differ from the official copy. Back up your edits before repairing.",
@@ -1469,7 +1471,9 @@ export const resources = {
         },
         "healthReason": {
           "CENTRAL_MISSING": "中央库中的官方副本缺失，请先恢复副本再修复接入。",
-          "CENTRAL_MODIFIED": "中央库中的官方副本已修改，请备份改动并恢复原始内容后再修复。",
+          "CENTRAL_MODIFIED": "受管理的官方 Skill 内容已变化，点击启用即可替换为应用内置版本。",
+          "CENTRAL_IO_ERROR": "无法读取官方 Skill，请检查目录权限后重试。",
+          "CENTRAL_UNSAFE_PATH": "官方 Skill 路径不是普通的受管理目录，请恢复其位置后重试。",
           "RECORD_ERROR": "上次部署记录有错误，请检查目标目录后尝试修复。",
           "TARGET_MISSING": "部署文件缺失或链接已断开，可尝试修复。",
           "TARGET_MODIFIED": "部署内容与官方副本不同，请先备份改动再修复。",

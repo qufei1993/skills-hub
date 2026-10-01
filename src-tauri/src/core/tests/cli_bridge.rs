@@ -136,6 +136,65 @@ fn cli_bridge_late_failure_restores_the_previous_verified_release() {
     );
 }
 
+#[cfg(any(target_os = "macos", windows))]
+#[test]
+fn cli_bridge_denied_replacement_preserves_previous_verified_release() {
+    let f = Fixture::new();
+    f.publish().unwrap();
+    let binary = f.destination.join(BINARY_NAME);
+    #[cfg(target_os = "macos")]
+    struct ImmutableGuard(PathBuf);
+    #[cfg(target_os = "macos")]
+    impl Drop for ImmutableGuard {
+        fn drop(&mut self) {
+            let _ = std::process::Command::new("/usr/bin/chflags")
+                .arg("nouchg")
+                .arg(&self.0)
+                .status();
+        }
+    }
+    #[cfg(target_os = "macos")]
+    let _guard = {
+        let guard = ImmutableGuard(binary.clone());
+        assert!(std::process::Command::new("/usr/bin/chflags")
+            .arg("uchg")
+            .arg(&binary)
+            .status()
+            .unwrap()
+            .success());
+        guard
+    };
+    #[cfg(windows)]
+    let _guard = {
+        use std::os::windows::fs::OpenOptionsExt;
+        OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&binary)
+            .unwrap()
+    };
+    fs::write(&f.source, b"xyz").unwrap();
+    let replacement_hash = hex::encode(Sha256::digest(b"xyz"));
+    assert!(publish_cli_bridge(&f.source, &f.destination, "0.10.2", &replacement_hash).is_err());
+    assert_eq!(fs::read(&binary).unwrap(), b"abc");
+    assert_eq!(
+        cli_bridge_status(&f.destination, VERSION, HASH).status,
+        CliBridgeHealth::Valid
+    );
+    assert_eq!(
+        fs::read_to_string(f.destination.join(VERSION_STAMP))
+            .unwrap()
+            .trim(),
+        VERSION
+    );
+    assert_eq!(
+        fs::read_to_string(f.destination.join(HASH_STAMP))
+            .unwrap()
+            .trim(),
+        HASH
+    );
+}
+
 #[test]
 fn cli_bridge_interruption_and_missing_or_tampered_files_are_never_valid() {
     let f = Fixture::new();

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync, rmSync, readdirSync, readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -51,15 +52,20 @@ it('requires a source commit before any remote inspection or mutation',async()=>
  })
 })
 
-it('accepts matching CLI resources alongside desktop assets and publishes only explicitly', async () => {
+it('rejects explicit publication before any remote call even with matching assets', async () => {
  await fixture(async ({directory,assets}) => {
   const calls=[]
-  await api.publishCliRelease({directory,tag:'v0.11.0',sourceCommit:'a'.repeat(40),publish:true,gh:async args=>{
+  await assert.rejects(api.publishCliRelease({directory,tag:'v0.11.0',sourceCommit:'a'.repeat(40),publish:true,gh:async args=>{
    calls.push(args)
-   if(args[0]==='api') return {draft:true,assets:[...assets,{name:'Skills-Hub.dmg',size:100,digest:'desktop'}]}
-  }})
-  assert.ok(calls.find(args=>args[1]==='edit').includes('--draft=false'))
+   return {draft:true,assets}
+  }}), /CLI_RELEASE_DRAFT_ONLY/)
+  assert.equal(calls.length,0)
  })
+})
+it('rejects the command line publication switch before invoking GitHub', () => {
+ const result=spawnSync(process.execPath,['scripts/publish-cli-release.mjs','/unused','--publish'],{encoding:'utf8'})
+ assert.equal(result.status,1)
+ assert.match(result.stderr,/CLI_RELEASE_DRAFT_ONLY/)
 })
 it('does not add new CLI assets to an already public desktop release', async () => {
  await fixture(async ({directory}) => {

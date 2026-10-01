@@ -66,7 +66,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Perl installation failed" }
           Add-Content $env:GITHUB_PATH 'C:\Strawberry\perl\bin'
       - run: npm ci
-      - run: node --test scripts/release-workflow.test.mjs scripts/reuse-cli-build.test.mjs scripts/linux-release.test.mjs scripts/release-downloads.test.mjs
+      - run: node --test scripts/release-workflow.test.mjs scripts/reuse-cli-build.test.mjs scripts/linux-release.test.mjs scripts/release-downloads.test.mjs scripts/verify-linux-deb.test.mjs scripts/check-ai-management-native.test.mjs
       - run: npm run version:check
       - name: Verify native host matches target
         shell: bash
@@ -76,10 +76,9 @@ jobs:
       - name: CLI and previous-stable compatibility tests (native debug executable)
         working-directory: src-tauri
         run: cargo test --locked --features cli --test cli_integration --test cli_desktop_compatibility
-      - name: Windows native bridge ancestor and junction race tests
-        if: runner.os == 'Windows'
-        working-directory: src-tauri
-        run: cargo test --locked --lib cli_bridge -- --nocapture
+      - name: AI management native recovery regressions
+        shell: bash
+        run: bash scripts/check-ai-management-native.sh
       - run: npm run build
       - run: npm run cli:prepare -- --target ${{ matrix.target }}
       - name: Verify Linux CLI in a headless Ubuntu container
@@ -801,7 +800,7 @@ jobs:
       - name: Verify Linux installers
         if: runner.os == 'Linux'
         shell: bash
-        run: bash scripts/verify-linux-packages.sh release-assets "$GITHUB_REF_NAME" "${{ matrix.target }}"
+        run: bash scripts/verify-linux-packages.sh release-assets "$GITHUB_REF_NAME" "${{ matrix.target }}" --install
 
       - name: List prepared assets
         shell: bash

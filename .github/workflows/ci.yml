@@ -42,7 +42,7 @@ jobs:
       - run: npm ci
       - run: npm run version:check
       - name: Validate CLI and desktop distribution pipeline
-        run: node --test scripts/cli-manifest.test.mjs scripts/verify-cli-release.test.mjs scripts/publish-cli-release.test.mjs scripts/verify-desktop-bundle.test.mjs scripts/release-workflow.test.mjs scripts/reuse-cli-build.test.mjs scripts/linux-release.test.mjs scripts/release-downloads.test.mjs
+        run: node --test scripts/cli-manifest.test.mjs scripts/verify-cli-release.test.mjs scripts/publish-cli-release.test.mjs scripts/verify-desktop-bundle.test.mjs scripts/release-workflow.test.mjs scripts/reuse-cli-build.test.mjs scripts/linux-release.test.mjs scripts/release-downloads.test.mjs scripts/check-ai-management-native.test.mjs
       - run: npm run lint
       - run: npm test
       - run: npm run network:check
@@ -58,7 +58,7 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - name: Verify release script execution on Windows
-        run: node --test scripts/release-workflow.test.mjs scripts/reuse-cli-build.test.mjs scripts/linux-release.test.mjs scripts/release-downloads.test.mjs
+        run: node --test scripts/release-workflow.test.mjs scripts/reuse-cli-build.test.mjs scripts/linux-release.test.mjs scripts/release-downloads.test.mjs scripts/check-ai-management-native.test.mjs
 
   rust:
     needs: changes
@@ -145,10 +145,9 @@ jobs:
       - name: CLI and previous-stable compatibility tests (native debug executable)
         working-directory: src-tauri
         run: cargo test --locked --features cli --test cli_integration --test cli_desktop_compatibility
-      - name: Windows native bridge ancestor and junction race tests
-        if: runner.os == 'Windows'
-        working-directory: src-tauri
-        run: cargo test --locked --lib cli_bridge -- --nocapture
+      - name: AI management native recovery regressions
+        shell: bash
+        run: bash scripts/check-ai-management-native.sh
       - run: npm run build
       - run: npm run cli:prepare -- --target ${{ matrix.target }}
       - name: Verify Linux CLI in a headless Ubuntu container

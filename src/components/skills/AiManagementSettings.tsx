@@ -118,7 +118,7 @@ const AiManagementSettings = ({ focusOnMount = false, initialStatus = null, onSt
       }
     }
   }
-  const updatePending = Boolean(status?.installed && (status.bridge.reason === 'VERSION_MISMATCH'
+  const updatePending = Boolean(status?.installed && (status.skillUpdateAvailable || status.bridge.reason === 'VERSION_MISMATCH'
     || (status.installedVersion && status.installedVersion !== status.bundledVersion)))
   const activeDeployment = status?.agents.some(agent => agent.deployed && !agent.needsRepair && agent.enabled && agent.detected)
   const ready = !updatePending && status?.skillEnabled && status.terminalReady && !status.terminalPathConflict && status.bridge.status === 'valid' && status.officialState === 'healthy'

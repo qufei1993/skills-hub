@@ -32,7 +32,11 @@ it('tag release independently verifies every native target before build or publi
   assert.match(commands, /--test cli_desktop_compatibility/)
   assert.match(commands, /version --json/)
   assert.match(commands, /doctor --json/)
-  assert.ok(verify.steps.some(step => step.if === "runner.os == 'Windows'" && /cargo test --locked --lib cli_bridge\b/.test(step.run)))
+  const recovery = verify.steps.find(step => step.name === 'AI management native recovery regressions')
+  assert.ok(recovery, 'all five native runners must verify AI management recovery')
+  assert.equal(recovery.if, undefined)
+  assert.equal(recovery.shell, 'bash')
+  assert.equal(recovery.run, 'bash scripts/check-ai-management-native.sh')
   assert.ok(verify.steps.every(step => !step['continue-on-error']))
   for (const name of ['cli-build', 'desktop-build', 'cli-publish', 'assemble-updater-json']) {
     const job = workflow.jobs[name]

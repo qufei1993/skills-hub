@@ -64,3 +64,12 @@ it('release extraction replaces an existing table with links from the actual ass
   assert.doesNotMatch(result.stdout,/old-link|Previous version/)
  } finally { rmSync(dir,{recursive:true,force:true}) }
 })
+
+it('shows the Linux minimum environment for both installer formats in both languages', () => {
+ for (const language of ['en','zh']) {
+  const table=api.renderDownloads({tag:'v0.11.0',language,assets:['Skills-Hub-v0.11.0-Linux-x64.deb','Skills-Hub-v0.11.0-Linux-arm64.AppImage']})
+  const rows=table.split('\n').filter(row=>row.startsWith('| Linux |'))
+  for (const row of rows) assert.match(row,/Ubuntu 24\.04.*glibc.*2\.39/)
+  assert.match(table,language==='en'?/Minimum environment/:/最低环境/)
+ }
+})

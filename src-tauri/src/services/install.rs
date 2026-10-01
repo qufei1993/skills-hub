@@ -180,14 +180,16 @@ impl SkillsHubService {
         use crate::core::content_hash::hash_dir_strict;
         self.ensure_database_compatible()?;
         validate_skill_name(name)?;
-        let mut existing = self
+        let records = self
             .store()
             .list_skills()
-            .map_err(|_| ServiceError::internal("failed to inspect bundled skill"))?
-            .into_iter()
-            .filter(|skill| skill.name.eq_ignore_ascii_case(name));
+            .map_err(|_| ServiceError::internal("failed to inspect bundled skill"))?;
+        let mut existing = records
+            .iter()
+            .filter(|skill| skill.name.eq_ignore_ascii_case(name))
+            .cloned();
         let previous = existing.next();
-        let mut verified_previous = previous.clone();
+        let mut previous_local_hash = None;
         let central =
             crate::core::central_repo::resolve_central_repo_path(self.paths(), self.store())
                 .map_err(|_| ServiceError::internal("failed to resolve bundled skill path"))?
@@ -198,21 +200,42 @@ impl SkillsHubService {
         let target = previous
             .as_ref()
             .map(|skill| PathBuf::from(&skill.central_path))
-            .unwrap_or(central);
-        if let Some(previous) = &mut verified_previous {
+            .unwrap_or_else(|| central.clone());
+        if let Some(previous) = &previous {
             if previous.source_type != "bundled" || previous.name != name {
                 return Err(bundled_conflict(&target, "non_bundled_skill"));
             }
-            crate::core::device_sync::manifest::recover_bundled_sync_hash(self.store(), previous)
-                .map_err(|_| bundled_conflict(&target, "bundled_skill_modified"))?;
-            let safe_directory = std::fs::symlink_metadata(&target)
-                .is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink());
-            if !safe_directory
-                || previous.content_hash.is_none()
-                || hash_dir_strict(&target).ok().as_ref() != previous.content_hash.as_ref()
+            if target != central
+                || records.iter().any(|record| {
+                    record.id != previous.id
+                        && crate::core::sync_engine::paths_overlap(
+                            Path::new(&record.central_path),
+                            &target,
+                        )
+                        .unwrap_or(true)
+                })
             {
-                return Err(bundled_conflict(&target, "bundled_skill_modified"));
+                return Err(bundled_conflict(&target, "unowned_library_path"));
             }
+            if !std::fs::symlink_metadata(&target)
+                .is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink())
+                || !target.parent().is_some_and(|parent| {
+                    std::fs::symlink_metadata(parent)
+                        .is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink())
+                })
+            {
+                return Err(bundled_conflict(&target, "unsafe_library_path"));
+            }
+            for entry in walkdir::WalkDir::new(&target).follow_links(false) {
+                let entry = entry.map_err(|_| bundled_conflict(&target, "library_io_error"))?;
+                if !entry.file_type().is_dir() && !entry.file_type().is_file() {
+                    return Err(bundled_conflict(&target, "unsafe_library_path"));
+                }
+            }
+            previous_local_hash = Some(
+                hash_dir_strict(&target)
+                    .map_err(|_| bundled_conflict(&target, "library_io_error"))?,
+            );
         } else if std::fs::symlink_metadata(&target)
             .map(|_| true)
             .unwrap_or_else(|error| error.kind() != std::io::ErrorKind::NotFound)
@@ -259,7 +282,7 @@ impl SkillsHubService {
             staging,
             record,
             previous,
-            previous_local_hash: verified_previous.and_then(|record| record.content_hash),
+            previous_local_hash,
         })
     }
 
@@ -271,7 +294,8 @@ impl SkillsHubService {
         use crate::core::sync_engine::PreparedDirReplacement;
         let path = Path::new(&bundled.record.central_path);
         let unchanged = bundled.previous.as_ref().is_some_and(|previous| {
-            previous.content_hash == bundled.record.content_hash
+            bundled.previous_local_hash == bundled.record.content_hash
+                && previous.content_hash == bundled.record.content_hash
                 && previous.source_revision == bundled.record.source_revision
         });
         if unchanged {

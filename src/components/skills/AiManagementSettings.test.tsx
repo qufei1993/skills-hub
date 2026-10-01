@@ -363,3 +363,14 @@ it('does not report setup failure when only the library refresh fails after succ
   expect(invoke.mock.calls.filter(([name]) => name === 'enable_ai_management')).toHaveLength(1)
   expect(changed).toHaveBeenCalledOnce()
 })
+
+it('offers an official Skill content update even when the version and CLI are current', async () => {
+  const state = fixture()
+  Object.assign(state, { officialState: 'healthy', installed: true, skillId: 'id', installedVersion: state.bundledVersion, skillUpdateAvailable: true })
+  state.agents[0].deployed = true
+  const invoke = vi.fn(async () => state)
+  render(<AiManagementSettings isTauri invokeTauri={invoke} onChanged={() => {}} onOpenSkill={() => {}} t={t} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'aiManagement.update' }))
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('enable_ai_management', { operationId: expect.any(String) }))
+  expect(screen.queryByText('aiManagement.ready')).toBeNull()
+})

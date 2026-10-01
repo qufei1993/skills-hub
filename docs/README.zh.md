@@ -205,7 +205,7 @@ skillshub-cli --help
 
 升级时重新执行同一条安装命令即可。这份独立 CLI 与桌面端管理的 CLI 分开维护，不会随桌面端自动升级。卸载时删除安装目录中的 `skillshub-cli`（Windows 为 `skillshub-cli.exe`）即可，技能库会保留。
 
-CLI 与桌面端共用本地技能库，但单独安装 CLI 不会自动安装官方 AI 管理 Skill。设备同步、定时任务、账号授权和应用设置仍需使用桌面端。Linux 下载文件面向 GNU/glibc 系统，不适用于 Alpine/musl。
+CLI 与桌面端共用本地技能库，但单独安装 CLI 不会自动安装官方 AI 管理 Skill。设备同步、定时任务、账号授权和应用设置仍需使用桌面端。Linux x64 与 ARM64 桌面安装包及 CLI 要求 Ubuntu 24.04 或兼容 GNU/glibc 发行版，glibc 至少为 2.39。Debian 包声明 `libc6 (>= 2.39)` 并保留自动生成的 WebKit 依赖；AppImage 也要求此 glibc 基线。这些构建不支持 Ubuntu 22.04、Debian 12 或 Alpine/musl。
 
 </details>
 

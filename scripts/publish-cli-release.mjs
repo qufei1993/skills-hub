@@ -14,6 +14,7 @@ function runGh(args) {
   return args[0]==='api' ? JSON.parse(result.stdout) : undefined
 }
 export async function publishCliRelease({directory,tag,sourceCommit,publish=false,notesFile,gh=runGh}) {
+  if(publish) throw new Error('CLI_RELEASE_DRAFT_ONLY')
   if(!/^[a-f0-9]{40}$/.test(sourceCommit ?? '')) throw new Error('CLI_RELEASE_SOURCE_REQUIRED')
   if(!/^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(tag)) throw new Error('CLI_RELEASE_TAG_INVALID')
   const manifests=readReleaseManifests(directory,{version:tag.slice(1),sourceCommit})
@@ -65,9 +66,8 @@ export async function publishCliRelease({directory,tag,sourceCommit,publish=fals
     release=await gh(['api',`repos/${repository}/releases/${id}`,'-H','Cache-Control: no-cache'])
     if(!release || release.id!==id || release.tag_name!==tag || !release.draft || release.body!==body) throw new Error('CLI_RELEASE_NOTES_MISMATCH')
   }
-  if(publish && release.draft) await gh(['release','edit',tag,'--repo',repository,'--draft=false',...(tag.includes('-')?[]:['--latest'])])
 }
 if(process.argv[1] && import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href) {
  try { await publishCliRelease({directory:process.argv[2],tag:process.env.GITHUB_REF_NAME,sourceCommit:process.env.GITHUB_SHA,publish:process.argv.includes('--publish'),notesFile:process.argv.includes('--notes-file')?process.argv[process.argv.indexOf('--notes-file')+1]:undefined}); console.log('CLI resources verified in the shared desktop release.') }
- catch {console.error('CLI_RELEASE_PUBLISH_FAILED: verify release access and immutable version assets.');process.exitCode=1}
+ catch(error) {console.error(error.message==='CLI_RELEASE_DRAFT_ONLY'?'CLI_RELEASE_DRAFT_ONLY: this helper can only stage draft resources.':'CLI_RELEASE_PUBLISH_FAILED: verify release access and immutable version assets.');process.exitCode=1}
 }
