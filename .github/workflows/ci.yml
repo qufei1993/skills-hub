@@ -48,6 +48,18 @@ jobs:
       - run: npm run network:check
       - run: npm run build
 
+  windows-release-scripts:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Verify release script execution on Windows
+        run: node --test scripts/release-workflow.test.mjs scripts/reuse-cli-build.test.mjs scripts/linux-release.test.mjs scripts/release-downloads.test.mjs
+
   rust:
     needs: changes
     if: always() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true')

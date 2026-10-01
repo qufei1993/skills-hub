@@ -24,6 +24,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Windows release validation**: Run multiline release-test scripts from files to preserve shell quoting on Windows, and check these scripts in pull-request CI before packaging.
+
 - **AI management after device sync**: Device sync now records the local directory checksum instead of the portable sync checksum. Enabling or updating AI management safely repairs the old official Skill record when unchanged content matches its recorded sync checksum, while preserving genuine edits. CLI recovery instructions now point to Enable.
 
 - **DeepSeek Harness custom home**: Global deployment, discovery, and installation detection now honor `DSH_HOME`, including blank-value fallback and current-user tilde expansion. Existing deployments can be safely unsynced from their recorded directory before redeploying to the new home; modified copies remain protected (fixes [#166](https://github.com/qufei1993/skills-hub/issues/166)).

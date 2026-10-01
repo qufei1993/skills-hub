@@ -9,6 +9,11 @@ const { load } = createRequire(import.meta.url)('js-yaml')
 const workflow = load(readFileSync(new URL('../.github/workflows/release.yml', import.meta.url),'utf8'))
 const api = await import('./prepare-linux-assets.mjs').catch(() => ({}))
 
+function executeWorkflowStep(run, root, env) {
+ writeFileSync(path.join(root, 'workflow-step.sh'), run)
+ return spawnSync('bash', ['workflow-step.sh'], {cwd:root, encoding:'utf8', env:{...process.env, ...env}})
+}
+
 it('stages complete Linux installers and the unchanged installer signatures with release names', () => {
  assert.equal(typeof api.prepareLinuxAssets,'function')
  for (const [target,arch] of [['x86_64-unknown-linux-gnu','x64'],['aarch64-unknown-linux-gnu','arm64']]) {
@@ -58,7 +63,7 @@ it('generates valid Linux updater entries matching each signed installer format'
    writeFileSync(path.join(root,`dl/Skills-Hub-v0.11.0-Linux-${arch}.deb.sig`),`deb-signature-${arch}\r\n`)
   }
   writeFileSync(path.join(root,'updater-notes.md'),'Quote " and slash \\ and 中文\nSecond line')
-  const result = spawnSync('bash',['-c',step.run],{cwd:root,encoding:'utf8',env:{...process.env,TAG:'v0.11.0',REPO:'qufei1993/skills-hub'}})
+  const result = executeWorkflowStep(step.run,root,{TAG:'v0.11.0',REPO:'qufei1993/skills-hub'})
   assert.equal(result.status,0,result.stderr)
   const updater = JSON.parse(readFileSync(path.join(root,'updater.json'),'utf8'))
   assert.equal(updater.version,'0.11.0')
@@ -84,7 +89,7 @@ it('adds download tables only to the GitHub page while updater notes contain cha
   writeFileSync(path.join(root,'dl/Skills-Hub-v0.11.0-Linux-x64.deb'),'installer')
   const steps = workflow.jobs['assemble-updater-json'].steps.filter(step => /Generate (release|updater) notes from changelog/.test(step.name ?? ''))
   for (const step of steps) {
-   const result = spawnSync('bash',['-c',step.run],{cwd:root,encoding:'utf8',env:{...process.env,TAG:'v0.11.0'}})
+   const result = executeWorkflowStep(step.run,root,{TAG:'v0.11.0'})
    assert.equal(result.status,0,result.stderr)
   }
   const page = readFileSync(path.join(root,'release-notes.md'),'utf8')
@@ -102,7 +107,7 @@ it('adds download tables only to the GitHub page while updater notes contain cha
   const generate = workflow.jobs['assemble-updater-json'].steps.find(step => step.name === 'Generate updater.json')
   writeFileSync(path.join(root,'dl/Skills-Hub-v0.11.0-Linux-x64.AppImage'),'appimage')
   writeFileSync(path.join(root,'dl/Skills-Hub-v0.11.0-Linux-x64.AppImage.sig'),'signature')
-  const result = spawnSync('bash',['-c',generate.run],{cwd:root,encoding:'utf8',env:{...process.env,TAG:'v0.11.0',REPO:'qufei1993/skills-hub'}})
+  const result = executeWorkflowStep(generate.run,root,{TAG:'v0.11.0',REPO:'qufei1993/skills-hub'})
   assert.equal(result.status,0,result.stderr)
   assert.equal(JSON.parse(readFileSync(path.join(root,'updater.json'),'utf8')).notes,updater.trimEnd())
  } finally { rmSync(root,{recursive:true,force:true}) }
