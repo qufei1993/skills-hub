@@ -79,7 +79,11 @@ const AiManagementSettings = ({ focusOnMount = false, initialStatus = null, onSt
         setStatus(result)
         onStatusChanged?.(result)
       }
-      await onChanged()
+      try {
+        await onChanged()
+      } catch {
+        if (mounted.current) setError('refresh')
+      }
     } catch (cause) {
       const message = String(cause)
       if (mounted.current) setError(message.includes('CLI_TERMINAL_UNAVAILABLE') ? 'terminal'
@@ -121,7 +125,8 @@ const AiManagementSettings = ({ focusOnMount = false, initialStatus = null, onSt
     && activeDeployment
   const conflict = status?.officialState === 'name_conflict'
   const inactive = !updatePending && status?.installed && status.terminalReady && status.officialState === 'healthy' && status.bridge.status === 'valid' && (!status.skillEnabled || !activeDeployment)
-  const pathConflictOnly = status?.terminalPathConflict && !updatePending && status.installed && status.bridge.status === 'valid' && status.officialState === 'healthy'
+  const pathConflictOnly = status?.terminalReady && status.terminalPathConflict && !updatePending && status.installed && status.bridge.status === 'valid' && status.officialState === 'healthy'
+  const cliInstallationFailure = error && ['unavailable', 'download', 'integrity', 'cli'].includes(error)
   return <section ref={cardRef} tabIndex={-1} className={`settings-card ai-management-card${focusOnMount ? ' ai-management-card-highlight' : ''}${ready ? ' ai-management-card-ready' : ''}`} aria-label={t('aiManagement.title')} aria-busy={pending}>
     <div className="settings-card-head">
       <span className="settings-card-icon"><Bot size={18} aria-hidden="true" /></span>
@@ -159,7 +164,8 @@ const AiManagementSettings = ({ focusOnMount = false, initialStatus = null, onSt
           <dt>{t('agentAccess.cliStatus')}</dt><dd>{t(`agentAccess.bridgeState.${status.bridge.status}`)}</dd>
           <dt>{t('agentAccess.cliVersion')}</dt><dd>{status.bridge.version ?? t('agentAccess.unknown')}</dd>
           <dt>{t('agentAccess.cliPath')}</dt><dd><code>{status.bridge.path}</code></dd>
-          {status.bridge.reason ? <><dt>{t('agentAccess.checkReason')}</dt><dd>{t(`agentAccess.reason.${status.bridge.reason}`)}</dd></> : null}
+          {status.bridge.reason ? <><dt>{t('agentAccess.checkReason')}</dt><dd>{t(cliInstallationFailure ? 'aiManagement.cliNeedsInstallation' : `agentAccess.reason.${status.bridge.reason}`)}</dd></> : null}
+          {cliInstallationFailure ? <><dt>{t('aiManagement.cliInstallationFailure')}</dt><dd>{t(`aiManagement.errors.${error}`)}</dd></> : null}
           <dt>{t('agentAccess.officialSkill')}</dt><dd>manage-skills-hub</dd>
           <dt>{t('agentAccess.installedVersion')}</dt><dd>{status.installedVersion ?? t('agentAccess.notInstalled')}</dd>
           {status.centralReason ? <><dt>{t('agentAccess.checkReason')}</dt><dd>{t(`agentAccess.healthReason.${status.centralReason}`)}</dd></> : null}

@@ -204,7 +204,14 @@ impl SkillsHubService {
                 OfficialSkillState::NameConflict
             } else if skill.is_none() {
                 OfficialSkillState::Missing
-            } else if central_reason.is_some() || health.iter().any(|agent| agent.needs_repair) {
+            } else if central_reason.is_some()
+                || health.iter().any(|health| {
+                    health.needs_repair
+                        && agents.agents.iter().any(|agent| {
+                            agent.key == health.agent && agent.enabled && agent.detected
+                        })
+                })
+            {
                 OfficialSkillState::NeedsRepair
             } else {
                 OfficialSkillState::Healthy

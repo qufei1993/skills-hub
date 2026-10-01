@@ -121,12 +121,15 @@ export const resources = {
   "terminalReady": "Open a new terminal and verify skillshub-cli points to the CLI path shown below.",
   "inactive": "The official Skill is installed but not active in a local tool. Manage its switch and sync targets in My Skills.",
   "viewSkill": "View Skill",
+  "cliNeedsInstallation": "The local CLI needs installation or an update. Installation did not finish; see the failure reason below.",
+  "cliInstallationFailure": "CLI installation failure",
   "details": "Installation status",
   "errors": {
     "download": "Download failed. Check your connection and proxy settings, then retry.",
-    "unavailable": "The component for this version is not available yet. Please retry later.",
+    "unavailable": "The CLI download for this version is not public or the asset is missing. GitHub draft releases cannot provide automatic CLI downloads. Publish the release with the CLI asset for this platform before enabling.",
     "integrity": "The downloaded component did not pass verification. Retry to download it again.",
 
+    "refresh": "AI management was enabled, but the Skill list could not be refreshed. Reopen My Skills to refresh it.",
     "read": "Could not read the status. Refresh to try again.",
     "cli": "The management component could not be prepared. Retry, or reinstall the desktop app if the problem persists.",
     "terminal": "Could not configure the terminal command. macOS/Linux supports Bash and Zsh only. Check shell profile permissions or Windows user PATH, then retry.",
@@ -1370,12 +1373,15 @@ export const resources = {
   "terminalReady": "请打开新终端，确认 skillshub-cli 指向下方所示路径。",
   "inactive": "官方 Skill 已安装，但尚未在本机工具中启用。请在「我的 Skills」中管理开关和同步工具。",
   "viewSkill": "查看 Skill",
+  "cliNeedsInstallation": "本机 CLI 需要安装或更新，但本次安装未完成，原因见下方。",
+  "cliInstallationFailure": "CLI 安装失败原因",
   "details": "安装状态",
   "errors": {
     "download": "下载失败，请检查网络和代理设置后重试。",
-    "unavailable": "当前版本的管理组件暂不可下载，请稍后重试。",
+    "unavailable": "当前版本的 CLI 下载资源尚未公开或缺失。GitHub 草稿版本无法自动下载 CLI，请在版本公开发布且包含对应平台的 CLI 资源后再启用。",
     "integrity": "下载文件未通过校验，请重试以重新下载。",
 
+    "refresh": "AI 管理已启用，但 Skill 列表刷新失败，请重新进入「我的 Skills」刷新。",
     "read": "暂时无法读取状态，请刷新重试。",
     "cli": "管理组件未能准备完成，请重试；若仍失败，请重新安装桌面应用。",
     "terminal": "终端命令配置失败。macOS/Linux 暂仅支持 Bash、Zsh；请检查配置文件权限或 Windows 用户 PATH 后重试。",

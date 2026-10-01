@@ -8,6 +8,41 @@ use crate::services::operation_lock::{OperationKind, OperationLock};
 use crate::services::skills_hub::SkillsHubService;
 
 #[test]
+fn one_click_management_ignores_unavailable_and_disabled_historical_targets() {
+    use crate::core::tool_adapters::{save_tool_config, ToolConfig};
+    use crate::services::agent_access::OfficialSkillState;
+    for disabled in [false, true] {
+        let f = Fixture::new();
+        f.service.enable_ai_management().unwrap();
+        let detached = f.home.path().join("cursor-detached");
+        fs::rename(f.home.path().join(".cursor"), &detached).unwrap();
+        if disabled {
+            fs::create_dir(f.home.path().join(".cursor")).unwrap();
+            save_tool_config(
+                f.service.store(),
+                ToolConfig {
+                    disabled_builtin_tools: vec!["cursor".into()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        for _ in 0..2 {
+            let status = f.service.enable_ai_management().unwrap();
+            assert!(matches!(status.official_state, OfficialSkillState::Healthy));
+            let historical = status
+                .health
+                .iter()
+                .find(|agent| agent.agent == "cursor")
+                .unwrap();
+            assert!(historical.needs_repair);
+            assert!(!f.target("cursor").exists());
+            assert!(detached.join("skills/manage-skills-hub/SKILL.md").exists());
+        }
+    }
+}
+
+#[test]
 fn one_click_management_installs_once_and_syncs_detected_enabled_tools() {
     let f = Fixture::new();
     let status = f.service.enable_ai_management().unwrap();

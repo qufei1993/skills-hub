@@ -122,12 +122,15 @@ export const ko = {
   "terminalReady": "새 터미널에서 skillshub-cli가 아래 경로를 가리키는지 확인하세요.",
   "inactive": "공식 Skill이 설치되어 있지만 로컬 도구에서 활성화되지 않았습니다. 내 Skills에서 활성화 상태와 동기화 도구를 관리하세요.",
   "viewSkill": "Skill 보기",
+  "cliNeedsInstallation": "로컬 CLI를 설치하거나 업데이트해야 하지만 이번 설치가 완료되지 않았습니다. 아래 실패 원인을 확인하세요.",
+  "cliInstallationFailure": "CLI 설치 실패 원인",
   "details": "설치 상태",
   "errors": {
     "download": "다운로드하지 못했습니다. 네트워크와 프록시 설정을 확인한 뒤 다시 시도하세요.",
-    "unavailable": "이 버전의 관리 구성 요소를 아직 다운로드할 수 없습니다. 나중에 다시 시도하세요.",
+    "unavailable": "이 버전의 CLI 다운로드가 공개되지 않았거나 파일이 없습니다. GitHub 초안 릴리스에서는 CLI를 자동으로 다운로드할 수 없습니다. 이 플랫폼의 CLI 파일을 포함하여 릴리스를 공개한 후 활성화하세요.",
     "integrity": "다운로드한 구성 요소가 검증을 통과하지 못했습니다. 다시 다운로드하세요.",
 
+    "refresh": "AI 관리가 활성화되었지만 Skill 목록을 새로 고치지 못했습니다. 내 Skills를 다시 열어 새로 고치세요.",
     "read": "상태를 읽을 수 없습니다. 새로 고침 후 다시 시도하세요.",
     "cli": "관리 구성 요소를 준비하지 못했습니다. 다시 시도하거나 데스크톱 앱을 재설치하세요.",
     "terminal": "터미널 명령을 설정하지 못했습니다. macOS/Linux에서는 Bash와 Zsh만 지원합니다. 설정 파일 권한 또는 Windows 사용자 PATH를 확인한 뒤 다시 시도하세요.",
