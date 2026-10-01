@@ -1096,7 +1096,15 @@ fn agent_access_official_skill_covers_the_automation_safety_contract() {
         "/../skills/manage-skills-hub/SKILL.md"
     ))
     .unwrap_or_default();
-    assert!(content.starts_with("---\nname: manage-skills-hub\ndescription:"));
+    let crlf_content = content.replace("\r\n", "\n").replace('\n', "\r\n");
+    for content in [&content, &crlf_content] {
+        let mut lines = content.lines();
+        assert_eq!(lines.next(), Some("---"));
+        assert_eq!(lines.next(), Some("name: manage-skills-hub"));
+        assert!(lines
+            .next()
+            .is_some_and(|line| line.starts_with("description:")));
+    }
     for requirement in [
         "--json",
         "SHA-256",
@@ -1454,4 +1462,125 @@ fn official_status_distinguishes_content_edits_from_bundle_updates() {
         Some(super::super::agent_access::AgentAccessReason::CentralModified)
     );
     assert!(!status.skill_update_available);
+}
+
+#[test]
+fn official_recovery_recreates_missing_managed_central_directory_without_status_writes() {
+    let f = Fixture::new();
+    f.service.enable_ai_management().unwrap();
+    let original = f.service.store().list_skills().unwrap().pop().unwrap();
+    let central = PathBuf::from(&original.central_path);
+    fs::remove_dir_all(&central).unwrap();
+    for _ in 0..2 {
+        let status = f.service.agent_access_status().unwrap();
+        assert_eq!(
+            status.central_reason,
+            Some(super::super::agent_access::AgentAccessReason::CentralMissing)
+        );
+        assert!(!central.exists());
+        assert_eq!(
+            f.service
+                .store()
+                .get_skill_by_id(&original.id)
+                .unwrap()
+                .unwrap(),
+            original
+        );
+    }
+    f.service.preflight_ai_management().unwrap();
+    assert!(!central.exists());
+    assert_eq!(
+        f.service
+            .store()
+            .get_skill_by_id(&original.id)
+            .unwrap()
+            .unwrap(),
+        original
+    );
+    let status = f.service.enable_ai_management().unwrap();
+    assert_eq!(status.skill_id.as_deref(), Some(original.id.as_str()));
+    assert_eq!(status.central_reason, None);
+    assert!(matches!(
+        status.official_state,
+        super::super::agent_access::OfficialSkillState::Healthy
+    ));
+    assert_eq!(
+        fs::read_to_string(central.join("SKILL.md")).unwrap(),
+        super::super::agent_access::OFFICIAL_SKILL_MD
+    );
+    for agent in ["codex", "cursor"] {
+        assert_eq!(
+            fs::read_to_string(f.target(agent).join("SKILL.md")).unwrap(),
+            super::super::agent_access::OFFICIAL_SKILL_MD
+        );
+        assert!(status
+            .health
+            .iter()
+            .any(|health| health.agent == agent && health.deployed && !health.needs_repair));
+    }
+}
+
+#[test]
+fn official_missing_central_recovery_rolls_back_to_missing_files_and_original_record() {
+    let f = Fixture::new();
+    f.service.enable_ai_management().unwrap();
+    let original = f.service.store().list_skills().unwrap().pop().unwrap();
+    let central = PathBuf::from(&original.central_path);
+    fs::remove_dir_all(&central).unwrap();
+    let bundled = f
+        .service
+        .prepare_bundled_install(
+            "manage-skills-hub",
+            super::super::agent_access::OFFICIAL_SKILL_MD,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .unwrap();
+    let result: Result<(), _> = f.service.apply_bundled_install(bundled, || {
+        Err(crate::services::error::ServiceError::internal(
+            "deployment failed",
+        ))
+    });
+    assert!(result.is_err());
+    assert!(!central.exists());
+    assert_eq!(
+        f.service
+            .store()
+            .get_skill_by_id(&original.id)
+            .unwrap()
+            .unwrap(),
+        original
+    );
+}
+
+#[test]
+fn official_missing_central_recovery_preserves_a_directory_created_after_preflight() {
+    let f = Fixture::new();
+    f.service.enable_ai_management().unwrap();
+    let original = f.service.store().list_skills().unwrap().pop().unwrap();
+    let central = PathBuf::from(&original.central_path);
+    fs::remove_dir_all(&central).unwrap();
+    let bundled = f
+        .service
+        .prepare_bundled_install(
+            "manage-skills-hub",
+            super::super::agent_access::OFFICIAL_SKILL_MD,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .unwrap();
+    fs::create_dir(&central).unwrap();
+    fs::write(central.join("SKILL.md"), "concurrent user content").unwrap();
+    let result = f.service.apply_bundled_install(bundled, || Ok(()));
+    assert!(result.is_err());
+    assert_eq!(
+        fs::read_to_string(central.join("SKILL.md")).unwrap(),
+        "concurrent user content"
+    );
+    assert_eq!(
+        f.service
+            .store()
+            .get_skill_by_id(&original.id)
+            .unwrap()
+            .unwrap(),
+        original
+    );
 }

@@ -28,6 +28,10 @@ pub(super) struct BundledInstall {
 }
 
 impl BundledInstall {
+    pub fn preview_content_source(&self) -> Option<&Path> {
+        (self.previous.is_some() && self.previous_local_hash.is_none()).then(|| self.staging.path())
+    }
+
     pub fn preview_record(&self) -> crate::core::skill_store::SkillRecord {
         if let Some(previous) = &self.previous {
             let mut record = previous.clone();
@@ -217,25 +221,30 @@ impl SkillsHubService {
             {
                 return Err(bundled_conflict(&target, "unowned_library_path"));
             }
-            if !std::fs::symlink_metadata(&target)
-                .is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink())
-                || !target.parent().is_some_and(|parent| {
-                    std::fs::symlink_metadata(parent)
-                        .is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink())
-                })
-            {
+            if !target.parent().is_some_and(|parent| {
+                std::fs::symlink_metadata(parent)
+                    .is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink())
+            }) {
                 return Err(bundled_conflict(&target, "unsafe_library_path"));
             }
-            for entry in walkdir::WalkDir::new(&target).follow_links(false) {
-                let entry = entry.map_err(|_| bundled_conflict(&target, "library_io_error"))?;
-                if !entry.file_type().is_dir() && !entry.file_type().is_file() {
-                    return Err(bundled_conflict(&target, "unsafe_library_path"));
+            let missing = match std::fs::symlink_metadata(&target) {
+                Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => false,
+                Ok(_) => return Err(bundled_conflict(&target, "unsafe_library_path")),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+                Err(_) => return Err(bundled_conflict(&target, "library_io_error")),
+            };
+            if !missing {
+                for entry in walkdir::WalkDir::new(&target).follow_links(false) {
+                    let entry = entry.map_err(|_| bundled_conflict(&target, "library_io_error"))?;
+                    if !entry.file_type().is_dir() && !entry.file_type().is_file() {
+                        return Err(bundled_conflict(&target, "unsafe_library_path"));
+                    }
                 }
+                previous_local_hash = Some(
+                    hash_dir_strict(&target)
+                        .map_err(|_| bundled_conflict(&target, "library_io_error"))?,
+                );
             }
-            previous_local_hash = Some(
-                hash_dir_strict(&target)
-                    .map_err(|_| bundled_conflict(&target, "library_io_error"))?,
-            );
         } else if std::fs::symlink_metadata(&target)
             .map(|_| true)
             .unwrap_or_else(|error| error.kind() != std::io::ErrorKind::NotFound)
@@ -305,10 +314,10 @@ impl SkillsHubService {
             bundled.staging.path(),
             path,
             bundled.previous_local_hash.clone(),
-            bundled.previous.is_none(),
+            bundled.previous_local_hash.is_none(),
         )
         .map_err(|_| bundled_conflict(path, "bundled_stage_failed"))?;
-        if bundled.previous.is_none() {
+        if bundled.previous_local_hash.is_none() {
             replacement.activate_missing_only()
         } else {
             replacement.activate().map(|_| ())

@@ -301,7 +301,12 @@ impl SkillsHubService {
             let preview = self.skill_from_record(bundled.preview_record(), None)?;
             let deployment =
                 DeploymentRequest::global(bundled.record.id.clone(), request.agents.clone());
-            let plan = self.plan_deployment_for_skill(deployment, false, preview)?;
+            let plan = self.plan_deployment_for_skill_with_content_source(
+                deployment,
+                false,
+                preview,
+                bundled.preview_content_source(),
+            )?;
             if restrict_to_selected {
                 if let Some(target) = plan.targets.iter().find(|target| {
                     target

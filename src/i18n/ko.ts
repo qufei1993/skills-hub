@@ -217,7 +217,7 @@ export const ko = {
         "PUBLICATION_IN_PROGRESS": "CLI 게시 중입니다. 완료된 후 새로고침하세요."
       },
       "healthReason": {
-        "CENTRAL_MISSING": "공식 라이브러리 사본이 없습니다. 사본을 복원한 후 연결을 복구하세요.",
+        "CENTRAL_MISSING": "관리되는 공식 Skill이 없습니다. 활성화를 클릭하여 앱에 포함된 버전을 복원하세요.",
         "CENTRAL_MODIFIED": "관리되는 공식 Skill이 변경되었습니다. 활성화를 클릭하여 앱에 포함된 버전으로 교체하세요.",
         "CENTRAL_IO_ERROR": "공식 Skill을 읽을 수 없습니다. 폴더 권한을 확인한 후 다시 시도하세요.",
         "CENTRAL_UNSAFE_PATH": "공식 Skill 경로가 일반 관리 디렉터리가 아닙니다. 위치를 복원한 후 다시 시도하세요.",

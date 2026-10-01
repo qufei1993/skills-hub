@@ -216,7 +216,7 @@ export const resources = {
           "PUBLICATION_IN_PROGRESS": "CLI publication is in progress. Refresh after it finishes."
         },
         "healthReason": {
-          "CENTRAL_MISSING": "The official library copy is missing. Restore it before repairing access.",
+          "CENTRAL_MISSING": "The managed official Skill is missing. Click Enable to restore the bundled version.",
           "CENTRAL_MODIFIED": "The managed official Skill has changed. Click Enable to replace it with the bundled version.",
           "CENTRAL_IO_ERROR": "The official Skill cannot be read. Check folder permissions and retry.",
           "CENTRAL_UNSAFE_PATH": "The official Skill path is not a regular managed directory. Restore its location and retry.",
@@ -1470,7 +1470,7 @@ export const resources = {
           "PUBLICATION_IN_PROGRESS": "正在发布 CLI，请稍后刷新。"
         },
         "healthReason": {
-          "CENTRAL_MISSING": "中央库中的官方副本缺失，请先恢复副本再修复接入。",
+          "CENTRAL_MISSING": "受管理的官方 Skill 已丢失，点击启用即可恢复应用内置版本。",
           "CENTRAL_MODIFIED": "受管理的官方 Skill 内容已变化，点击启用即可替换为应用内置版本。",
           "CENTRAL_IO_ERROR": "无法读取官方 Skill，请检查目录权限后重试。",
           "CENTRAL_UNSAFE_PATH": "官方 Skill 路径不是普通的受管理目录，请恢复其位置后重试。",

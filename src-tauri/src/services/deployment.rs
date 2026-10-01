@@ -169,6 +169,16 @@ impl SkillsHubService {
         undeploy: bool,
         skill: Skill,
     ) -> Result<DeploymentPlan, ServiceError> {
+        self.plan_deployment_for_skill_with_content_source(request, undeploy, skill, None)
+    }
+
+    pub(super) fn plan_deployment_for_skill_with_content_source(
+        &self,
+        request: DeploymentRequest,
+        undeploy: bool,
+        skill: Skill,
+        content_source: Option<&Path>,
+    ) -> Result<DeploymentPlan, ServiceError> {
         self.ensure_database_compatible()?;
         if request.agents.is_empty() || request.agents.iter().any(|agent| agent.trim().is_empty()) {
             return Err(ServiceError::new(
@@ -190,9 +200,10 @@ impl SkillsHubService {
             ));
         }
         let source = PathBuf::from(&skill.central_path);
-        let source_hash = hash_dir_strict(&source)
+        let inspection_source = content_source.unwrap_or(&source);
+        let source_hash = hash_dir_strict(inspection_source)
             .map_err(|_| ServiceError::internal("failed to inspect the central skill"))?;
-        let conflict_hash = hash_dir_for_sync_conflict(&source)
+        let conflict_hash = hash_dir_for_sync_conflict(inspection_source)
             .map_err(|_| ServiceError::internal("failed to inspect the central skill"))?;
         let agents = self.list_agents()?.agents;
         let project = match &request.scope {
