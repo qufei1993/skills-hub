@@ -1016,4 +1016,4 @@ jobs:
       - name: Verify CLI assets in the complete release draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/publish-cli-release.mjs cli-resources
+        run: node scripts/publish-cli-release.mjs cli-resources --notes-file release-notes.md

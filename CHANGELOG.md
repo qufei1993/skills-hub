@@ -24,6 +24,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Preserve generated release notes and download tables when CLI resources pre-create a shared draft.
+
 - **Independent Linux ARM64 CLI**: Release linking removes unused desktop-library dependencies. Linux CLI binaries are checked for GUI dependencies and started in a minimal Ubuntu container before publication.
 
 - **Windows release validation**: Run multiline release-test scripts from files to preserve shell quoting on Windows, and check these scripts in pull-request CI before packaging.
