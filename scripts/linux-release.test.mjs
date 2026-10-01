@@ -132,3 +132,48 @@ it('packages both Linux architectures natively and verifies extracted installers
  assert.match(steps[verify].run,/verify-linux-packages\.sh/)
  assert.ok(verify < steps.findIndex(step => step.name === 'Upload workflow artifacts'))
 })
+
+
+const cliDependencies = await import('./verify-linux-cli.mjs')
+function elfFixture(dependencies, machine = 183) {
+ const strings = Buffer.from('\0' + dependencies.join('\0') + '\0')
+ const dynamicOffset = 64 + 3 * 64
+ const dynamicSize = (dependencies.length + 1) * 16
+ const stringOffset = dynamicOffset + dynamicSize
+ const bytes = Buffer.alloc(stringOffset + strings.length)
+ bytes.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1])
+ bytes.writeUInt16LE(machine,18)
+ bytes.writeBigUInt64LE(64n,40)
+ bytes.writeUInt16LE(64,58)
+ bytes.writeUInt16LE(3,60)
+ bytes.writeUInt32LE(6,64+64+4)
+ bytes.writeBigUInt64LE(BigInt(dynamicOffset),64+64+24)
+ bytes.writeBigUInt64LE(BigInt(dynamicSize),64+64+32)
+ bytes.writeUInt32LE(2,64+64+40)
+ bytes.writeUInt32LE(3,64+128+4)
+ bytes.writeBigUInt64LE(BigInt(stringOffset),64+128+24)
+ bytes.writeBigUInt64LE(BigInt(strings.length),64+128+32)
+ let index = 1
+ for (let i=0;i<dependencies.length;i++) {
+  bytes.writeBigUInt64LE(1n,dynamicOffset+i*16)
+  bytes.writeBigUInt64LE(BigInt(index),dynamicOffset+i*16+8)
+  index+=Buffer.byteLength(dependencies[i])+1
+ }
+ strings.copy(bytes,stringOffset)
+ return bytes
+}
+
+it('allows standalone Linux CLI dependencies on both native architectures', () => {
+ const dependencies=['libdbus-1.so.3','libz.so.1','libgcc_s.so.1','libm.so.6','libc.so.6']
+ for (const machine of [62,183]) assert.deepEqual(cliDependencies.verifyLinuxCli(elfFixture(dependencies,machine)),dependencies)
+})
+it('rejects GUI libraries retained by the ARM64 CLI linker', () => {
+ for (const library of ['libwebkit2gtk-4.1.so.0','libgtk-3.so.0','libsoup-3.0.so.0','libjavascriptcoregtk-4.1.so.0','libgdk-3.so.0']) {
+  assert.throws(()=>cliDependencies.verifyLinuxCli(elfFixture(['libc.so.6',library])),/CLI_GUI_RUNTIME_DEPENDENCY/)
+ }
+})
+it('rejects malformed executables instead of reporting a dependency-free CLI', () => {
+ assert.throws(()=>cliDependencies.verifyLinuxCli(Buffer.from('not an ELF')))
+ const truncated=elfFixture(['libc.so.6']).subarray(0,80)
+ assert.throws(()=>cliDependencies.verifyLinuxCli(truncated))
+})

@@ -8,6 +8,8 @@ on:
       - .github/workflows/release.yml
       - scripts/prepare-linux-assets.mjs
       - scripts/verify-linux-packages.sh
+      - scripts/verify-linux-cli.mjs
+      - scripts/verify-linux-cli.sh
       - scripts/verify-desktop-bundle.mjs
       - scripts/release-downloads.mjs
       - src-tauri/tauri.conf.json
@@ -21,6 +23,8 @@ on:
       - .github/workflows/release.yml
       - scripts/prepare-linux-assets.mjs
       - scripts/verify-linux-packages.sh
+      - scripts/verify-linux-cli.mjs
+      - scripts/verify-linux-cli.sh
       - src-tauri/tauri.conf.json
 
 permissions:
@@ -52,6 +56,10 @@ jobs:
           node-version: 22
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
+      - name: Configure Linux ARM64 linker
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        shell: bash
+        run: echo 'RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=lld' >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
@@ -60,12 +68,16 @@ jobs:
       - name: Install Linux desktop dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb xauth xdotool
+          sudo apt-get install -y clang lld libglib2.0-dev libgtk-3-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb xauth xdotool
       - run: npm ci
       - run: npm run version:check
       - run: npm run build
       - name: Prepare current native CLI metadata
         run: npm run cli:prepare -- --target ${{ matrix.target }}
+      - name: Verify Linux CLI in a headless Ubuntu container
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash scripts/verify-linux-cli.sh "src-tauri/binaries/skillshub-cli-${{ matrix.target }}"
       - name: Prepare disposable CI signing key
         shell: bash
         run: |
