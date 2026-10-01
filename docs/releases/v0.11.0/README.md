@@ -58,3 +58,5 @@ The compatibility test uses a frozen v0.10.1 shared-schema fixture, performs CLI
 - [Standalone CLI installation](cli-installation.md)
 
 - [AI management after device sync](ai-management-sync-hash.md)
+
+- [Release build reuse](build-performance.md)

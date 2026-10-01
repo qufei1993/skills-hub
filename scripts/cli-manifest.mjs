@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, rmSync, lstatSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -31,6 +31,13 @@ export function createCliManifest({ binaryPath, version, sourceCommit, target, p
     assetName: `skillshub-cli-${version}-${cliPlatforms[target]}${target.includes('windows') ? '.exe' : ''}`,
     size: binary.length, sha256: createHash('sha256').update(binary).digest('hex') }
   return validateCliManifest(manifest, { version, sourceCommit, target, profile })
+}
+export function verifyCliBinary(manifest, binaryPath, expected) {
+  validateCliManifest(manifest, expected)
+  if (!lstatSync(binaryPath).isFile()) throw new Error('CLI_INTEGRITY_FAILED')
+  const actual = createCliManifest({ binaryPath, ...expected })
+  if (actual.size !== manifest.size || actual.sha256 !== manifest.sha256) throw new Error('CLI_INTEGRITY_FAILED')
+  return manifest
 }
 export function writeCliManifest(filename, manifest) {
   const temporary = `${filename}.${process.pid}.tmp`

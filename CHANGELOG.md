@@ -24,6 +24,8 @@ Desktop users only need the installer. The CLI downloads automatically when you 
 
 ### Improved
 
+- **Release build reuse**: Native validation and tests share one target directory. Signing reuses the verified release CLI instead of compiling it again; native CI and desktop jobs share per-platform release dependency caches while ordinary Rust CI keeps a separate debug cache; desktop packaging downloads only its matching CLI manifest. Native verification, signatures and draft publication gates remain enforced.
+
 - **AI management guidance and Settings**: A dismissible My Skills notice leads to the AI management card before the official Skill is installed. Installation details are collapsed by default; background checks retain the current status and View Skill action. Network and storage settings can also collapse while retaining summaries.
 - **Default tool sync**: AI installations sync to detected, enabled tools by default. Explicit tool choices, library-only requests, and project scope take precedence. Incomplete sync is reported separately.
 - **Shared library refresh**: Returning to the app, entering library or tag pages, or opening tag filters refreshes Skills and tags while preserving filters. AI changes appear without restarting.

@@ -84,7 +84,7 @@ it('notarization gate accepts only Accepted JSON and never echoes untrusted resp
   }
 })
 
-it('desktop release has no npm publication dependency and retains native CLI preparation', () => {
+it('desktop release has no npm publication dependency and reuses native verified CLI builds', () => {
   assert.deepEqual(needs(workflow.jobs['assemble-updater-json']), ['verify', 'desktop-build', 'cli-publish'])
   for (const job of Object.values(workflow.jobs)) {
     assert.ok(needs(job).every(name => Object.hasOwn(workflow.jobs, name)))
@@ -94,7 +94,8 @@ it('desktop release has no npm publication dependency and retains native CLI pre
     }
   }
   const commands = workflow.jobs['cli-build'].steps.map(step => step.run ?? '').join('\n')
-  assert.match(commands, /npm run cli:prepare/)
+  assert.doesNotMatch(commands, /npm run cli:prepare/)
+  assert.ok(workflow.jobs['cli-build'].steps.some(step => step.name === 'Verify reused CLI build'))
   assert.match(commands, /cli-manifest/)
 })
 
@@ -131,7 +132,7 @@ it('separates CLI and desktop builds and keeps the complete release as a draft',
   }
   assert.ok(!finalSteps.some(step => /verify-cli-release\.mjs/.test(step.run ?? '')))
   const desktop = workflow.jobs['desktop-build'].steps
-  assert.ok(desktop.some(step => step.uses === 'actions/download-artifact@v4' && step.with.pattern === 'cli-assets-*'))
+  assert.ok(desktop.some(step => step.uses === 'actions/download-artifact@v4' && step.with.name === 'cli-manifest-${{ matrix.target }}'))
   assert.ok(desktop.some(step => /verify-desktop-bundle\.mjs/.test(step.run ?? '')))
   assert.ok(!desktop.some(step => /npm run cli:prepare/.test(step.run ?? '')))
 })
