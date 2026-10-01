@@ -24,6 +24,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Independent Linux ARM64 CLI**: Release linking removes unused desktop-library dependencies. Linux CLI binaries are checked for GUI dependencies and started in a minimal Ubuntu container before publication.
+
 - **Windows release validation**: Run multiline release-test scripts from files to preserve shell quoting on Windows, and check these scripts in pull-request CI before packaging.
 
 - **AI management after device sync**: Device sync now records the local directory checksum instead of the portable sync checksum. Enabling or updating AI management safely repairs the old official Skill record when unchanged content matches its recorded sync checksum, while preserving genuine edits. CLI recovery instructions now point to Enable.
