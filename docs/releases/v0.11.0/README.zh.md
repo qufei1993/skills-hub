@@ -2,17 +2,7 @@
 
 [English](README.md)
 
-## 下载安装
-
-| 系统 | 适用电脑 | 安装包 |
-| --- | --- | --- |
-| macOS | Apple 芯片（M1 / M2 / M3 等） | [下载 .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-aarch64.dmg) |
-| macOS | Intel 芯片 | [下载 .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-x86_64.dmg) |
-| Windows | Intel / AMD 64 位电脑 | [下载 .exe](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Windows-x64.exe) |
-| Linux | Intel / AMD 64 位电脑 | [下载 .deb](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Linux-x64.deb) · [下载 .AppImage](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Linux-x64.AppImage) |
-| Linux | ARM64 电脑 | [下载 .deb](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Linux-arm64.deb) · [下载 .AppImage](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Linux-arm64.AppImage) |
-
-桌面用户只需下载安装包，CLI 会在启用 AI 管理时自动下载。
+各平台安装包的下载链接在发布时自动生成到 [GitHub 发布页](https://github.com/qufei1993/skills-hub/releases/tag/v0.11.0)。
 
 v0.11.0 支持通过 AI 对话管理 Skills，由官方 `manage-skills-hub` Skill 和 `skillshub-cli` 执行。在「设置 → AI 管理」一键启用后，AI 安装默认同步到已检测、已启用的工具；切换相关页面或切回应用即可刷新列表。CLI 与桌面共用本地库，按桌面版本下载安装，安装包不再携带 CLI。首次启用需要联网；已校验通过的对应版本可离线使用，关闭桌面端后仍可运行。CLI 和官方 Skill 更新由设置中的更新按钮触发，启动不自动更新。
 

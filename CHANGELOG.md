@@ -6,18 +6,6 @@ All notable changes to this project will be documented in this file.
 
 ## [0.11.0]
 
-### Downloads
-
-| System | Computer | Installer |
-| --- | --- | --- |
-| macOS | Apple silicon (M1 / M2 / M3, etc.) | [Download .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-aarch64.dmg) |
-| macOS | Intel processor | [Download .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-x86_64.dmg) |
-| Windows | Intel / AMD 64-bit PCs | [Download .exe](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Windows-x64.exe) |
-| Linux | Intel / AMD 64-bit PCs | [Download .deb](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Linux-x64.deb) · [Download .AppImage](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Linux-x64.AppImage) |
-| Linux | ARM64 computers | [Download .deb](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Linux-arm64.deb) · [Download .AppImage](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Linux-arm64.AppImage) |
-
-Desktop users only need the installer. The CLI downloads automatically when you enable AI management.
-
 ### Added
 
 - **Linux desktop installers**: Linux x64 and ARM64 builds provide `.deb` and `.AppImage` packages. Each release generates its bilingual download table from actual installer assets; signed AppImages are included in the updater manifest.
@@ -27,6 +15,7 @@ Desktop users only need the installer. The CLI downloads automatically when you 
 
 ### Improved
 
+- **Focused desktop update notes**: Download tables are generated only for the GitHub release page. Changelogs and updater notes contain version changes; desktop update dialogs also omit download sections from fetched release-page notes.
 - **Release build reuse**: Native validation and tests share one target directory. Signing reuses the verified release CLI instead of compiling it again; native CI and desktop jobs share per-platform release dependency caches while ordinary Rust CI keeps a separate debug cache; desktop packaging downloads only its matching CLI manifest. Native verification, signatures and draft publication gates remain enforced.
 
 - **AI management guidance and Settings**: A dismissible My Skills notice leads to the AI management card before the official Skill is installed. Installation details are collapsed by default; background checks retain the current status and View Skill action. Network and storage settings can also collapse while retaining summaries.

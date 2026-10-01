@@ -847,6 +847,22 @@ jobs:
             echo '**macOS Note:** macOS Gatekeeper workaround (only needed on some macOS versions): `xattr -cr "/Applications/Skills Hub.app"` (https://v2.tauri.app/distribute/#macos).'
           } > release-notes.md
 
+      - name: Generate updater notes from changelog
+        env:
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo '## 中文'
+            echo
+            node scripts/extract-changelog.mjs "$TAG" docs/CHANGELOG.zh.md
+            echo
+            echo '## English'
+            echo
+            node scripts/extract-changelog.mjs "$TAG" CHANGELOG.md
+          } > updater-notes.md
+
       - name: Generate updater.json
         env:
           REPO: ${{ github.repository }}
@@ -896,7 +912,7 @@ jobs:
           fi
 
           # Read release notes if available (generated in prior step or inline)
-          NOTES_FILE="release-notes.md"
+          NOTES_FILE="updater-notes.md"
           if [ -f "$NOTES_FILE" ]; then
             NOTES_CONTENT=$(cat "$NOTES_FILE")
           else

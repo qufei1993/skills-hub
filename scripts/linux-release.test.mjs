@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -54,7 +54,7 @@ it('generates valid Linux updater entries from signed AppImages without linking 
    writeFileSync(path.join(root,`dl/Skills-Hub-v0.11.0-Linux-${arch}.AppImage.sig`),`signature-${arch}\r\n`)
    writeFileSync(path.join(root,`dl/Skills-Hub-v0.11.0-Linux-${arch}.deb`),'deb')
   }
-  writeFileSync(path.join(root,'release-notes.md'),'Quote " and slash \\ and 中文\nSecond line')
+  writeFileSync(path.join(root,'updater-notes.md'),'Quote " and slash \\ and 中文\nSecond line')
   const result = spawnSync('bash',['-c',step.run],{cwd:root,encoding:'utf8',env:{...process.env,TAG:'v0.11.0',REPO:'qufei1993/skills-hub'}})
   assert.equal(result.status,0,result.stderr)
   const updater = JSON.parse(readFileSync(path.join(root,'updater.json'),'utf8'))
@@ -64,6 +64,42 @@ it('generates valid Linux updater entries from signed AppImages without linking 
    'linux-x86_64':{signature:'signature-x64',url:'https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Linux-x64.AppImage'},
    'linux-aarch64':{signature:'signature-arm64',url:'https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Linux-arm64.AppImage'},
   })
+ } finally { rmSync(root,{recursive:true,force:true}) }
+})
+
+it('adds download tables only to the GitHub page while updater notes contain changes only', () => {
+ const root = mkdtempSync(path.join(tmpdir(),'release-notes-'))
+ try {
+  mkdirSync(path.join(root,'scripts'))
+  mkdirSync(path.join(root,'docs'))
+  mkdirSync(path.join(root,'dl'))
+  for (const script of ['extract-changelog.mjs','release-downloads.mjs']) copyFileSync(new URL(script,import.meta.url),path.join(root,'scripts',script))
+  writeFileSync(path.join(root,'CHANGELOG.md'),'## [0.11.0]\n\n### Fixed\n- English fix\n')
+  writeFileSync(path.join(root,'docs/CHANGELOG.zh.md'),'## [0.11.0]\n\n### 修复\n- 中文修复\n')
+  writeFileSync(path.join(root,'dl/Skills-Hub-v0.11.0-Linux-x64.deb'),'installer')
+  const steps = workflow.jobs['assemble-updater-json'].steps.filter(step => /Generate (release|updater) notes from changelog/.test(step.name ?? ''))
+  for (const step of steps) {
+   const result = spawnSync('bash',['-c',step.run],{cwd:root,encoding:'utf8',env:{...process.env,TAG:'v0.11.0'}})
+   assert.equal(result.status,0,result.stderr)
+  }
+  const page = readFileSync(path.join(root,'release-notes.md'),'utf8')
+  assert.match(page,/### 下载安装/)
+  assert.match(page,/### Downloads/)
+  assert.match(page,/Skills-Hub-v0.11.0-Linux-x64.deb/)
+  assert.match(page,/- 中文修复/)
+  assert.match(page,/- English fix/)
+  const updaterFile = path.join(root,'updater-notes.md')
+  assert.ok(readdirSync(root).includes('updater-notes.md'),'updater requires separate notes without release-page downloads')
+  const updater = readFileSync(updaterFile,'utf8')
+  assert.match(updater,/- 中文修复/)
+  assert.match(updater,/- English fix/)
+  assert.doesNotMatch(updater,/下载安装|Downloads|Skills-Hub-|SmartScreen|Gatekeeper/)
+  const generate = workflow.jobs['assemble-updater-json'].steps.find(step => step.name === 'Generate updater.json')
+  writeFileSync(path.join(root,'dl/Skills-Hub-v0.11.0-Linux-x64.AppImage'),'appimage')
+  writeFileSync(path.join(root,'dl/Skills-Hub-v0.11.0-Linux-x64.AppImage.sig'),'signature')
+  const result = spawnSync('bash',['-c',generate.run],{cwd:root,encoding:'utf8',env:{...process.env,TAG:'v0.11.0',REPO:'qufei1993/skills-hub'}})
+  assert.equal(result.status,0,result.stderr)
+  assert.equal(JSON.parse(readFileSync(path.join(root,'updater.json'),'utf8')).notes,updater.trimEnd())
  } finally { rmSync(root,{recursive:true,force:true}) }
 })
 
