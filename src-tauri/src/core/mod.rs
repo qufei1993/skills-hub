@@ -1,3 +1,4 @@
+pub mod app_updater;
 pub mod auto_update;
 pub mod cache_cleanup;
 pub mod cancel_token;

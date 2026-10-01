@@ -62,7 +62,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Perl installation failed" }
           Add-Content $env:GITHUB_PATH 'C:\Strawberry\perl\bin'
       - run: npm ci
-      - run: node --test scripts/release-workflow.test.mjs scripts/reuse-cli-build.test.mjs
+      - run: node --test scripts/release-workflow.test.mjs scripts/reuse-cli-build.test.mjs scripts/linux-release.test.mjs scripts/release-downloads.test.mjs
       - run: npm run version:check
       - name: Verify native host matches target
         shell: bash
@@ -385,7 +385,14 @@ jobs:
             target: x86_64-pc-windows-msvc
             arch: x64
             platform: win32-x64
-
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            arch: x64
+            platform: linux-x64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            arch: arm64
+            platform: linux-arm64
 
     steps:
       - name: Checkout
@@ -416,6 +423,12 @@ jobs:
         run: |
           set -euxo pipefail
           brew install pkg-config cmake
+
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb xauth xdotool
 
       - name: Install Windows build deps
         if: runner.os == 'Windows'
@@ -598,6 +611,15 @@ jobs:
           echo "=== Build completed ==="
           ls -la src-tauri/target/${{ matrix.target }}/release/bundle/ || true
 
+      - name: Build Tauri App (Linux)
+        if: runner.os == 'Linux'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          node node_modules/@tauri-apps/cli/tauri.js build --target ${{ matrix.target }} --bundles deb,appimage -- --bin app
+
       - name: Verify codesign (optional)
         if: runner.os == 'macOS'
         shell: bash
@@ -754,6 +776,16 @@ jobs:
           cp "${EXE}" "release-assets/${NEW_EXE}"
           cp "${EXE}.sig" "release-assets/${NEW_EXE}.sig"
 
+      - name: Prepare Linux Assets
+        if: runner.os == 'Linux'
+        shell: bash
+        run: node scripts/prepare-linux-assets.mjs "src-tauri/target/${{ matrix.target }}/release/bundle" release-assets "$GITHUB_REF_NAME" "${{ matrix.target }}"
+
+      - name: Verify Linux installers
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash scripts/verify-linux-packages.sh release-assets "$GITHUB_REF_NAME" "${{ matrix.target }}"
+
       - name: List prepared assets
         shell: bash
         run: ls -la release-assets || true
@@ -815,6 +847,22 @@ jobs:
             echo '**macOS Note:** macOS Gatekeeper workaround (only needed on some macOS versions): `xattr -cr "/Applications/Skills Hub.app"` (https://v2.tauri.app/distribute/#macos).'
           } > release-notes.md
 
+      - name: Generate updater notes from changelog
+        env:
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo '## 中文'
+            echo
+            node scripts/extract-changelog.mjs "$TAG" docs/CHANGELOG.zh.md
+            echo
+            echo '## English'
+            echo
+            node scripts/extract-changelog.mjs "$TAG" CHANGELOG.md
+          } > updater-notes.md
+
       - name: Generate updater.json
         env:
           REPO: ${{ github.repository }}
@@ -831,6 +879,10 @@ jobs:
           mac_x64_url=""; mac_x64_sig=""
           win_arm_url=""; win_arm_sig=""
           win_x64_url=""; win_x64_sig=""
+          linux_arm_url=""; linux_arm_sig=""
+          linux_x64_url=""; linux_x64_sig=""
+          linux_deb_arm_url=""; linux_deb_arm_sig=""
+          linux_deb_x64_url=""; linux_deb_x64_sig=""
 
           ls -la dl || true
 
@@ -849,16 +901,24 @@ jobs:
                 win_arm_url="$url"; win_arm_sig="$sig_content";;
               *-Windows-x64.exe)
                 win_x64_url="$url"; win_x64_sig="$sig_content";;
+              *-Linux-arm64.deb)
+                linux_deb_arm_url="$url"; linux_deb_arm_sig="$sig_content";;
+              *-Linux-x64.deb)
+                linux_deb_x64_url="$url"; linux_deb_x64_sig="$sig_content";;
+              *-Linux-arm64.AppImage)
+                linux_arm_url="$url"; linux_arm_sig="$sig_content";;
+              *-Linux-x64.AppImage)
+                linux_x64_url="$url"; linux_x64_sig="$sig_content";;
             esac
           done
 
-          if [ -z "${mac_arm_url:-}" ] && [ -z "${mac_x64_url:-}" ] && [ -z "${win_arm_url:-}" ] && [ -z "${win_x64_url:-}" ]; then
+          if [ -z "${mac_arm_url:-}" ] && [ -z "${mac_x64_url:-}" ] && [ -z "${win_arm_url:-}" ] && [ -z "${win_x64_url:-}" ] && [ -z "${linux_arm_url:-}" ] && [ -z "${linux_x64_url:-}" ]; then
             echo "❌ 未找到任何 updater 签名（dl/*.sig）; 请确认构建产物包含 *.sig" >&2
             exit 1
           fi
 
           # Read release notes if available (generated in prior step or inline)
-          NOTES_FILE="release-notes.md"
+          NOTES_FILE="updater-notes.md"
           if [ -f "$NOTES_FILE" ]; then
             NOTES_CONTENT=$(cat "$NOTES_FILE")
           else
@@ -893,6 +953,26 @@ jobs:
             if [ -n "${win_x64_url:-}" ] && [ -n "${win_x64_sig:-}" ]; then
               [ $first -eq 0 ] && echo ','
               echo "    \"windows-x86_64\": {\"signature\": \"$win_x64_sig\", \"url\": \"$win_x64_url\"}"
+              first=0
+            fi
+            if [ -n "${linux_x64_url:-}" ] && [ -n "${linux_x64_sig:-}" ]; then
+              [ $first -eq 0 ] && echo ','
+              echo "    \"linux-x86_64\": {\"signature\": \"$linux_x64_sig\", \"url\": \"$linux_x64_url\"}"
+              first=0
+            fi
+            if [ -n "${linux_arm_url:-}" ] && [ -n "${linux_arm_sig:-}" ]; then
+              [ $first -eq 0 ] && echo ','
+              echo "    \"linux-aarch64\": {\"signature\": \"$linux_arm_sig\", \"url\": \"$linux_arm_url\"}"
+              first=0
+            fi
+            if [ -n "${linux_deb_x64_url:-}" ] && [ -n "${linux_deb_x64_sig:-}" ]; then
+              [ $first -eq 0 ] && echo ','
+              echo "    \"linux-x86_64-deb\": {\"signature\": \"$linux_deb_x64_sig\", \"url\": \"$linux_deb_x64_url\"}"
+              first=0
+            fi
+            if [ -n "${linux_deb_arm_url:-}" ] && [ -n "${linux_deb_arm_sig:-}" ]; then
+              [ $first -eq 0 ] && echo ','
+              echo "    \"linux-aarch64-deb\": {\"signature\": \"$linux_deb_arm_sig\", \"url\": \"$linux_deb_arm_url\"}"
               first=0
             fi
             echo '  }'

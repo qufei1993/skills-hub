@@ -42,7 +42,7 @@ jobs:
       - run: npm ci
       - run: npm run version:check
       - name: Validate CLI and desktop distribution pipeline
-        run: node --test scripts/cli-manifest.test.mjs scripts/verify-cli-release.test.mjs scripts/publish-cli-release.test.mjs scripts/verify-desktop-bundle.test.mjs scripts/release-workflow.test.mjs scripts/reuse-cli-build.test.mjs
+        run: node --test scripts/cli-manifest.test.mjs scripts/verify-cli-release.test.mjs scripts/publish-cli-release.test.mjs scripts/verify-desktop-bundle.test.mjs scripts/release-workflow.test.mjs scripts/reuse-cli-build.test.mjs scripts/linux-release.test.mjs scripts/release-downloads.test.mjs
       - run: npm run lint
       - run: npm test
       - run: npm run network:check

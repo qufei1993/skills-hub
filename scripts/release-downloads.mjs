@@ -4,13 +4,18 @@ export function renderDownloads({ tag, assets, language }) {
   }
   const zh = language === 'zh'
   const installers = [
-    [`Skills-Hub-${tag}-macOS-aarch64.dmg`, 'macOS', zh ? 'Apple 芯片（M1 / M2 / M3 等）' : 'Apple silicon (M1 / M2 / M3, etc.)', '.dmg'],
-    [`Skills-Hub-${tag}-macOS-x86_64.dmg`, 'macOS', zh ? 'Intel 芯片' : 'Intel processor', '.dmg'],
-    [`Skills-Hub-${tag}-Windows-x64.exe`, 'Windows', zh ? 'Intel / AMD 64 位电脑' : 'Intel / AMD 64-bit PCs', '.exe'],
-  ].filter(([name]) => assets.includes(name))
+    ['macOS-aarch64', 'macOS', zh ? 'Apple 芯片（M1 / M2 / M3 等）' : 'Apple silicon (M1 / M2 / M3, etc.)', ['.dmg']],
+    ['macOS-x86_64', 'macOS', zh ? 'Intel 芯片' : 'Intel processor', ['.dmg']],
+    ['Windows-x64', 'Windows', zh ? 'Intel / AMD 64 位电脑' : 'Intel / AMD 64-bit PCs', ['.exe']],
+    ['Linux-x64', 'Linux', zh ? 'Intel / AMD 64 位电脑' : 'Intel / AMD 64-bit PCs', ['.deb', '.AppImage']],
+    ['Linux-arm64', 'Linux', zh ? 'ARM64 电脑' : 'ARM64 computers', ['.deb', '.AppImage']],
+  ].map(([platform, system, computer, extensions]) => ({
+    system, computer,
+    links: extensions.filter(extension => assets.includes(`Skills-Hub-${tag}-${platform}${extension}`)).map(extension =>
+      `[${zh ? '下载' : 'Download'} ${extension}](https://github.com/qufei1993/skills-hub/releases/download/${tag}/Skills-Hub-${tag}-${platform}${extension})`),
+  })).filter(row => row.links.length)
   if (!installers.length) throw new Error('No desktop installers available')
-  const rows = installers.map(([name, system, computer, extension]) =>
-    `| ${system} | ${computer} | [${zh ? '下载' : 'Download'} ${extension}](https://github.com/qufei1993/skills-hub/releases/download/${tag}/${name}) |`)
+  const rows = installers.map(({ system, computer, links }) => `| ${system} | ${computer} | ${links.join(' · ')} |`)
   return [
     zh ? '### 下载安装' : '### Downloads', '',
     zh ? '| 系统 | 适用电脑 | 安装包 |' : '| System | Computer | Installer |',

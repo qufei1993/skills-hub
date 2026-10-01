@@ -6,24 +6,16 @@
 
 ## [0.11.0]
 
-### 下载安装
-
-| 系统 | 适用电脑 | 安装包 |
-| --- | --- | --- |
-| macOS | Apple 芯片（M1 / M2 / M3 等） | [下载 .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-aarch64.dmg) |
-| macOS | Intel 芯片 | [下载 .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-x86_64.dmg) |
-| Windows | Intel / AMD 64 位电脑 | [下载 .exe](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Windows-x64.exe) |
-
-桌面用户只需下载安装包，CLI 会在启用 AI 管理时自动下载。
-
 ### 新增
 
+- **Linux 桌面安装包**：提供 Linux x64、ARM64 的 `.deb` 和 `.AppImage` 安装包。每次发布按实际安装包自动生成中英文下载表格，应用更新按安装格式使用带签名的 `.deb` 或 AppImage。
 - **AI 管理 Skills**：在「设置 → AI 管理」一键启用官方 `manage-skills-hub` Skill，通过 AI 对话搜索、安装、导入、更新、同步、管理标签和安全删除 Skills，与桌面端共用技能库。
 - **更轻的安装包与按需 CLI**：正式桌面安装包不再内置 CLI，启用 AI 管理时下载并校验对应版本，同时配置终端命令，重新打开终端即可使用。首次启用需要联网；已校验的对应版本可离线使用，关闭桌面端后仍可运行。CLI 和官方 Skill 更新由设置中的按钮触发，支持下载进度与失败重试，失败保留原来可用的 CLI。CLI 文件与桌面安装包放在同一个 Release 中，无需 Node.js 或 npm。
 - **独立 CLI 安装脚本**：macOS、Linux 和 Windows x64 可用一条命令安装或升级 CLI，自动校验下载文件并配置用户命令路径。
 
 ### 优化
 
+- **更清晰的桌面更新说明**：下载表格仅在发布时动态生成到 GitHub 发布页。更新日志和更新清单保留版本变更内容；桌面升级弹窗也会过滤从发布页读取的下载区块。
 - **发布构建复用**：原生验证与测试统一使用同一构建目录；签名阶段复用已验证的正式 CLI，不再重复编译。原生 CI 与桌面构建共享本平台正式依赖缓存，普通 Rust CI 使用独立调试缓存；桌面打包仅下载对应平台的 CLI 清单。原生验证、签名和草稿发布检查保持不变。
 
 - **AI 管理引导与设置**：官方 Skill 尚未安装时，「我的 Skills」显示可关闭的提示，可直接定位到设置中的 AI 管理卡片。安装详情默认折叠，后台检查保留当前状态和「查看 Skill」入口；网络与存储设置也支持折叠并保留摘要。

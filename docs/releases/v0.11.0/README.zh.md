@@ -2,15 +2,7 @@
 
 [English](README.md)
 
-## 下载安装
-
-| 系统 | 适用电脑 | 安装包 |
-| --- | --- | --- |
-| macOS | Apple 芯片（M1 / M2 / M3 等） | [下载 .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-aarch64.dmg) |
-| macOS | Intel 芯片 | [下载 .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-x86_64.dmg) |
-| Windows | Intel / AMD 64 位电脑 | [下载 .exe](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Windows-x64.exe) |
-
-桌面用户只需下载安装包，CLI 会在启用 AI 管理时自动下载。
+各平台安装包的下载链接在发布时自动生成到 [GitHub 发布页](https://github.com/qufei1993/skills-hub/releases/tag/v0.11.0)。
 
 v0.11.0 支持通过 AI 对话管理 Skills，由官方 `manage-skills-hub` Skill 和 `skillshub-cli` 执行。在「设置 → AI 管理」一键启用后，AI 安装默认同步到已检测、已启用的工具；切换相关页面或切回应用即可刷新列表。CLI 与桌面共用本地库，按桌面版本下载安装，安装包不再携带 CLI。首次启用需要联网；已校验通过的对应版本可离线使用，关闭桌面端后仍可运行。CLI 和官方 Skill 更新由设置中的更新按钮触发，启动不自动更新。
 
@@ -41,7 +33,7 @@ Skills Hub 继承的 `DSH_HOME` 非空白时，全局同步和扫描使用 `$DSH
 本记录不代表已公开。此前内置 CLI 的草稿已替换为 v0.11.0 标签对应的按需下载 CLI 候选版本。新版本保持草稿状态，等待发布负责人明确批准公开。
 
 - 保护 GitHub 的 `release` 环境，仅允许已批准标签。工作流由 `v*` 标签触发，并检查全部产品版本一致。
-- 每个标签在自身提交上独立运行五平台原生 CLI 验证：macOS arm64/x64、Windows x64、Linux GNU arm64/x64，包括兼容性和 Windows 桥接测试。此前 PR/main CI 不能替代此门禁。桌面打包覆盖 macOS arm64/x64、Windows x64。
+- 每个标签在自身提交上独立运行五平台原生 CLI 验证：macOS arm64/x64、Windows x64、Linux GNU arm64/x64，包括兼容性和 Windows 桥接测试。此前 PR/main CI 不能替代此门禁。桌面打包覆盖 macOS arm64/x64、Windows x64 和 Linux GNU arm64/x64。
 - 先对 CLI 签名并完成已配置的公证，再生成最终字节清单。桌面构建使用匹配清单，不内置 CLI。macOS 使用已配置的签名身份；Windows 配置签名时签名，否则提示未签名。更新签名不等同于 Windows Authenticode 签名。
 - CLI 与桌面分别公证，配置公证时各自须返回 `Accepted`。桌面附加并验证票据后，重新生成更新归档和签名。独立 Mach-O CLI 不能附加票据，须校验代码签名和哈希。
 - CLI 二进制、校验文件、清单及桌面产物进入原仓库同一个 Release 草稿。公开前核对 CLI 长度与摘要，公开后验证匿名下载，同名冲突资源不覆盖。使用原仓库有 Contents 写权限的 GITHUB_TOKEN，无需独立资源仓库或 npm 发布凭据。
@@ -62,3 +54,5 @@ GitHub 按标签查询返回 404 时，草稿查询改用已认证的分页发�
 - [设备同步后的 AI 一键管理修复](ai-management-sync-hash.zh.md)
 
 - [发布构建复用](build-performance.zh.md)
+
+- [Linux 桌面打包](linux-desktop-packaging.zh.md)

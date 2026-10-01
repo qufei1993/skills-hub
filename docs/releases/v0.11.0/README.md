@@ -2,15 +2,7 @@
 
 [中文](README.zh.md)
 
-## Downloads
-
-| System | Computer | Installer |
-| --- | --- | --- |
-| macOS | Apple silicon (M1 / M2 / M3, etc.) | [Download .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-aarch64.dmg) |
-| macOS | Intel processor | [Download .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-x86_64.dmg) |
-| Windows | Intel / AMD 64-bit PCs | [Download .exe](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Windows-x64.exe) |
-
-Desktop users only need the installer. The CLI downloads automatically when you enable AI management.
+Installer links are generated on the [GitHub release page](https://github.com/qufei1993/skills-hub/releases/tag/v0.11.0).
 
 v0.11.0 lets you manage Skills through AI conversations using the official `manage-skills-hub` Skill and `skillshub-cli`. Enable AI management in Settings with one click. AI installations sync to detected, enabled tools by default, and desktop lists refresh on navigation and window focus. The CLI shares the desktop library and follows its version, but is downloaded only when enabling or updating AI management. The desktop installer contains no CLI binary. First setup requires network access; a verified matching installation works offline and after the desktop is closed. Startup does not update the CLI or official Skill. See [Agent-first CLI](agent-first-cli.md) and [verified desktop bridge](verified-cli-bridge.md).
 
@@ -39,7 +31,7 @@ After changing the environment variable, restart Skills Hub (and its launcher if
 This record does not imply publication. The previous bundled-build draft was replaced with the on-demand CLI candidate at tag v0.11.0. Keep the replacement release as a draft until the release owner explicitly approves publication.
 
 - Protect the `release` GitHub environment and restrict it to approved tags. The workflow triggers on `v*` tags and verifies all product versions.
-- Each tag independently runs the five-platform native CLI verification matrix at its SHA: macOS arm64/x64, Windows x64 and Linux GNU arm64/x64. Compatibility and Windows bridge tests are included; prior PR/main CI does not replace this gate. Desktop packaging covers macOS arm64/x64 and Windows x64.
+- Each tag independently runs the five-platform native CLI verification matrix at its SHA: macOS arm64/x64, Windows x64 and Linux GNU arm64/x64. Compatibility and Windows bridge tests are included; prior PR/main CI does not replace this gate. Desktop packaging covers macOS arm64/x64, Windows x64 and Linux GNU arm64/x64.
 - Sign the CLI and complete configured notarization before generating its final-byte manifest. Desktop builds consume the matching manifests and exclude CLI binaries. macOS uses the configured signing identity; Windows signs when configured and otherwise reports unsigned artifacts. Updater signatures are separate from Windows Authenticode signatures.
 - CLI and desktop notarization are independent and must each report `Accepted` when configured. Staple and validate the desktop ticket before regenerating the updater archive and signature. Standalone Mach-O CLI files cannot be stapled; verify their code signature and hash.
 - Stage CLI binaries, checksums, manifests and desktop assets in the same original-repository release draft. Verify remote CLI sizes and digests before publication; check anonymous downloads afterward. Conflicting version assets are not overwritten. Use the original repository GITHUB_TOKEN with Contents write permission; no separate resource repository or npm publishing credentials are required.
@@ -60,3 +52,5 @@ The compatibility test uses a frozen v0.10.1 shared-schema fixture, performs CLI
 - [AI management after device sync](ai-management-sync-hash.md)
 
 - [Release build reuse](build-performance.md)
+
+- [Linux desktop packaging](linux-desktop-packaging.md)
