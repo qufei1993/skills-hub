@@ -136,6 +136,99 @@ fn cli_bridge_late_failure_restores_the_previous_verified_release() {
     );
 }
 
+#[cfg(unix)]
+struct ChildBeforeExec {
+    socket: std::os::unix::net::UnixStream,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(unix)]
+impl ChildBeforeExec {
+    fn spawn() -> Self {
+        use std::os::unix::{io::AsRawFd, process::CommandExt};
+        extern "C" {
+            fn read(fd: i32, buffer: *mut u8, count: usize) -> isize;
+            fn write(fd: i32, buffer: *const u8, count: usize) -> isize;
+        }
+        let (mut socket, child_socket) = std::os::unix::net::UnixStream::pair().unwrap();
+        let worker = std::thread::spawn(move || {
+            let mut command = std::process::Command::new("/usr/bin/true");
+            // Only async-signal-safe syscalls run in the forked child before exec.
+            unsafe {
+                command.pre_exec(move || {
+                    let mut byte = 1u8;
+                    if write(child_socket.as_raw_fd(), &byte, 1) != 1
+                        || read(child_socket.as_raw_fd(), &mut byte, 1) != 1
+                    {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+            assert!(command.spawn().unwrap().wait().unwrap().success());
+        });
+        let mut ready = [0];
+        socket.read_exact(&mut ready).unwrap();
+        Self {
+            socket,
+            worker: Some(worker),
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ChildBeforeExec {
+    fn drop(&mut self) {
+        let _ = self.socket.write_all(&[1]);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_bridge_publication_unlocks_while_a_child_waits_before_exec() {
+    for fail_after_replace in [false, true] {
+        let f = Fixture::new();
+        f.publish().unwrap();
+        let mut child = None;
+        let result = publish_cli_bridge_with_hook(&f.source, &f.destination, VERSION, HASH, || {
+            child = Some(ChildBeforeExec::spawn());
+            if fail_after_replace {
+                anyhow::bail!("simulated stamp failure");
+            }
+            Ok(())
+        });
+        assert_eq!(result.is_err(), fail_after_replace);
+        assert_eq!(
+            cli_bridge_status(&f.destination, VERSION, HASH).status,
+            CliBridgeHealth::Valid
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_bridge_shared_lock_releases_before_an_inheriting_child_executes() {
+    let f = Fixture::new();
+    f.publish().unwrap();
+    let directory = BridgeDirectory::open(&f.destination, false).unwrap();
+    let file = directory
+        .open_file(OsStr::new(LOCK_FILE), false, false)
+        .unwrap();
+    FileExt::try_lock_shared(&file).unwrap();
+    let lock = BridgeLock::new(file);
+    let _child = ChildBeforeExec::spawn();
+    assert!(f
+        .publish()
+        .unwrap_err()
+        .to_string()
+        .contains("CLI_BRIDGE_PUBLICATION_IN_PROGRESS"));
+    drop(lock);
+    assert_eq!(f.publish().unwrap().status, CliBridgeHealth::Valid);
+}
+
 #[cfg(any(target_os = "macos", windows))]
 #[test]
 fn cli_bridge_denied_replacement_preserves_previous_verified_release() {
