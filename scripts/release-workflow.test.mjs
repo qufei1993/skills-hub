@@ -124,6 +124,7 @@ it('separates CLI and desktop builds and keeps the complete release as a draft',
   assert.equal(finalSteps[upload].with.draft, true)
   const verification = finalSteps.findIndex(step => /publish-cli-release\.mjs/.test(step.run ?? ''))
   assert.ok(upload < verification)
+  assert.match(finalSteps[verification].run, /--notes-file release-notes\.md/)
   for (const job of Object.values(workflow.jobs)) {
     for (const step of job.steps ?? []) {
       assert.doesNotMatch(step.run ?? '', /--publish|--draft=false/)

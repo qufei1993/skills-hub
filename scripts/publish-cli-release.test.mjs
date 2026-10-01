@@ -108,3 +108,33 @@ it('rejects duplicate drafts for one tag before mutating either release', async 
   assert.ok(calls.every(args=>args[0]==='api'))
  })
 })
+
+it('replaces placeholder notes on the canonical draft and verifies the result', async () => {
+ await fixture(async ({directory,assets}) => {
+  const notesFile=path.join(tmpdir(),`release-notes-${Date.now()}.md`)
+  const body='### Downloads\n| Linux | [Download](https://example.com/app.deb) |\n'
+  writeFileSync(notesFile,body)
+  const calls=[]; let release={id:123,tag_name:'v0.11.0',draft:true,body:'Native CLI resources.',assets}
+  try {
+   await api.publishCliRelease({directory,tag:'v0.11.0',sourceCommit:'a'.repeat(40),notesFile,gh:async args=>{
+    calls.push(args)
+    if(args.includes('PATCH')) { release={...release,body:args.find(arg=>arg.startsWith('body=')).slice(5)};return release }
+    if(args[1].includes('/releases/tags/')) return null
+    return [[release]]
+   }})
+   const patch=calls.find(args=>args.includes('PATCH'))
+   assert.ok(patch)
+   assert.ok(patch.includes('repos/qufei1993/skills-hub/releases/123'))
+   assert.ok(patch.includes('draft=true'))
+   assert.equal(release.body,body)
+   assert.ok(calls.every(args=>!args.includes('--draft=false')))
+  } finally {rmSync(notesFile,{force:true})}
+ })
+})
+it('refuses to replace notes on an already public release', async () => {
+ await fixture(async ({directory,assets}) => {
+  const calls=[]
+  await assert.rejects(api.publishCliRelease({directory,tag:'v0.11.0',sourceCommit:'a'.repeat(40),notesFile:'/unused',gh:async args=>{calls.push(args);return {id:123,draft:false,assets}}}),/CLI_RELEASE_NOT_DRAFT/)
+  assert.ok(calls.every(args=>!args.includes('PATCH')))
+ })
+})
