@@ -115,17 +115,21 @@ it('replaces placeholder notes on the canonical draft and verifies the result', 
   const body='### Downloads\n| Linux | [Download](https://example.com/app.deb) |\n'
   writeFileSync(notesFile,body)
   const calls=[]; let release={id:123,tag_name:'v0.11.0',draft:true,body:'Native CLI resources.',assets}
+  const staleListRelease={...release}
   try {
    await api.publishCliRelease({directory,tag:'v0.11.0',sourceCommit:'a'.repeat(40),notesFile,gh:async args=>{
     calls.push(args)
     if(args.includes('PATCH')) { release={...release,body:args.find(arg=>arg.startsWith('body=')).slice(5)};return release }
     if(args[1].includes('/releases/tags/')) return null
-    return [[release]]
+    if(args[1].endsWith('/releases/123')) return release
+    return [[staleListRelease]]
    }})
    const patch=calls.find(args=>args.includes('PATCH'))
    assert.ok(patch)
    assert.ok(patch.includes('repos/qufei1993/skills-hub/releases/123'))
    assert.ok(patch.includes('draft=true'))
+   assert.ok(patch.includes('tag_name=v0.11.0'))
+   assert.ok(patch.includes(`target_commitish=${'a'.repeat(40)}`))
    assert.equal(release.body,body)
    assert.ok(calls.every(args=>!args.includes('--draft=false')))
   } finally {rmSync(notesFile,{force:true})}

@@ -61,9 +61,9 @@ export async function publishCliRelease({directory,tag,sourceCommit,publish=fals
     const body=readFileSync(notesFile,'utf8')
     if(!body.trim()) throw new Error('CLI_RELEASE_NOTES_EMPTY')
     const id=release.id
-    await gh(['api',`repos/${repository}/releases/${id}`,'--method','PATCH','-f',`body=${body}`,'-F','draft=true'])
-    release=await inspect()
-    if(!release || release.id!==id || !release.draft || release.body!==body) throw new Error('CLI_RELEASE_NOTES_MISMATCH')
+    await gh(['api',`repos/${repository}/releases/${id}`,'--method','PATCH','-f',`body=${body}`,'-f',`tag_name=${tag}`,'-f',`target_commitish=${sourceCommit}`,'-F','draft=true'])
+    release=await gh(['api',`repos/${repository}/releases/${id}`,'-H','Cache-Control: no-cache'])
+    if(!release || release.id!==id || release.tag_name!==tag || !release.draft || release.body!==body) throw new Error('CLI_RELEASE_NOTES_MISMATCH')
   }
   if(publish && release.draft) await gh(['release','edit',tag,'--repo',repository,'--draft=false',...(tag.includes('-')?[]:['--latest'])])
 }
