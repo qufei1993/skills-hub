@@ -60,3 +60,5 @@ GitHub 按标签查询返回 404 时，草稿查询改用已认证的分页发�
 - [独立 CLI 安装](cli-installation.md)
 
 - [设备同步后的 AI 一键管理修复](ai-management-sync-hash.zh.md)
+
+- [发布构建复用](build-performance.zh.md)

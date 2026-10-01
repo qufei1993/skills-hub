@@ -42,7 +42,7 @@ jobs:
       - run: npm ci
       - run: npm run version:check
       - name: Validate CLI and desktop distribution pipeline
-        run: node --test scripts/cli-manifest.test.mjs scripts/verify-cli-release.test.mjs scripts/publish-cli-release.test.mjs scripts/verify-desktop-bundle.test.mjs scripts/release-workflow.test.mjs
+        run: node --test scripts/cli-manifest.test.mjs scripts/verify-cli-release.test.mjs scripts/publish-cli-release.test.mjs scripts/verify-desktop-bundle.test.mjs scripts/release-workflow.test.mjs scripts/reuse-cli-build.test.mjs
       - run: npm run lint
       - run: npm test
       - run: npm run network:check
@@ -52,6 +52,8 @@ jobs:
     needs: changes
     if: always() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true')
     runs-on: ubuntu-latest
+    env:
+      CARGO_BUILD_TARGET: x86_64-unknown-linux-gnu
     defaults:
       run:
         working-directory: src-tauri
@@ -72,6 +74,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          shared-key: native-x86_64-unknown-linux-gnu
+          key: debug
       - name: Prepare debug sidecar before desktop Rust checks
         working-directory: .
         run: node scripts/prepare-cli-sidecar.mjs --target x86_64-unknown-linux-gnu --debug
@@ -83,6 +87,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     name: Native CLI (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_BUILD_TARGET: ${{ matrix.target }}
     strategy:
       fail-fast: false
       matrix:
@@ -107,6 +113,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          shared-key: native-${{ matrix.target }}
+          key: release
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |

@@ -19,6 +19,8 @@ jobs:
       contents: read
     name: Verify release CLI (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_BUILD_TARGET: ${{ matrix.target }}
     strategy:
       fail-fast: false
       matrix:
@@ -45,6 +47,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          shared-key: native-${{ matrix.target }}
+          key: release
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -58,7 +62,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Perl installation failed" }
           Add-Content $env:GITHUB_PATH 'C:\Strawberry\perl\bin'
       - run: npm ci
-      - run: node --test scripts/release-workflow.test.mjs
+      - run: node --test scripts/release-workflow.test.mjs scripts/reuse-cli-build.test.mjs
       - run: npm run version:check
       - name: Verify native host matches target
         shell: bash
@@ -82,6 +86,16 @@ jobs:
           source="$GITHUB_WORKSPACE/src-tauri/binaries/skillshub-cli-${{ matrix.target }}$extension"
           "$source" version --json
           "$source" doctor --json
+
+      - name: Upload verified release CLI build
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-cli-build-${{ matrix.target }}
+          path: |
+            src-tauri/binaries/skillshub-cli-${{ matrix.target }}${{ runner.os == 'Windows' && '.exe' || '' }}
+            src-tauri/binaries/skillshub-cli-${{ matrix.target }}.json
+          if-no-files-found: error
+          compression-level: 0
 
   cli-build:
     needs: verify
@@ -124,43 +138,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Add macOS targets
-        run: rustup target add ${{ matrix.target }}
-
-      - name: Install macOS build deps
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          set -euxo pipefail
-          brew install pkg-config cmake
-
-      - name: Install Windows build deps
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          set -euxo pipefail
-          # Install Strawberry Perl for OpenSSL build (required by openssl-sys)
-          choco install -y strawberryperl
-          # Add Strawberry Perl to PATH
-          export PATH="/c/Strawberry/perl/bin:$PATH"
-          # WebView2 Runtime is pre-installed on windows-2022 runner
-          rustup target add ${{ matrix.target }}
-
-      - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Verify native runner and release version
         shell: bash
@@ -169,8 +149,34 @@ jobs:
           npm run version:check
           node -e 'if ("v" + JSON.parse(require("fs").readFileSync("package.json")).version !== process.env.GITHUB_REF_NAME) process.exit(1)'
 
-      - name: Install frontend deps
-        run: npm ci
+      - name: Install Linux CLI runtime dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-0 libdbus-1-3 zlib1g
+
+      - name: Download verified release CLI build
+        uses: actions/download-artifact@v4
+        with:
+          name: verified-cli-build-${{ matrix.target }}
+          path: src-tauri/binaries
+
+      - name: Verify reused CLI build
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFileSync, chmodSync } from 'node:fs';
+          import { verifyCliBinary } from './scripts/cli-manifest.mjs';
+          const target = '${{ matrix.target }}';
+          const base = 'src-tauri/binaries/skillshub-cli-' + target;
+          const binary = base + (target.includes('windows') ? '.exe' : '');
+          const version = JSON.parse(readFileSync('package.json')).version;
+          verifyCliBinary(JSON.parse(readFileSync(base + '.json')), binary, {
+            version, sourceCommit: process.env.GITHUB_SHA, target, profile: 'release',
+          });
+          if (!target.includes('windows')) chmodSync(binary, 0o755);
+          NODE
 
       - name: Import Apple certificate (codesign)
         if: runner.os == 'macOS'
@@ -223,11 +229,6 @@ jobs:
             fi
             echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
           fi
-
-      - name: Build release CLI sidecar
-        run: |
-          npm run build
-          npm run cli:prepare -- --target ${{ matrix.target }}
 
       - name: Sign and verify macOS CLI
         if: runner.os == 'macOS'
@@ -324,6 +325,13 @@ jobs:
           path: cli-assets/*
           if-no-files-found: error
 
+      - name: Upload desktop CLI manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-manifest-${{ matrix.target }}
+          path: cli-assets/cli-manifest-${{ matrix.target }}.json
+          if-no-files-found: error
+
   cli-publish:
     needs: [verify, cli-build]
     if: startsWith(github.ref, 'refs/tags/v')
@@ -354,6 +362,7 @@ jobs:
     environment: release
     runs-on: ${{ matrix.os }}
     env:
+      CARGO_BUILD_TARGET: ${{ matrix.target }}
       SKILLS_HUB_GITHUB_CLIENT_ID: ${{ secrets.SKILLS_HUB_GITHUB_CLIENT_ID }}
       SKILLS_HUB_GITLAB_CLIENT_ID: ${{ secrets.SKILLS_HUB_GITLAB_CLIENT_ID }}
       SKILLS_HUB_GITEE_AUTH_RELAY_URL: ${{ secrets.SKILLS_HUB_GITEE_AUTH_RELAY_URL }}
@@ -395,6 +404,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          shared-key: native-${{ matrix.target }}
+          key: release
 
       - name: Add macOS targets
         run: rustup target add ${{ matrix.target }}
@@ -537,9 +548,8 @@ jobs:
       - name: Download verified CLI manifests
         uses: actions/download-artifact@v4
         with:
-          pattern: cli-assets-*
+          name: cli-manifest-${{ matrix.target }}
           path: cli-manifests
-          merge-multiple: true
 
       - name: Select matching CLI manifest without bundling its binary
         shell: bash
