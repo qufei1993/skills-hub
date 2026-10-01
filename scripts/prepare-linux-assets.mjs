@@ -13,7 +13,7 @@ export function prepareLinuxAssets({ bundle, output, tag, target }) {
   }
   const deb = select('deb', '.deb')
   const image = select('appimage', '.AppImage')
-  const files = [[deb, '.deb'], [image, '.AppImage'], [`${image}.sig`, '.AppImage.sig']]
+  const files = [[deb, '.deb'], [`${deb}.sig`, '.deb.sig'], [image, '.AppImage'], [`${image}.sig`, '.AppImage.sig']]
   for (const [file] of files) if (!statSync(file).isFile() || !statSync(file).size) throw new Error('LINUX_INSTALLER_OR_SIGNATURE_EMPTY')
   mkdirSync(output, { recursive: true })
   for (const [file, extension] of files) {

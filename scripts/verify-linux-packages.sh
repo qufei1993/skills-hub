@@ -15,6 +15,7 @@ image="$assets/Skills-Hub-$tag-Linux-$arch.AppImage"
 test "$(dpkg-deb -f "$deb" Architecture)" = "$deb_arch"
 test "$(dpkg-deb -f "$deb" Version)" = "${tag#v}"
 test -s "$image.sig"
+test -s "$deb.sig"
 
 root=$(mktemp -d)
 trap 'rm -rf "$root"' EXIT

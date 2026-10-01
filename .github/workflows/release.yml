@@ -881,6 +881,8 @@ jobs:
           win_x64_url=""; win_x64_sig=""
           linux_arm_url=""; linux_arm_sig=""
           linux_x64_url=""; linux_x64_sig=""
+          linux_deb_arm_url=""; linux_deb_arm_sig=""
+          linux_deb_x64_url=""; linux_deb_x64_sig=""
 
           ls -la dl || true
 
@@ -899,6 +901,10 @@ jobs:
                 win_arm_url="$url"; win_arm_sig="$sig_content";;
               *-Windows-x64.exe)
                 win_x64_url="$url"; win_x64_sig="$sig_content";;
+              *-Linux-arm64.deb)
+                linux_deb_arm_url="$url"; linux_deb_arm_sig="$sig_content";;
+              *-Linux-x64.deb)
+                linux_deb_x64_url="$url"; linux_deb_x64_sig="$sig_content";;
               *-Linux-arm64.AppImage)
                 linux_arm_url="$url"; linux_arm_sig="$sig_content";;
               *-Linux-x64.AppImage)
@@ -957,6 +963,16 @@ jobs:
             if [ -n "${linux_arm_url:-}" ] && [ -n "${linux_arm_sig:-}" ]; then
               [ $first -eq 0 ] && echo ','
               echo "    \"linux-aarch64\": {\"signature\": \"$linux_arm_sig\", \"url\": \"$linux_arm_url\"}"
+              first=0
+            fi
+            if [ -n "${linux_deb_x64_url:-}" ] && [ -n "${linux_deb_x64_sig:-}" ]; then
+              [ $first -eq 0 ] && echo ','
+              echo "    \"linux-x86_64-deb\": {\"signature\": \"$linux_deb_x64_sig\", \"url\": \"$linux_deb_x64_url\"}"
+              first=0
+            fi
+            if [ -n "${linux_deb_arm_url:-}" ] && [ -n "${linux_deb_arm_sig:-}" ]; then
+              [ $first -eq 0 ] && echo ','
+              echo "    \"linux-aarch64-deb\": {\"signature\": \"$linux_deb_arm_sig\", \"url\": \"$linux_deb_arm_url\"}"
               first=0
             fi
             echo '  }'
