@@ -30,6 +30,26 @@ it('omits unavailable installers and rejects an empty desktop download list', ()
  assert.throws(() => api.renderDownloads({tag:'v0.11.0',language:'zh',assets:['skillshub-cli-0.11.0-linux-x64']}))
 })
 
+it('groups both Linux formats by architecture and links only the available version assets', () => {
+ const assets = [
+  'Skills-Hub-v0.11.0-Linux-x64.deb', 'Skills-Hub-v0.11.0-Linux-x64.AppImage',
+  'Skills-Hub-v0.11.0-Linux-arm64.deb', 'Skills-Hub-v0.11.0-Linux-arm64.AppImage',
+  'Skills-Hub-v0.11.0-Linux-x64.AppImage.sig', 'Skills-Hub-v0.10.1-Linux-x64.deb',
+ ]
+ for (const language of ['en', 'zh']) {
+  const table = api.renderDownloads({tag:'v0.11.0',language,assets})
+  const rows = table.split('\n').filter(line => line.startsWith('| Linux |'))
+  assert.equal(rows.length,2)
+  assert.match(rows[0],/Intel \/ AMD/)
+  assert.match(rows[1],/ARM64/)
+  for (const name of assets.slice(0,4)) assert.ok(table.includes(`https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/${name}`))
+  assert.doesNotMatch(table,/\.sig|v0\.10\.1|macOS|Windows/)
+ }
+ const partial = api.renderDownloads({tag:'v0.11.0',language:'en',assets:[assets[1]]})
+ assert.match(partial,/Download .AppImage/)
+ assert.doesNotMatch(partial,/\.deb|ARM64/)
+})
+
 it('release extraction replaces an existing table with links from the actual assets', () => {
  const dir = mkdtempSync(path.join(tmpdir(),'release-downloads-'))
  try {

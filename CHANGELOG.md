@@ -13,11 +13,14 @@ All notable changes to this project will be documented in this file.
 | macOS | Apple silicon (M1 / M2 / M3, etc.) | [Download .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-aarch64.dmg) |
 | macOS | Intel processor | [Download .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-x86_64.dmg) |
 | Windows | Intel / AMD 64-bit PCs | [Download .exe](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Windows-x64.exe) |
+| Linux | Intel / AMD 64-bit PCs | [Download .deb](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Linux-x64.deb) · [Download .AppImage](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Linux-x64.AppImage) |
+| Linux | ARM64 computers | [Download .deb](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Linux-arm64.deb) · [Download .AppImage](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Linux-arm64.AppImage) |
 
 Desktop users only need the installer. The CLI downloads automatically when you enable AI management.
 
 ### Added
 
+- **Linux desktop installers**: Linux x64 and ARM64 builds provide `.deb` and `.AppImage` packages. Each release generates its bilingual download table from actual installer assets; signed AppImages are included in the updater manifest.
 - **AI Skill management**: Enable the official `manage-skills-hub` Skill in Settings. Use AI conversations to search, install, import, update, deploy, tag, and safely remove Skills from the desktop's shared library.
 - **Smaller installers and on-demand CLI**: Production desktop installers no longer include the CLI. Enabling AI management downloads and verifies the matching version and configures the terminal command. Open a new terminal to use it. First setup requires a connection; verified installations work offline and after the desktop closes. Update the CLI and official Skill explicitly in Settings, with download progress and retry. Failures preserve the working CLI. CLI files share the desktop release; Node.js and npm are not required.
 - **Standalone CLI installer**: Install or upgrade the CLI with one command on macOS, Linux, or Windows x64, with checksum verification and user-level PATH setup.

@@ -13,11 +13,14 @@
 | macOS | Apple 芯片（M1 / M2 / M3 等） | [下载 .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-aarch64.dmg) |
 | macOS | Intel 芯片 | [下载 .dmg](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-macOS-x86_64.dmg) |
 | Windows | Intel / AMD 64 位电脑 | [下载 .exe](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Windows-x64.exe) |
+| Linux | Intel / AMD 64 位电脑 | [下载 .deb](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Linux-x64.deb) · [下载 .AppImage](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Linux-x64.AppImage) |
+| Linux | ARM64 电脑 | [下载 .deb](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Linux-arm64.deb) · [下载 .AppImage](https://github.com/qufei1993/skills-hub/releases/download/v0.11.0/Skills-Hub-v0.11.0-Linux-arm64.AppImage) |
 
 桌面用户只需下载安装包，CLI 会在启用 AI 管理时自动下载。
 
 ### 新增
 
+- **Linux 桌面安装包**：提供 Linux x64、ARM64 的 `.deb` 和 `.AppImage` 安装包。每次发布按实际安装包自动生成中英文下载表格，带签名的 AppImage 纳入应用更新清单。
 - **AI 管理 Skills**：在「设置 → AI 管理」一键启用官方 `manage-skills-hub` Skill，通过 AI 对话搜索、安装、导入、更新、同步、管理标签和安全删除 Skills，与桌面端共用技能库。
 - **更轻的安装包与按需 CLI**：正式桌面安装包不再内置 CLI，启用 AI 管理时下载并校验对应版本，同时配置终端命令，重新打开终端即可使用。首次启用需要联网；已校验的对应版本可离线使用，关闭桌面端后仍可运行。CLI 和官方 Skill 更新由设置中的按钮触发，支持下载进度与失败重试，失败保留原来可用的 CLI。CLI 文件与桌面安装包放在同一个 Release 中，无需 Node.js 或 npm。
 - **独立 CLI 安装脚本**：macOS、Linux 和 Windows x64 可用一条命令安装或升级 CLI，自动校验下载文件并配置用户命令路径。

@@ -1,0 +1,17 @@
+# Linux 桌面打包
+
+[English](linux-desktop-packaging.md)
+
+发布流程新增 Linux x64（`ubuntu-24.04`）和 ARM64（`ubuntu-24.04-arm`），在对应架构的原生机器上构建 `.deb` 和 `.AppImage`。正式安装包不内置 CLI，启用 AI 管理时下载匹配版本的发布 CLI。
+
+安装包命名为 `Skills-Hub-v<版本>-Linux-x64` 或 `Skills-Hub-v<版本>-Linux-arm64`，后缀为 `.deb`、`.AppImage` 和 `.AppImage.sig`。整理资源时要求每种安装包各有一个非空文件，且 AppImage 签名存在；缺失、空文件或混入旧安装包会让构建失败。重命名不会改变已签名 AppImage 的字节。更新清单新增 `linux-x86_64` 和 `linux-aarch64`，使用带签名的 AppImage，符合 [Tauri 更新格式](https://v2.tauri.app/plugin/updater/)。
+
+每次发布按实际桌面安装包生成中英文下载表格，每种架构一行，列出已生成格式的下载链接。CLI、签名和未生成的安装包不进入表格。旧表格会被替换，后续版本自动使用对应标签链接。公开下载链接在草稿正式发布后可用；草稿测试仍通过已登录的底部资源列表下载。
+
+`.deb` 通过 Debian/Ubuntu 的包管理安装，AppImage 授予执行权限后运行，并支持应用内更新。两种安装包都基于 Ubuntu 24.04 构建，本次不承诺兼容 Ubuntu 22.04、Debian 12 等旧发行版。AppImage 也受 glibc 兼容性限制，参见 [Tauri Linux 兼容性说明](https://v2.tauri.app/distribute/appimage/)。
+
+Linux 打包 CI 使用 x64、ARM64 原生机器和一次性测试签名密钥，不读取正式发布签名凭据。实际构建两种格式，检查 Debian 包的架构和版本，解包确认均不包含 CLI 可执行文件，并在临时应用数据目录和 Xvfb 中验证 AppImage 能打开桌面窗口。正式发布上传前执行同样的安装包检查；原有 CLI 验证、签名和草稿发布检查保持有效。
+
+本地回归测试覆盖资源整理、缺失/空文件/重复资源、双语表格链接，以及用 Linux 样本执行真实的更新清单生成步骤。实际原生安装包检查在 Linux CI 中运行。本记录不代表现有 v0.11.0 草稿已经重新构建或对外公开。
+
+本地验证：`npm run check` 通过，包括 304 项前端测试、636 项 Rust 单元测试、2 项旧稳定版兼容性测试和 19 项 CLI 集成测试。17 项独立发布回归测试、版本检查、工作流 YAML 解析和 Bash 语法检查也通过。首次完整检查需要为新分支基线重新生成开发 CLI 清单；准备后最终检查通过。

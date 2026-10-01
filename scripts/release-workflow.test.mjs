@@ -107,7 +107,7 @@ it('release notes generate bilingual download tables from actual desktop assets'
 
 it('separates CLI and desktop builds and keeps the complete release as a draft', () => {
   assert.equal(workflow.jobs['cli-build'].strategy.matrix.include.length, 5)
-  assert.equal(workflow.jobs['desktop-build'].strategy.matrix.include.length, 3)
+  assert.equal(workflow.jobs['desktop-build'].strategy.matrix.include.length, 5)
   assert.ok(needs(workflow.jobs['desktop-build']).includes('cli-build'))
   assert.ok(needs(workflow.jobs['cli-publish']).includes('cli-build'))
   const cliSteps = workflow.jobs['cli-build'].steps

@@ -1,0 +1,17 @@
+# Linux desktop packaging
+
+[中文](linux-desktop-packaging.zh.md)
+
+The release matrix now builds Linux x64 on `ubuntu-24.04` and ARM64 on `ubuntu-24.04-arm`. Both native runners produce `.deb` and `.AppImage` installers. Production installers contain no CLI executable; AI management downloads the matching release CLI when enabled.
+
+Assets use `Skills-Hub-v<version>-Linux-x64` or `Skills-Hub-v<version>-Linux-arm64` with `.deb`, `.AppImage` and `.AppImage.sig` suffixes. Staging requires one nonempty installer of each format and its AppImage signature. Missing or ambiguous assets fail the job. Renaming preserves the exact signed AppImage bytes. `updater.json` includes `linux-x86_64` and `linux-aarch64`, pointing to the signed AppImages, as required by [Tauri's updater format](https://v2.tauri.app/plugin/updater/).
+
+Release notes generate English and Chinese download tables from the staged desktop assets. Each architecture has one row with available format links. CLI binaries, signatures and unavailable installers are excluded. Existing tables are replaced, so later versions receive current tag URLs automatically. These direct URLs become publicly accessible after the draft is published; authenticated draft downloads remain available through the asset list.
+
+`.deb` packages install through Debian/Ubuntu package management. AppImages run after granting execute permission and support in-app updates. Both builds use Ubuntu 24.04, so this change does not promise compatibility with older distributions such as Ubuntu 22.04 or Debian 12. AppImage does not eliminate the glibc compatibility requirement; see [Tauri's Linux compatibility guidance](https://v2.tauri.app/distribute/appimage/).
+
+The Linux packaging CI uses native x64 and ARM64 runners and a disposable signing key, never release signing credentials. It builds both formats, checks Debian architecture/version metadata, extracts both packages to reject carried CLI executables, and verifies that the AppImage opens a desktop window under Xvfb with temporary application data. Release jobs perform the same package checks before uploading assets. Existing CLI verification, signing and draft publication gates remain enforced.
+
+Local regression tests cover staging and missing/empty/ambiguous assets, table links in both languages, and execution of the real updater-generation step with Linux fixtures. Actual native package checks run in Linux CI. This record does not mean the existing v0.11.0 draft has been rebuilt or publicly published.
+
+Local validation: `npm run check` passed with 304 frontend tests, 636 Rust unit tests, two previous-stable compatibility tests and 19 CLI integration tests. The 17 standalone release regression tests, version check, workflow YAML parsing and Bash syntax checks also passed. The first full check required regenerating the debug CLI metadata for the new branch baseline; the final check passed after that preparation.
