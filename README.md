@@ -208,7 +208,7 @@ skillshub-cli --help
 
 Run the same installation command again to upgrade. This standalone copy is separate from the desktop-managed CLI and does not update automatically with the app. To remove it, delete the installed `skillshub-cli` executable (`skillshub-cli.exe` on Windows); your Skill library is retained.
 
-The CLI shares the local library with Skills Hub. Installing it alone does not install the official AI management Skill. Device sync, scheduled tasks, account authorization, and app settings remain desktop features. Linux releases target GNU/glibc systems, not Alpine/musl.
+The CLI shares the local library with Skills Hub. Installing it alone does not install the official AI management Skill. Device sync, scheduled tasks, account authorization, and app settings remain desktop features. Linux x64 and ARM64 desktop installers and CLI require Ubuntu 24.04 or a compatible GNU/glibc distribution with glibc 2.39 or later. Debian packages declare `libc6 (>= 2.39)` and retain automatic WebKit dependencies. AppImage also requires this glibc baseline. Ubuntu 22.04, Debian 12 and Alpine/musl are unsupported by these builds.
 
 </details>
 

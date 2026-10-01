@@ -15,11 +15,16 @@ export function renderDownloads({ tag, assets, language }) {
       `[${zh ? '下载' : 'Download'} ${extension}](https://github.com/qufei1993/skills-hub/releases/download/${tag}/Skills-Hub-${tag}-${platform}${extension})`),
   })).filter(row => row.links.length)
   if (!installers.length) throw new Error('No desktop installers available')
-  const rows = installers.map(({ system, computer, links }) => `| ${system} | ${computer} | ${links.join(' · ')} |`)
+  const rows = installers.map(({ system, computer, links }) => {
+    const minimum = system === 'Linux'
+      ? (zh ? 'Ubuntu 24.04 或兼容发行版（glibc ≥ 2.39）' : 'Ubuntu 24.04 or compatible distribution (glibc ≥ 2.39)')
+      : '—'
+    return `| ${system} | ${computer} | ${minimum} | ${links.join(' · ')} |`
+  })
   return [
     zh ? '### 下载安装' : '### Downloads', '',
-    zh ? '| 系统 | 适用电脑 | 安装包 |' : '| System | Computer | Installer |',
-    '| --- | --- | --- |', ...rows, '',
+    zh ? '| 系统 | 适用电脑 | 最低环境 | 安装包 |' : '| System | Computer | Minimum environment | Installer |',
+    '| --- | --- | --- | --- |', ...rows, '',
     zh ? '桌面用户只需下载安装包，CLI 会在启用 AI 管理时自动下载。' : 'Desktop users only need the installer. The CLI downloads automatically when you enable AI management.',
   ].join('\n')
 }

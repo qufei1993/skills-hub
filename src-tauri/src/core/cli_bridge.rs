@@ -20,6 +20,32 @@ pub const VERSION_STAMP: &str = "skillshub-cli.version";
 pub const HASH_STAMP: &str = "skillshub-cli.sha256";
 const LOCK_FILE: &str = ".skillshub-cli.lock";
 
+struct BridgeLock {
+    file: File,
+    locked: bool,
+}
+
+impl BridgeLock {
+    fn new(file: File) -> Self {
+        Self { file, locked: true }
+    }
+
+    fn release(&mut self) -> std::io::Result<()> {
+        if self.locked {
+            FileExt::unlock(&self.file)?;
+            self.locked = false;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for BridgeLock {
+    fn drop(&mut self) {
+        // Closing the parent FD alone leaves flock held during a child's fork/exec window.
+        let _ = self.release();
+    }
+}
+
 fn bundled_cli_source_for_profile(
     _executable: &Path,
     development: bool,
@@ -261,13 +287,20 @@ fn previous_bridge(directory: &BridgeDirectory) -> Option<PreviousBridge> {
 }
 
 fn restore_previous_bridge(directory: &BridgeDirectory, previous: PreviousBridge) -> Result<()> {
-    let mut temp = directory.temp().map_err(io_error)?;
-    temp.file.write_all(&previous.binary).map_err(io_error)?;
-    temp.file
-        .set_permissions(previous.permissions)
-        .map_err(io_error)?;
-    temp.file.sync_all().map_err(io_error)?;
-    temp.persist(BINARY_NAME).map_err(io_error)?;
+    let binary_unchanged = directory
+        .open_file(OsStr::new(BINARY_NAME), false, false)
+        .ok()
+        .and_then(|mut file| hash_open_file(&mut file).ok())
+        .is_some_and(|hash| hash == previous.hash);
+    if !binary_unchanged {
+        let mut temp = directory.temp().map_err(io_error)?;
+        temp.file.write_all(&previous.binary).map_err(io_error)?;
+        temp.file
+            .set_permissions(previous.permissions)
+            .map_err(io_error)?;
+        temp.file.sync_all().map_err(io_error)?;
+        temp.persist(BINARY_NAME).map_err(io_error)?;
+    }
     atomic_stamp(directory, HASH_STAMP, &previous.hash)?;
     atomic_stamp(directory, VERSION_STAMP, &previous.version)?;
     Ok(())
@@ -286,58 +319,63 @@ fn publish_cli_bridge_with_hook(
         .map_err(io_error)?;
     lock.try_lock_exclusive()
         .map_err(|_| anyhow::anyhow!(CliBridgeReason::PublicationInProgress.code()))?;
-    if !hash_valid(expected_hash) {
-        bail!(CliBridgeReason::HashMismatch.code());
-    }
-    if !metadata_valid(version, expected_hash) {
-        bail!(CliBridgeReason::InvalidMetadata.code());
-    }
-    if !regular_file(source) {
-        bail!(CliBridgeReason::SourceMissing.code());
-    }
-    if hash_file(source)? != expected_hash {
-        bail!(CliBridgeReason::HashMismatch.code());
-    }
-    let previous = previous_bridge(&directory);
-    let mut changed = false;
+    let mut lock = BridgeLock::new(lock);
     let result = (|| {
-        let mut temp = directory.temp().map_err(io_error)?;
-        let mut input = File::open(source).map_err(io_error)?;
-        std::io::copy(&mut input, &mut temp.file).map_err(io_error)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            temp.file
-                .set_permissions(fs::Permissions::from_mode(0o700))
-                .map_err(io_error)?;
-        }
-        temp.file.sync_all().map_err(io_error)?;
-        if hash_open_file(&mut temp.file)? != expected_hash {
+        if !hash_valid(expected_hash) {
             bail!(CliBridgeReason::HashMismatch.code());
         }
-        changed = true;
-        invalidate_stamps(&directory)?;
-        temp.persist(BINARY_NAME).map_err(io_error)?;
-        after_replace()?;
-        atomic_stamp(&directory, HASH_STAMP, expected_hash)?;
-        atomic_stamp(&directory, VERSION_STAMP, version)?;
-        directory.verify().map_err(io_error)?;
-        Ok(CliBridgeStatus {
-            status: CliBridgeHealth::Valid,
-            reason: None,
-            path: destination.join(BINARY_NAME),
-            version: Some(version.to_string()),
-        })
-    })();
-    if result.is_err() && changed {
-        if let Some(previous) = previous {
-            if restore_previous_bridge(&directory, previous).is_err() {
+        if !metadata_valid(version, expected_hash) {
+            bail!(CliBridgeReason::InvalidMetadata.code());
+        }
+        if !regular_file(source) {
+            bail!(CliBridgeReason::SourceMissing.code());
+        }
+        if hash_file(source)? != expected_hash {
+            bail!(CliBridgeReason::HashMismatch.code());
+        }
+        let previous = previous_bridge(&directory);
+        let mut changed = false;
+        let result = (|| {
+            let mut temp = directory.temp().map_err(io_error)?;
+            let mut input = File::open(source).map_err(io_error)?;
+            std::io::copy(&mut input, &mut temp.file).map_err(io_error)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                temp.file
+                    .set_permissions(fs::Permissions::from_mode(0o700))
+                    .map_err(io_error)?;
+            }
+            temp.file.sync_all().map_err(io_error)?;
+            if hash_open_file(&mut temp.file)? != expected_hash {
+                bail!(CliBridgeReason::HashMismatch.code());
+            }
+            changed = true;
+            invalidate_stamps(&directory)?;
+            temp.persist(BINARY_NAME).map_err(io_error)?;
+            after_replace()?;
+            atomic_stamp(&directory, HASH_STAMP, expected_hash)?;
+            atomic_stamp(&directory, VERSION_STAMP, version)?;
+            directory.verify().map_err(io_error)?;
+            Ok(CliBridgeStatus {
+                status: CliBridgeHealth::Valid,
+                reason: None,
+                path: destination.join(BINARY_NAME),
+                version: Some(version.to_string()),
+            })
+        })();
+        if result.is_err() && changed {
+            if let Some(previous) = previous {
+                if restore_previous_bridge(&directory, previous).is_err() {
+                    let _ = invalidate_stamps(&directory);
+                }
+            } else {
                 let _ = invalidate_stamps(&directory);
             }
-        } else {
-            let _ = invalidate_stamps(&directory);
         }
-    }
+        result
+    })();
+    lock.release().map_err(io_error)?;
     result
 }
 
@@ -360,72 +398,77 @@ pub fn cli_bridge_status(
         Err(_) => return damaged(CliBridgeReason::IoError),
         Ok(directory) => directory,
     };
-    let lock = match directory.open_file(OsStr::new(LOCK_FILE), false, false) {
+    let mut lock = match directory.open_file(OsStr::new(LOCK_FILE), false, false) {
         Ok(file) => {
             if FileExt::try_lock_shared(&file).is_err() {
                 return damaged(CliBridgeReason::PublicationInProgress);
             }
-            Some(file)
+            Some(BridgeLock::new(file))
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(_) => return damaged(CliBridgeReason::IoError),
     };
-    let _lock = lock;
-    if !metadata_valid(version, expected_hash) {
-        return damaged(CliBridgeReason::InvalidMetadata);
-    }
-    let binary = destination.join(BINARY_NAME);
-    let mut binary_file = match directory.open_file(OsStr::new(BINARY_NAME), false, false) {
-        Ok(file) => file,
-        Err(_) => return damaged(CliBridgeReason::BinaryMissing),
-    };
-    let read_stamp = |name| -> std::io::Result<String> {
-        let mut value = String::new();
-        directory
-            .open_file(OsStr::new(name), false, false)?
-            .take(1024)
-            .read_to_string(&mut value)?;
-        Ok(value)
-    };
-    let stamp_version = match read_stamp(VERSION_STAMP) {
-        Ok(value) => value,
-        Err(_) => return damaged(CliBridgeReason::StampMissing),
-    };
-    if stamp_version.trim() != version {
-        return damaged(CliBridgeReason::VersionMismatch);
-    }
-    let stamp_hash = match read_stamp(HASH_STAMP) {
-        Ok(value) => value,
-        Err(_) => return damaged(CliBridgeReason::StampMissing),
-    };
-    if stamp_hash.trim() != expected_hash {
-        return damaged(CliBridgeReason::HashMismatch);
-    }
-    match hash_open_file(&mut binary_file) {
-        Ok(hash) if hash == expected_hash => {}
-        Ok(_) => return damaged(CliBridgeReason::HashMismatch),
-        Err(_) => return damaged(CliBridgeReason::IoError),
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if binary_file
-            .metadata()
-            .map(|m| m.permissions().mode() & 0o100 == 0)
-            .unwrap_or(true)
-        {
-            return damaged(CliBridgeReason::NotExecutable);
+    let status = (|| {
+        if !metadata_valid(version, expected_hash) {
+            return damaged(CliBridgeReason::InvalidMetadata);
         }
-    }
-    if directory.verify().is_err() {
+        let binary = destination.join(BINARY_NAME);
+        let mut binary_file = match directory.open_file(OsStr::new(BINARY_NAME), false, false) {
+            Ok(file) => file,
+            Err(_) => return damaged(CliBridgeReason::BinaryMissing),
+        };
+        let read_stamp = |name| -> std::io::Result<String> {
+            let mut value = String::new();
+            directory
+                .open_file(OsStr::new(name), false, false)?
+                .take(1024)
+                .read_to_string(&mut value)?;
+            Ok(value)
+        };
+        let stamp_version = match read_stamp(VERSION_STAMP) {
+            Ok(value) => value,
+            Err(_) => return damaged(CliBridgeReason::StampMissing),
+        };
+        if stamp_version.trim() != version {
+            return damaged(CliBridgeReason::VersionMismatch);
+        }
+        let stamp_hash = match read_stamp(HASH_STAMP) {
+            Ok(value) => value,
+            Err(_) => return damaged(CliBridgeReason::StampMissing),
+        };
+        if stamp_hash.trim() != expected_hash {
+            return damaged(CliBridgeReason::HashMismatch);
+        }
+        match hash_open_file(&mut binary_file) {
+            Ok(hash) if hash == expected_hash => {}
+            Ok(_) => return damaged(CliBridgeReason::HashMismatch),
+            Err(_) => return damaged(CliBridgeReason::IoError),
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if binary_file
+                .metadata()
+                .map(|m| m.permissions().mode() & 0o100 == 0)
+                .unwrap_or(true)
+            {
+                return damaged(CliBridgeReason::NotExecutable);
+            }
+        }
+        if directory.verify().is_err() {
+            return damaged(CliBridgeReason::IoError);
+        }
+        CliBridgeStatus {
+            status: CliBridgeHealth::Valid,
+            reason: None,
+            path: binary,
+            version: Some(version.to_string()),
+        }
+    })();
+    if lock.as_mut().is_some_and(|lock| lock.release().is_err()) {
         return damaged(CliBridgeReason::IoError);
     }
-    CliBridgeStatus {
-        status: CliBridgeHealth::Valid,
-        reason: None,
-        path: binary,
-        version: Some(version.to_string()),
-    }
+    status
 }
 
 #[cfg(test)]

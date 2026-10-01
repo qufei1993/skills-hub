@@ -38,6 +38,8 @@ impl SetupAgentRequest {
 pub enum AgentAccessReason {
     CentralMissing,
     CentralModified,
+    CentralIoError,
+    CentralUnsafePath,
     RecordError,
     TargetMissing,
     TargetModified,
@@ -86,6 +88,7 @@ pub struct AgentAccessStatus {
     pub skill_id: Option<String>,
     pub bundled_version: String,
     pub installed_version: Option<String>,
+    pub skill_update_available: bool,
     pub skill: Option<Skill>,
     pub agents: AgentList,
     pub central_reason: Option<AgentAccessReason>,
@@ -204,7 +207,14 @@ impl SkillsHubService {
                 OfficialSkillState::NameConflict
             } else if skill.is_none() {
                 OfficialSkillState::Missing
-            } else if central_reason.is_some() || health.iter().any(|agent| agent.needs_repair) {
+            } else if central_reason.is_some()
+                || health.iter().any(|health| {
+                    health.needs_repair
+                        && agents.agents.iter().any(|agent| {
+                            agent.key == health.agent && agent.enabled && agent.detected
+                        })
+                })
+            {
                 OfficialSkillState::NeedsRepair
             } else {
                 OfficialSkillState::Healthy
@@ -219,6 +229,14 @@ impl SkillsHubService {
             installed_version: skill
                 .as_ref()
                 .and_then(|skill| skill.source.revision.clone()),
+            skill_update_available: skill.as_ref().is_some_and(|skill| {
+                skill.source.revision.as_deref() != Some(env!("CARGO_PKG_VERSION"))
+                    || (central_reason.is_none()
+                        && (std::fs::read(Path::new(&skill.central_path).join("SKILL.md"))
+                            .is_ok_and(|content| content != OFFICIAL_SKILL_MD.as_bytes())
+                            || std::fs::read_dir(&skill.central_path)
+                                .is_ok_and(|entries| entries.count() != 1)))
+            }),
             skill,
             agents,
             central_reason,
@@ -283,7 +301,12 @@ impl SkillsHubService {
             let preview = self.skill_from_record(bundled.preview_record(), None)?;
             let deployment =
                 DeploymentRequest::global(bundled.record.id.clone(), request.agents.clone());
-            let plan = self.plan_deployment_for_skill(deployment, false, preview)?;
+            let plan = self.plan_deployment_for_skill_with_content_source(
+                deployment,
+                false,
+                preview,
+                bundled.preview_content_source(),
+            )?;
             if restrict_to_selected {
                 if let Some(target) = plan.targets.iter().find(|target| {
                     target
@@ -342,16 +365,16 @@ fn central_health(skill: &Skill) -> Option<AgentAccessReason> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Some(AgentAccessReason::CentralMissing)
         }
-        Err(_) => return Some(AgentAccessReason::CentralModified),
+        Err(_) => return Some(AgentAccessReason::CentralIoError),
     };
-    if !metadata.is_dir()
-        || metadata.file_type().is_symlink()
-        || hash_dir_strict(path)
-            .ok()
-            .as_ref()
-            .zip(skill.content_hash.as_ref())
-            .map_or(true, |(actual, expected)| actual != expected)
-    {
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Some(AgentAccessReason::CentralUnsafePath);
+    }
+    let actual = match hash_dir_strict(path) {
+        Ok(actual) => actual,
+        Err(_) => return Some(AgentAccessReason::CentralIoError),
+    };
+    if skill.content_hash.as_ref() != Some(&actual) {
         return Some(AgentAccessReason::CentralModified);
     }
     if skill.content_status != "ok" {

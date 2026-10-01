@@ -122,12 +122,15 @@ export const ko = {
   "terminalReady": "새 터미널에서 skillshub-cli가 아래 경로를 가리키는지 확인하세요.",
   "inactive": "공식 Skill이 설치되어 있지만 로컬 도구에서 활성화되지 않았습니다. 내 Skills에서 활성화 상태와 동기화 도구를 관리하세요.",
   "viewSkill": "Skill 보기",
+  "cliNeedsInstallation": "로컬 CLI를 설치하거나 업데이트해야 하지만 이번 설치가 완료되지 않았습니다. 아래 실패 원인을 확인하세요.",
+  "cliInstallationFailure": "CLI 설치 실패 원인",
   "details": "설치 상태",
   "errors": {
     "download": "다운로드하지 못했습니다. 네트워크와 프록시 설정을 확인한 뒤 다시 시도하세요.",
-    "unavailable": "이 버전의 관리 구성 요소를 아직 다운로드할 수 없습니다. 나중에 다시 시도하세요.",
+    "unavailable": "이 버전의 CLI 다운로드가 공개되지 않았거나 파일이 없습니다. GitHub 초안 릴리스에서는 CLI를 자동으로 다운로드할 수 없습니다. 이 플랫폼의 CLI 파일을 포함하여 릴리스를 공개한 후 활성화하세요.",
     "integrity": "다운로드한 구성 요소가 검증을 통과하지 못했습니다. 다시 다운로드하세요.",
 
+    "refresh": "AI 관리가 활성화되었지만 Skill 목록을 새로 고치지 못했습니다. 내 Skills를 다시 열어 새로 고치세요.",
     "read": "상태를 읽을 수 없습니다. 새로 고침 후 다시 시도하세요.",
     "cli": "관리 구성 요소를 준비하지 못했습니다. 다시 시도하거나 데스크톱 앱을 재설치하세요.",
     "terminal": "터미널 명령을 설정하지 못했습니다. macOS/Linux에서는 Bash와 Zsh만 지원합니다. 설정 파일 권한 또는 Windows 사용자 PATH를 확인한 뒤 다시 시도하세요.",
@@ -214,8 +217,10 @@ export const ko = {
         "PUBLICATION_IN_PROGRESS": "CLI 게시 중입니다. 완료된 후 새로고침하세요."
       },
       "healthReason": {
-        "CENTRAL_MISSING": "공식 라이브러리 사본이 없습니다. 사본을 복원한 후 연결을 복구하세요.",
-        "CENTRAL_MODIFIED": "공식 라이브러리 사본이 변경되었습니다. 변경 사항을 백업하고 원본을 복원한 후 복구하세요.",
+        "CENTRAL_MISSING": "관리되는 공식 Skill이 없습니다. 활성화를 클릭하여 앱에 포함된 버전을 복원하세요.",
+        "CENTRAL_MODIFIED": "관리되는 공식 Skill이 변경되었습니다. 활성화를 클릭하여 앱에 포함된 버전으로 교체하세요.",
+        "CENTRAL_IO_ERROR": "공식 Skill을 읽을 수 없습니다. 폴더 권한을 확인한 후 다시 시도하세요.",
+        "CENTRAL_UNSAFE_PATH": "공식 Skill 경로가 일반 관리 디렉터리가 아닙니다. 위치를 복원한 후 다시 시도하세요.",
         "RECORD_ERROR": "마지막 배포에 오류가 기록되었습니다. 대상 폴더를 확인하고 복구하세요.",
         "TARGET_MISSING": "배포 파일이 없거나 링크가 끊어졌습니다. 복구를 시도하세요.",
         "TARGET_MODIFIED": "배포 파일이 공식 사본과 다릅니다. 변경 사항을 백업한 후 복구하세요.",

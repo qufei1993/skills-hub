@@ -296,14 +296,81 @@ it('subscribes only on click and ignores unrelated download progress', async () 
 })
 
 it.each(['CLI_DOWNLOAD_FAILED', 'CLI_DOWNLOAD_UNAVAILABLE', 'CLI_INTEGRITY_FAILED'])('offers retry after %s without reporting ready', async code => {
+  const state = fixture()
+  state.bridge = { ...state.bridge, status: 'damaged', reason: 'HASH_MISMATCH', version: null }
   const invoke = vi.fn(async (command: string) => {
     if (command === 'enable_ai_management') throw new Error(code)
-    return fixture()
+    return state
   })
   render(<AiManagementSettings isTauri invokeTauri={invoke} onChanged={() => {}} onOpenSkill={() => {}} t={t} />)
   fireEvent.click(await screen.findByRole('button', { name: 'aiManagement.enable' }))
   expect((await screen.findByRole('alert')).textContent).toContain(code === 'CLI_INTEGRITY_FAILED' ? 'aiManagement.errors.integrity' : code === 'CLI_DOWNLOAD_UNAVAILABLE' ? 'aiManagement.errors.unavailable' : 'aiManagement.errors.download')
   expect(screen.queryByText('aiManagement.ready')).toBeNull()
+  const details = document.querySelector('details')!
+  const key = code === 'CLI_INTEGRITY_FAILED' ? 'integrity' : code === 'CLI_DOWNLOAD_UNAVAILABLE' ? 'unavailable' : 'download'
+  expect(details.textContent).toContain(`aiManagement.errors.${key}`)
+  if (key !== 'unavailable') expect(details.textContent).not.toContain('aiManagement.errors.unavailable')
   fireEvent.click(screen.getByRole('button', { name: 'aiManagement.enable' }))
   await waitFor(() => expect(invoke.mock.calls.filter(([name]) => name === 'enable_ai_management')).toHaveLength(2))
+})
+
+
+it.each(['en', 'zh', 'ko'])('connects unavailable CLI resources to the blocked installation in %s', async lng => {
+  const i18n = createInstance()
+  await i18n.init({ lng, resources, fallbackLng: false })
+  const state = fixture()
+  state.bridge = { ...state.bridge, status: 'damaged', reason: 'HASH_MISMATCH', version: null }
+  const invoke = vi.fn(async (command: string) => {
+    if (command === 'enable_ai_management') throw new Error('CLI_DOWNLOAD_UNAVAILABLE')
+    return state
+  })
+  render(<AiManagementSettings isTauri invokeTauri={invoke} onChanged={() => {}} onOpenSkill={() => {}} t={i18n.t} />)
+  fireEvent.click(await screen.findByRole('button', { name: i18n.t('aiManagement.enable') }))
+  const alert = await screen.findByRole('alert')
+  const explanation = i18n.t('aiManagement.errors.unavailable')
+  expect(alert.textContent).toBe(explanation)
+  const details = document.querySelector('details')!
+  await waitFor(() => expect(details.textContent).toContain(i18n.t('aiManagement.cliInstallationFailure')))
+  expect(details.textContent).toContain(explanation)
+  expect(details.textContent).toContain(i18n.t('aiManagement.cliNeedsInstallation'))
+  expect(details.textContent).not.toContain(i18n.t('agentAccess.reason.HASH_MISMATCH'))
+  expect(explanation).not.toContain('aiManagement.errors.')
+  if (lng === 'zh') {
+    expect(explanation).toContain('草稿')
+    expect(explanation).toContain('公开发布')
+    expect(explanation).not.toContain('稍后重试')
+  }
+})
+
+it('keeps terminal repair available when a PATH conflict is also present', async () => {
+  const state = fixture()
+  Object.assign(state, { officialState: 'healthy', installed: true, terminalReady: false, terminalPathConflict: true })
+  state.agents[0].deployed = true
+  render(<AiManagementSettings isTauri invokeTauri={async () => state} onChanged={() => {}} onOpenSkill={() => {}} t={t} />)
+  expect(await screen.findByRole('button', { name: 'aiManagement.enable' })).toBeTruthy()
+})
+
+it('does not report setup failure when only the library refresh fails after successful enabling', async () => {
+  const ready = fixture()
+  Object.assign(ready, { officialState: 'healthy', installed: true, skillId: 'official' })
+  ready.agents[0].deployed = true
+  const invoke = vi.fn(async (command: string) => command === 'enable_ai_management' ? ready : fixture())
+  const changed = vi.fn().mockRejectedValue(new Error('refresh failed'))
+  render(<AiManagementSettings isTauri invokeTauri={invoke} onChanged={changed} onOpenSkill={() => {}} t={t} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'aiManagement.enable' }))
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'aiManagement.errors.refresh')
+  expect(screen.getByText('aiManagement.ready')).toBeTruthy()
+  expect(invoke.mock.calls.filter(([name]) => name === 'enable_ai_management')).toHaveLength(1)
+  expect(changed).toHaveBeenCalledOnce()
+})
+
+it('offers an official Skill content update even when the version and CLI are current', async () => {
+  const state = fixture()
+  Object.assign(state, { officialState: 'healthy', installed: true, skillId: 'id', installedVersion: state.bundledVersion, skillUpdateAvailable: true })
+  state.agents[0].deployed = true
+  const invoke = vi.fn(async () => state)
+  render(<AiManagementSettings isTauri invokeTauri={invoke} onChanged={() => {}} onOpenSkill={() => {}} t={t} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'aiManagement.update' }))
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('enable_ai_management', { operationId: expect.any(String) }))
+  expect(screen.queryByText('aiManagement.ready')).toBeNull()
 })

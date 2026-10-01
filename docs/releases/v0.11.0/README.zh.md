@@ -1,5 +1,9 @@
 # Skills Hub v0.11.0
 
+五平台恢复回归与 Linux 安装验证见 [发布恢复验证](release-recovery.zh.md)。
+
+草稿下载限制、就绪判断和修复入口的说明见 [AI 管理诊断与恢复](ai-management-recovery.zh.md)。
+
 [English](README.md)
 
 各平台安装包的下载链接在发布时自动生成到 [GitHub 发布页](https://github.com/qufei1993/skills-hub/releases/tag/v0.11.0)。

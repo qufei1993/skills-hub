@@ -1,5 +1,9 @@
 # Skills Hub v0.11.0
 
+See [release recovery verification](release-recovery.md) for native recovery gates and Linux package installation checks.
+
+See [AI management diagnostics and recovery](ai-management-recovery.md) for draft download limitations and fixes to readiness and recovery.
+
 [中文](README.zh.md)
 
 Installer links are generated on the [GitHub release page](https://github.com/qufei1993/skills-hub/releases/tag/v0.11.0).

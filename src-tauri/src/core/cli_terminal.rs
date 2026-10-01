@@ -95,9 +95,24 @@ fn update_profile(profile: &Path, line: &str) -> Result<()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(error) => return Err(error.into()),
     };
-    if existing.lines().any(|entry| entry == line) {
+    let matches = existing.lines().filter(|entry| *entry == line).count();
+    if matches == 1 && existing.lines().last() == Some(line) {
         return Ok(());
     }
+    let updated = if matches == 0 {
+        format!("{existing}\n# Skills Hub CLI\n{line}\n")
+    } else {
+        let mut text: String = existing
+            .split_inclusive('\n')
+            .filter(|entry| entry.trim_end_matches(['\n', '\r']) != line)
+            .collect();
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str(line);
+        text.push('\n');
+        text
+    };
     let parent = destination
         .parent()
         .context("missing shell profile parent")?;
@@ -105,7 +120,7 @@ fn update_profile(profile: &Path, line: &str) -> Result<()> {
     if let Ok(metadata) = std::fs::metadata(&destination) {
         staged.as_file().set_permissions(metadata.permissions())?;
     }
-    write!(staged, "{existing}\n# Skills Hub CLI\n{line}\n")?;
+    staged.write_all(updated.as_bytes())?;
     staged.as_file().sync_all()?;
     staged.persist(&destination)?;
     Ok(())
@@ -226,8 +241,14 @@ mod windows {
             bail!("unsupported terminal path");
         }
         let (current, kind) = read_path_value(key)?;
-        if !contains_directory(&current, directory) {
-            let path = wide(&format!("{directory};{current}"));
+        let other_entries = current
+            .split(';')
+            .filter(|entry| !contains_directory(entry, directory))
+            .collect::<Vec<_>>()
+            .join(";");
+        let updated = format!("{directory};{other_entries}");
+        if updated != current {
+            let path = wide(&updated);
             let status = unsafe {
                 RegSetKeyValueW(
                     HKEY_CURRENT_USER,
@@ -358,13 +379,41 @@ mod tests {
             }
         }
         let _cleanup = Cleanup(key_wide);
+        let root = tempfile::tempdir().unwrap();
+        let production = root.path().join("production tools");
+        let development = root.path().join("development tools");
+        for (directory, result) in [(&production, "production"), (&development, "development")] {
+            std::fs::create_dir(directory).unwrap();
+            std::fs::write(
+                directory.join("skillshub-cli.cmd"),
+                format!("@echo {result}\r\n"),
+            )
+            .unwrap();
+        }
         windows::configure_path(&key, Path::new("C:\\existing")).unwrap();
-        windows::configure_path(&key, Path::new("C:\\Users\\test user\\.skills-hub\\bin")).unwrap();
-        let first = windows::read_path(&key).unwrap();
-        windows::configure_path(&key, Path::new("C:\\Users\\test user\\.skills-hub\\bin")).unwrap();
-        assert_eq!(windows::read_path(&key).unwrap(), first);
-        assert!(first.contains("C:\\existing"));
-        assert!(first.starts_with("C:\\Users\\test user\\.skills-hub\\bin;"));
+        windows::configure_path(&key, &production).unwrap();
+        windows::configure_path(&key, &development).unwrap();
+        windows::configure_path(&key, &production).unwrap();
+        let reordered = windows::read_path(&key).unwrap();
+        let output = std::process::Command::new(std::env::var_os("COMSPEC").unwrap())
+            .args(["/D", "/C", "skillshub-cli"])
+            .env("PATH", &reordered)
+            .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+            .current_dir(root.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap().trim(),
+            "production"
+        );
+        windows::configure_path(&key, &production).unwrap();
+        assert_eq!(windows::read_path(&key).unwrap(), reordered);
+        assert!(reordered.contains("C:\\existing"));
+        assert!(contains_directory(
+            &reordered,
+            development.to_str().unwrap()
+        ));
     }
 
     #[cfg(unix)]
@@ -399,6 +448,61 @@ mod tests {
             String::from_utf8(output.stdout).unwrap().trim(),
             binary.to_str().unwrap()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reconfiguring_production_after_development_selects_production_in_new_shell() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("dotfile");
+        let profile = root.path().join(".bashrc");
+        let production = root.path().join("production");
+        let development = root.path().join("development");
+        for (directory, result) in [(&production, "production"), (&development, "development")] {
+            std::fs::create_dir(directory).unwrap();
+            let binary = directory.join("skillshub-cli");
+            std::fs::write(&binary, format!("#!/bin/sh\nprintf '{result}\\n'\n")).unwrap();
+            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        std::fs::write(
+            &target,
+            "# keep user settings\nexport CUSTOM_SETTING=preserved\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::os::unix::fs::symlink(&target, &profile).unwrap();
+        let line = path_line(&production).unwrap();
+        update_profile(&profile, &line).unwrap();
+        update_profile(&profile, &path_line(&development).unwrap()).unwrap();
+        let content = std::fs::read_to_string(&target).unwrap();
+        std::fs::write(&target, format!("{line}\n{content}")).unwrap();
+        update_profile(&profile, &line).unwrap();
+        let output = std::process::Command::new("/bin/bash")
+            .args(["--noprofile", "--norc", "-c", "source \"$1\"; command -v skillshub-cli; skillshub-cli; printf '%s\\n' \"$CUSTOM_SETTING\"", "test"])
+            .arg(&profile)
+            .env("PATH", "/usr/bin:/bin")
+            .env_remove("BASH_ENV")
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            format!(
+                "{}\nproduction\npreserved\n",
+                production.join("skillshub-cli").display()
+            )
+        );
+        assert!(profile.is_symlink());
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let content = std::fs::read_to_string(&target).unwrap();
+        assert!(content.starts_with("# keep user settings\nexport CUSTOM_SETTING=preserved\n"));
+        assert_eq!(content.lines().filter(|entry| *entry == line).count(), 1);
+        update_profile(&profile, &line).unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), content);
     }
 
     #[cfg(unix)]

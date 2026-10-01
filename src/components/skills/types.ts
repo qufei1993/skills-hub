@@ -1,4 +1,4 @@
-export type AgentAccessReason = 'CENTRAL_MISSING' | 'CENTRAL_MODIFIED' | 'RECORD_ERROR' | 'TARGET_MISSING' | 'TARGET_MODIFIED' | 'TARGET_OWNERSHIP' | 'VERSION_MISMATCH'
+export type AgentAccessReason = 'CENTRAL_MISSING' | 'CENTRAL_MODIFIED' | 'CENTRAL_IO_ERROR' | 'CENTRAL_UNSAFE_PATH' | 'RECORD_ERROR' | 'TARGET_MISSING' | 'TARGET_MODIFIED' | 'TARGET_OWNERSHIP' | 'VERSION_MISMATCH'
 
 export type AgentAccessAgentDto = {
   key: string
@@ -26,6 +26,7 @@ export type AgentAccessStatusDto = {
   }
   bundledVersion: string
   installedVersion: string | null
+  skillUpdateAvailable?: boolean
   installed: boolean
   centralReason: AgentAccessReason | null
   agents: AgentAccessAgentDto[]
