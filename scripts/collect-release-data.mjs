@@ -456,4 +456,3 @@ export async function collectReleaseSnapshot({
     notes,
   };
 }
-
