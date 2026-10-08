@@ -35,3 +35,34 @@ jobs:
           if (!response.ok || !data.success || data.result?.name !== 'skills-hub-release-data') throw Error('Pages project access verification failed. Check token account and Pages permissions.');
           console.log('Pages release data project access verified; no deployment performed.');
           JS
+      - name: Prepare release data for preview verification
+        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+        id: data
+        run: node scripts/publish-release-data.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASES_BASE_URL: https://releases.aiskillshub.link/
+      - name: Verify Pages upload with isolated preview
+        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: e2238e7536f05ab6dbd4eb993fcfed80
+          wranglerVersion: '4.145.0'
+          command: pages deploy ${{ steps.data.outputs.directory }} --project-name=skills-hub-release-data --branch=verify-pr-${{ github.event.number || github.run_id }}
+      - name: Verify preview pointer and catalog
+        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          PREVIEW_BASE: https://verify-pr-${{ github.event.number || github.run_id }}.skills-hub-release-data.pages.dev/
+        run: |
+          node --input-type=module <<'JS'
+          const base = process.env.PREVIEW_BASE;
+          const response = await fetch(new URL('current.json', base), { signal: AbortSignal.timeout(30000) });
+          if (!response.ok) throw Error('Preview pointer verification failed.');
+          const pointer = await response.json();
+          if (!/^snapshots\/[a-f0-9]{64}\/$/.test(pointer.snapshotPath)) throw Error('Invalid preview snapshot.');
+          const catalogResponse = await fetch(new URL(pointer.snapshotPath + 'index.json', base), { signal: AbortSignal.timeout(30000) });
+          const catalog = await catalogResponse.json();
+          if (!catalogResponse.ok || catalog.latest !== pointer.latest) throw Error('Preview catalog verification failed.');
+          console.log('Release data preview upload and catalog verified; production is unchanged.');
+          JS
