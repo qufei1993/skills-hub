@@ -1,26 +1,22 @@
 # 官网桌面发布数据
 
-正式 GitHub Release 发布后，`Publish desktop release data` 工作流从 GitHub 读取最新稳定版本、真实安装包以及该版本 tag 的中英文 Changelog，发布独立数据源。无需重建官网，也不触发官网部署。预发布和草稿不触发。
+正式 GitHub Release 发布后，工作流读取 GitHub 最新稳定版本、安装包链接与中英文日志，发布到独立 Cloudflare Pages 项目。官网运行时读取，无需重建官网。合集发布不受影响。
 
 ## 一次性配置
 
-1. Cloudflare R2 创建专用 bucket：`skills-hub-release-data`，绑定自定义域名 `releases.aiskillshub.link`。不要使用合集 bucket。
-2. CORS 允许 `https://aiskillshub.link`、`https://skills-hub-7rq.pages.dev` 执行 GET/HEAD。需要本地联调时增加对应 localhost origin。配置示例：
-   ```json
-   [{"AllowedOrigins":["https://aiskillshub.link","https://skills-hub-7rq.pages.dev"],"AllowedMethods":["GET","HEAD"]}]
-   ```
-3. 创建仅此 bucket 的 Object Read & Write 凭据。只放入本仓库 GitHub Actions Secrets：`RELEASES_R2_ACCESS_KEY_ID`、`RELEASES_R2_SECRET_ACCESS_KEY`。禁止提交到代码、日志或聊天。账户 ID 在工作流中配置，是公开标识。
-4. 手动运行该工作流一次，初始化现有最新稳定版本。确认公开 `current.json`、快照与中英文日志均可访问，再部署官网读取改动。
+1. 已创建并初始化 Direct Upload Pages 项目 `skills-hub-release-data`，生产分支 `main`，绑定 `releases.aiskillshub.link`。使用 Pages 免费计划；不启用 Functions、R2 或数据库。
+2. 在桌面仓库 Actions Secrets 添加 `CLOUDFLARE_API_TOKEN`，权限为对应账户的 **Cloudflare Pages / Edit**。不把密钥放进代码、文档或聊天。
+3. 工作流合入默认分支后，手动运行 `Publish desktop release data`，仅首次勾选 `bootstrap`。确认 `current.json` 和日志可读取，再上线官网读取改动。
 
-[R2 自定义域名](https://developers.cloudflare.com/r2/buckets/public-buckets/) · [CORS 配置](https://developers.cloudflare.com/r2/buckets/cors/)
+[Cloudflare 项目](https://dash.cloudflare.com/e2238e7536f05ab6dbd4eb993fcfed80/workers-and-pages) · [桌面仓库 Secrets](https://github.com/qufei1993/skills-hub/settings/secrets/actions) · [发布工作流](https://github.com/qufei1993/skills-hub/actions/workflows/publish-release-data.yml)
 
-## 发布与回滚
+## 数据与发布
 
-- 仅安装包索引和日志上传 R2，安装包仍从 GitHub 下载。无需 Rust 构建，Node 工作流限时 10 分钟。
-- 每次生成 `snapshots/<SHA256>/`。依次上传全部文件、完成标记，最后切换 `current.json`。上传失败保留旧指针；修好后手动重跑。
-- `current.json` 使用 `no-store`，不要对它设置强制缓存规则。快照长期缓存，不覆盖或删除。
-- 回滚：手动运行工作流，在 `rollback_snapshot` 填此前成功日志中的 SHA256。只允许激活有完成标记的快照，保留全部历史文件。
-- 发布流程读取 GitHub 当前 latest，重跑历史事件不会主动降级。人工指定回滚是例外。
-- 合集数据和官网版本发布仍由各自流程管理，本工作流不访问它们。
+- `current.json` 指向 `snapshots/<SHA256>/index.json`，日志在该快照的 `changelog/zh/`、`changelog/en/`。`archive.json` 记录保留的快照。
+- 每次拉取并校验历史快照，生成完整目录，再一次部署。历史读取失败或内容不完整时停止，不覆盖线上数据。首次初始化只允许明确的 404，不忽略网络错误。
+- `current.json`、归档目录不缓存；快照长期缓存。公开文件允许跨域读取，缺失文件返回 404。
+- 安装包仍在 GitHub。工作流不编译桌面应用，不发布官网或合集。重跑旧事件仍读取 GitHub 当前 latest。
+- 回滚在此独立 Pages 项目的生产部署列表中选择之前成功的部署。回滚后不要删除旧部署，方便恢复。
+- 达到 19,000 文件或单文件超过 25 MiB 时停止发布，提前规划历史快照清理。正常新增版本无需修改官网。
 
-验证：`npm run test:release-data`。
+验证：`npm run test:release-data`。本项目无需开通 R2 或付费订阅。

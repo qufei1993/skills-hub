@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- **Independent website release data**: Publishing a stable desktop release updates an isolated R2 snapshot of installer links and bilingual notes, without rebuilding the website. Failed uploads retain the previous pointer; completed snapshots support explicit rollback.
+- **Independent website release data**: Publishing a stable desktop release updates an isolated Cloudflare Pages snapshot of installer links and bilingual notes, without rebuilding the website. Preparation failures do not deploy; previous production deployments can be restored in Pages.
 
 ## [0.11.0]
 
