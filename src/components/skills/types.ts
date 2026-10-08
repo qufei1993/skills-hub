@@ -464,3 +464,11 @@ export type CliPreparationProgress = {
   downloadedBytes: number
   totalBytes: number | null
 }
+
+export type CollectionManifest = {
+  v: 1
+  title: string
+  sources: { repo: string; ref: string }[]
+  skills: { name: string; path: string; source: number }[]
+}
+export type CollectionResult = { state: 'installed' | 'existing' | 'failed'; message?: string }

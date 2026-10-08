@@ -49,16 +49,45 @@ pub(crate) fn runtime_paths_for_tauri<R: tauri::Runtime>(
     runtime_paths(app)
 }
 
+#[cfg(any(target_os = "macos", test))]
+fn activate_collection_link(links: &[String], activate: impl FnOnce()) {
+    if links
+        .iter()
+        .any(|link| commands::collection_link::parse_link(link).is_ok())
+    {
+        activate();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(debug_assertions)]
     let _ = dotenvy::dotenv();
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = if std::env::args().any(|arg| arg == "--background-task") {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
+    };
+    builder
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(core::app_updater::builder().build())
         .setup(|app| {
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
+            if !cfg!(debug_assertions) {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                app.deep_link().register_all()?;
+            }
             app.handle().plugin(
                 tauri_plugin_log::Builder::default()
                     .level(log::LevelFilter::Info)
@@ -241,6 +270,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::collection_link::parse_collection_link,
             commands::get_central_repo_path,
             commands::preview_central_repo_path_change,
             commands::set_central_repo_path,
@@ -334,11 +364,41 @@ pub fn run() {
         })
         .build(runtime_context())
         .expect("error while running tauri application")
-        .run(|_app, _event| {});
+        .run(|_app, _event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event {
+                let links: Vec<String> = urls.iter().map(ToString::to_string).collect();
+                activate_collection_link(&links, || {
+                    let _ = _app.show();
+                    if let Some(window) = _app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
+                    }
+                });
+            }
+        });
 }
 
 #[cfg(test)]
 mod environment_tests {
+    #[test]
+    fn collection_open_activates_only_for_valid_install_links() {
+        let manifest = serde_json::json!({"v":1,"title":"Collection","sources":[{"repo":"owner/repo","ref":"a".repeat(40)}],"skills":[{"name":"design","path":"skills/design","source":0}]});
+        let valid = format!(
+            "skills-hub://install?manifest={}",
+            urlencoding::encode(&manifest.to_string())
+        );
+        let activated = std::cell::Cell::new(false);
+        super::activate_collection_link(&[valid], || activated.set(true));
+        assert!(activated.get());
+        activated.set(false);
+        super::activate_collection_link(&["skills-hub://install?manifest=invalid".into()], || {
+            activated.set(true)
+        });
+        assert!(!activated.get());
+    }
+
     #[test]
     fn desktop_identity_keeps_the_shared_cli_data_identifier() {
         let packaged: serde_json::Value =

@@ -6831,3 +6831,22 @@
   height: 6px;
   accent-color: var(--accent-primary);
 }
+
+.modal.modal-collection-install { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; }
+.modal-collection-install .modal-body { overflow-y: auto; }
+.modal-collection-install .delete-title { color: var(--text-primary); }
+.modal-collection-install .delete-title svg { color: var(--accent-primary); }
+.collection-install-body h3 { margin: 0 0 8px; color: var(--text-primary); font-size: 16px; }
+.collection-install-body p { margin: 8px 0 16px; }
+.collection-install-body ul { padding: 0; margin: 20px 0; list-style: none; }
+.collection-install-body li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }
+.collection-install-body strong { color: var(--text-primary); }
+.collection-install-body small { display: block; margin-top: 4px; overflow-wrap: anywhere; font-size: 12px; }
+.collection-install-body li > span { font-size: 12px; align-self: center; }
+.collection-install-body .collection-install-error { grid-column: 1 / -1; margin: 0; color: var(--status-error); overflow-wrap: anywhere; }
+.collection-install-body fieldset { border: 0; margin: 0; padding: 0; }
+.collection-install-body legend { color: var(--text-primary); font-weight: 600; }
+.collection-install-tools { display: flex; gap: 12px 20px; flex-wrap: wrap; }
+.collection-install-tools label { display: flex; align-items: center; gap: 8px; }
+.collection-install-tools input { accent-color: var(--accent-primary); }
+.collection-install-note { font-size: 12px; }

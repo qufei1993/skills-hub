@@ -1,5 +1,28 @@
 export const ko = {
   "translation": {
+    "collectionInstall": {
+  "title": "컬렉션 설치",
+  "intro": "라이브러리에 설치하기 전에 {{count}}개 스킬과 출처를 확인하세요.",
+  "listLabel": "설치할 스킬",
+  "close": "닫기",
+  "install": "스킬 설치",
+  "retry": "실패한 항목 재시도",
+  "done": "완료",
+  "tools": "도구에도 배포 (선택 사항)",
+  "scope": "선택한 도구에 전역 범위로 배포합니다. 선택하지 않으면 라이브러리에만 설치합니다.",
+  "existingNote": "동일한 출처의 기존 스킬은 유지됩니다. 이름 충돌 항목은 덮어쓰지 않습니다.",
+  "working": "설치 중…",
+  "pending": "설치 대기",
+  "installed": "설치됨",
+  "existing": "이미 라이브러리에 있음",
+  "failed": "실패",
+  "missing": "지정한 버전에서 스킬을 찾을 수 없습니다.",
+  "conflict": "동일한 이름의 다른 스킬이 있습니다. 먼저 이름 충돌을 해결하세요.",
+  "busy": "다른 컬렉션을 열기 전에 현재 컬렉션을 완료하거나 닫으세요.",
+  "invalid": "설치 링크가 잘못되었거나 지원되지 않습니다. 웹사이트에서 다시 시도하세요.",
+  "unavailable": "웹사이트 설치 링크를 수신할 수 없습니다. Skills Hub를 다시 시작하세요.",
+  "refreshFailed": "설치는 종료되었지만 라이브러리를 새로 고치지 못했습니다. 내 스킬을 다시 여세요."
+},
     "appName": "Skills Hub",
     "unknown": "알 수 없음",
     "languageShort": {

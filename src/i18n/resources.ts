@@ -3,6 +3,29 @@ import { ko } from './ko'
 export const resources = {
   en: {
     translation: {
+      collectionInstall: {
+  "title": "Install collection",
+  "intro": "Confirm these {{count}} Skills and their sources before installing into your library.",
+  "listLabel": "Skills to install",
+  "close": "Close",
+  "install": "Install Skills",
+  "retry": "Retry failed items",
+  "done": "Done",
+  "tools": "Also use in tools (optional)",
+  "scope": "Selected tools use the global scope. Leave all unchecked to install only into your library.",
+  "existingNote": "Existing Skills from the same source are kept. Conflicts will not be overwritten.",
+  "working": "Installing…",
+  "pending": "Ready to install",
+  "installed": "Installed",
+  "existing": "Already in library",
+  "failed": "Failed",
+  "missing": "The requested Skill was not found at this revision.",
+  "conflict": "A different Skill uses this name. Resolve the conflict in your library first.",
+  "busy": "Finish or close the current collection before opening another.",
+  "invalid": "This installation link is invalid or unsupported. Return to the website and try again.",
+  "unavailable": "Unable to receive website installation links. Restart Skills Hub and try again.",
+  "refreshFailed": "Installation finished, but the library could not refresh. Reopen My Skills."
+},
       appName: 'Skills Hub',
       unknown: 'unknown',
       languageShort: {
@@ -1258,6 +1281,29 @@ export const resources = {
   },
   zh: {
     translation: {
+      collectionInstall: {
+  "title": "安装合集",
+  "intro": "请确认这 {{count}} 个 Skills 及其来源，再安装到你的技能库。",
+  "listLabel": "待安装的 Skills",
+  "close": "关闭",
+  "install": "安装 Skills",
+  "retry": "重试失败项",
+  "done": "完成",
+  "tools": "同时分发到工具（可选）",
+  "scope": "所选工具使用全局范围。不勾选工具时，仅安装到技能库。",
+  "existingNote": "已安装的同源 Skills 会保留；名称冲突的项目不会被覆盖。",
+  "working": "正在安装…",
+  "pending": "待安装",
+  "installed": "已安装",
+  "existing": "已在技能库中",
+  "failed": "失败",
+  "missing": "在指定版本中没有找到这个 Skill。",
+  "conflict": "技能库中有同名的其他 Skill，请先处理名称冲突。",
+  "busy": "请先完成或关闭当前合集，再打开另一个合集。",
+  "invalid": "安装链接无效或暂不支持，请回到官网重试。",
+  "unavailable": "无法接收官网安装链接，请重启 Skills Hub 后重试。",
+  "refreshFailed": "安装已结束，但技能库刷新失败，请重新打开「我的 Skills」。"
+},
       appName: 'Skills Hub',
       unknown: '未知',
       languageShort: {

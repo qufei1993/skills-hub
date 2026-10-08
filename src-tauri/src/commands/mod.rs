@@ -1,3 +1,4 @@
+pub mod collection_link;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};

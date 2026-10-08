@@ -10,6 +10,16 @@ All notable changes to this project will be documented in this file.
 
 - **Independent website release data**: Publishing a stable desktop release updates an isolated Cloudflare Pages snapshot of installer links and bilingual notes, without rebuilding the website. Preparation failures do not deploy; previous production deployments can be restored in Pages.
 
+- **Website collection installation**: Open a collection from the website in Skills Hub, review its Skills and sources, and explicitly install them into the shared library. Optionally distribute new Skills to selected tools. Existing same-source Skills are preserved; failed items can be retried without reinstalling successful items. Git installation supports exact pinned commits.
+
+### Fixed
+
+- **Collection confirmation from manual installation**: Opening a website collection while adding a Skill replaces the idle manual installation view with the collection confirmation, preserving entered form values.
+
+- **Collection installation stability**: Match Windows repository directory separators and preserve installation and retry progress while other confirmations temporarily take priority.
+
+- **Website launch visibility**: On macOS, opening a valid website collection link shows, restores, and focuses the desktop window so the installation confirmation is immediately visible.
+
 ## [0.11.0]
 
 ### Added

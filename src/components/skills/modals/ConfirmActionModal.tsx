@@ -1,7 +1,8 @@
 import { memo, useEffect, useId, useRef, type ReactNode, type RefObject } from 'react'
-import { Trash2, TriangleAlert } from 'lucide-react'
+import { PackagePlus, Trash2, TriangleAlert } from 'lucide-react'
 
 type ConfirmActionModalProps = {
+  intent?: 'default' | 'danger'
   recoverable?: boolean
   open: boolean
   loading: boolean
@@ -17,6 +18,7 @@ type ConfirmActionModalProps = {
 
 const ConfirmActionModal = ({
   open,
+  intent = 'danger',
   recoverable = false,
   loading,
   title,
@@ -93,7 +95,7 @@ const ConfirmActionModal = ({
     >
       <div
         ref={dialogRef}
-        className={`modal modal-delete${recoverable ? ' modal-recoverable-delete' : ''}`}
+        className={`modal modal-delete${recoverable ? ' modal-recoverable-delete' : ''}${intent === 'default' ? ' modal-collection-install' : ''}`}
         tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
         role="dialog"
@@ -103,7 +105,7 @@ const ConfirmActionModal = ({
       >
         <div className="modal-body delete-body">
           <div className="delete-title" id={titleId}>
-            {recoverable ? <Trash2 size={20} /> : <TriangleAlert size={20} />}
+            {intent === 'default' ? <PackagePlus size={20} /> : recoverable ? <Trash2 size={20} /> : <TriangleAlert size={20} />}
             {title}
           </div>
           <div className="delete-desc" id={descriptionId}>
@@ -120,7 +122,7 @@ const ConfirmActionModal = ({
             {cancelLabel}
           </button>
           <button
-            className={`btn ${recoverable ? 'btn-danger' : 'btn-danger-solid'}`}
+            className={`btn ${intent === 'default' ? 'btn-primary' : recoverable ? 'btn-danger' : 'btn-danger-solid'}`}
             type="button"
             onClick={onConfirm}
             disabled={loading || confirmDisabled}
