@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Skills Hub",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "identifier": "com.qufei1993.skillshub",
   "build": {
     "frontendDist": "../dist",
@@ -35,7 +35,7 @@
     "createUpdaterArtifacts": true,
     "linux": {
       "deb": {
-        "depends": ["libc6 (>= 2.39)"]
+        "depends": ["libc6 (>= 2.39)", "desktop-file-utils", "xdg-utils"]
       }
     },
     "icon": [
@@ -54,6 +54,11 @@
         "https://github.com/qufei1993/skills-hub/releases/latest/download/updater.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI1QjEyQ0U0RkM5NjZCMjQKUldRa2E1Yjg1Q3l4dFM0TGl4N3k3KytFalRiajhFZmo4QkE5ek5HVXM1MjRDZWVORWhibnR6Vk8K"
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": ["skills-hub"]
+      }
     }
   }
 }

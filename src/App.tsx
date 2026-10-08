@@ -1,3 +1,5 @@
+import CollectionInstallModal from './components/skills/modals/CollectionInstallModal'
+import { useCollectionInstallLink } from './components/skills/useCollectionInstallLink'
 import { hasUnboundLocalSource } from './components/skills/skillSourceState'
 import {
   useCallback,
@@ -847,6 +849,8 @@ function App() {
     (id: string) => installedToolIds.includes(id),
     [installedToolIds],
   )
+  const collectionInstall = useCollectionInstallLink(isTauri, invokeTauri, () => setShowAddModal(false))
+
   const installedTools = useMemo(
     () => tools.filter((tool) => installedToolIds.includes(tool.id)),
     [tools, installedToolIds],
@@ -3570,6 +3574,14 @@ function App() {
 
   return (
     <div className={`skills-app${isTauri ? ' is-tauri' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
+      {collectionInstall.manifest && (
+        <CollectionInstallModal open={!loading && !showAddModal && !showGitPickModal && !showLocalPickModal
+        && !showImportModal && !showBulkSyncModal && !showBulkDeleteModal && !showBulkTagsModal
+        && !showDiscoveryScanModal && !showNewToolsModal && !showAppUpdateModal
+        && !tagEditorSkill && !pendingSharedToggle && !pendingSyncTargetChange && !pendingRenameTag
+        && !currentScopeModalSkill && !pendingDeleteId && !pendingStoragePathChange && !pendingDeleteTag} manifest={collectionInstall.manifest} tools={installedTools} invoke={invokeTauri}
+          onClose={collectionInstall.dismiss} onComplete={async () => { await loadManagedSkills(); await loadTags() }} />
+      )}
       <Toaster
         position="top-right"
         richColors

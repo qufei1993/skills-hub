@@ -18,6 +18,11 @@ pub fn clone_or_pull(
     cancel: Option<&CancelToken>,
     proxy_url: Option<&str>,
 ) -> Result<String> {
+    if let Some(revision) =
+        branch.filter(|value| value.len() == 40 && value.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        return clone_pinned_commit(repo_url, dest, revision, cancel, proxy_url);
+    }
     // Prefer the system `git` binary if available. It tends to work better on macOS
     // networks because it respects user git config (proxy/certs) and OS trust store.
     if let Some(git_bin) = resolve_git_bin() {
@@ -119,6 +124,11 @@ pub fn clone_or_pull_sparse(
     cancel: Option<&CancelToken>,
     proxy_url: Option<&str>,
 ) -> Result<String> {
+    if let Some(revision) =
+        branch.filter(|value| value.len() == 40 && value.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        return clone_pinned_commit(repo_url, dest, revision, cancel, proxy_url);
+    }
     let clean_subpath = subpath.trim_matches('/');
     if clean_subpath.is_empty() {
         anyhow::bail!("sparse checkout path is empty");
@@ -597,3 +607,103 @@ fn fetch_origin(repo: &Repository, proxy_url: &str) -> Result<()> {
 #[cfg(test)]
 #[path = "tests/git_fetcher.rs"]
 mod tests;
+
+fn clone_pinned_commit(
+    repo_url: &str,
+    dest: &Path,
+    revision: &str,
+    cancel: Option<&CancelToken>,
+    proxy_url: Option<&str>,
+) -> Result<String> {
+    if resolve_git_bin().is_none() {
+        return clone_pinned_commit_via_libgit2(
+            repo_url,
+            dest,
+            revision,
+            proxy_url.unwrap_or_default(),
+        );
+    }
+    std::fs::create_dir_all(dest)?;
+    if !dest.join(".git").exists() {
+        let mut init = git_cmd(proxy_url);
+        init.arg("init").arg(dest);
+        let output = run_cmd_with_timeout(
+            init,
+            git_timeout(),
+            "initialize pinned cache".into(),
+            cancel,
+        )?;
+        anyhow::ensure!(output.status.success(), "could not initialize pinned cache");
+    }
+    let mut fetch = git_cmd_for_remote(proxy_url, Some(repo_url));
+    fetch
+        .arg("-C")
+        .arg(dest)
+        .args(["fetch", "--depth", "1", "--no-tags", repo_url, revision]);
+    let output = run_cmd_with_timeout(
+        fetch,
+        git_fetch_timeout(),
+        "fetch pinned revision".into(),
+        cancel,
+    )?;
+    anyhow::ensure!(
+        output.status.success(),
+        "could not fetch pinned revision: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut checkout = git_cmd(proxy_url);
+    checkout
+        .arg("-C")
+        .arg(dest)
+        .args(["checkout", "--detach", "--force", revision]);
+    let output = run_cmd_with_timeout(
+        checkout,
+        git_timeout(),
+        "checkout pinned revision".into(),
+        cancel,
+    )?;
+    anyhow::ensure!(
+        output.status.success(),
+        "could not checkout pinned revision"
+    );
+    let repo = Repository::open(dest)?;
+    let head = repo
+        .head()?
+        .target()
+        .context("missing pinned HEAD")?
+        .to_string();
+    anyhow::ensure!(
+        head.eq_ignore_ascii_case(revision),
+        "pinned revision mismatch"
+    );
+    Ok(head)
+}
+
+fn clone_pinned_commit_via_libgit2(
+    repo_url: &str,
+    dest: &Path,
+    revision: &str,
+    proxy_url: &str,
+) -> Result<String> {
+    let repo = if dest.join(".git").exists() {
+        Repository::open(dest)?
+    } else {
+        Repository::init(dest)?
+    };
+    let oid = git2::Oid::from_str(revision)?;
+    let mut options = git_fetch_options(proxy_url);
+    if repo_url.starts_with("https://") || repo_url.starts_with("http://") {
+        options.depth(1);
+    }
+    repo.remote_anonymous(repo_url)?
+        .fetch(&[revision], Some(&mut options), None)
+        .context("fetch pinned revision")?;
+    let commit = repo
+        .find_commit(oid)
+        .context("requested pinned revision is unavailable")?;
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.force();
+    repo.checkout_tree(commit.as_object(), Some(&mut checkout))?;
+    repo.set_head_detached(oid)?;
+    Ok(oid.to_string())
+}

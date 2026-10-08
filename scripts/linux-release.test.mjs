@@ -177,3 +177,29 @@ it('rejects malformed executables instead of reporting a dependency-free CLI', (
  const truncated=elfFixture(['libc.so.6']).subarray(0,80)
  assert.throws(()=>cliDependencies.verifyLinuxCli(truncated))
 })
+
+const unixSmokeTest = process.platform === 'win32' ? it.skip : it
+unixSmokeTest('starts each Linux package smoke test in its own desktop bus session', () => {
+ const root = mkdtempSync(path.join(tmpdir(), 'linux-smoke-'))
+ try {
+  const bin = path.join(root, 'bin'); mkdirSync(bin)
+  const writeExecutable = (name, body) => writeFileSync(path.join(bin, name), '#!/bin/bash\n' + body, {mode: 0o755})
+  writeExecutable('xvfb-run', 'shift; exec "$@"\n')
+  writeExecutable('dbus-run-session', 'shift; export DBUS_SESSION_BUS_ADDRESS=isolated-session; exec "$@"\n')
+  writeExecutable('app', 'if [[ "$DBUS_SESSION_BUS_ADDRESS" != isolated-session ]]; then echo MISSING_DESKTOP_BUS >&2; exit 1; fi; touch "$SMOKE_READY"; sleep 60\n')
+  writeExecutable('xdotool', 'test -f "$SMOKE_READY"\n')
+  const script = readFileSync(new URL('./verify-linux-packages.sh', import.meta.url), 'utf8')
+  const smoke = script.slice(script.indexOf('smoke() {'), script.indexOf('\nsmoke "$root/image'))
+  writeFileSync(path.join(root, 'smoke.sh'), 'set -euo pipefail\nroot="$SMOKE_ROOT"\n' + smoke + '\nsmoke "$SMOKE_APP"\n')
+  for (let pass = 0; pass < 2; pass++) {
+   const result = spawnSync('bash', [path.join(root,'smoke.sh')], {encoding: 'utf8', timeout: 10000, env: {...process.env, PATH: bin + path.delimiter + process.env.PATH, SMOKE_ROOT: root, SMOKE_APP: path.join(bin,'app'), SMOKE_READY: path.join(root, 'ready'), DBUS_SESSION_BUS_ADDRESS: 'inherited-session'}})
+   assert.equal(result.status, 0, result.stderr)
+   assert.match(result.stdout, /window opened successfully/)
+   rmSync(path.join(root, 'ready'))
+  }
+  writeExecutable('app', 'echo "Could not register the Skills Hub collection link protocol." >&2; touch "$SMOKE_READY"; sleep 60\n')
+  const failedRegistration = spawnSync('bash', [path.join(root, 'smoke.sh')], {encoding: 'utf8', timeout: 10000, env: {...process.env, PATH: bin + path.delimiter + process.env.PATH, SMOKE_ROOT: root, SMOKE_APP: path.join(bin,'app'), SMOKE_READY: path.join(root, 'ready')}})
+  assert.notEqual(failedRegistration.status, 0)
+  assert.match(failedRegistration.stderr, /Could not register/)
+ } finally { rmSync(root, {recursive:true, force:true}) }
+})

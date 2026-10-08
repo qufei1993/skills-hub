@@ -49,14 +49,22 @@ mkdir -p "$root/home" "$root/config" "$root/data" "$root/cache" "$root/runtime"
 chmod 700 "$root/runtime"
 smoke() {
   env HOME="$root/home" XDG_CONFIG_HOME="$root/config" XDG_DATA_HOME="$root/data" XDG_CACHE_HOME="$root/cache" XDG_RUNTIME_DIR="$root/runtime" WEBKIT_DISABLE_COMPOSITING_MODE=1 \
-  xvfb-run -a bash -s -- "$1" <<'SMOKE'
+  xvfb-run -a dbus-run-session -- bash -s -- "$1" "$root/startup.log" <<'SMOKE'
 set -euo pipefail
-"$1" >/dev/null 2>&1 &
+"$1" >"$2" 2>&1 &
 pid=$!
 trap 'kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true' EXIT
 for attempt in $(seq 1 30); do
-  kill -0 "$pid"
+  if ! kill -0 "$pid" 2>/dev/null; then
+    cat "$2" >&2
+    echo 'Linux desktop process exited before opening its window.' >&2
+    exit 1
+  fi
   if xdotool search --onlyvisible --name '^Skills Hub$' >/dev/null 2>&1; then
+    if grep -Fq 'Could not register the Skills Hub collection link protocol.' "$2"; then
+      cat "$2" >&2
+      exit 1
+    fi
     echo 'Linux desktop window opened successfully.'
     exit 0
   fi

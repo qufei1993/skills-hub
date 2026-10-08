@@ -1,7 +1,7 @@
 {
   "name": "skills-hub",
   "private": true,
-  "version": "0.11.0",
+  "version": "0.12.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port 5173 --strictPort",
@@ -45,6 +45,7 @@
     "@lobehub/icons-static-svg": "^1.91.0",
     "@tailwindcss/vite": "^4.1.18",
     "@tauri-apps/api": "^2.9.1",
+    "@tauri-apps/plugin-deep-link": "2.4.6",
     "@tauri-apps/plugin-dialog": "^2.5.3",
     "@tauri-apps/plugin-opener": "^2.5.3",
     "@tauri-apps/plugin-process": "^2.3.1",
