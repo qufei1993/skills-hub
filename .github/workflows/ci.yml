@@ -40,6 +40,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: npm run test:release-data
       - run: npm run version:check
       - name: Validate CLI and desktop distribution pipeline
         run: node --test scripts/cli-manifest.test.mjs scripts/verify-cli-release.test.mjs scripts/publish-cli-release.test.mjs scripts/verify-desktop-bundle.test.mjs scripts/release-workflow.test.mjs scripts/reuse-cli-build.test.mjs scripts/linux-release.test.mjs scripts/release-downloads.test.mjs scripts/check-ai-management-native.test.mjs

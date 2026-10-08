@@ -1,0 +1,49 @@
+name: Publish desktop release data
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      bootstrap:
+        description: 'First deployment only: allow a missing archive on an empty Pages project'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: desktop-release-data
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || (!github.event.release.draft && !github.event.release.prerelease)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Validate deployment credential
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: test -n "$CLOUDFLARE_API_TOKEN" || { echo 'Configure CLOUDFLARE_API_TOKEN in repository Actions secrets.'; exit 1; }
+      - run: npm ci --ignore-scripts
+      - run: npm run test:release-data
+      - name: Prepare complete release data directory
+        id: data
+        run: node scripts/publish-release-data.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_ACCOUNT_ID: e2238e7536f05ab6dbd4eb993fcfed80
+          RELEASES_BASE_URL: https://releases.aiskillshub.link/
+          RELEASES_BOOTSTRAP: ${{ inputs.bootstrap }}
+      - name: Deploy independent Pages data project
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: e2238e7536f05ab6dbd4eb993fcfed80
+          wranglerVersion: '4.145.0'
+          command: pages deploy ${{ steps.data.outputs.directory }} --project-name=skills-hub-release-data --branch=main

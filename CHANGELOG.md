@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.12.0]
+
+### Added
+
+- **Independent website release data**: Publishing a stable desktop release updates an isolated Cloudflare Pages snapshot of installer links and bilingual notes, without rebuilding the website. Preparation failures do not deploy; previous production deployments can be restored in Pages.
+
 ## [0.11.0]
 
 ### Added
