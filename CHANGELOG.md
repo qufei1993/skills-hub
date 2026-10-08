@@ -4,11 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [0.11.0]
+## [0.12.0]
 
 ### Added
 
 - **Independent website release data**: Publishing a stable desktop release updates an isolated R2 snapshot of installer links and bilingual notes, without rebuilding the website. Failed uploads retain the previous pointer; completed snapshots support explicit rollback.
+
+## [0.11.0]
+
+### Added
 
 - **Linux desktop installers**: Linux x64 and ARM64 builds provide `.deb` and `.AppImage` packages. Each release generates its bilingual download table from actual installer assets; signed updates preserve the installed Linux package format.
 - **AI Skill management**: Enable the official `manage-skills-hub` Skill in Settings. Use AI conversations to search, install, import, update, deploy, tag, and safely remove Skills from the desktop's shared library.
