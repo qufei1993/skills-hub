@@ -35,7 +35,7 @@
     "createUpdaterArtifacts": true,
     "linux": {
       "deb": {
-        "depends": ["libc6 (>= 2.39)"]
+        "depends": ["libc6 (>= 2.39)", "desktop-file-utils", "xdg-utils"]
       }
     },
     "icon": [

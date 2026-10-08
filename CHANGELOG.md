@@ -16,6 +16,8 @@ All notable changes to this project will be documented in this file.
 
 - **Collection confirmation from manual installation**: Opening a website collection while adding a Skill replaces the idle manual installation view with the collection confirmation, preserving entered form values.
 
+- **Linux collection link registration**: Debian installers include the desktop utilities required to register website links; package startup verification uses an isolated desktop bus session.
+
 - **Collection installation stability**: Match Windows repository directory separators and preserve installation and retry progress while other confirmations temporarily take priority.
 
 - **Website launch visibility**: On macOS, opening a valid website collection link shows, restores, and focuses the desktop window so the installation confirmation is immediately visible.
