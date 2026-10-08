@@ -197,5 +197,9 @@ unixSmokeTest('starts each Linux package smoke test in its own desktop bus sessi
    assert.match(result.stdout, /window opened successfully/)
    rmSync(path.join(root, 'ready'))
   }
+  writeExecutable('app', 'echo "Could not register the Skills Hub collection link protocol." >&2; touch "$SMOKE_READY"; sleep 60\n')
+  const failedRegistration = spawnSync('bash', [path.join(root, 'smoke.sh')], {encoding: 'utf8', timeout: 10000, env: {...process.env, PATH: bin + path.delimiter + process.env.PATH, SMOKE_ROOT: root, SMOKE_APP: path.join(bin,'app'), SMOKE_READY: path.join(root, 'ready')}})
+  assert.notEqual(failedRegistration.status, 0)
+  assert.match(failedRegistration.stderr, /Could not register/)
  } finally { rmSync(root, {recursive:true, force:true}) }
 })

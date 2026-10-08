@@ -61,6 +61,10 @@ for attempt in $(seq 1 30); do
     exit 1
   fi
   if xdotool search --onlyvisible --name '^Skills Hub$' >/dev/null 2>&1; then
+    if grep -Fq 'Could not register the Skills Hub collection link protocol.' "$2"; then
+      cat "$2" >&2
+      exit 1
+    fi
     echo 'Linux desktop window opened successfully.'
     exit 0
   fi

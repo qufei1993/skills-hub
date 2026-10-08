@@ -86,7 +86,9 @@ pub fn run() {
             #[cfg(any(target_os = "linux", target_os = "windows"))]
             if !cfg!(debug_assertions) {
                 use tauri_plugin_deep_link::DeepLinkExt;
-                app.deep_link().register_all()?;
+                if app.deep_link().register_all().is_err() {
+                    eprintln!("Could not register the Skills Hub collection link protocol.");
+                }
             }
             app.handle().plugin(
                 tauri_plugin_log::Builder::default()
