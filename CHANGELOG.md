@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Independent website release data**: Publishing a stable desktop release updates an isolated R2 snapshot of installer links and bilingual notes, without rebuilding the website. Failed uploads retain the previous pointer; completed snapshots support explicit rollback.
+
 - **Linux desktop installers**: Linux x64 and ARM64 builds provide `.deb` and `.AppImage` packages. Each release generates its bilingual download table from actual installer assets; signed updates preserve the installed Linux package format.
 - **AI Skill management**: Enable the official `manage-skills-hub` Skill in Settings. Use AI conversations to search, install, import, update, deploy, tag, and safely remove Skills from the desktop's shared library.
 - **Smaller installers and on-demand CLI**: Production desktop installers no longer include the CLI. Enabling AI management downloads and verifies the matching version and configures the terminal command. Open a new terminal to use it. First setup requires a connection; verified installations work offline and after the desktop closes. Update the CLI and official Skill explicitly in Settings, with download progress and retry. Failures preserve the working CLI. CLI files share the desktop release; Node.js and npm are not required.

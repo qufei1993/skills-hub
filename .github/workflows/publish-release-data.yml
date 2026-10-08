@@ -1,0 +1,38 @@
+name: Publish desktop release data
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      rollback_snapshot:
+        description: 'Restore a completed snapshot SHA256 (leave empty to publish latest stable release)'
+        type: string
+        required: false
+permissions:
+  contents: read
+concurrency:
+  group: desktop-release-data
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || (!github.event.release.draft && !github.event.release.prerelease)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run test:release-data
+      - name: Publish independent release snapshot
+        run: node scripts/publish-release-data.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_ACCOUNT_ID: e2238e7536f05ab6dbd4eb993fcfed80
+          RELEASES_R2_ACCESS_KEY_ID: ${{ secrets.RELEASES_R2_ACCESS_KEY_ID }}
+          RELEASES_R2_SECRET_ACCESS_KEY: ${{ secrets.RELEASES_R2_SECRET_ACCESS_KEY }}
+          RELEASES_ROLLBACK_SNAPSHOT: ${{ inputs.rollback_snapshot }}
