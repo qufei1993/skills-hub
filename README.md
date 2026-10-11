@@ -7,6 +7,10 @@ A cross-platform desktop app (Tauri + React) for installing, organizing, updatin
 - English (default): `README.md` (this file)
 - 中文：[`docs/README.zh.md`](docs/README.zh.md)
 
+## Skill collections
+
+[Awesome Skills](https://github.com/qufei1993/awesome-skills) is the companion collection directory for Skills Hub. Browse task-focused collections and their upstream Skill links on the [website](https://aiskillshub.link/collections), or contribute a collection in that repository. Skills Hub manages and syncs your installed Skills; the collection repository maintains discovery content.
+
 ## Why Skills Hub
 
 AI coding tools increasingly use their own skills directories and installation flows. Maintaining those directories manually can quickly become messy: the same skill gets copied many times, update sources become unclear, tool activation states drift, and bulk cleanup takes too much effort.
