@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ## [0.12.0]
 
+- **Windows subdirectory Skill updates**: Fix `path not found in repo` when saved source paths contain backslashes. New Git source paths use forward slashes, existing records remain updateable, and sparse caches missing the selected directory are refreshed. (#182)
+
 - Native collection installation now validates manifests directly, supporting large catalogs without routing them through the external deep-link size limit.
 
 - Search collection metadata only and automatically reveal the next 12 collections when scrolling near the end of the list.

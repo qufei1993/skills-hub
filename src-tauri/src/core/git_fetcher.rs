@@ -129,7 +129,8 @@ pub fn clone_or_pull_sparse(
     {
         return clone_pinned_commit(repo_url, dest, revision, cancel, proxy_url);
     }
-    let clean_subpath = subpath.trim_matches('/');
+    let normalized_subpath = subpath.replace('\\', "/");
+    let clean_subpath = normalized_subpath.trim_matches('/');
     if clean_subpath.is_empty() {
         anyhow::bail!("sparse checkout path is empty");
     }

@@ -1854,3 +1854,128 @@ fn git_source_identity_normalizes_equivalent_urls_but_preserves_branch_and_path(
         "."
     ));
 }
+
+#[test]
+fn issue_182_installs_windows_selection_with_portable_source_path() {
+    let (dir, store) = make_store();
+    let paths = RuntimePaths::from_roots(
+        crate::core::runtime_paths::RuntimeProfile::Test,
+        dir.path(),
+        dir.path(),
+    );
+    let central = tempfile::tempdir().unwrap();
+    set_central_path(&store, central.path());
+    let source = tempfile::tempdir().unwrap();
+    fs::create_dir_all(source.path().join("skills/example")).unwrap();
+    fs::write(
+        source.path().join("skills/example/SKILL.md"),
+        "---\nname: example\n---\nfirst",
+    )
+    .unwrap();
+    let _repo = init_git_repo(source.path());
+    let installed = super::install_git_skill_from_selection(
+        &paths,
+        &store,
+        source.path().to_str().unwrap(),
+        r"skills\example",
+        None,
+        None,
+    )
+    .unwrap();
+    let record = store.get_skill_by_id(&installed.skill_id).unwrap().unwrap();
+    assert_eq!(record.source_subpath.as_deref(), Some("skills/example"));
+    assert!(installed.central_path.join("SKILL.md").is_file());
+}
+
+#[test]
+fn issue_182_updates_legacy_windows_source_path() {
+    let (dir, store) = make_store();
+    let paths = RuntimePaths::from_roots(
+        crate::core::runtime_paths::RuntimeProfile::Test,
+        dir.path(),
+        dir.path(),
+    );
+    let central = tempfile::tempdir().unwrap();
+    set_central_path(&store, central.path());
+    store.set_setting("git_cache_ttl_secs", "0").unwrap();
+    let source = tempfile::tempdir().unwrap();
+    let file = source.path().join("skills/example/SKILL.md");
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    fs::write(&file, "---\nname: example\n---\nfirst").unwrap();
+    let repo = init_git_repo(source.path());
+    let installed = super::install_git_skill_from_selection(
+        &paths,
+        &store,
+        source.path().to_str().unwrap(),
+        "skills/example",
+        None,
+        None,
+    )
+    .unwrap();
+    let mut record = store.get_skill_by_id(&installed.skill_id).unwrap().unwrap();
+    record.source_subpath = Some(r"skills\example".into());
+    store.upsert_skill(&record).unwrap();
+    fs::write(&file, "---\nname: example\n---\nsecond").unwrap();
+    commit_all(&repo, "second");
+    let updated =
+        super::update_managed_skill_from_source(&paths, &store, &installed.skill_id).unwrap();
+    assert!(updated.changed);
+    assert!(fs::read_to_string(installed.central_path.join("SKILL.md"))
+        .unwrap()
+        .contains("second"));
+    assert_eq!(
+        store
+            .get_skill_by_id(&installed.skill_id)
+            .unwrap()
+            .unwrap()
+            .source_subpath
+            .as_deref(),
+        Some("skills/example")
+    );
+}
+
+#[test]
+fn issue_182_repairs_fresh_sparse_cache_missing_requested_directory() {
+    let (dir, store) = make_store();
+    let paths = RuntimePaths::from_roots(
+        crate::core::runtime_paths::RuntimeProfile::Test,
+        dir.path(),
+        dir.path(),
+    );
+    store.set_setting("git_cache_ttl_secs", "3600").unwrap();
+    let source = tempfile::tempdir().unwrap();
+    fs::create_dir_all(source.path().join("skills/example")).unwrap();
+    fs::write(
+        source.path().join("skills/example/SKILL.md"),
+        "---\nname: example\n---\nfirst",
+    )
+    .unwrap();
+    let _repo = init_git_repo(source.path());
+    let (cache, _) = super::clone_to_cache_subpath(
+        &paths,
+        &store,
+        source.path().to_str().unwrap(),
+        None,
+        "skills/example",
+        None,
+    )
+    .unwrap();
+    let status = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&cache)
+        .args(["sparse-checkout", "set", "--no-cone", r"skills\example"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert!(!cache.join("skills/example").exists());
+    let (repaired, _) = super::clone_to_cache_subpath(
+        &paths,
+        &store,
+        source.path().to_str().unwrap(),
+        None,
+        "skills/example",
+        None,
+    )
+    .unwrap();
+    assert!(repaired.join("skills/example/SKILL.md").is_file());
+}

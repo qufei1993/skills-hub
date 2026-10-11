@@ -954,7 +954,7 @@ fn scan_skill_candidates_in_dir(repo_dir: &Path) -> Vec<(String, String)> {
             .strip_prefix(repo_dir)
             .unwrap_or(&p)
             .to_string_lossy()
-            .to_string();
+            .replace('\\', "/");
         out.push((name, rel));
     }
     out
@@ -1551,7 +1551,11 @@ fn stage_skill_source(
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("missing source_ref for git skill"))?;
             let parsed = parse_github_url(repo_url);
-            let (repo_dir, revision) = if let Some(subpath) = record.source_subpath.as_deref() {
+            let stored_subpath = record
+                .source_subpath
+                .as_deref()
+                .map(|path| path.replace('\\', "/"));
+            let (repo_dir, revision) = if let Some(subpath) = stored_subpath.as_deref() {
                 clone_to_cache_subpath(
                     paths,
                     store,
@@ -1569,8 +1573,7 @@ fn stage_skill_source(
                     cancel,
                 )?
             };
-            let mut resolved_subpath = record
-                .source_subpath
+            let mut resolved_subpath = stored_subpath
                 .as_deref()
                 .or(parsed.subpath.as_deref())
                 .map(str::to_string);
@@ -1761,7 +1764,7 @@ pub fn list_git_skills(
                     .strip_prefix(&repo_dir)
                     .unwrap_or(&p)
                     .to_string_lossy()
-                    .to_string();
+                    .replace('\\', "/");
                 out.push(GitSkillCandidate {
                     name,
                     description: desc,
@@ -1791,7 +1794,7 @@ pub fn list_git_skills(
             .strip_prefix(&repo_dir)
             .unwrap_or(&p)
             .to_string_lossy()
-            .to_string();
+            .replace('\\', "/");
         out.push(GitSkillCandidate {
             name,
             description: desc,
@@ -2140,6 +2143,8 @@ pub fn install_git_skill_from_selection(
     name: Option<String>,
     cancel: Option<&CancelToken>,
 ) -> Result<InstallResult> {
+    let normalized_subpath = subpath.replace('\\', "/");
+    let subpath = normalized_subpath.as_str();
     let parsed = parse_github_url(repo_url);
     let user_provided_name = name.is_some();
     let mut display_name = name.unwrap_or_else(|| {
@@ -2364,6 +2369,8 @@ fn clone_to_cache_subpath(
     subpath: &str,
     cancel: Option<&CancelToken>,
 ) -> Result<(PathBuf, String)> {
+    let normalized_subpath = subpath.replace('\\', "/");
+    let subpath = normalized_subpath.as_str();
     let started = std::time::Instant::now();
     let cache_root = &paths.git_cache_dir;
     std::fs::create_dir_all(cache_root)
@@ -2375,7 +2382,7 @@ fn clone_to_cache_subpath(
     let lock = GIT_CACHE_LOCK.get_or_init(|| Mutex::new(()));
     let _guard = lock.lock().unwrap_or_else(|err| err.into_inner());
 
-    if repo_dir.join(".git").exists() {
+    if repo_dir.join(".git").exists() && repo_dir.join(subpath).is_dir() {
         if let Ok(meta) = std::fs::read_to_string(&meta_path) {
             if let Ok(meta) = serde_json::from_str::<RepoCacheMeta>(&meta) {
                 if let Some(head) = meta.head {
