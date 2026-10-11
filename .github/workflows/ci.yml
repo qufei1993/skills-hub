@@ -189,6 +189,13 @@ jobs:
           New-Item -ItemType Directory -Force target | Out-Null
           rustc --edition=2021 scripts/windows-console-probe.rs --out-dir target
           .\target\windows-console-probe.exe
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Prepare debug CLI for scheduler regressions
+        run: node scripts/prepare-cli-sidecar.mjs --target x86_64-pc-windows-msvc --debug
+      - name: Verify localized Task Scheduler output on Windows
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --lib windows_scheduler_
       - name: Verify guarded CLI file replacement on Windows
         shell: pwsh
         run: |
