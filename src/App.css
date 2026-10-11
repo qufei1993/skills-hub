@@ -6832,21 +6832,419 @@
   accent-color: var(--accent-primary);
 }
 
-.modal.modal-collection-install { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; }
-.modal-collection-install .modal-body { overflow-y: auto; }
-.modal-collection-install .delete-title { color: var(--text-primary); }
-.modal-collection-install .delete-title svg { color: var(--accent-primary); }
-.collection-install-body h3 { margin: 0 0 8px; color: var(--text-primary); font-size: 16px; }
-.collection-install-body p { margin: 8px 0 16px; }
-.collection-install-body ul { padding: 0; margin: 20px 0; list-style: none; }
-.collection-install-body li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }
-.collection-install-body strong { color: var(--text-primary); }
-.collection-install-body small { display: block; margin-top: 4px; overflow-wrap: anywhere; font-size: 12px; }
-.collection-install-body li > span { font-size: 12px; align-self: center; }
-.collection-install-body .collection-install-error { grid-column: 1 / -1; margin: 0; color: var(--status-error); overflow-wrap: anywhere; }
-.collection-install-body fieldset { border: 0; margin: 0; padding: 0; }
-.collection-install-body legend { color: var(--text-primary); font-weight: 600; }
-.collection-install-tools { display: flex; gap: 12px 20px; flex-wrap: wrap; }
-.collection-install-tools label { display: flex; align-items: center; gap: 8px; }
-.collection-install-tools input { accent-color: var(--accent-primary); }
-.collection-install-note { font-size: 12px; }
+/* Collection installation keeps the configuration visible beside the manifest. */
+.modal.modal-collection-install { width: min(960px, calc(100vw - 40px)); height: min(720px, calc(100dvh - 64px)); max-height: calc(100dvh - 64px); display: flex; flex-direction: column; }
+.modal-collection-install .modal-body { flex: 1; min-height: 0; padding: 20px 0 0; display: flex; flex-direction: column; gap: 0; overflow: hidden; }
+.modal-collection-install .delete-title { flex: none; padding: 0 24px; color: var(--text-secondary); font-size: 13px; gap: 8px; }
+.modal-collection-install .delete-title svg { color: var(--accent-primary); width: 18px; height: 18px; }
+.modal-collection-install .delete-desc { flex: 1; min-height: 0; margin-top: 12px; display: flex; }
+.collection-install-body { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.collection-install-heading { flex: none; padding: 0 24px 16px; border-bottom: 1px solid var(--border-subtle); }
+.collection-install-heading h3 { margin: 0 0 9px; color: var(--text-primary); font-size: 22px; line-height: 1.3; font-weight: 650; letter-spacing: -.025em; overflow-wrap: anywhere; }
+.collection-install-sources { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; }
+.collection-install-sources span { display: inline-flex; align-items: center; gap: 10px; overflow-wrap: anywhere; }
+.collection-install-sources code { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); background: var(--bg-element); padding: 2px 5px; border-radius: var(--radius-sm); }
+.collection-install-workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 310px; }
+.collection-install-catalog { min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 16px 12px 0 16px; }
+.collection-install-search { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 8px 10px; margin: 0 4px 12px; color: var(--text-secondary); }
+.collection-install-search:focus-within { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+.collection-install-search input { background: transparent; border: 0; outline: 0; min-width: 0; flex: 1; font: inherit; font-size: 13px; color: var(--text-primary); }
+.collection-install-search span { font-size: 11px; font-variant-numeric: tabular-nums; }
+.collection-install-list { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding: 0 4px 12px; margin: 0; list-style: none; }
+.collection-install-item { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: 6px 10px; padding: 11px 8px; border-radius: var(--radius-sm); }
+.collection-install-selection { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 12px 12px; font-size: 12px; color: var(--text-secondary); }
+.collection-install-selection label { display: inline-flex; align-items: center; gap: 10px; color: var(--text-primary); }
+.collection-install-checkbox, .collection-install-selection input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent-primary); cursor: pointer; }
+.collection-install-checkbox:disabled, .collection-install-selection input:disabled { cursor: default; }
+.collection-install-checkbox:focus-visible, .collection-install-selection input:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+.collection-install-item.is-notSelected .collection-install-skill { opacity: .6; }
+.collection-install-item:nth-child(even) { background: var(--bg-app); }
+.collection-install-item > svg { color: var(--text-tertiary); }
+.collection-install-skill { min-width: 0; }
+.collection-install-skill strong { display: block; color: var(--text-primary); font-size: 13px; line-height: 1.5; font-weight: 600; overflow-wrap: anywhere; }
+.collection-install-skill small { display: block; margin-top: 2px; font-family: var(--font-mono); font-size: 10px; line-height: 1.5; color: var(--text-secondary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+.collection-install-state { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-secondary); }
+.collection-install-item.is-working { background: var(--accent-soft-bg); }
+.collection-install-item.is-working > svg, .collection-install-item.is-working .collection-install-state { color: var(--accent-primary); }
+.collection-install-item.is-installed > svg { color: var(--status-success); }
+.collection-install-item.is-failed > svg, .collection-install-item.is-failed .collection-install-state { color: var(--status-error); }
+.collection-install-error { color: var(--status-error); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.collection-install-item .collection-install-error { grid-column: 2 / -1; margin: 2px 0; }
+.collection-install-settings { min-width: 0; min-height: 0; overflow-y: auto; padding: 20px; border-left: 1px solid var(--border-subtle); background: var(--bg-app); }
+.collection-install-settings fieldset { min-width: 0; border: 0; margin: 0 0 16px; padding: 0; }
+.collection-install-settings legend { padding: 0; margin-bottom: 10px; color: var(--text-primary); font-size: 13px; font-weight: 600; }
+.collection-install-settings .add-tags-list { margin-bottom: 12px; max-height: 100px; overflow-y: auto; }
+.collection-install-label { display: block; font-size: 12px; margin: 0 0 6px; }
+.collection-install-settings .input { width: 100%; min-width: 0; font-size: 12px; font-family: var(--font-ui); }
+.collection-install-note { margin: 8px 0 10px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.collection-install-tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.collection-install-tools .tool-pill-toggle { min-width: 0; max-width: 100%; min-height: 38px; padding: 7px; font-size: 11px; background: var(--bg-panel); }
+.collection-install-tools .tool-pill-toggle input { display: block; flex: none; width: 12px; height: 12px; margin: 0; accent-color: var(--accent-primary); }
+.collection-install-tools .tool-pill-toggle:focus-within { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+.collection-install-tools .tool-pill-toggle:hover { border-color: var(--accent-primary); }
+.collection-install-tools .tool-brand-icon { width: 18px; height: 18px; flex: 0 0 18px; }
+.collection-install-tools .add-tool-label { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+.collection-install-tools .tool-pill-toggle.active { background: var(--accent-soft-bg); border-color: var(--accent-soft-border); color: var(--text-primary); }
+.collection-install-settings .scope-compact-header { flex-wrap: wrap; gap: 8px; }
+.collection-install-settings .project-path-row { min-width: 0; }
+.collection-install-settings .mono { overflow-wrap: anywhere; }
+.collection-install-preserve { margin: 20px 0 0; padding-top: 16px; border-top: 1px solid var(--border-subtle); }
+.collection-install-empty { padding: 12px; font-size: 13px; }
+.modal-collection-install .modal-footer { flex: none; padding: 16px 24px; gap: 10px; }
+.collection-install-progress { margin-right: auto; display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 12px; }
+.collection-install-progress strong { color: var(--text-primary); font-weight: 600; }
+.collection-install-progress span { color: var(--text-secondary); }
+.collection-install-progress progress { width: 160px; height: 4px; margin-top: 5px; accent-color: var(--accent-primary); }
+.collection-install-spinner { animation: collection-install-spin 1s linear infinite; }
+@keyframes collection-install-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .collection-install-spinner { animation: none; } }
+@media (max-width: 760px) {
+  .modal.modal-collection-install { width: calc(100vw - 24px); height: calc(100dvh - 32px); max-height: calc(100dvh - 32px); }
+  .collection-install-workspace { display: flex; flex-direction: column; overflow-y: auto; }
+  .collection-install-settings { order: -1; flex: none; overflow: visible; border-left: 0; border-bottom: 1px solid var(--border-subtle); padding: 16px 20px; }
+  .collection-install-catalog { flex: 1 0 280px; min-height: 280px; }
+  .collection-install-settings fieldset { margin-bottom: 16px; }
+  .collection-install-heading h3 { font-size: 18px; }
+  .modal-collection-install .modal-footer { padding: 12px 16px; }
+  .collection-install-state { max-width: 75px; text-align: right; }
+  .collection-install-progress progress { width: 100px; }
+}
+
+
+/* Unified Skills discovery workspace */
+.discovery-page { width: 100%; height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.discovery-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 4px 0 24px; flex-shrink: 0; }
+.discovery-heading { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.discovery-heading h1 { color: var(--text-primary); margin: 0; font-size: 23px; font-weight: 650; letter-spacing: -.035em; line-height: 1.4; }
+.discovery-heading p { margin: 5px 0 0; font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+.discovery-import-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.discovery-import-actions .btn { min-height: 34px; padding: 7px 11px; font-size: 12px; font-weight: 500; box-shadow: none; }
+.discovery-import-actions .selected { border-color: var(--accent-soft-border); background: var(--accent-soft-bg); color: var(--accent-primary); }
+.discovery-back { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-panel); color: var(--text-secondary); cursor: pointer; }
+.discovery-search-area { padding: 18px; margin-bottom: 24px; border-radius: 12px; background: var(--accent-soft-bg); flex-shrink: 0; }
+.discovery-search { min-height: 50px; display: flex; align-items: center; gap: 12px; padding: 0 16px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--bg-panel); color: var(--text-secondary); transition: border-color .15s; }
+.discovery-search:focus-within { border-color: var(--accent-primary); box-shadow: 0 0 0 3px var(--accent-soft-bg); }
+.discovery-search input { flex: 1; min-width: 0; padding: 14px 0; border: 0; outline: none; color: var(--text-primary); background: transparent; font: inherit; font-size: 14px; }
+.discovery-search input::-webkit-search-cancel-button { display: none; }
+.discovery-search input::placeholder { color: var(--text-tertiary); }
+.discovery-search > svg { flex-shrink: 0; }
+.discovery-search button { background: transparent; border: 0; display: grid; place-items: center; padding: 5px; border-radius: var(--radius-sm); color: var(--text-secondary); cursor: pointer; }
+.discovery-search-provider { font-size: 11px; border-left: 1px solid var(--border-subtle); padding-left: 12px; }
+.discovery-suggestions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; font-size: 11px; color: var(--text-secondary); }
+.discovery-suggestions > span { margin-right: 4px; color: var(--text-tertiary); }
+.discovery-suggestions button { border: 1px solid var(--accent-soft-border); padding: 4px 9px; font: inherit; color: var(--text-secondary); background: var(--bg-panel); border-radius: var(--radius-sm); cursor: pointer; }
+.discovery-suggestions button:hover { color: var(--accent-primary); background: var(--accent-soft-bg); }
+.discovery-body { flex: 1; min-height: 0; overflow: auto; padding: 0 2px 24px; scrollbar-gutter: stable; }
+.discovery-section-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+.discovery-section-heading h2 { margin: 0; font-size: 14px; font-weight: 650; }
+.discovery-section-heading p { margin: 5px 0 0; font-size: 12px; color: var(--text-secondary); }
+.discovery-section-heading > span { font-size: 11px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.discovery-collections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.discovery-collection, .discovery-detail { min-width: 0; --collection-ink: var(--collection-development); --collection-surface: var(--collection-development-bg); }
+.discovery-collection[data-category="design"], .discovery-detail[data-category="design"] { --collection-ink: var(--collection-design); --collection-surface: var(--collection-design-bg); }
+.discovery-collection[data-category="media"], .discovery-detail[data-category="media"] { --collection-ink: var(--collection-media); --collection-surface: var(--collection-media-bg); }
+.discovery-collection[data-category="marketing"], .discovery-detail[data-category="marketing"] { --collection-ink: var(--collection-marketing); --collection-surface: var(--collection-marketing-bg); }
+.discovery-collection-open { display: flex; align-items: flex-start; gap: 15px; padding: 20px; width: 100%; height: 100%; text-align: left; background: var(--bg-panel); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); cursor: pointer; font: inherit; transition: border-color .15s, background .15s; }
+.discovery-collection-open:hover { border-color: var(--collection-ink); background: color-mix(in srgb, var(--collection-surface) 45%, var(--bg-panel)); }
+.discovery-collection-symbol { width: 48px; height: 48px; flex-shrink: 0; display: grid; place-items: center; background: var(--collection-surface); border: 0; border-radius: 12px; color: var(--collection-ink); }
+.discovery-collection-content { min-width: 0; flex: 1; display: flex; flex-direction: column; }
+.discovery-collection-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-secondary); font-size: 10px; line-height: 1.5; }
+.discovery-collection-meta > span { white-space: nowrap; color: var(--collection-ink); background: var(--collection-surface); padding: 2px 7px; border-radius: 4px; }
+.discovery-collection-title { margin: 8px 0 7px; font-size: 16px; font-weight: 650; line-height: 1.4; letter-spacing: -.025em; overflow-wrap: anywhere; }
+.discovery-collection-description { color: var(--text-secondary); font-size: 12px; line-height: 1.65; }
+.discovery-collection-tags { color: var(--collection-ink); font-size: 10px; line-height: 1.5; margin-top: 14px; }
+.discovery-collection-arrow { color: var(--text-tertiary); align-self: center; flex-shrink: 0; }
+.discovery-bottom-note { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-secondary); margin: 22px 0 0; line-height: 1.6; }
+.discovery-bottom-note svg { flex-shrink: 0; }
+.discovery-results { margin-top: 28px; }
+.discovery-skill-results { padding: 0; margin: 0; list-style: none; background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); overflow: hidden; }
+.discovery-skill-results li { display: flex; align-items: center; gap: 14px; padding: 13px 16px; border-bottom: 1px solid var(--border-subtle); }
+.discovery-skill-results li:last-child { border-bottom: 0; }
+.discovery-skill-symbol { color: var(--text-tertiary); display: grid; place-items: center; }
+.discovery-result-identity { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.discovery-result-identity strong { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.discovery-result-identity small { font-size: 11px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.discovery-installs { display: flex; align-items: center; gap: 5px; color: var(--text-tertiary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.discovery-skill-results .btn { padding: 5px 13px; font-size: 12px; min-width: 65px; box-shadow: none; }
+.discovery-installed { display: flex; gap: 4px; align-items: center; min-width: 65px; justify-content: center; color: var(--status-success); font-size: 12px; }
+.discovery-feedback { padding: 22px 16px; background: var(--bg-element); border-radius: var(--radius-md); color: var(--text-secondary); font-size: 12px; line-height: 1.7; }
+.discovery-feedback p { margin: 0 0 10px; }
+.discovery-no-match { margin: 0; font-size: 12px; color: var(--text-secondary); }
+.discovery-skeletons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.discovery-skeletons > div { height: 150px; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-element); }
+.discovery-return { display: inline-flex; align-items: center; gap: 7px; margin: 0 0 22px; padding: 0; border: 0; background: transparent; color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer; }
+.discovery-return:hover { color: var(--accent-primary); }
+.discovery-detail-header { display: flex; align-items: center; gap: 18px; padding: 22px; background: var(--collection-surface); border-radius: var(--radius-lg); }
+.discovery-detail-symbol { display: grid; place-items: center; width: 64px; height: 64px; flex: 0 0 64px; border-radius: 16px; color: var(--collection-ink); background: var(--bg-panel); }
+.discovery-detail-identity { flex: 1; }
+.discovery-detail-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.discovery-detail-tags span { font-size: 11px; color: var(--collection-ink); }
+.discovery-detail-tags span + span::before { content: '/'; margin-right: 6px; opacity: .5; }
+.discovery-detail-source { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.discovery-detail-header > div { min-width: 0; }
+.discovery-detail-header .btn { flex-shrink: 0; font-size: 12px; }
+.discovery-byline { display: flex; align-items: center; gap: 14px; font-size: 11px; color: var(--text-secondary); }
+.discovery-byline span { padding-left: 14px; border-left: 1px solid var(--border-subtle); color: var(--collection-ink); }
+.discovery-detail h2 { margin: 10px 0; font-size: 24px; font-weight: 650; letter-spacing: -.035em; }
+.discovery-detail-header p { font-size: 13px; line-height: 1.7; color: var(--text-secondary); margin: 0; }
+.discovery-overview { white-space: pre-line; font-size: 12px; line-height: 1.8; color: var(--text-secondary); padding: 16px 0 20px; margin: 0 0 16px; max-width: 86ch; }
+.discovery-detail .discovery-section-heading h2 { font-size: 14px; margin: 0; letter-spacing: normal; }
+.discovery-detail-skills { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; list-style: none; padding: 0; margin: 0; }
+.discovery-detail-skills li { min-width: 0; border-bottom: 1px solid var(--border-subtle); padding: 16px 0 16px 12px; border-left: 2px solid var(--collection-surface); }
+.discovery-detail-skills strong { color: var(--text-primary); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.discovery-detail-skills p { font-size: 12px; line-height: 1.65; color: var(--text-secondary); margin: 6px 0; }
+.discovery-detail-skills small { font-size: 10px; color: var(--text-tertiary); }
+.discovery-error { color: var(--status-error); font-size: 12px; }
+.discovery-page button:focus-visible, .discovery-import button:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 3px; }
+.add-skill-modal.discovery-import .add-install-workspace { max-width: 900px; margin: 0; max-height: none; flex: 0 1 auto; }
+.add-skill-modal.discovery-import .add-source-card { grid-template-columns: 1fr; }
+.add-skill-modal.discovery-import .add-card-header { min-height: 0; padding: 20px 22px 0; }
+.add-skill-modal.discovery-import .add-source-body { padding: 18px 22px 22px; grid-template-columns: 1fr; gap: 12px; }
+.add-skill-modal.discovery-import .add-source-note { border: 0; padding: 0; background: transparent; min-height: 0; font-size: 11px; }
+.add-skill-modal.discovery-import .add-form-heading span { font-size: 12px; }
+@media (max-width: 1000px) {
+  .discovery-header { align-items: flex-start; }
+  .discovery-import-actions .btn { padding: 7px 9px; }
+  .discovery-import-actions .btn svg { display: none; }
+  .discovery-collection-open { padding: 16px; gap: 12px; }
+  .discovery-collection-symbol { display: none; }
+}
+@media (max-width: 760px) {
+  .discovery-header { flex-wrap: wrap; gap: 14px; padding-bottom: 18px; }
+  .discovery-heading h1 { font-size: 21px; }
+  .discovery-collections, .discovery-skeletons, .discovery-detail-skills { grid-template-columns: minmax(0, 1fr); }
+  .discovery-detail-header { align-items: flex-start; flex-direction: column; gap: 16px; }
+  .discovery-search-provider, .discovery-installs { display: none; }
+  .discovery-search-area { padding-bottom: 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .discovery-search, .discovery-collection-open { transition: none; }
+}
+.discovery-collections.is-searching { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.discovery-collections.is-searching .discovery-collection-open { padding: 14px 16px; align-items: center; }
+.discovery-collections.is-searching .discovery-collection-symbol { width: 36px; height: 42px; }
+.discovery-collections.is-searching .discovery-collection-title { margin: 5px 0; font-size: 14px; }
+.discovery-collections.is-searching .discovery-collection-tags { display: none; }
+
+/* Source entry and installation confirmation share a focused, single-column dialog. */
+.modal.install-flow-dialog { width: min(780px, calc(100vw - 48px)); max-height: calc(100dvh - 64px); display: flex; flex-direction: column; overflow: hidden; }
+.modal.install-source-dialog { width: min(520px, calc(100vw - 48px)); border-radius: 14px; }
+.install-source-dialog .modal-header { border-bottom: 0; padding-bottom: 16px; }
+.install-source-heading { display: flex; align-items: center; gap: 12px; }
+.install-source-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 10px; color: var(--accent-primary); background: var(--accent-soft-bg); flex-shrink: 0; }
+.install-flow-dialog .modal-header { align-items: flex-start; padding: 22px 24px 18px; flex: none; }
+.install-flow-dialog h2 { margin: 0; font-size: 19px; line-height: 1.4; font-weight: 650; }
+.install-flow-dialog .modal-header p { margin: 5px 0 0; font-size: 12px; color: var(--text-secondary); }
+.install-source-reference { display: block; max-width: 600px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); margin-top: 6px; }
+.install-source-form { min-height: 0; overflow-y: auto; }
+.install-source-tabs { display: flex; gap: 4px; padding: 4px; margin: 0 24px; border-radius: 9px; background: var(--bg-element); }
+.install-source-tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex: 1; border: 1px solid transparent; border-radius: 6px; padding: 8px 10px; font: inherit; font-size: 12px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.install-source-tabs button[aria-pressed="true"] { color: var(--text-primary); border-color: var(--border-subtle); background: var(--bg-panel); box-shadow: var(--shadow-sm); }
+.install-source-tabs button[aria-pressed="true"] svg { color: var(--accent-primary); }
+.install-source-tabs button:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+.install-source-tabs button:hover:not(:disabled) { color: var(--accent-primary); }
+.install-source-tabs button:disabled { cursor: default; opacity: .6; }
+.install-source-field { display: flex; flex-direction: column; gap: 8px; margin: 24px 24px 0; font-size: 13px; font-weight: 500; }
+.install-source-field .input-row { display: flex; gap: 8px; }
+.install-source-field .input { min-width: 0; flex: 1; font-weight: 400; }
+.install-source-help { display: flex; align-items: flex-start; gap: 8px; margin: 14px 24px 24px; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+.install-source-help svg { flex-shrink: 0; margin-top: 2px; color: var(--accent-primary); }
+.modal.install-source-dialog .modal-footer { background: var(--bg-app); padding: 14px 24px; }
+.modal.install-flow-dialog .modal-body { overflow-y: auto; display: block; padding: 16px 24px; }
+.modal.install-flow-dialog .pick-list { flex: none; min-height: 0; max-height: 230px; overflow-y: auto; margin-bottom: 20px; }
+.modal.install-flow-dialog .pick-item { padding: 10px 6px; }
+.modal.install-flow-dialog .modal-footer { flex: none; padding: 16px 24px; }
+.install-settings-sections { border-top: 1px solid var(--border-subtle); color: var(--text-primary); }
+.install-settings-section { border-bottom: 1px solid var(--border-subtle); }
+.install-settings-toggle { display: flex; width: 100%; align-items: center; gap: 16px; padding: 13px 0; color: var(--text-primary); background: transparent; border: 0; text-align: left; font-size: 13px; cursor: pointer; }
+.install-settings-toggle strong { font-weight: 550; flex: 0 0 84px; }
+.install-settings-toggle span { flex: 1; min-width: 0; color: var(--text-secondary); overflow-wrap: anywhere; }
+.install-settings-toggle svg { flex: none; color: var(--text-secondary); transition: transform 120ms; }
+.install-settings-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.install-settings-toggle:hover { color: var(--accent-primary); }
+.install-settings-content { padding: 0 0 16px; }
+.install-settings-content[hidden] { display: none; }
+.install-settings-content fieldset { border: 0; min-width: 0; margin: 0; padding: 0; }
+.install-settings-content legend { display: none; }
+.install-settings-content .add-tags-list { max-height: none; overflow: visible; display: flex; flex-wrap: wrap; gap: 8px; }
+.install-settings-content .tool-matrix, .install-settings-content .collection-install-tools { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.install-settings-content .tool-pill-toggle { min-width: 0; width: auto; height: auto; min-height: 40px; justify-content: flex-start; padding: 8px 10px; }
+.install-settings-content .add-tool-label { white-space: normal; overflow-wrap: anywhere; }
+.install-settings-content .project-path-row { min-width: 0; }
+.install-settings-content .mono { overflow-wrap: anywhere; }
+.modal.modal-collection-install { width: min(780px, calc(100vw - 48px)); height: min(740px, calc(100dvh - 64px)); }
+.modal-collection-install .collection-install-heading h3 { font-size: 20px; }
+.modal-collection-install .collection-install-workspace { display: block; overflow-y: auto; padding: 16px 24px; }
+.modal-collection-install .collection-install-catalog { padding: 0; min-height: 0; display: block; }
+.modal-collection-install .collection-install-list { max-height: 235px; overflow-y: auto; padding-bottom: 0; }
+.modal-collection-install .collection-install-settings { padding: 16px 0 0; background: transparent; overflow: visible; border: 0; }
+.modal-collection-install .collection-install-settings fieldset { margin: 0; }
+.modal-collection-install .collection-install-preserve { margin-top: 12px; padding: 0; border: 0; }
+.modal-collection-install .collection-install-search { margin: 0 0 12px; }
+@media (max-width: 700px) {
+  .install-settings-content .tool-matrix, .install-settings-content .collection-install-tools { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .modal.install-flow-dialog, .modal.modal-collection-install { width: calc(100vw - 24px); max-height: calc(100dvh - 32px); }
+  .install-settings-toggle strong { flex-basis: 70px; }
+}
+.modal.install-flow-dialog .pick-list { max-height: 190px; border: 0; border-radius: 0; }
+.modal.install-flow-dialog .pick-item { border: 0; border-bottom: 1px solid var(--border-subtle); border-radius: 0; padding: 10px 4px; margin: 0; box-shadow: none; }
+.modal.install-flow-dialog .pick-item-title { font-size: 13px; }
+.modal.install-flow-dialog .pick-item-desc, .modal.install-flow-dialog .pick-item-path { font-size: 12px; line-height: 1.5; }
+.modal.install-flow-dialog .pick-item-checkbox input { width: 16px; height: 16px; }
+.modal.install-flow-dialog .pick-item-checkbox { padding-top: 2px; }
+.modal.install-flow-dialog .modal-body > .label { font-size: 12px; margin: 0 0 12px; font-weight: 400; }
+.install-inline-progress { margin-right: auto; min-width: 0; flex: 1; font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.install-shared-confirm { padding: 12px; margin-bottom: 12px; background: var(--accent-soft-bg); border-radius: 6px; font-size: 12px; }
+.install-shared-confirm p { margin: 0 0 10px; line-height: 1.6; }
+.install-shared-confirm > div { display: flex; gap: 8px; justify-content: flex-end; }
+.modal-collection-install .collection-install-list { max-height: 190px; }
+.install-settings-content .tool-pill-toggle input { display: block; position: static; width: 14px; height: 14px; opacity: 1; flex: none; accent-color: var(--accent-primary); }
+.install-settings-content .add-tool-state { display: none; }
+.modal.install-flow-dialog:has(.install-settings-toggle[aria-expanded="true"]) .pick-list,
+.modal-collection-install:has(.install-settings-toggle[aria-expanded="true"]) .collection-install-list { max-height: 140px; }
+@media (max-height: 700px) {
+  .modal.install-flow-dialog .pick-list,
+  .modal-collection-install .collection-install-list { max-height: 100px; }
+  .modal.install-flow-dialog:has(.install-settings-toggle[aria-expanded="true"]) .pick-list,
+  .modal-collection-install:has(.install-settings-toggle[aria-expanded="true"]) .collection-install-list { max-height: 80px; }
+}
+
+/* Installation destinations stay visible; tags are edited only when needed. */
+.install-settings-visible { --install-label-width: 64px; --install-column-gap: 12px; padding-top: 12px; }
+.install-settings-visible .install-settings-row { display: grid; grid-template-columns: var(--install-label-width) minmax(0, 1fr); gap: var(--install-column-gap); padding: 10px 0; }
+.install-settings-visible .install-settings-label { font-size: 12px; font-weight: 550; padding-top: 8px; color: var(--text-primary); }
+.install-settings-visible .install-settings-label strong { font-weight: inherit; }
+.install-settings-visible .install-settings-content { min-width: 0; padding: 0; }
+.install-settings-visible .tool-matrix, .install-settings-visible .collection-install-tools { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.install-settings-visible .tool-pill-toggle { min-height: 32px; padding: 6px 8px; gap: 6px; border-radius: 6px; font-size: 12px; }
+.install-settings-visible .add-tool-logo { width: 16px; height: 16px; flex: none; }
+.install-settings-visible .add-tool-label { font-size: 12px; line-height: 1.35; }
+.install-settings-visible .install-settings-summary { margin: 7px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.4; }
+.install-settings-visible .install-settings-scope { display: block; }
+.install-settings-visible .scope-compact-header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--install-column-gap); }
+.install-settings-visible .scope-compact-header > .label { width: var(--install-label-width); flex: 0 0 var(--install-label-width); margin: 0; font-size: 12px; }
+.install-settings-visible .scope-toggle-item { min-height: 30px; padding: 5px 16px; font-size: 12px; }
+.install-settings-visible .scope-selector { gap: 10px; }
+.install-settings-visible .scope-selector-compact > .project-sync-panel { margin-inline-start: calc(var(--install-label-width) + var(--install-column-gap)); min-width: 0; }
+.install-settings-visible .recent-project-row { min-width: 0; text-align: start; }
+.install-settings-visible .recent-project-row > :last-child { flex-shrink: 0; }
+.install-settings-visible .project-sync-panel > .btn { align-self: flex-start; }
+.install-tags-summary { display: flex; align-items: center; gap: 12px; min-height: 30px; }
+.install-tags-summary > span { min-width: 0; flex: 1; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
+.install-tags-edit { display: inline-flex; align-items: center; justify-content: center; gap: 4px; flex: none; background: transparent; border: 1px solid var(--border-subtle); border-radius: 6px; padding: 5px 8px; font-size: 12px; color: var(--text-primary); cursor: pointer; }
+.install-tags-edit:hover:not(:disabled) { border-color: var(--accent-primary); color: var(--accent-primary); }
+.install-tags-edit:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+.install-tags-edit:disabled { opacity: .5; cursor: default; }
+.install-tag-options { padding-top: 10px; }
+.install-tag-options[hidden] { display: none; }
+.modal.install-flow-dialog .pick-list, .modal-collection-install .collection-install-list { max-height: 150px; }
+.modal-collection-install .collection-install-settings { padding-top: 10px; }
+.modal-collection-install .collection-install-heading { padding-bottom: 12px; }
+.modal-collection-install .collection-install-heading h3 { margin-bottom: 6px; }
+.modal-collection-install .collection-install-preserve { margin: 8px 0 0; font-size: 11px; }
+@media (max-width: 740px) {
+  .install-settings-visible .tool-matrix, .install-settings-visible .collection-install-tools { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 540px) {
+  .install-settings-visible .tool-matrix, .install-settings-visible .collection-install-tools { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .install-settings-visible { --install-label-width: 48px; --install-column-gap: 8px; }
+}
+@media (max-height: 700px) {
+  .modal.install-flow-dialog .pick-list, .modal-collection-install .collection-install-list { max-height: 90px; }
+  .install-settings-visible .install-settings-row { padding-top: 6px; padding-bottom: 6px; }
+}
+
+@media (max-height: 700px) {
+  .modal-collection-install .modal-header { padding: 14px 24px 10px; }
+  .modal-collection-install .collection-install-heading h3 { font-size: 18px; }
+  .modal-collection-install .collection-install-workspace { padding-top: 10px; padding-bottom: 10px; }
+  .modal-collection-install .collection-install-item { padding-top: 8px; padding-bottom: 8px; }
+  .modal-collection-install .collection-install-list { max-height: 76px; }
+  .install-settings-visible { padding-top: 4px; }
+  .install-settings-visible .install-settings-summary { margin-top: 3px; }
+}
+
+/* Separate selection from destination settings so both retain usable space. */
+.install-flow-steps { display: flex; flex: none; gap: 24px; list-style: none; margin: 0; padding: 12px 24px; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: 12px; }
+.install-flow-steps li { display: flex; align-items: center; gap: 8px; }
+.install-flow-steps li > span { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--bg-app); border: 1px solid var(--border-subtle); font-size: 11px; }
+.install-flow-steps li[aria-current] { color: var(--accent-primary); font-weight: 600; }
+.install-flow-steps li[aria-current] > span { background: var(--accent-primary); color: white; border-color: var(--accent-primary); }
+.install-flow-steps:focus { outline: none; }
+.modal.install-flow-dialog.install-wizard { height: min(740px, calc(100dvh - 64px)); }
+.install-wizard [hidden] { display: none !important; }
+.modal.install-flow-dialog.install-wizard .modal-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.install-wizard .install-selection-page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.modal.install-flow-dialog.install-wizard .pick-list { flex: 1; max-height: none; margin-bottom: 0; }
+.install-wizard .install-settings-page { min-height: 0; overflow-y: auto; }
+.install-selection-summary { margin-right: auto; font-size: 12px; color: var(--text-secondary); }
+.install-wizard .install-settings-sections { border-top: 0; padding-top: 0; }
+.install-wizard .collection-install-workspace { display: flex; flex-direction: column; min-height: 0; flex: 1; overflow: hidden; }
+.install-wizard .collection-install-catalog { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.modal-collection-install .install-wizard .collection-install-list { flex: 1; max-height: none; min-height: 0; overflow-y: auto; }
+.modal-collection-install .install-wizard .collection-install-settings { overflow-y: auto; padding-top: 0; min-height: 0; }
+
+/* Compact, equal-height destination choices; tags are directly available. */
+.install-wizard .install-settings-visible .tool-matrix,
+.install-wizard .install-settings-visible .collection-install-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.install-wizard .install-settings-visible .tool-pill-toggle { position: relative; display: inline-flex; flex: 0 0 auto; width: auto; height: 34px; min-height: 34px; max-width: 100%; padding: 0 12px; gap: 7px; border-radius: 17px; border: 1px solid var(--border-subtle); background: var(--bg-panel); color: var(--text-secondary); box-shadow: none; }
+.install-wizard .install-settings-visible .tool-pill-toggle.active { color: var(--accent-primary); background: var(--accent-soft-bg); border-color: var(--accent-soft-border); }
+.install-wizard .install-settings-visible .tool-pill-toggle:hover:not(.disabled) { border-color: var(--accent-primary); }
+.install-wizard .install-settings-visible .tool-pill-toggle:focus-within { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+.install-wizard .install-settings-visible .tool-pill-toggle input { appearance: auto; -webkit-appearance: checkbox; position: static; opacity: 1; width: 14px; height: 14px; min-width: 14px; margin: 0; border-radius: 3px; accent-color: var(--accent-primary); box-shadow: none; }
+.install-wizard .install-settings-visible .add-tool-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; }
+.install-wizard .install-settings-visible .add-tool-logo,
+.install-wizard .install-settings-visible .tool-brand-icon { width: 18px; height: 18px; flex: 0 0 18px; border-radius: 4px; }
+.install-wizard .install-settings-visible .install-settings-row { padding: 14px 0; }
+.install-wizard .install-settings-visible .install-settings-label,
+.install-wizard .install-settings-visible .scope-compact-header > .label { color: var(--text-primary); font-weight: 550; }
+.install-wizard .install-tag-options { padding-top: 0; }
+.install-wizard .install-settings-visible .add-tags-list { max-height: 144px; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; padding: 2px; }
+.install-wizard .install-settings-visible .add-tag-pill { min-height: 30px; border-radius: 15px; padding: 4px 10px; background: var(--bg-panel); border: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: 12px; }
+.install-wizard .install-settings-visible .add-tag-pill.selected { color: var(--accent-primary); border-color: var(--accent-soft-border); background: var(--accent-soft-bg); }
+.install-wizard .install-settings-visible .add-tag-pill:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+.install-wizard .install-settings-visible .scope-toggle-item.active { background: var(--accent-soft-bg); color: var(--accent-primary); }
+.install-wizard .install-settings-visible .scope-toggle-item { font-weight: 500; }
+
+/* One selection surface for repository, local and collection installs. */
+.skill-selection-list { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.skill-selection-search { display: flex; align-items: center; gap: 10px; flex: none; min-height: 38px; padding: 0 12px; background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); color: var(--text-secondary); }
+.skill-selection-search:focus-within { border-color: var(--accent-primary); box-shadow: 0 0 0 2px var(--accent-soft-bg); }
+.skill-selection-search input { width: 100%; min-width: 0; padding: 10px 0; border: 0; outline: none; font: inherit; font-size: 13px; color: var(--text-primary); background: transparent; }
+.skill-selection-toolbar { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 8px; color: var(--text-secondary); font-size: 12px; }
+.skill-selection-list input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--accent-primary); flex-shrink: 0; }
+.skill-selection-items { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; list-style: none; margin: 0; padding: 0; }
+.skill-selection-item { padding: 10px 8px; border-bottom: 1px solid var(--border-subtle); }
+.skill-selection-item:last-child { border-bottom: 0; }
+.skill-selection-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.skill-selection-heading { display: flex; align-items: center; gap: 12px; min-height: 26px; }
+.skill-selection-identity { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 10px; }
+.skill-selection-heading > .git-pick-status { flex-shrink: 0; }
+.skill-selection-heading strong { color: var(--text-primary); font-size: 13px; line-height: 1.5; font-weight: 600; min-width: 0; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-selection-path { font: 11px/1.5 var(--font-mono); color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-selection-copy > .git-pick-description, .skill-selection-copy > .skill-selection-note { margin-inline-start: 28px; }
+.skill-selection-copy .pick-item-desc { font-size: 12px; line-height: 1.6; }
+.skill-selection-note { margin: 0; font-size: 12px; line-height: 1.6; color: var(--text-secondary); }
+.skill-selection-note.is-error, .git-pick-status-error { color: var(--status-error); }
+.skill-selection-item.is-unavailable { background: var(--bg-element); border-radius: 6px; }
+.skill-selection-item.is-unavailable input[type="checkbox"] { appearance: none; -webkit-appearance: none; position: relative; border: 1px solid var(--border-subtle); border-radius: 4px; background: var(--bg-element-hover); cursor: not-allowed; }
+.skill-selection-item.is-unavailable input[type="checkbox"]::after { content: ""; position: absolute; width: 8px; height: 2px; inset: 50% auto auto 50%; transform: translate(-50%, -50%); background: var(--text-secondary); }
+.skill-selection-item.is-unavailable strong { color: var(--text-secondary); }
+.git-pick-status-neutral { color: var(--text-secondary); background: var(--bg-element); border-color: var(--border-subtle); }
+.skill-selection-list input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+
+.skill-selection-copy .git-pick-description-text:not(.is-expanded) { -webkit-line-clamp: 2; }
+
+@media (max-width: 1100px) {
+  .discovery-detail-header { flex-wrap: wrap; }
+  .discovery-detail-header .btn { margin-left: 82px; }
+}
+@media (max-width: 760px) {
+  .discovery-detail-header { flex-direction: row; padding: 16px; gap: 12px; }
+  .discovery-detail-symbol { width: 44px; height: 44px; flex-basis: 44px; border-radius: 10px; }
+  .discovery-detail-identity { flex-basis: calc(100% - 56px); }
+  .discovery-detail-header .btn { margin-left: 56px; max-width: calc(100% - 56px); white-space: normal; }
+  .discovery-detail .discovery-section-heading { flex-wrap: wrap; }
+}
+
+.discovery-pagination { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 12px; margin-top: 20px; color: var(--text-secondary); font-size: 12px; }

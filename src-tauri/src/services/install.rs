@@ -152,6 +152,8 @@ pub struct GitInstallCandidate {
     #[serde(flatten)]
     pub candidate: GitSkillCandidate,
     pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub existing_skill_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -462,16 +464,33 @@ impl SkillsHubService {
         cancel: Option<&CancelToken>,
     ) -> Result<Vec<GitInstallCandidate>, ServiceError> {
         let candidates = self.git_install_candidates_with_cancel(reference, cancel)?;
+        self.git_install_local_preview(reference, candidates, name)
+    }
+
+    pub(crate) fn git_install_local_preview(
+        &self,
+        reference: &str,
+        candidates: Vec<GitSkillCandidate>,
+        name: Option<&str>,
+    ) -> Result<Vec<GitInstallCandidate>, ServiceError> {
+        self.ensure_database_compatible()?;
+        validate_git_reference(reference)?;
         candidates
             .into_iter()
             .map(|candidate| {
-                let status = match classify_git_candidate(self, reference, &candidate, name) {
-                    Ok(Some(_)) => "update",
-                    Ok(None) => "install",
-                    Err(error) if error.code == ErrorCode::TargetConflict => "conflict",
-                    Err(error) => return Err(error),
-                };
-                Ok(GitInstallCandidate { candidate, status })
+                validate_subpath(&candidate.subpath)?;
+                let (status, existing_skill_id) =
+                    match classify_git_candidate(self, reference, &candidate, name) {
+                        Ok(Some(existing)) => ("update", Some(existing.id)),
+                        Ok(None) => ("install", None),
+                        Err(error) if error.code == ErrorCode::TargetConflict => ("conflict", None),
+                        Err(error) => return Err(error),
+                    };
+                Ok(GitInstallCandidate {
+                    candidate,
+                    status,
+                    existing_skill_id,
+                })
             })
             .collect()
     }
@@ -763,7 +782,13 @@ fn validate_git_reference(reference: &str) -> Result<(), ServiceError> {
         if url
             .host_str()
             .is_some_and(|host| host.eq_ignore_ascii_case("github.com"))
-            && !looks_like_marketplace_shorthand(url.path().trim_start_matches('/'))
+            && !looks_like_marketplace_shorthand(
+                reference
+                    .split_once("://")
+                    .and_then(|(_, authority_and_path)| authority_and_path.split_once('/'))
+                    .map(|(_, path)| path)
+                    .unwrap_or_default(),
+            )
         {
             return Err(invalid_source());
         }
@@ -844,7 +869,10 @@ fn looks_like_marketplace_shorthand(input: &str) -> bool {
     if parts.len() == 2 {
         return true;
     }
-    if parts.len() < 5 || !matches!(parts[2], "tree" | "blob") {
+    if parts.len() < 4
+        || !matches!(parts[2], "tree" | "blob")
+        || (parts[2] == "blob" && parts.len() < 5)
+    {
         return false;
     }
     parts[3..]
@@ -1058,6 +1086,29 @@ mod error_mapping_tests {
             assert_eq!(error.code, code);
             assert_eq!(error.details["legacy_category"], category);
             assert!(!serde_json::to_string(&error).unwrap().contains(secret));
+        }
+    }
+}
+
+#[cfg(test)]
+mod collection_reference_tests {
+    use super::validate_git_reference;
+
+    #[test]
+    fn accepts_pinned_repository_root_without_relaxing_invalid_paths() {
+        assert!(validate_git_reference(
+            "https://github.com/mattpocock/skills/tree/d81f3a183412e71a5b1e84ca21bc1a35eea03a60"
+        )
+        .is_ok());
+        for source in [
+            "https://github.com/owner/repo/tree/",
+            "https://github.com/owner/repo/blob/main",
+            "https://github.com/owner/repo/tree/main/",
+            "https://github.com/owner/repo/tree/main/../demo",
+            "https://github.com/owner/repo/tree/main?token=secret",
+            "https://user:secret@github.com/owner/repo/tree/main",
+        ] {
+            assert!(validate_git_reference(source).is_err(), "{source}");
         }
     }
 }

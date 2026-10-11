@@ -27,7 +27,7 @@ const candidates = [
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 describe.each(['git', 'local'] as const)('%s skill picker', (kind) => {
-  function setup({ invalid = false, loading = false } = {}) {
+  function setup({ invalid = false, loading = false, wizard = false } = {}) {
     const onInstall = vi.fn()
     const items = invalid
       ? [...candidates, { name: 'broken', subpath: 'skills/broken', valid: false, reason: 'missing_skill_md' }]
@@ -37,6 +37,7 @@ describe.each(['git', 'local'] as const)('%s skill picker', (kind) => {
         Object.fromEntries(items.map((c) => [c.subpath, true])),
       )
       const props = {
+        settings: wizard ? <input aria-label="Settings input" /> : undefined,
         open: true,
         loading,
         onRequestClose: vi.fn(),
@@ -57,6 +58,21 @@ describe.each(['git', 'local'] as const)('%s skill picker', (kind) => {
       install: () => fireEvent.click(screen.getByRole('button', { name: 'Install selected' })),
     }
   }
+
+  it('preserves search and settings between steps and submits only the visible selection', () => {
+    const { search, onInstall } = setup({ wizard: true })
+    search('review')
+    fireEvent.click(screen.getByRole('button', { name: 'installFlow.next' }))
+    expect(onInstall).not.toHaveBeenCalled()
+    expect(screen.getByPlaceholderText('pickSearchPlaceholder').closest('[hidden]')).not.toBeNull()
+    fireEvent.change(screen.getByRole('textbox', { name: 'Settings input' }), { target: { value: 'retained' } })
+    fireEvent.click(screen.getByRole('button', { name: 'installFlow.back' }))
+    expect((screen.getByPlaceholderText('pickSearchPlaceholder') as HTMLInputElement).value).toBe('review')
+    fireEvent.click(screen.getByRole('button', { name: 'installFlow.next' }))
+    expect((screen.getByRole('textbox', { name: 'Settings input' }) as HTMLInputElement).value).toBe('retained')
+    fireEvent.click(screen.getByRole('button', { name: 'Install selected' }))
+    expect(onInstall).toHaveBeenCalledExactlyOnceWith(['skills/review'])
+  })
 
   it.each([' acad ', 'LEARNING', 'skills/academy'])('submits only the visible selection when searching %s', (query) => {
     const { search, install, onInstall } = setup()

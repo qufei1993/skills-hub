@@ -103,6 +103,7 @@ export type ManagedSkill = {
 }
 
 export type GitSkillCandidate = {
+  existing_skill_id?: string
   status?: 'install' | 'update' | 'conflict'
   name: string
   description?: string | null
@@ -259,15 +260,6 @@ export type AutoUpdateProgressSnapshotDto = {
   failed: AutoUpdateSkillProgressDto[]
   running?: AutoUpdateSkillProgressDto | null
   pending: AutoUpdateSkillProgressDto[]
-}
-
-export type FeaturedSkillDto = {
-  slug: string
-  name: string
-  summary: string
-  downloads: number
-  stars: number
-  source_url: string
 }
 
 export type OnlineSkillDto = {

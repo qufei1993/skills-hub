@@ -1,9 +1,17 @@
-import { memo, useMemo, useState } from 'react'
-import { Search } from 'lucide-react'
+import InstallFlowSteps from './InstallFlowSteps'
+import { useInstallDialog } from './useInstallDialog'
+import { type ReactNode, memo, useMemo, useState } from 'react'
+import SkillSelectionList from './SkillSelectionList'
 import type { TFunction } from 'i18next'
 import type { LocalSkillCandidate } from '../types'
 
 type LocalPickModalProps = {
+  actionMessage?: string | null
+  onCancelOperation?: () => void
+  settings?: ReactNode
+  source?: string
+  installDisabled?: boolean
+  installDisabledReason?: string
   open: boolean
   loading: boolean
   localCandidates: LocalSkillCandidate[]
@@ -16,6 +24,12 @@ type LocalPickModalProps = {
 }
 
 const LocalPickModal = ({
+  actionMessage,
+  onCancelOperation,
+  settings,
+  source,
+  installDisabled = false,
+  installDisabledReason,
   open,
   loading,
   localCandidates,
@@ -26,7 +40,9 @@ const LocalPickModal = ({
   onInstall,
   t,
 }: LocalPickModalProps) => {
+  const dialogRef = useInstallDialog(open, loading, onRequestClose)
   const [query, setQuery] = useState('')
+  const [step, setStep] = useState<1 | 2>(1)
   const normalizedQuery = query.trim().toLowerCase()
   const filteredCandidates = useMemo(() => {
     if (!normalizedQuery) return localCandidates
@@ -41,11 +57,6 @@ const LocalPickModal = ({
     (c) => localCandidateSelected[c.subpath],
   )
   const selectedCount = selectedCandidates.length
-  const selectableCount = selectableCandidates.length
-  const allVisibleSelected =
-    selectableCount > 0 &&
-    selectableCandidates.every((c) => localCandidateSelected[c.subpath])
-
   const toggleVisibleCandidates = (checked: boolean) => {
     selectableCandidates.forEach((c) => onToggleCandidate(c.subpath, checked))
   }
@@ -62,10 +73,10 @@ const LocalPickModal = ({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onRequestClose}>
-      <div className="modal pick-skill-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop install-flow-backdrop" onClick={onRequestClose}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t(settings ? 'installFlow.confirmTitle' : 'localPickTitle')} tabIndex={-1} className="modal pick-skill-modal install-flow-dialog install-wizard" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <div className="modal-title">{t('localPickTitle')}</div>
+          <div><h2>{t(settings ? 'installFlow.confirmTitle' : 'localPickTitle')}</h2>{source && <small className="install-source-reference" title={source}>{source}</small>}</div>
           <button
             className="modal-close"
             type="button"
@@ -75,77 +86,33 @@ const LocalPickModal = ({
             ✕
           </button>
         </div>
+        {settings && <InstallFlowSteps step={step} t={t} />}
         <div className="modal-body">
-          <p className="label">{t('localPickBody')}</p>
-          <div className="pick-search">
-            <Search size={16} className="search-icon-abs" />
-            <input
-              className="search-input"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t('pickSearchPlaceholder')}
-            />
+          <div className="install-selection-page" hidden={Boolean(settings) && step === 2}>
+          {!settings && <p className="label">{t('localPickBody')}</p>}
+          <SkillSelectionList query={query} onQueryChange={setQuery} disabled={loading} t={t}
+            onToggle={onToggleCandidate} onToggleAll={toggleVisibleCandidates}
+            items={filteredCandidates.map(c => ({ id: c.subpath, name: c.name, path: c.subpath, description: c.description,
+              selected: Boolean(localCandidateSelected[c.subpath]), selectable: c.valid,
+              tone: c.valid ? 'install' : 'conflict', status: c.valid ? t('gitInstall.install') : t('skillSelection.unavailable'),
+              note: c.valid ? undefined : t('localPickInvalidReason', { reason: mapReason(c.reason) }),
+            }))} />
           </div>
-          <div className="pick-toolbar">
-            <label className="inline-checkbox">
-              <input
-                type="checkbox"
-                checked={allVisibleSelected}
-                onChange={(e) => toggleVisibleCandidates(e.target.checked)}
-                disabled={selectableCount === 0}
-              />
-              {t('selectAll')}
-            </label>
-            <span className="pick-toolbar-count">
-              {t('selectedCount', {
-                selected: selectedCount,
-                total: selectableCount,
-              })}
-            </span>
-          </div>
-          <div className="pick-list">
-            {filteredCandidates.length === 0 ? (
-              <div className="empty">{t('pickSearchEmpty')}</div>
-            ) : null}
-            {filteredCandidates.map((c) => (
-              <div
-                className={`pick-item${c.valid ? '' : ' disabled'}`}
-                key={c.subpath}
-              >
-                <label className="pick-item-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(localCandidateSelected[c.subpath])}
-                    onChange={(e) => onToggleCandidate(c.subpath, e.target.checked)}
-                    disabled={!c.valid}
-                  />
-                </label>
-                <div className="pick-item-main">
-                  <div className="pick-item-title">{c.name}</div>
-                  {c.description ? (
-                    <div className="pick-item-desc">{c.description}</div>
-                  ) : null}
-                  <div className="pick-item-path">{c.subpath}</div>
-                  {!c.valid ? (
-                    <div className="pick-item-reason">
-                      {t('localPickInvalidReason', { reason: mapReason(c.reason) })}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            ))}
-          </div>
+          <div className="install-settings-page" hidden={!settings || step === 1}>{settings}</div>
         </div>
         <div className="modal-footer">
-          <button className="btn btn-secondary" onClick={onCancel} disabled={loading}>
-            {t('cancel')}
+          {!loading && step === 2 && <span className="install-selection-summary">{t('selectedCount', { selected: selectedCount, total: selectableCandidates.length })}</span>}
+          {loading && <span className="install-inline-progress" role="status">{actionMessage ?? t('processingTipShort')}</span>}
+          {!loading && step === 2 && installDisabled && <span className="install-inline-progress" role="status">{installDisabledReason ?? t('projectSync.projectRequired')}</span>}
+          <button className="btn btn-secondary" onClick={loading ? onCancelOperation : settings && step === 2 ? () => setStep(1) : onCancel} disabled={loading && !onCancelOperation}>
+            {t(loading ? 'cancel' : settings ? 'installFlow.back' : 'cancel')}
           </button>
           <button
             className="btn btn-primary"
-            onClick={() => onInstall(selectedCandidates.map((c) => c.subpath))}
-            disabled={loading || selectedCount === 0}
+            onClick={() => { if (settings && step === 1) setStep(2); else onInstall(selectedCandidates.map((c) => c.subpath)) }}
+            disabled={loading || (step === 2 && installDisabled) || selectedCount === 0}
           >
-            {t('installSelected')}
+            {t(settings && step === 1 ? 'installFlow.next' : 'installSelected')}
           </button>
         </div>
       </div>

@@ -50,14 +50,23 @@ pub fn parse_link(link: &str) -> Result<CollectionManifest, &'static str> {
         return Err(invalid);
     }
     let manifest: CollectionManifest = serde_json::from_str(&params[0].1).map_err(|_| invalid)?;
+    validate_manifest(manifest, 100, 20)
+}
+
+fn validate_manifest(
+    manifest: CollectionManifest,
+    max_skills: usize,
+    max_sources: usize,
+) -> Result<CollectionManifest, &'static str> {
+    let invalid = "COLLECTION_LINK_INVALID";
     if manifest.v != 1
         || manifest.title.trim().is_empty()
         || manifest.title.chars().count() > 120
         || manifest.title.chars().any(char::is_control)
         || manifest.sources.is_empty()
-        || manifest.sources.len() > 20
+        || manifest.sources.len() > max_sources
         || manifest.skills.is_empty()
-        || manifest.skills.len() > 100
+        || manifest.skills.len() > max_skills
     {
         return Err(invalid);
     }
@@ -96,6 +105,12 @@ pub fn parse_link(link: &str) -> Result<CollectionManifest, &'static str> {
 pub fn parse_collection_link(link: String) -> Result<CollectionManifest, String> {
     parse_link(&link).map_err(str::to_owned)
 }
+#[tauri::command]
+pub fn validate_collection_manifest(
+    manifest: CollectionManifest,
+) -> Result<CollectionManifest, String> {
+    validate_manifest(manifest, 2000, 100).map_err(str::to_owned)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,6 +123,40 @@ mod tests {
             urlencoding::encode(&value.to_string())
         )
     }
+    #[test]
+    fn native_catalog_accepts_large_manifests_without_expanding_deep_links() {
+        let mut value = manifest();
+        value["skills"] = (0..1297)
+            .map(|i| {
+                serde_json::json!({
+                    "name": format!("skill-{i}"), "path": format!("skills/skill-{i}"), "source": 0
+                })
+            })
+            .collect();
+        assert!(parse_link(&link(value.clone())).is_err());
+        let parsed =
+            validate_collection_manifest(serde_json::from_value(value.clone()).unwrap()).unwrap();
+        assert_eq!(parsed.skills.len(), 1297);
+        value["skills"][0]["path"] = "../escape".into();
+        assert!(validate_collection_manifest(serde_json::from_value(value).unwrap()).is_err());
+    }
+
+    #[test]
+    fn native_catalog_rejects_excessive_and_unsafe_manifests() {
+        let mut value = manifest();
+        value["skills"] = (0..2001)
+            .map(|i| {
+                serde_json::json!({
+                    "name": format!("skill-{i}"), "path": format!("skills/skill-{i}"), "source": 0
+                })
+            })
+            .collect();
+        assert!(validate_collection_manifest(serde_json::from_value(value).unwrap()).is_err());
+        let mut value = manifest();
+        value["sources"][0]["ref"] = "main".into();
+        assert!(validate_collection_manifest(serde_json::from_value(value).unwrap()).is_err());
+    }
+
     #[test]
     fn accepts_all_current_website_collection_manifests() {
         let fixtures: Vec<serde_json::Value> =

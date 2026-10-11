@@ -6,13 +6,48 @@ All notable changes to this project will be documented in this file.
 
 ## [0.12.0]
 
+- Native collection installation now validates manifests directly, supporting large catalogs without routing them through the external deep-link size limit.
+
+- Search collection metadata only and automatically reveal the next 12 collections when scrolling near the end of the list.
+
+- Reuse loaded discovery lists on detail return and cached immutable catalog snapshots when the publication version has not changed, avoiding repeated full-index downloads.
+
+- Load desktop collections from the published catalog snapshot used by the website, pin details and offline caches to the same version, and retire the legacy four-collection endpoint.
+
+- Collection discovery renders 12 cards per batch, with automatic scroll loading and preserved batches when returning from details.
+
+- Give collection details a category-colored heading, matching icon and topic labels; show a shared repository once while retaining per-item sources for mixed repositories.
+
+- Make unavailable selection rows distinct with a muted background and minus-marked disabled checkbox; align controls with the title and show truncated paths inline.
+
+- **Shared Skill selection list**: Collection, Git and local confirmation reuse the same search, selection toolbar, rows and expandable descriptions. Collection preview conflicts are unchecked and disabled, excluded from counts and installation; select-all changes only matching eligible rows.
+
+- Align expanded project directories with installation controls; left-align recent paths and preserve the same columns in narrow windows.
+
+- **Discovery and source dialog styling**: Use theme-aware category colors for collection identity, a distinct search surface, and a compact Git/local source selector with a tighter dialog layout.
+
 ### Added
+
+- **Collection-first discovery**: Browse the website collection catalog and details inside the desktop app, then reuse the collection installation dialog. A unified search shows matching collections and skills.sh results in place; task shortcuts and shared Git/local import headers replace nested tabs and the blank search screen. Remove the Top 300 catalog and its scheduled generator; cache website data for offline fallback.
 
 - **Independent website release data**: Publishing a stable desktop release updates an isolated Cloudflare Pages snapshot of installer links and bilingual notes, without rebuilding the website. Preparation failures do not deploy; previous production deployments can be restored in Pages.
 
 - **Website collection installation**: Open a collection from the website in Skills Hub, review its Skills and sources, and explicitly install them into the shared library. Optionally distribute new Skills to selected tools. Existing same-source Skills are preserved; failed items can be retried without reinstalling successful items. Git installation supports exact pinned commits.
 
 ### Fixed
+
+- **Unified installation confirmation**: Git and local sources are detected before installation, including single Skills. Choose Skills in a full-height list, then continue to installation settings. Git, local, and collection installs share the two-step flow; going back preserves selections and settings. Returning preserves input and selections; cancelled scans cannot reopen confirmation. Shared-tool confirmation stays inline. Tool choices use equal-height compact controls; tags are visible by default with bounded scrolling and consistent selection colors. Tool selectors retain native square checkboxes to make multiple selection explicit.
+
+
+- Inspect local collection sources before confirmation, showing existing Skills and name conflicts through the same classifier as Git installation; revalidate when installing.
+
+- Close collection confirmation automatically after all selected Skills succeed and show a success notification; keep failed items available for retry.
+
+- **Collection selection**: Select individual Skills before installation, with select-all, selected counts, and retries restricted to the chosen items. Search preserves the selection.
+
+- Fixed collection installation rejecting pinned repository-root URLs before download; removed the misleading pending-state circle.
+
+- **Collection installation workspace**: Keep the searchable Skill list above visible tool and scope settings and an optional tag editor, with visible progress and retry results. Reuse global/project deployment and tag operations; label new installs without relabeling existing Skills. Existing same-source Skills can be distributed without reinstalling, and each pinned repository is scanned once per attempt. The Agent management Skill now documents pinned collection installation and partial-failure recovery.
 
 - **Collection confirmation from manual installation**: Opening a website collection while adding a Skill replaces the idle manual installation view with the collection confirmation, preserving entered form values.
 

@@ -149,10 +149,11 @@ fn source_parser_is_deterministic_and_does_not_guess_bare_local_names() {
 }
 
 #[test]
-fn marketplace_shorthand_requires_a_complete_safe_ref_and_path() {
+fn marketplace_shorthand_requires_a_complete_safe_ref_and_optional_tree_path() {
     for valid in [
         "owner/repo",
         "owner/repo.git",
+        "owner/repo/tree/main",
         "owner/repo/tree/main/skills/demo",
         "owner/repo/blob/main/skills/demo/SKILL.md",
     ] {
@@ -165,7 +166,7 @@ fn marketplace_shorthand_requires_a_complete_safe_ref_and_path() {
     for invalid in [
         "owner/repo/tree",
         "owner/repo/tree/",
-        "owner/repo/tree/main",
+        "owner/repo/blob/main",
         "owner/repo/tree/main/",
         "owner/repo/tree//skills/demo",
         "owner/repo/tree/main/../demo",
@@ -860,4 +861,57 @@ fn cancelled_git_update_does_not_change_content_or_source_health() {
         crate::core::content_hash::hash_dir(Path::new(&first.central_path)).unwrap(),
         first.content_hash.unwrap()
     );
+}
+
+#[test]
+fn collection_preview_identifies_renamed_source_instead_of_name_collision() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("collection-source");
+    write_skill(&repo, "design");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    let url = format!("file://{}", repo.display());
+    let original = service
+        .install(InstallRequest::git(&url).with_name(Some("design-custom".into())))
+        .unwrap();
+    let local = fixture.paths.app_data_dir.join("unrelated");
+    write_skill(&local, "design");
+    let other = service.install(InstallRequest::local(&local)).unwrap();
+    let preview = service
+        .git_install_preview_with_cancel(&url, None, None)
+        .unwrap();
+    let value = serde_json::to_value(&preview[0]).unwrap();
+    assert_eq!(value["existing_skill_id"], original.id);
+    assert_ne!(value["existing_skill_id"], other.id);
+    fs::remove_dir_all(&repo).unwrap();
+    let local_preview = service
+        .git_install_local_preview(
+            &url,
+            vec![
+                crate::core::installer::GitSkillCandidate {
+                    name: "design".into(),
+                    subpath: ".".into(),
+                    description: None,
+                },
+                crate::core::installer::GitSkillCandidate {
+                    name: "design".into(),
+                    subpath: "other".into(),
+                    description: None,
+                },
+                crate::core::installer::GitSkillCandidate {
+                    name: "new-skill".into(),
+                    subpath: "new".into(),
+                    description: None,
+                },
+            ],
+            None,
+        )
+        .unwrap();
+    assert_eq!(local_preview[0].status, "update");
+    assert_eq!(
+        local_preview[0].existing_skill_id.as_deref(),
+        Some(original.id.as_str())
+    );
+    assert_eq!(local_preview[1].status, "conflict");
+    assert_eq!(local_preview[2].status, "install");
 }

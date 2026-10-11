@@ -1705,7 +1705,7 @@ fn ignored_update_entry(path: &Path, metadata: &std::fs::Metadata) -> bool {
         || (metadata.is_dir() && file_name == Some(std::ffi::OsStr::new("__pycache__")))
 }
 
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct GitSkillCandidate {
     pub name: String,
     pub description: Option<String>,

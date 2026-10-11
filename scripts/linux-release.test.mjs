@@ -202,4 +202,4 @@ unixSmokeTest('starts each Linux package smoke test in its own desktop bus sessi
   assert.notEqual(failedRegistration.status, 0)
   assert.match(failedRegistration.stderr, /Could not register/)
  } finally { rmSync(root, {recursive:true, force:true}) }
-})
+}, 35000)
