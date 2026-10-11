@@ -4,6 +4,10 @@
 
 > English documentation: [`README.md`](../README.md)
 
+## 技能合集
+
+[Awesome Skills](https://github.com/qufei1993/awesome-skills) 是 Skills Hub 配套的技能合集目录。可在[官网合集页](https://aiskillshub.link/collections) 浏览面向具体任务的合集及上游 Skill 链接，也可以前往该仓库贡献合集。Skills Hub 负责管理和同步已安装的 Skills，合集仓库负责维护发现内容。
+
 ## 为什么使用 Skills Hub
 
 AI 编程工具越来越多，每个工具都有自己的 skills 目录和安装方式。手动维护这些目录会带来几个问题：同一个 Skill 要复制多份、更新来源不清楚、不同工具启用状态不一致、批量整理成本高。
