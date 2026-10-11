@@ -59,7 +59,7 @@ beforeEach(() => {
       return { groups: [], total_skills_found: 0 }
     }
     if (command === 'get_tool_config') return { disabled_builtin_tools: [], custom_tools: [] }
-    if (command === 'get_featured_skills') return []
+    if (command === 'get_website_collections') return { schemaVersion: 1, collections: [] }
     if (command === 'get_recent_projects') return []
     if (command === 'get_recycle_bin_items') return []
     if (command === 'get_agent_access_status') return {
@@ -110,14 +110,15 @@ it.each([false, true, 'cancelled'] as const)('installs new skills alongside an e
   await act(async () => { await vi.advanceTimersByTimeAsync(0) })
   fireEvent.click(screen.getByRole('button', { name: 'addSkills' }))
   await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-  fireEvent.click(screen.getByRole('button', { name: 'manualAdd' }))
+  fireEvent.click(screen.getByRole('button', { name: 'discovery.git' }))
   await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-  fireEvent.click(screen.getByRole('button', { name: 'gitTab' }))
+  fireEvent.click(screen.getAllByRole('button', { name: 'discovery.git' }).at(-1)!)
   fireEvent.change(screen.getByPlaceholderText('gitUrlPlaceholder'), { target: { value: 'https://github.com/example/repo' } })
-  fireEvent.click(screen.getByRole('button', { name: 'install' }))
+  fireEvent.click(screen.getByRole('button', { name: 'installFlow.detect' }))
   await act(async () => { await vi.advanceTimersByTimeAsync(0) })
   expect(screen.getByText('gitInstall.update')).toBeTruthy()
   expect((screen.getByRole('checkbox', { name: 'conflict' }) as HTMLInputElement).disabled).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'installFlow.next' }))
   fireEvent.click(screen.getByRole('button', { name: 'gitInstall.submit' }))
   await act(async () => { await vi.advanceTimersByTimeAsync(0) })
   const calls = invoke.mock.calls.filter(([command]) => command === 'install_git_selection')
@@ -128,4 +129,126 @@ it.each([false, true, 'cancelled'] as const)('installs new skills alongside an e
   expect(screen.queryByText('gitPickTitle')).toBeNull()
   if (updateFails === true) expect(screen.getByText(/errors.targetModified/)).toBeTruthy()
   if (updateFails === 'cancelled') expect(screen.getByText('gitInstall.cancelled')).toBeTruthy()
+})
+
+it.each(['git', 'local'] as const)('requires confirmation for a single %s skill and keeps settings when going back', async kind => {
+  const initial = invoke.getMockImplementation()!
+  invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+    if (command === 'get_tags') return [{ id: 9, name: 'Regression', skill_count: 0 }]
+    if (command === 'list_git_skills_cmd' || command === 'list_local_skills_cmd') return [
+      { name: 'single', subpath: 'skills/single', status: 'install', valid: true },
+    ]
+    return initial(command, args)
+  })
+  render(<App />)
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  fireEvent.click(screen.getByRole('button', { name: 'addSkills' }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  fireEvent.click(screen.getByRole('button', { name: `discovery.${kind}` }))
+  const placeholder = kind === 'git' ? 'gitUrlPlaceholder' : 'localPathPlaceholder'
+  const source = kind === 'git' ? 'https://github.com/example/repo' : '/tmp/local-fixture'
+  fireEvent.change(screen.getByPlaceholderText(placeholder), { target: { value: source } })
+  fireEvent.click(screen.getByRole('button', { name: 'installFlow.detect' }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  expect(screen.getAllByRole('dialog')).toHaveLength(1)
+  expect(screen.getByText('installFlow.confirmTitle')).toBeTruthy()
+  expect(invoke.mock.calls.filter(([command]) => command.startsWith('install_'))).toHaveLength(0)
+  fireEvent.click(screen.getByRole('button', { name: 'installFlow.next' }))
+  fireEvent.click(screen.getByRole('button', { name: '#Regression' }))
+  fireEvent.click(screen.getByRole('button', { name: 'installFlow.back' }))
+  fireEvent.click(screen.getByRole('checkbox', { name: 'selectAll' }))
+  fireEvent.click(screen.getByRole('button', { name: 'installFlow.back' }))
+  expect((screen.getByPlaceholderText(placeholder) as HTMLInputElement).value).toBe(source)
+  fireEvent.click(screen.getByRole('button', { name: 'installFlow.detect' }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  expect((screen.getByRole('checkbox', { name: 'selectAll' }) as HTMLInputElement).checked).toBe(false)
+  fireEvent.click(screen.getByRole('checkbox', { name: 'selectAll' }))
+  fireEvent.click(screen.getByRole('button', { name: 'installFlow.next' }))
+  expect(screen.getByRole('button', { name: '#Regression' }).className).toContain('selected')
+})
+
+it('does not open confirmation when a cancelled source scan resolves late', async () => {
+  let finish: (value: unknown) => void = () => {}
+  const initial = invoke.getMockImplementation()!
+  invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+    if (command === 'list_git_skills_cmd') return new Promise(resolve => { finish = resolve })
+    if (command === 'cancel_current_operation') return undefined
+    return initial(command, args)
+  })
+  render(<App />)
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  fireEvent.click(screen.getByRole('button', { name: 'addSkills' }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  fireEvent.click(screen.getByRole('button', { name: 'discovery.git' }))
+  fireEvent.change(screen.getByPlaceholderText('gitUrlPlaceholder'), { target: { value: 'https://github.com/example/repo' } })
+  fireEvent.click(screen.getByRole('button', { name: 'installFlow.detect' }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  expect(screen.getAllByRole('dialog')).toHaveLength(1)
+  fireEvent.click(screen.getByRole('button', { name: 'cancel' }))
+  await act(async () => { finish([{ name: 'single', subpath: '.', status: 'install' }]); await vi.advanceTimersByTimeAsync(0) })
+  expect(screen.queryByText('installFlow.confirmTitle')).toBeNull()
+  expect(screen.getByPlaceholderText('gitUrlPlaceholder')).toBeTruthy()
+})
+
+it('confirms shared tool changes inline without opening another dialog', async () => {
+  const initial = invoke.getMockImplementation()!
+  invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+    if (command === 'get_tool_status') return {
+      installed: ['codex', 'amp'], newly_installed: [],
+      tools: ['codex', 'amp'].map(key => ({ key, label: key, enabled: true, installed: true, is_custom: false, skills_dir: '/test/shared', project_skills_dir: '.agents/skills', supports_project_scope: true, sync_mode: 'symlink' })),
+    }
+    if (command === 'list_git_skills_cmd') return [{ name: 'single', subpath: 'skills/single', status: 'install' }]
+    return initial(command, args)
+  })
+  render(<App />)
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  fireEvent.click(screen.getByRole('button', { name: 'addSkills' }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  fireEvent.click(screen.getByRole('button', { name: 'discovery.git' }))
+  fireEvent.change(screen.getByPlaceholderText('gitUrlPlaceholder'), { target: { value: 'https://github.com/example/repo' } })
+  fireEvent.click(screen.getByRole('button', { name: 'installFlow.detect' }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  fireEvent.click(screen.getByRole('button', { name: 'installFlow.next' }))
+  const checkbox = screen.getByRole('checkbox', { name: 'codex' }) as HTMLInputElement
+  const previous = checkbox.checked
+  fireEvent.click(checkbox)
+  expect(screen.getAllByRole('dialog')).toHaveLength(1)
+  expect(screen.getByRole('alert').textContent).toContain('sharedDirConfirm')
+  expect((screen.getByRole('button', { name: 'installSelected' }) as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'confirm' }))
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(checkbox.checked).toBe(!previous)
+  expect((screen.getByRole('checkbox', { name: 'amp' }) as HTMLInputElement).checked).toBe(!previous)
+  expect((screen.getByRole('button', { name: 'installSelected' }) as HTMLButtonElement).disabled).toBe(false)
+})
+
+it.each(['git', 'local'] as const)('keeps a failed single %s install available for retry', async kind => {
+  const initial = invoke.getMockImplementation()!
+  let attempts = 0
+  invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+    if (command === 'list_git_skills_cmd' || command === 'list_local_skills_cmd') return [{ name: 'single', subpath: 'single', status: 'install', valid: true }]
+    if (command === `install_${kind}_selection`) {
+      if (attempts++ === 0) throw new Error('temporary installation failure')
+      return { skill_id: 'new', name: 'single', central_path: '/tmp/single', action: 'installed' }
+    }
+    return initial(command, args)
+  })
+  render(<App />)
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  fireEvent.click(screen.getByRole('button', { name: 'addSkills' }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  fireEvent.click(screen.getByRole('button', { name: `discovery.${kind}` }))
+  fireEvent.change(screen.getByPlaceholderText(kind === 'git' ? 'gitUrlPlaceholder' : 'localPathPlaceholder'), { target: { value: kind === 'git' ? 'https://github.com/example/repo' : '/tmp/local-fixture' } })
+  fireEvent.click(screen.getByRole('button', { name: 'installFlow.detect' }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  if (screen.queryByRole('button', { name: 'installFlow.next' })) fireEvent.click(screen.getByRole('button', { name: 'installFlow.next' }))
+  fireEvent.click(screen.getByRole('button', { name: 'installSelected' }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  expect(screen.getByRole('dialog', { name: 'installFlow.confirmTitle' })).toBeTruthy()
+  expect(screen.getByText(/temporary installation failure/)).toBeTruthy()
+  if (screen.queryByRole('button', { name: 'installFlow.next' })) fireEvent.click(screen.getByRole('button', { name: 'installFlow.next' }))
+  fireEvent.click(screen.getByRole('button', { name: 'installSelected' }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  expect(screen.queryByRole('dialog', { name: 'installFlow.confirmTitle' })).toBeNull()
+  expect(attempts).toBe(2)
 })

@@ -273,6 +273,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::collection_link::parse_collection_link,
+            commands::collection_link::validate_collection_manifest,
             commands::get_central_repo_path,
             commands::preview_central_repo_path_change,
             commands::set_central_repo_path,
@@ -302,6 +303,7 @@ pub fn run() {
             commands::install_local_selection,
             commands::install_git,
             commands::list_git_skills_cmd,
+            commands::preview_git_skills_local,
             commands::install_git_selection,
             commands::sync_skill_dir,
             commands::sync_skill_to_tool,
@@ -326,7 +328,8 @@ pub fn run() {
             commands::set_skill_tags,
             commands::get_untagged_skill_ids,
             commands::delete_managed_skill,
-            commands::get_featured_skills,
+            commands::get_website_collections,
+            commands::cache_website_collections,
             commands::search_skills_online,
             commands::list_skill_files,
             commands::read_skill_file,

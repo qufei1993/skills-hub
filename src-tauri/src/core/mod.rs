@@ -8,7 +8,6 @@ pub mod cli_distribution;
 pub mod cli_terminal;
 pub mod content_hash;
 pub mod device_sync;
-pub mod featured_skills;
 pub mod git_fetcher;
 pub mod github_download;
 pub mod github_search;
@@ -28,6 +27,7 @@ pub mod system_scheduler;
 pub mod temp_cleanup;
 pub mod tool_adapters;
 pub mod tool_distribution;
+pub mod website_collections;
 
 #[cfg(test)]
 #[path = "tests/runtime_paths.rs"]

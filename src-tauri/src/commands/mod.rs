@@ -38,7 +38,6 @@ use crate::core::device_sync::types::{
     SyncStatus, TrashEntry,
 };
 use crate::core::device_sync::DeviceSyncService;
-use crate::core::featured_skills::{fetch_featured_skills, FeaturedSkill};
 use crate::core::github_search::{search_github_repos, RepoSummary};
 use crate::core::github_token::{
     has_github_token, resolve_github_token, set_github_token as set_github_token_core,
@@ -1434,6 +1433,22 @@ pub async fn install_git(
 
 #[tauri::command]
 #[allow(non_snake_case)]
+pub async fn preview_git_skills_local(
+    service: State<'_, SkillsHubService>,
+    repoUrl: String,
+    candidates: Vec<crate::core::installer::GitSkillCandidate>,
+) -> Result<Vec<GitInstallCandidate>, String> {
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.git_install_local_preview(&repoUrl, candidates, None)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_service_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
 pub async fn list_git_skills_cmd(
     service: State<'_, SkillsHubService>,
     cancel: State<'_, Arc<CancelToken>>,
@@ -2264,37 +2279,35 @@ fn get_managed_skills_impl(store: &SkillStore) -> Result<Vec<ManagedSkillDto>, S
         .map_err(format_service_error)
 }
 
-#[derive(Debug, Serialize)]
-pub struct FeaturedSkillDto {
-    pub slug: String,
-    pub name: String,
-    pub summary: String,
-    pub downloads: u64,
-    pub stars: u64,
-    pub source_url: String,
-}
-
-impl From<FeaturedSkill> for FeaturedSkillDto {
-    fn from(s: FeaturedSkill) -> Self {
-        Self {
-            slug: s.slug,
-            name: s.name,
-            summary: s.summary,
-            downloads: s.downloads,
-            stars: s.stars,
-            source_url: s.source_url,
-        }
-    }
+#[tauri::command]
+pub async fn cache_website_collections(
+    store: State<'_, SkillStore>,
+    id: Option<String>,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::core::website_collections::cache_validated(&store, id.as_deref(), value)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_anyhow_error)
 }
 
 #[tauri::command]
-pub async fn get_featured_skills(
+pub async fn get_website_collections(
     store: State<'_, SkillStore>,
-) -> Result<Vec<FeaturedSkillDto>, String> {
+    id: Option<String>,
+    cached: Option<bool>,
+    version: Option<String>,
+) -> Result<serde_json::Value, String> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let skills = fetch_featured_skills(&store)?;
-        Ok::<_, anyhow::Error>(skills.into_iter().map(FeaturedSkillDto::from).collect())
+        if cached.unwrap_or(false) {
+            crate::core::website_collections::cached(&store, id.as_deref(), version.as_deref())
+        } else {
+            crate::core::website_collections::fetch(&store, id.as_deref(), version.as_deref())
+        }
     })
     .await
     .map_err(|err| err.to_string())?

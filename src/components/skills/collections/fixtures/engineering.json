@@ -1,0 +1,1106 @@
+{
+  "schemaVersion": 1,
+  "id": "d2ca0659-07ee-44a5-8d99-d3295f5e2f0c",
+  "slug": "engineering",
+  "revision": 2,
+  "createdAt": "2026-10-01T05:14:49Z",
+  "updatedAt": "2026-10-01T06:12:31Z",
+  "sourceKeys": [
+    "github:mattpocock/skills:engineering-misc-productivity"
+  ],
+  "status": "active",
+  "sourceKind": "author-repository",
+  "title": "Skills for Real Engineers",
+  "description": "从需求澄清到实现与验证，把工程经验带进 Agent 协作。",
+  "category": "development",
+  "tags": [
+    "需求澄清",
+    "代码实现",
+    "测试驱动",
+    "代码评审",
+    "故障诊断",
+    "架构设计"
+  ],
+  "overview": "把日常工程工作拆成可组合的小 Skills，覆盖需求澄清、方案整理、任务拆分、代码实现、测试与审查，也包括故障诊断和项目维护。本合集完整收录作者 engineering、misc、productivity 三个目录组，不包含 in-progress 中的试验项；不等同于作者的 Claude Code 插件安装包。",
+  "scenarios": [
+    "新功能开发",
+    "故障诊断与修复",
+    "代码评审与架构维护"
+  ],
+  "usage": "每个项目首次使用时，先让 Agent 完成项目配置，再按阶段选择需求澄清、实现、测试或评审；拿不准时可用 ask-matt 找到合适的能力。",
+  "provenance": {
+    "repositoryScope": {
+      "repo": "mattpocock/skills",
+      "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+      "directories": [
+        "skills/engineering",
+        "skills/misc",
+        "skills/productivity"
+      ],
+      "coverage": "all-valid-skills"
+    },
+    "evidence": [
+      {
+        "id": "engineering-readme",
+        "kind": "repository",
+        "url": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/README.md",
+        "title": "Skills For Real Engineers",
+        "publisher": "Matt Pocock",
+        "checkedAt": "2026-10-01",
+        "location": "README.md / Installation / Reference / Engineering、Productivity",
+        "finding": "作者说明这些 Skills 用于日常工程工作，可组合使用；README 定义 Engineering 和 Productivity 两组，并说明项目首次配置方式。本证据不宣称存在作者官方定义的 31 项安装包。",
+        "supportsItemIds": [
+          "ask-matt",
+          "setup-matt-pocock-skills",
+          "grill-me",
+          "to-spec",
+          "implement-spec",
+          "tdd",
+          "code-review",
+          "diagnosing-bugs",
+          "codebase-design",
+          "domain-modeling",
+          "grill-with-docs",
+          "implement",
+          "improve-codebase-architecture",
+          "pr",
+          "prototype",
+          "research",
+          "retro",
+          "to-tickets",
+          "triage",
+          "wayfinder",
+          "wizard",
+          "grilling",
+          "handoff",
+          "teach",
+          "to-questionnaire",
+          "wait-what",
+          "writing-for-agents"
+        ]
+      },
+      {
+        "id": "engineering-misc-readme",
+        "kind": "repository",
+        "url": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/skills/misc/README.md",
+        "title": "Misc skills",
+        "publisher": "Matt Pocock",
+        "checkedAt": "2026-10-01",
+        "location": "skills/misc/README.md；skills/misc/ 四个 Skill 目录",
+        "finding": "作者单独定义 Misc 目录，当前四项来自此组；Misc 不属于 Claude Code 插件清单。本合集把该组与另外两组一并收录，范围须在接入前确认。",
+        "supportsItemIds": [
+          "git-guardrails-claude-code",
+          "migrate-to-shoehorn",
+          "scaffold-exercises",
+          "setup-pre-commit"
+        ]
+      }
+    ],
+    "author": {
+      "name": "Matt Pocock",
+      "url": "https://github.com/mattpocock"
+    }
+  },
+  "cover": {
+    "kind": "source-image",
+    "url": "/assets/collections/engineering.png",
+    "sourceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/README.md",
+    "alt": "Skills for Real Engineers 原项目封面",
+    "rightsStatus": "needs-review",
+    "width": 738,
+    "height": 388,
+    "background": "#fff"
+  },
+  "skills": [
+    {
+      "id": "ask-matt",
+      "name": "ask-matt",
+      "summary": "根据当前问题，推荐此仓库中合适的技能或工作流程。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/ask-matt/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "ask-matt",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/ask-matt",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Ask which skill or flow fits your situation. A router over the skills in this repo."
+    },
+    {
+      "id": "setup-matt-pocock-skills",
+      "name": "setup-matt-pocock-skills",
+      "summary": "为工程技能配置问题追踪器、分类标签与领域文档结构。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/setup-matt-pocock-skills/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "setup-matt-pocock-skills",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/setup-matt-pocock-skills",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Configure this repo for the engineering skills: set up its issue tracker, triage label vocabulary, and domain doc layout. Run once before first use of the other engineering skills."
+    },
+    {
+      "id": "grill-me",
+      "name": "grill-me",
+      "summary": "通过连续深入的追问，帮助细化已有的计划或设计方案。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/productivity/grill-me/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "grill-me",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/productivity/grill-me",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "A relentless interview to sharpen a plan or design."
+    },
+    {
+      "id": "to-spec",
+      "name": "to-spec",
+      "summary": "将已讨论的内容汇总为规格，发布到项目的问题追踪器。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/to-spec/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "to-spec",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/to-spec",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Turn the current conversation into a spec and publish it to the project issue tracker: no interview, just synthesis of what you've already discussed."
+    },
+    {
+      "id": "implement-spec",
+      "name": "implement-spec",
+      "summary": "根据规格与任务拆分流程的产出，落实对应代码实现。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/implement-spec/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "implement-spec",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/implement-spec",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Implement the result of /to-spec and /to-tickets in code."
+    },
+    {
+      "id": "tdd",
+      "name": "tdd",
+      "summary": "以测试先行的方式开发功能或修复问题，并支持集成测试。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/tdd/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "tdd",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/tdd",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Test-driven development. Use when the user wants to build features or fix bugs test-first, mentions \"red-green-refactor\", or wants integration tests."
+    },
+    {
+      "id": "code-review",
+      "name": "code-review",
+      "summary": "并行检查代码规范与需求符合度，对照展示两类审查结果。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/code-review/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "code-review",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/code-review",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes: Standards (does the code follow this repo's documented coding standards?) and Spec (does the code match what the originating issue/spec asked for?). Runs both reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to \\\"review since X\\\"."
+    },
+    {
+      "id": "diagnosing-bugs",
+      "name": "diagnosing-bugs",
+      "summary": "系统诊断复杂故障与性能回退，追踪失败或运行缓慢的原因。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/diagnosing-bugs/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "diagnosing-bugs",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/diagnosing-bugs",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Diagnosis loop for hard bugs and performance regressions. Use when the user says \"diagnose\"/\"debug this\", or reports something broken/throwing/failing/slow."
+    },
+    {
+      "id": "codebase-design",
+      "name": "codebase-design",
+      "summary": "用深模块设计原则，改进模块接口、边界与代码可测试性。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/codebase-design/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "codebase-design",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/codebase-design",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Shared vocabulary for designing deep modules. Use when the user wants to design or improve a module's interface, find deepening opportunities, decide where a seam goes, make code more testable or AI-navigable, or when another skill needs the deep-module vocabulary."
+    },
+    {
+      "id": "domain-modeling",
+      "name": "domain-modeling",
+      "summary": "整理项目领域术语，维护词汇表与架构决策记录。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/domain-modeling/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "domain-modeling",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/domain-modeling",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Build and sharpen a project's domain model. Use when discussing codebase terminology, writing or editing a GLOSSARY.md, or recording or editing an ADR."
+    },
+    {
+      "id": "grill-with-docs",
+      "name": "grill-with-docs",
+      "summary": "通过连续追问细化方案，并同步整理架构决策与领域词汇。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/grill-with-docs/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "grill-with-docs",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/grill-with-docs",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "A relentless interview to sharpen a plan or design, which also creates docs (ADR's and glossary) as we go."
+    },
+    {
+      "id": "implement",
+      "name": "implement",
+      "summary": "根据已有规格或任务清单，完成一项开发工作的代码实现。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/implement/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "implement",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/implement",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Implement a piece of work based on a spec or set of tickets."
+    },
+    {
+      "id": "improve-codebase-architecture",
+      "name": "improve-codebase-architecture",
+      "summary": "扫描模块改进机会，以可视化报告呈现后深入讨论选定方案。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/improve-codebase-architecture/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "improve-codebase-architecture",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/improve-codebase-architecture",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Scan a codebase for deepening opportunities, present them as a visual HTML report, then grill through whichever one you pick."
+    },
+    {
+      "id": "pr",
+      "name": "pr",
+      "summary": "将开发改动整理成可用于提交拉取请求的正文说明。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/pr/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "pr",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/pr",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Use when writing a PR body."
+    },
+    {
+      "id": "prototype",
+      "name": "prototype",
+      "summary": "用一次性原型验证设计问题，探索状态逻辑或界面效果。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/prototype/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "prototype",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/prototype",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Build a throwaway prototype to answer a design question. Use when the user wants to sanity-check whether a state model or logic feels right, or explore what a UI should look like."
+    },
+    {
+      "id": "research",
+      "name": "research",
+      "summary": "查阅可信的一手资料，并将研究结论保存为项目中的文档。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/research/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "research",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/research",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the repo. Use when the user wants a topic researched, docs or API facts gathered, or reading legwork delegated to a background agent."
+    },
+    {
+      "id": "retro",
+      "name": "retro",
+      "summary": "回顾一次编码会话，梳理本次工作的过程与实践。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/retro/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "retro",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/retro",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Conduct a retrospective on a coding session."
+    },
+    {
+      "id": "to-tickets",
+      "name": "to-tickets",
+      "summary": "将方案拆成可逐步交付的任务，并记录各项任务的阻塞关系。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/to-tickets/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "to-tickets",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/to-tickets",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker (edges as text in one file per ticket locally, or native blocking links on a real tracker)."
+    },
+    {
+      "id": "triage",
+      "name": "triage",
+      "summary": "分类并核验问题与外部拉取请求，整理适合代理执行的说明。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/triage/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "triage",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/triage",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Move issues and external PRs through a state machine of triage roles, categorise, verify, grill if needed, and write agent-ready briefs."
+    },
+    {
+      "id": "wayfinder",
+      "name": "wayfinder",
+      "summary": "把大型工作规划为共享决策任务，逐项澄清通往目标的路径。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/wayfinder/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "wayfinder",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/wayfinder",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Plan a huge chunk of work (more than one agent session can hold) as a shared map of decision tickets on your issue tracker, and resolve them one at a time until the way to the destination is clear."
+    },
+    {
+      "id": "wizard",
+      "name": "wizard",
+      "summary": "为必须由人完成的配置或迁移步骤，生成交互式命令行向导。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/engineering/wizard/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "wizard",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/engineering/wizard",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Generate an interactive bash wizard that walks a human through steps only they can perform. Use when provisioning infrastructure, setting up credentials or CI secrets, walking an unfamiliar third-party dashboard, or running a one-off migration or cutover. Don't invoke this for steps the agent can perform itself."
+    },
+    {
+      "id": "git-guardrails-claude-code",
+      "name": "git-guardrails-claude-code",
+      "summary": "为 Claude Code 设置安全钩子，在执行前阻止危险 Git 命令。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/misc/git-guardrails-claude-code/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "git-guardrails-claude-code",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/misc/git-guardrails-claude-code",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Set up Claude Code hooks to block dangerous git commands (push, reset --hard, clean, branch -D, etc.) before they execute. Use when user wants to prevent destructive git operations, add git safety hooks, or block git push/reset in Claude Code."
+    },
+    {
+      "id": "migrate-to-shoehorn",
+      "name": "migrate-to-shoehorn",
+      "summary": "将测试中的类型断言迁移到 shoehorn，构造局部测试数据。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/misc/migrate-to-shoehorn/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "migrate-to-shoehorn",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/misc/migrate-to-shoehorn",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Migrate test files from `as` type assertions to @total-typescript/shoehorn. Use when user mentions shoehorn, wants to replace `as` in tests, or needs partial test data."
+    },
+    {
+      "id": "scaffold-exercises",
+      "name": "scaffold-exercises",
+      "summary": "创建含章节、题目、解答与讲解的练习目录，并满足检查要求。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/misc/scaffold-exercises/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "scaffold-exercises",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/misc/scaffold-exercises",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Create exercise directory structures with sections, problems, solutions, and explainers that pass linting. Use when user wants to scaffold exercises, create exercise stubs, or set up a new course section."
+    },
+    {
+      "id": "setup-pre-commit",
+      "name": "setup-pre-commit",
+      "summary": "配置提交前钩子，自动执行格式整理、类型检查与测试。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/misc/setup-pre-commit/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "setup-pre-commit",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/misc/setup-pre-commit",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Set up Husky pre-commit hooks with lint-staged (Prettier), type checking, and tests in the current repo. Use when user wants to add pre-commit hooks, set up Husky, configure lint-staged, or add commit-time formatting/typechecking/testing."
+    },
+    {
+      "id": "grilling",
+      "name": "grilling",
+      "summary": "围绕计划、决策或想法持续追问，检验思路是否经得起推敲。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/productivity/grilling/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "grilling",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/productivity/grilling",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Grill the user relentlessly about a plan, decision, or idea. Use when the user wants to stress-test their thinking, or uses any 'grill' trigger phrases."
+    },
+    {
+      "id": "handoff",
+      "name": "handoff",
+      "summary": "将当前对话压缩成工作交接文档，方便其他代理继续推进。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/productivity/handoff/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "handoff",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/productivity/handoff",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Compact the current conversation into a handoff document for another agent to pick up."
+    },
+    {
+      "id": "teach",
+      "name": "teach",
+      "summary": "在当前工作区内，讲解并教授用户新的技能或概念。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/productivity/teach/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "teach",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/productivity/teach",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Teach the user a new skill or concept, within this workspace."
+    },
+    {
+      "id": "to-questionnaire",
+      "name": "to-questionnaire",
+      "summary": "将尚不能完整回答的决策问题，整理成供他人填写的问卷。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/productivity/to-questionnaire/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "to-questionnaire",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/productivity/to-questionnaire",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Turn a decision you can't fully answer into a questionnaire for someone else to fill in."
+    },
+    {
+      "id": "wait-what",
+      "name": "wait-what",
+      "summary": "在上一条表达未被理解时暂停推进，重新组织并说明原意。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/productivity/wait-what/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "wait-what",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/productivity/wait-what",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Stop. That last message did not land: re-pitch it."
+    },
+    {
+      "id": "writing-for-agents",
+      "name": "writing-for-agents",
+      "summary": "编写面向代理的文档，适用于技能与项目协作规则文件。",
+      "entry": {
+        "repo": "mattpocock/skills",
+        "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+        "entryPoint": "skills/productivity/writing-for-agents/SKILL.md"
+      },
+      "installationMode": "skill",
+      "installationItems": [
+        {
+          "name": "writing-for-agents",
+          "repo": "mattpocock/skills",
+          "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+          "directory": "skills/productivity/writing-for-agents",
+          "entryPoint": "SKILL.md",
+          "license": {
+            "identifier": "MIT",
+            "evidenceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE"
+          }
+        }
+      ],
+      "resourceCheck": "needs-review",
+      "resourceNotes": "入口路径已按固定提交的目录树核对；完整目录资源引用、目录外依赖和安装环境仍需逐项复核。",
+      "originalDescription": "Writing documents for agents. Use when creating or editing skills, or modifying AGENTS.md or CLAUDE.md."
+    }
+  ],
+  "verification": {
+    "source": "needs-review",
+    "files": "needs-review",
+    "installation": "not-tested",
+    "workflow": "not-tested",
+    "checkedAt": "2026-10-01",
+    "notes": [
+      "保留官网现有固定 commit 和全部条目；本轮核对原作者说明、目录树与仓库根许可证，摘要沿用现有中文用途说明。",
+      "安装项引用仓库根 MIT 许可证；完整资源范围、可能的单独许可与安装兼容性尚未逐项复核，也未安装或运行第三方 Skills。",
+      "原项目封面用于记录现有素材，图片的具体使用授权仍待确认；批准发布时未解决则使用概念封面。",
+      "固定提交共 37 个入口；本记录只覆盖上述三个目录中的 31 项，排除 in-progress 的 6 项。官方插件为 27 项；这里不把 31 项宣称为作者官方安装包。"
+    ]
+  },
+  "review": {
+    "status": "approved",
+    "reviewer": "user",
+    "reviewedAt": "2026-10-01",
+    "notes": [
+      "用户明确批准将现有官网展示内容接入统一 JSON 结构；此次仅批准展示迁移，保留现有来源、文件、素材与安装核验状态。"
+    ]
+  },
+  "sortOrder": 20,
+  "localizations": {
+    "en": {
+      "title": "Skills for Real Engineers",
+      "description": "Bring engineering practice into agent collaboration, from clarifying requirements to implementation and verification.",
+      "tags": [
+        "Requirements",
+        "Implementation",
+        "Test-driven development",
+        "Code review",
+        "Debugging",
+        "Architecture"
+      ],
+      "overview": "Composable Skills for everyday engineering work: clarifying requirements, shaping plans, breaking down tasks, implementation, testing, and review, as well as debugging and project maintenance. This collection includes all Skills in the author's engineering, misc, and productivity groups. It excludes experimental items in in-progress and differs from the author's Claude Code plugin package.",
+      "scenarios": [
+        "Developing new features",
+        "Diagnosing and fixing bugs",
+        "Code review and architecture maintenance"
+      ],
+      "usage": "For a project's first use, ask the agent to configure the project. Then choose requirement clarification, implementation, testing, or review for the current stage. Use ask-matt if you are unsure which Skill fits.",
+      "coverAlt": "Original Skills for Real Engineers project cover",
+      "provenance": {
+        "evidence": {
+          "engineering-readme": {
+            "title": "Skills For Real Engineers",
+            "location": "README.md / Installation / Reference / Engineering and Productivity",
+            "finding": "The author describes these Skills as composable tools for everyday engineering. The README defines the Engineering and Productivity groups and explains initial project setup. This evidence does not establish an official package of 31 Skills."
+          },
+          "engineering-misc-readme": {
+            "title": "Misc skills",
+            "location": "skills/misc/README.md and the four Skill directories under skills/misc/",
+            "finding": "The author defines a separate Misc directory containing these four items. Misc is not part of the Claude Code plugin list. This collection combines it with the other two groups; the scope still needs confirmation before integration."
+          }
+        }
+      },
+      "skills": {
+        "ask-matt": {
+          "summary": "Recommend a suitable Skill or workflow from this repository for the current problem."
+        },
+        "setup-matt-pocock-skills": {
+          "summary": "Configure the issue tracker, triage labels, and domain document layout for the engineering Skills."
+        },
+        "grill-me": {
+          "summary": "Refine an existing plan or design through sustained, detailed questioning."
+        },
+        "to-spec": {
+          "summary": "Synthesize the discussion into a specification and publish it to the project's issue tracker."
+        },
+        "implement-spec": {
+          "summary": "Implement the results of the specification and task breakdown workflows in code."
+        },
+        "tdd": {
+          "summary": "Develop features or fix bugs with tests first, including integration tests."
+        },
+        "code-review": {
+          "summary": "Review coding standards and requirement compliance in parallel, presenting the two results side by side."
+        },
+        "diagnosing-bugs": {
+          "summary": "Diagnose difficult bugs and performance regressions to trace failures or slow behavior."
+        },
+        "codebase-design": {
+          "summary": "Improve module interfaces, boundaries, and testability using deep-module design principles."
+        },
+        "domain-modeling": {
+          "summary": "Organize domain terminology and maintain a glossary and architecture decision records."
+        },
+        "grill-with-docs": {
+          "summary": "Refine plans through detailed questioning while documenting architecture decisions and domain terms."
+        },
+        "implement": {
+          "summary": "Implement a piece of work from an existing specification or task list."
+        },
+        "improve-codebase-architecture": {
+          "summary": "Identify module improvement opportunities, present a visual report, and discuss a selected approach in detail."
+        },
+        "pr": {
+          "summary": "Turn development changes into a description for a pull request."
+        },
+        "prototype": {
+          "summary": "Use a throwaway prototype to explore a design question, state logic, or interface behavior."
+        },
+        "research": {
+          "summary": "Consult trusted primary sources and save the findings as a document in the project."
+        },
+        "retro": {
+          "summary": "Review a coding session's process and practices in a retrospective."
+        },
+        "to-tickets": {
+          "summary": "Break a plan into incrementally deliverable tasks and record their blocking relationships."
+        },
+        "triage": {
+          "summary": "Classify and verify issues and external pull requests, preparing briefs that agents can act on."
+        },
+        "wayfinder": {
+          "summary": "Map a large effort into shared decision tasks and clarify the path to the goal one decision at a time."
+        },
+        "wizard": {
+          "summary": "Generate an interactive command-line wizard for setup or migration steps that a human must perform."
+        },
+        "git-guardrails-claude-code": {
+          "summary": "Set up Claude Code safety hooks to block dangerous Git commands before execution."
+        },
+        "migrate-to-shoehorn": {
+          "summary": "Migrate type assertions in tests to shoehorn for constructing partial test data."
+        },
+        "scaffold-exercises": {
+          "summary": "Create exercise directories with sections, problems, solutions, and explanations that pass checks."
+        },
+        "setup-pre-commit": {
+          "summary": "Configure pre-commit hooks to run formatting, type checks, and tests automatically."
+        },
+        "grilling": {
+          "summary": "Question a plan, decision, or idea in depth to test the reasoning behind it."
+        },
+        "handoff": {
+          "summary": "Condense the current conversation into a handoff document so another agent can continue the work."
+        },
+        "teach": {
+          "summary": "Teach the user a new Skill or concept in the current workspace."
+        },
+        "to-questionnaire": {
+          "summary": "Turn a decision that cannot yet be fully answered into a questionnaire for someone else."
+        },
+        "wait-what": {
+          "summary": "Pause when the previous message was misunderstood, then reorganize and explain it again."
+        },
+        "writing-for-agents": {
+          "summary": "Write documentation for agents, including Skill files and project collaboration rules."
+        }
+      }
+    }
+  }
+}

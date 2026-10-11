@@ -45,5 +45,11 @@ export function useCollectionInstallLink(enabled: boolean, invoke: CollectionInv
     return () => { disposed = true; stop?.() }
   }, [enabled, invoke])
   const dismiss = useCallback(() => { setManifest(null); occupied.current = false; lastLink.current = '' }, [])
-  return { manifest, dismiss }
+  const openManifest = useCallback((value: CollectionManifest) => {
+    if (occupied.current) { toast.info(translate.current('collectionInstall.busy')); return }
+    occupied.current = true
+    received.current?.()
+    setManifest(value)
+  }, [])
+  return { manifest, dismiss, openManifest }
 }
