@@ -1,4 +1,6 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+
+use crate::services::operation_lock::{OperationKind, OperationLock, OperationLockError};
 use serde::{Deserialize, Serialize};
 
 use super::installer::{
@@ -25,6 +27,7 @@ pub const AUTO_UPDATE_PROGRESS_KEY: &str = "skill_auto_update_progress";
 
 pub const DEFAULT_AUTO_UPDATE_INTERVAL_HOURS: i64 = 24;
 pub const DEFAULT_AUTO_UPDATE_DAILY_TIME: &str = "03:00";
+const AUTO_UPDATE_STARTUP_GRACE_MS: i64 = 60_000;
 const MIN_AUTO_UPDATE_INTERVAL_HOURS: i64 = 1;
 const MAX_AUTO_UPDATE_INTERVAL_HOURS: i64 = 24 * 30;
 const MIN_AUTO_UPDATE_INTERVAL_MINUTES: i64 = 15;
@@ -107,6 +110,56 @@ pub struct AutoUpdateSkillProgress {
 }
 
 pub fn get_auto_update_config(store: &SkillStore) -> Result<AutoUpdateConfig> {
+    let config = read_auto_update_config(store)?;
+    if !may_have_interrupted_auto_update(&config) {
+        return Ok(config);
+    }
+    let data_dir = store
+        .db_path()
+        .parent()
+        .context("database has no parent directory")?;
+    let _lock = match OperationLock::acquire_in(data_dir, OperationKind::AutoUpdate) {
+        Ok(lock) => lock,
+        Err(OperationLockError::Busy(_)) => return Ok(config),
+        Err(error) => return Err(error.into()),
+    };
+    let mut config = read_auto_update_config(store)?;
+    if may_have_interrupted_auto_update(&config) {
+        record_auto_update_stopped(store, &mut config)?;
+    }
+    Ok(config)
+}
+
+fn may_have_interrupted_auto_update(config: &AutoUpdateConfig) -> bool {
+    config.last_status.as_deref() == Some("running")
+        && config.last_started_at.map_or(true, |started_at| {
+            now_ms().saturating_sub(started_at) >= AUTO_UPDATE_STARTUP_GRACE_MS
+        })
+}
+
+fn record_auto_update_stopped(store: &SkillStore, config: &mut AutoUpdateConfig) -> Result<()> {
+    if let Some(interrupted) = config.progress.running.take() {
+        config.progress.pending.insert(0, interrupted);
+    }
+    let finished_at = now_ms();
+    store.set_settings(&[
+        (AUTO_UPDATE_LAST_FINISHED_AT_KEY, &finished_at.to_string()),
+        (
+            AUTO_UPDATE_LAST_UNCHANGED_KEY,
+            &config.last_unchanged.to_string(),
+        ),
+        (
+            AUTO_UPDATE_PROGRESS_KEY,
+            &serde_json::to_string(&config.progress)?,
+        ),
+        (AUTO_UPDATE_LAST_STATUS_KEY, "stopped"),
+    ])?;
+    config.last_finished_at = Some(finished_at);
+    config.last_status = Some("stopped".to_string());
+    Ok(())
+}
+
+fn read_auto_update_config(store: &SkillStore) -> Result<AutoUpdateConfig> {
     let enabled = store
         .get_setting(AUTO_UPDATE_ENABLED_KEY)?
         .map(|v| v == "true")
@@ -289,6 +342,55 @@ pub fn run_auto_update_now<R: tauri::Runtime>(
 
     record_auto_update_result(store, &result)?;
     Ok(result)
+}
+
+pub fn trigger_auto_update(store: &SkillStore) -> Result<()> {
+    use super::system_scheduler::{
+        current_scheduler_config, install_auto_update_task, trigger_auto_update_task_now,
+    };
+    trigger_auto_update_with(store, || {
+        let config = read_auto_update_config(store)?;
+        let scheduler_config = current_scheduler_config(config.schedule)?;
+        install_auto_update_task(&scheduler_config)?;
+        trigger_auto_update_task_now()
+    })
+}
+
+fn trigger_auto_update_with(
+    store: &SkillStore,
+    trigger: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    let data_dir = store
+        .db_path()
+        .parent()
+        .context("database has no parent directory")?;
+    let lock = OperationLock::acquire_in(data_dir, OperationKind::AutoUpdate)?;
+    let existing = read_auto_update_config(store)?;
+    if existing.last_status.as_deref() == Some("running")
+        && !may_have_interrupted_auto_update(&existing)
+    {
+        anyhow::bail!("UPDATE_IN_PROGRESS|auto-update starting");
+    }
+    record_auto_update_triggered(store)?;
+    let started_at = read_auto_update_config(store)?.last_started_at;
+    // The scheduler may start the worker before its trigger command returns.
+    drop(lock);
+    if let Err(error) = trigger() {
+        match OperationLock::acquire_in(data_dir, OperationKind::AutoUpdate) {
+            Ok(_lock) => {
+                let mut config = read_auto_update_config(store)?;
+                if config.last_status.as_deref() == Some("running")
+                    && config.last_started_at == started_at
+                {
+                    record_auto_update_stopped(store, &mut config)?;
+                }
+            }
+            Err(OperationLockError::Busy(_)) => {}
+            Err(lock_error) => return Err(error.context(lock_error)),
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 pub fn record_auto_update_triggered(store: &SkillStore) -> Result<()> {

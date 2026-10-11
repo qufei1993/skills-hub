@@ -10,6 +10,10 @@ Installer links are generated on the [GitHub release page](https://github.com/qu
 
 v0.11.0 lets you manage Skills through AI conversations using the official `manage-skills-hub` Skill and `skillshub-cli`. Enable AI management in Settings with one click. AI installations sync to detected, enabled tools by default, and desktop lists refresh on navigation and window focus. The CLI shares the desktop library and follows its version, but is downloaded only when enabling or updating AI management. The desktop installer contains no CLI binary. First setup requires network access; a verified matching installation works offline and after the desktop is closed. Startup does not update the CLI or official Skill. See [Agent-first CLI](agent-first-cli.md) and [verified desktop bridge](verified-cli-bridge.md).
 
+## Interrupted Skill updates
+
+Recover after a terminated update worker, preserve completed progress, and retry without restarting. See [recovery details](auto-update-recovery.md).
+
 ## Incremental Git installation
 
 Reinstalling a multi-Skill repository updates existing Skills from the same repository, branch selection, and subpath, while installing new Skills. Unchanged Skills retain their records. The desktop picker shows installation/update counts, uses green, blue, and amber badges for new Skills, update checks, and conflicts, and skips source or name conflicts; individual failures do not block the remaining selections. Conflicting items have visibly disabled checkboxes, and descriptions longer than three lines can be expanded or collapsed.

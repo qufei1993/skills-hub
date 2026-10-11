@@ -5,9 +5,9 @@ use tauri::{AppHandle, Manager, State};
 use std::sync::Arc;
 
 use crate::core::auto_update::{
-    get_auto_update_config as get_auto_update_config_core, record_auto_update_triggered,
+    get_auto_update_config as get_auto_update_config_core,
     run_auto_update_now as run_auto_update_now_core,
-    set_auto_update_config as set_auto_update_config_core, AutoUpdateConfig,
+    set_auto_update_config as set_auto_update_config_core, trigger_auto_update, AutoUpdateConfig,
     AutoUpdateIntervalUnit, AutoUpdateProgressSnapshot, AutoUpdateRunResult, AutoUpdateSchedule,
     AutoUpdateScheduleType,
 };
@@ -66,7 +66,7 @@ use crate::core::sync_engine::{
 };
 use crate::core::system_scheduler::{
     current_scheduler_config, get_auto_update_task_status, install_auto_update_task,
-    trigger_auto_update_task_now, uninstall_auto_update_task,
+    uninstall_auto_update_task,
 };
 use crate::core::tool_adapters::{
     is_builtin_tool_enabled, is_tool_installed, load_tool_config, project_relative_skills_dir,
@@ -1018,16 +1018,10 @@ pub async fn run_auto_update_now(
 #[tauri::command]
 pub async fn trigger_auto_update_task_now_cmd(store: State<'_, SkillStore>) -> Result<(), String> {
     let store = store.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let config = get_auto_update_config_core(&store)?;
-        let scheduler_config = current_scheduler_config(config.schedule)?;
-        install_auto_update_task(&scheduler_config)?;
-        record_auto_update_triggered(&store)?;
-        trigger_auto_update_task_now()
-    })
-    .await
-    .map_err(|err| err.to_string())?
-    .map_err(format_anyhow_error)
+    tauri::async_runtime::spawn_blocking(move || trigger_auto_update(&store))
+        .await
+        .map_err(|err| err.to_string())?
+        .map_err(format_anyhow_error)
 }
 
 #[derive(Debug, Serialize)]
@@ -2159,13 +2153,8 @@ fn to_service_install_dto(result: InstallOutcome) -> InstallResultDto {
     }
 }
 
-fn to_auto_update_config_dto(mut config: AutoUpdateConfig) -> AutoUpdateConfigDto {
+fn to_auto_update_config_dto(config: AutoUpdateConfig) -> AutoUpdateConfigDto {
     let task_status = get_auto_update_task_status();
-    if config.last_status.as_deref() == Some("running")
-        && task_status.detail.contains("state = not running")
-    {
-        config.last_status = Some("stopped".to_string());
-    }
     AutoUpdateConfigDto {
         enabled: config.enabled,
         interval_hours: config.interval_hours,

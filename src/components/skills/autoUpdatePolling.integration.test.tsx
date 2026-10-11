@@ -191,3 +191,39 @@ it('reads AI management for discovery and settings without polling or accessing 
   await act(async () => { finishRefresh(await originalInvoke('get_agent_access_status')) })
   expect(invoke.mock.calls.some(([command]) => /credential|execute_cli|run_cli/.test(command))).toBe(false)
 })
+
+
+it('re-enables update after polling recovers an interrupted run with completed progress', async () => {
+  const original = invoke.getMockImplementation()!
+  let runtime: AutoUpdateConfigDto = {
+    ...autoUpdateConfig,
+    last_status: 'running',
+    last_run_at: Date.now() - 24 * 60 * 60 * 1000,
+    last_unchanged: 1,
+    progress: {
+      total: 2,
+      succeeded: [{ skill_id: 'done', name: 'Done' }],
+      failed: [],
+      running: { skill_id: 'interrupted', name: 'Interrupted' },
+      pending: [],
+    },
+  }
+  invoke.mockImplementation(async (command: string, ...args: unknown[]) => {
+    if (command === 'get_auto_update_config' || command === 'get_auto_update_runtime') return runtime
+    return original(command, ...args)
+  })
+  render(<App />)
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /manageTabs.updates/ })) })
+  expect((screen.getByRole('button', { name: 'autoUpdateRunningButton' }) as HTMLButtonElement).disabled).toBe(true)
+  runtime = {
+    ...runtime,
+    last_status: 'stopped',
+    last_finished_at: Date.now(),
+    progress: { ...runtime.progress!, running: null, pending: [{ skill_id: 'interrupted', name: 'Interrupted' }] },
+  }
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+  expect((screen.getByRole('button', { name: 'autoUpdateRunNow' }) as HTMLButtonElement).disabled).toBe(false)
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+  expect((screen.getByRole('button', { name: 'autoUpdateRunNow' }) as HTMLButtonElement).disabled).toBe(false)
+})
