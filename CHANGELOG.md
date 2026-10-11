@@ -36,6 +36,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Windows scheduled update errors**: Decode non-UTF-8 Task Scheduler output using the system OEM code page so localized errors remain readable when creating, deleting, querying, or running a task. (#181)
+
 - **Unified installation confirmation**: Git and local sources are detected before installation, including single Skills. Choose Skills in a full-height list, then continue to installation settings. Git, local, and collection installs share the two-step flow; going back preserves selections and settings. Returning preserves input and selections; cancelled scans cannot reopen confirmation. Shared-tool confirmation stays inline. Tool choices use equal-height compact controls; tags are visible by default with bounded scrolling and consistent selection colors. Tool selectors retain native square checkboxes to make multiple selection explicit.
 
 

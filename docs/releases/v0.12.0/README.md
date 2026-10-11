@@ -4,6 +4,7 @@
 
 | 功能 | 用户可见变化 | 进度 |
 | --- | --- | --- |
+| Windows 定时更新错误提示 | 修复创建、删除、查询及运行任务时本地语言错误信息乱码。 | [说明](windows-scheduler-output.zh.md)；本地完整检查通过；Windows 专用回归测试接入 PR CI |
 | 在线探索整合合集 | 默认浏览官网合集及详情，保留 skills.sh 搜索，移除 Top 300 及维护任务。 | 完整检查与桌面验证通过；[PR #187](https://github.com/qufei1993/skills-hub/pull/187) |
 | 统一安装确认 | Git／本地先检测再确认，与合集共用「选择 Skills → 安装设置」两步流程；保留返回状态及原有安装规则。 | 完整检查与桌面验证通过；[PR #187](https://github.com/qufei1993/skills-hub/pull/187) |
 | 官网合集安装 | 从官网唤起桌面端，确认清单后安装并分发 Skills；支持多个作者和仓库。 | 已合入（[PR #185](https://github.com/qufei1993/skills-hub/pull/185)） |
