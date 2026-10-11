@@ -227,6 +227,58 @@ fn adopt_excludes_managed_sources_targets_invalid_content_and_escaping_links() {
 }
 
 #[test]
+fn adopt_noncanonical_source_with_exclusions_succeeds() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("external");
+    write_skill(&source.join("fresh"), "fresh", "original");
+    fs::create_dir_all(source.join("empty-dir")).unwrap();
+    let spelling = source.join("..").join("external");
+    let plan = fixture.service.plan_adopt(&spelling).unwrap();
+    assert_eq!(plan.excluded.len(), 1);
+    assert_eq!(plan.excluded[0].reason, "missing_skill_md");
+
+    let outcome = fixture
+        .service
+        .adopt(AdoptRequest::confirmed(plan.id))
+        .unwrap();
+    assert_eq!(outcome.adopted.len(), 1);
+    assert!(fixture.central_skill_exists("fresh"));
+    assert!(source.join("empty-dir").is_dir());
+}
+
+#[test]
+#[cfg(unix)]
+fn adopt_parent_alias_preserves_excluded_links() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("external");
+    write_skill(&source.join("fresh"), "fresh", "original");
+    let outside = fixture.paths.app_data_dir.join("outside");
+    write_skill(&outside, "outside", "protected");
+    let missing = fixture.paths.app_data_dir.join("missing");
+    std::os::unix::fs::symlink(&outside, source.join("escape")).unwrap();
+    std::os::unix::fs::symlink(&missing, source.join("dangling")).unwrap();
+    let alias = fixture.paths.app_data_dir.join("alias");
+    std::os::unix::fs::symlink(&fixture.paths.app_data_dir, &alias).unwrap();
+    let plan = fixture.service.plan_adopt(alias.join("external")).unwrap();
+    assert_eq!(plan.excluded.len(), 2);
+    assert!(plan
+        .excluded
+        .iter()
+        .all(|item| item.reason == "path_escape"));
+
+    let outcome = fixture
+        .service
+        .adopt(AdoptRequest::confirmed(plan.id))
+        .unwrap();
+    assert_eq!(outcome.adopted.len(), 1);
+    assert_eq!(outcome.adopted[0].name, "fresh");
+    assert_eq!(fs::read_link(source.join("escape")).unwrap(), outside);
+    assert_eq!(fs::read_link(source.join("dangling")).unwrap(), missing);
+    assert!(outside.join("SKILL.md").is_file());
+    assert!(!fixture.central_skill_exists("outside"));
+}
+
+#[test]
 fn adopt_requires_confirmation_detects_stale_content_and_records_local_source() {
     let fixture = Fixture::new();
     let source_root = fixture.paths.app_data_dir.join("adopt");

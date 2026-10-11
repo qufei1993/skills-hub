@@ -365,6 +365,36 @@ fn preview_and_confirmation_protect_remove_adopt_and_tag_delete() {
 }
 
 #[test]
+fn adopt_relative_source_with_exclusions_succeeds() {
+    let fixture = Fixture::new();
+    let source = fixture.root.path().join("external");
+    write_skill(&source.join("adopted"), "adopted");
+    fs::create_dir_all(source.join("empty-dir")).unwrap();
+
+    for flag in ["--dry-run", "--yes"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_skillshub-cli"))
+            .env("SKILLSHUB_CLI_TEST_ROOT", fixture.root.path())
+            .current_dir(fixture.root.path())
+            .args(["--json", "skills", "adopt", "external", flag])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
+        if flag == "--dry-run" {
+            assert_eq!(payload["data"]["candidates"].as_array().unwrap().len(), 1);
+            assert_eq!(payload["data"]["excluded"].as_array().unwrap().len(), 1);
+            assert_eq!(payload["data"]["excluded"][0]["reason"], "missing_skill_md");
+            assert!(fixture.service().list_skills().unwrap().is_empty());
+        } else {
+            assert_eq!(payload["data"]["adopted"].as_array().unwrap().len(), 1);
+        }
+    }
+    assert!(source.join("empty-dir").is_dir());
+    assert!(source.join("adopted/SKILL.md").is_file());
+    assert_eq!(fixture.service().list_skills().unwrap().len(), 1);
+}
+
+#[test]
 fn multi_skill_conflict_and_scope_errors_have_stable_protocols() {
     let fixture = Fixture::new();
     fixture.source("alpha");
