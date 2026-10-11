@@ -195,11 +195,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\target\windows-bridge-rename-probe.exe
 
-
   windows-auto-update:
     needs: changes
     if: always() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true')
     runs-on: windows-2022
+    env:
+      CARGO_BUILD_TARGET: x86_64-pc-windows-msvc
     steps:
       - name: Require successful change detection
         if: needs.changes.result != 'success'
