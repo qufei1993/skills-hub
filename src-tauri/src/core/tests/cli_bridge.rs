@@ -157,8 +157,12 @@ impl ChildBeforeExec {
             unsafe {
                 command.pre_exec(move || {
                     let mut byte = 1u8;
-                    if write(child_socket.as_raw_fd(), (&byte as *const u8).cast(), 1) != 1
-                        || read(child_socket.as_raw_fd(), (&mut byte as *mut u8).cast(), 1) != 1
+                    if write(child_socket.as_raw_fd(), std::ptr::addr_of!(byte).cast(), 1) != 1
+                        || read(
+                            child_socket.as_raw_fd(),
+                            std::ptr::addr_of_mut!(byte).cast(),
+                            1,
+                        ) != 1
                     {
                         return Err(std::io::Error::last_os_error());
                     }
