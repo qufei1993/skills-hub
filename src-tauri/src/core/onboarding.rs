@@ -121,11 +121,11 @@ pub(crate) fn scan_adopt_directory(
         }
     }
 
-    let direct_skill = regular_skill_manifest(root);
+    let direct_skill = regular_skill_manifest(&canonical_root);
     let mut paths = if direct_skill {
-        vec![root.to_path_buf()]
+        vec![canonical_root.clone()]
     } else {
-        fs::read_dir(root)?
+        fs::read_dir(&canonical_root)?
             .filter_map(|entry| entry.ok().map(|entry| entry.path()))
             .filter(|path| {
                 fs::symlink_metadata(path)
