@@ -294,6 +294,7 @@ fn config_reports_local_skills_for_permission_hint() {
 #[test]
 fn progress_snapshot_is_persisted_while_update_is_running() {
     let (_dir, store) = make_store();
+    record_auto_update_started(&store, 60).unwrap();
 
     record_auto_update_progress(
         &store,
@@ -617,4 +618,332 @@ fn unbound_local_skills_are_not_source_update_candidates() {
         vec!["bound", "git"]
     );
     assert_eq!(super::count_local_auto_update_skills(&store).unwrap().0, 1);
+}
+
+#[test]
+fn interrupted_auto_update_recovers_persisted_progress_after_restart() {
+    let (dir, store) = make_store();
+    record_auto_update_started(&store, 3).unwrap();
+    store
+        .set_setting(super::AUTO_UPDATE_LAST_STARTED_AT_KEY, "1000")
+        .unwrap();
+    store
+        .set_setting(super::AUTO_UPDATE_LAST_RUN_AT_KEY, "1000")
+        .unwrap();
+    store
+        .set_setting(super::AUTO_UPDATE_LAST_UNCHANGED_KEY, "1")
+        .unwrap();
+    let entry = |id: &str| AutoUpdateSkillProgress {
+        skill_id: id.into(),
+        name: id.into(),
+        reason: None,
+    };
+    record_auto_update_progress_snapshot(
+        &store,
+        &AutoUpdateProgressSnapshot {
+            total: 3,
+            succeeded: vec![entry("done")],
+            running: Some(entry("interrupted")),
+            pending: vec![entry("pending")],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    drop(store);
+    let reopened = SkillStore::new(dir.path().join("test.db"));
+    let config = get_auto_update_config(&reopened).unwrap();
+    assert_eq!(config.last_status.as_deref(), Some("stopped"));
+    assert!(config.last_finished_at.is_some());
+    assert_eq!(config.last_unchanged, 1);
+    assert_eq!(config.progress.succeeded[0].skill_id, "done");
+    assert!(config.progress.running.is_none());
+    assert_eq!(
+        config
+            .progress
+            .pending
+            .iter()
+            .map(|item| item.skill_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["interrupted", "pending"]
+    );
+    assert_eq!(
+        reopened
+            .get_setting(AUTO_UPDATE_LAST_STATUS_KEY)
+            .unwrap()
+            .as_deref(),
+        Some("stopped")
+    );
+    let polled = get_auto_update_config(&reopened).unwrap();
+    assert_eq!(polled.last_status.as_deref(), Some("stopped"));
+    assert_eq!(polled.last_finished_at, config.last_finished_at);
+}
+
+#[test]
+fn interrupted_auto_update_child() {
+    let Some(root) = std::env::var_os("SKILLS_HUB_TEST_INTERRUPTED_UPDATE_ROOT") else {
+        return;
+    };
+    let root = std::path::PathBuf::from(root);
+    let paths = crate::core::runtime_paths::RuntimePaths::from_roots(
+        crate::core::runtime_paths::RuntimeProfile::Test,
+        &root,
+        &root,
+    );
+    let store = crate::core::runtime_paths::open_store(&paths).unwrap();
+    let _lock = crate::services::operation_lock::OperationLock::acquire(
+        &paths,
+        crate::services::operation_lock::OperationKind::AutoUpdate,
+    )
+    .unwrap();
+    record_auto_update_started(&store, 1).unwrap();
+    store
+        .set_setting(super::AUTO_UPDATE_LAST_STARTED_AT_KEY, "1000")
+        .unwrap();
+    store
+        .set_setting(super::AUTO_UPDATE_LAST_RUN_AT_KEY, "1000")
+        .unwrap();
+    record_auto_update_progress_snapshot(
+        &store,
+        &AutoUpdateProgressSnapshot {
+            total: 1,
+            running: Some(AutoUpdateSkillProgress {
+                skill_id: "interrupted".into(),
+                name: "Interrupted".into(),
+                reason: None,
+            }),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    std::fs::write(root.join("ready"), "ready").unwrap();
+    loop {
+        std::thread::park();
+    }
+}
+
+#[test]
+fn interrupted_auto_update_recovers_only_after_worker_is_killed() {
+    use crate::core::runtime_paths::{open_store, RuntimePaths, RuntimeProfile};
+    use crate::services::operation_lock::{OperationKind, OperationLock};
+    let root = tempfile::tempdir().unwrap();
+    struct ChildGuard(std::process::Child);
+    impl Drop for ChildGuard {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let mut child = ChildGuard(
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "core::auto_update::tests::interrupted_auto_update_child",
+                "--nocapture",
+            ])
+            .env("SKILLS_HUB_TEST_INTERRUPTED_UPDATE_ROOT", root.path())
+            .spawn()
+            .unwrap(),
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !root.path().join("ready").exists() {
+        assert!(
+            child.0.try_wait().unwrap().is_none(),
+            "worker exited before readiness"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "worker did not become ready"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let paths = RuntimePaths::from_roots(RuntimeProfile::Test, root.path(), root.path());
+    let store = open_store(&paths).unwrap();
+    let active = get_auto_update_config(&store).unwrap();
+    assert_eq!(active.last_status.as_deref(), Some("running"));
+    assert!(active.last_finished_at.is_none());
+    child.0.kill().unwrap();
+    child.0.wait().unwrap();
+    let recovered = get_auto_update_config(&store).unwrap();
+    assert_eq!(recovered.last_status.as_deref(), Some("stopped"));
+    assert!(recovered.last_finished_at.is_some());
+    assert!(recovered.progress.running.is_none());
+    let _retry_lock = OperationLock::acquire(&paths, OperationKind::AutoUpdate).unwrap();
+    record_auto_update_triggered(&store).unwrap();
+    assert_eq!(
+        get_auto_update_config(&store)
+            .unwrap()
+            .last_status
+            .as_deref(),
+        Some("running")
+    );
+}
+
+#[test]
+fn interrupted_auto_update_keeps_a_new_trigger_running_during_startup() {
+    let (_dir, store) = make_store();
+    record_auto_update_triggered(&store).unwrap();
+    let config = get_auto_update_config(&store).unwrap();
+    assert_eq!(config.last_status.as_deref(), Some("running"));
+    assert!(config.last_finished_at.is_none());
+}
+
+#[test]
+fn interrupted_auto_update_does_not_guess_when_lock_cannot_be_opened() {
+    let (dir, store) = make_store();
+    record_auto_update_started(&store, 0).unwrap();
+    store
+        .set_setting(super::AUTO_UPDATE_LAST_STARTED_AT_KEY, "1000")
+        .unwrap();
+    std::fs::create_dir(dir.path().join("operation.lock")).unwrap();
+    assert!(get_auto_update_config(&store).is_err());
+    assert_eq!(
+        store
+            .get_setting(AUTO_UPDATE_LAST_STATUS_KEY)
+            .unwrap()
+            .as_deref(),
+        Some("running")
+    );
+}
+
+#[test]
+fn interrupted_auto_update_recovers_legacy_state_without_inventing_completed_items() {
+    let (_dir, store) = make_store();
+    store
+        .set_setting(AUTO_UPDATE_LAST_STATUS_KEY, "running")
+        .unwrap();
+    store
+        .set_setting(AUTO_UPDATE_LAST_CHECKED_KEY, "5")
+        .unwrap();
+    store
+        .set_setting(AUTO_UPDATE_LAST_UPDATED_KEY, "1")
+        .unwrap();
+    let config = get_auto_update_config(&store).unwrap();
+    assert_eq!(config.last_status.as_deref(), Some("stopped"));
+    assert_eq!(config.last_unchanged, 0);
+    assert_eq!(get_auto_update_config(&store).unwrap().last_unchanged, 0);
+}
+
+#[test]
+fn interrupted_auto_update_recovery_is_atomic_on_database_failure() {
+    let (_dir, store) = make_store();
+    record_auto_update_started(&store, 0).unwrap();
+    store
+        .set_setting(super::AUTO_UPDATE_LAST_STARTED_AT_KEY, "1000")
+        .unwrap();
+    rusqlite::Connection::open(store.db_path())
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER reject_stop BEFORE UPDATE ON settings
+         WHEN NEW.key = 'skill_auto_update_last_status' AND NEW.value = 'stopped'
+         BEGIN SELECT RAISE(ABORT, 'test write failure'); END;",
+        )
+        .unwrap();
+    assert!(get_auto_update_config(&store).is_err());
+    assert_eq!(
+        store
+            .get_setting(AUTO_UPDATE_LAST_STATUS_KEY)
+            .unwrap()
+            .as_deref(),
+        Some("running")
+    );
+    assert_eq!(
+        store
+            .get_setting(super::AUTO_UPDATE_LAST_FINISHED_AT_KEY)
+            .unwrap()
+            .as_deref(),
+        Some("")
+    );
+}
+
+#[test]
+fn interrupted_auto_update_failed_trigger_stops_immediately() {
+    let (_dir, store) = make_store();
+    let error =
+        super::trigger_auto_update_with(&store, || anyhow::bail!("scheduler refused")).unwrap_err();
+    assert_eq!(error.to_string(), "scheduler refused");
+    let config = get_auto_update_config(&store).unwrap();
+    assert_eq!(config.last_status.as_deref(), Some("stopped"));
+    assert!(config.last_finished_at.is_some());
+}
+
+#[test]
+fn interrupted_auto_update_trigger_does_not_reset_an_active_writer() {
+    use crate::core::runtime_paths::{open_store, RuntimePaths, RuntimeProfile};
+    use crate::services::operation_lock::{OperationKind, OperationLock};
+    let root = tempfile::tempdir().unwrap();
+    let paths = RuntimePaths::from_roots(RuntimeProfile::Test, root.path(), root.path());
+    let store = open_store(&paths).unwrap();
+    let _lock = OperationLock::acquire(&paths, OperationKind::AutoUpdate).unwrap();
+    record_auto_update_started(&store, 3).unwrap();
+    store
+        .set_setting(AUTO_UPDATE_LAST_UPDATED_KEY, "1")
+        .unwrap();
+    let called = std::cell::Cell::new(false);
+    let result = super::trigger_auto_update_with(&store, || {
+        called.set(true);
+        Ok(())
+    });
+    assert!(result.is_err());
+    assert!(!called.get());
+    let config = get_auto_update_config(&store).unwrap();
+    assert_eq!(config.last_updated, 1);
+    assert_eq!(config.last_status.as_deref(), Some("running"));
+}
+
+#[test]
+fn interrupted_auto_update_trigger_releases_lock_before_worker_starts() {
+    use crate::core::runtime_paths::{open_store, RuntimePaths, RuntimeProfile};
+    use crate::services::operation_lock::{OperationKind, OperationLock};
+    let root = tempfile::tempdir().unwrap();
+    let paths = RuntimePaths::from_roots(RuntimeProfile::Test, root.path(), root.path());
+    let store = open_store(&paths).unwrap();
+    super::trigger_auto_update_with(&store, || {
+        let _worker_lock = OperationLock::acquire(&paths, OperationKind::AutoUpdate)?;
+        record_auto_update_started(&store, 0)
+    })
+    .unwrap();
+    assert_eq!(
+        get_auto_update_config(&store)
+            .unwrap()
+            .last_status
+            .as_deref(),
+        Some("running")
+    );
+}
+
+#[test]
+fn interrupted_auto_update_late_trigger_error_preserves_an_active_worker() {
+    use crate::core::runtime_paths::{open_store, RuntimePaths, RuntimeProfile};
+    use crate::services::operation_lock::{OperationKind, OperationLock};
+    let root = tempfile::tempdir().unwrap();
+    let paths = RuntimePaths::from_roots(RuntimeProfile::Test, root.path(), root.path());
+    let store = open_store(&paths).unwrap();
+    let mut worker_lock = None;
+    let result = super::trigger_auto_update_with(&store, || {
+        worker_lock = Some(OperationLock::acquire(&paths, OperationKind::AutoUpdate)?);
+        record_auto_update_started(&store, 1)?;
+        anyhow::bail!("late scheduler error")
+    });
+    assert!(result.is_err());
+    let config = get_auto_update_config(&store).unwrap();
+    assert_eq!(config.last_status.as_deref(), Some("running"));
+    assert!(config.last_finished_at.is_none());
+}
+
+#[test]
+fn interrupted_auto_update_rejects_duplicate_trigger_during_startup_grace() {
+    let (_dir, store) = make_store();
+    record_auto_update_triggered(&store).unwrap();
+    let before = get_auto_update_config(&store).unwrap().last_started_at;
+    let called = std::cell::Cell::new(false);
+    let result = super::trigger_auto_update_with(&store, || {
+        called.set(true);
+        Ok(())
+    });
+    assert!(result.is_err());
+    assert!(!called.get());
+    assert_eq!(
+        get_auto_update_config(&store).unwrap().last_started_at,
+        before
+    );
 }

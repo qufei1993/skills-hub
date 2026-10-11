@@ -12,6 +12,10 @@ v0.11.0 支持通过 AI 对话管理 Skills，由官方 `manage-skills-hub` Skil
 
 详细说明见 [Agent 优先的命令行入口](agent-first-cli.zh.md) 和 [桌面 CLI 桥接](verified-cli-bridge.zh.md)。
 
+## Skill 更新中断恢复
+
+更新进程中断后可恢复状态、保留已完成进度并重新更新，详见[中断恢复说明](auto-update-recovery.zh.md)。
+
 ## CLI 导入包含排除项的目录
 
 修复 `skills adopt --yes` 在源目录包含空文件夹或不安全链接等排除项时误报 `PLAN_STALE`。此前，相对路径、父目录别名和 Windows 路径规范化会使预览与确认快照不一致，即使文件系统没有变化也会拒绝导入。现在两次扫描统一使用规范化根目录，并保留被排除链接（包括断链）自身的位置；内容变化校验和路径越界保护继续生效。修复 [#186](https://github.com/qufei1993/skills-hub/issues/186)。

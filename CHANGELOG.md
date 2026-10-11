@@ -24,6 +24,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Interrupted Skill updates**: Recover persisted running state after a terminated update worker, including on Windows. Preserve completed progress, allow retry, and keep active workers protected by the shared write lock (fixes [#183](https://github.com/qufei1993/skills-hub/issues/183)).
+
 - **CLI adoption with excluded entries**: `skills adopt --yes` no longer reports a false `PLAN_STALE` when source paths need normalization and the directory contains empty folders, invalid Skills, or excluded links. Preview and confirmation use consistent paths while preserving stale-content and path-escape checks (fixes [#186](https://github.com/qufei1993/skills-hub/issues/186)).
 
 - **AI management updates and rollback**: Same-version official Skill changes now offer an update. Enable repairs the managed official central copy directly, while preserving tool-target and path protections. Failed CLI replacement preserves the previous verified installation; switching between development and production restores the correct terminal command priority. Bridge operations explicitly unlock on completion to prevent child processes from briefly retaining the lock between fork and exec. CLI staging cannot publish an incomplete release. Linux packages declare the glibc 2.39 minimum and verify actual installation and package upgrade.

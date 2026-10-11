@@ -10,6 +10,10 @@ Installer links are generated on the [GitHub release page](https://github.com/qu
 
 v0.11.0 lets you manage Skills through AI conversations using the official `manage-skills-hub` Skill and `skillshub-cli`. Enable AI management in Settings with one click. AI installations sync to detected, enabled tools by default, and desktop lists refresh on navigation and window focus. The CLI shares the desktop library and follows its version, but is downloaded only when enabling or updating AI management. The desktop installer contains no CLI binary. First setup requires network access; a verified matching installation works offline and after the desktop is closed. Startup does not update the CLI or official Skill. See [Agent-first CLI](agent-first-cli.md) and [verified desktop bridge](verified-cli-bridge.md).
 
+## Interrupted Skill updates
+
+Recover after a terminated update worker, preserve completed progress, and retry without restarting. See [recovery details](auto-update-recovery.md).
+
 ## CLI adoption with excluded entries
 
 `skills adopt --yes` now imports valid Skills when a source directory also contains excluded entries such as empty folders or unsafe links. Previously, relative paths, parent-directory aliases, and Windows path normalization could cause preview and confirmation to disagree without any filesystem change, returning `PLAN_STALE`. Both scans now use the canonical root while retaining the location of excluded links, including dangling links. Content-change validation and path-escape protections remain enforced. Fixes [#186](https://github.com/qufei1993/skills-hub/issues/186).

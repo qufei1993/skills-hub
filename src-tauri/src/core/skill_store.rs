@@ -445,6 +445,21 @@ impl SkillStore {
         })
     }
 
+    pub(crate) fn set_settings(&self, settings: &[(&str, &str)]) -> Result<()> {
+        self.with_conn(|conn| {
+            let transaction = conn.unchecked_transaction()?;
+            for (key, value) in settings {
+                transaction.execute(
+                    "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![key, value],
+                )?;
+            }
+            transaction.commit()?;
+            Ok(())
+        })
+    }
+
     pub fn replace_setting(&self, key: &str, value: &str) -> Result<Option<String>> {
         self.with_conn(|conn| {
             conn.execute_batch("BEGIN IMMEDIATE;")?;

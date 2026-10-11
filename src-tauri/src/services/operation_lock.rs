@@ -73,13 +73,20 @@ pub struct OperationLock {
 
 impl OperationLock {
     pub fn acquire(paths: &RuntimePaths, kind: OperationKind) -> Result<Self, OperationLockError> {
-        std::fs::create_dir_all(&paths.app_data_dir)?;
+        Self::acquire_in(&paths.app_data_dir, kind)
+    }
+
+    pub(crate) fn acquire_in(
+        app_data_dir: &std::path::Path,
+        kind: OperationKind,
+    ) -> Result<Self, OperationLockError> {
+        std::fs::create_dir_all(app_data_dir)?;
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)
             .read(true)
             .write(true)
-            .open(paths.app_data_dir.join("operation.lock"))?;
+            .open(app_data_dir.join("operation.lock"))?;
 
         match file.try_lock_exclusive() {
             Ok(()) => Ok(Self { file }),
