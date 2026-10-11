@@ -147,8 +147,8 @@ impl ChildBeforeExec {
     fn spawn() -> Self {
         use std::os::unix::{io::AsRawFd, process::CommandExt};
         extern "C" {
-            fn read(fd: i32, buffer: *mut u8, count: usize) -> isize;
-            fn write(fd: i32, buffer: *const u8, count: usize) -> isize;
+            fn read(fd: i32, buffer: *mut std::ffi::c_void, count: usize) -> isize;
+            fn write(fd: i32, buffer: *const std::ffi::c_void, count: usize) -> isize;
         }
         let (mut socket, child_socket) = std::os::unix::net::UnixStream::pair().unwrap();
         let worker = std::thread::spawn(move || {
@@ -157,8 +157,12 @@ impl ChildBeforeExec {
             unsafe {
                 command.pre_exec(move || {
                     let mut byte = 1u8;
-                    if write(child_socket.as_raw_fd(), &byte, 1) != 1
-                        || read(child_socket.as_raw_fd(), &mut byte, 1) != 1
+                    if write(child_socket.as_raw_fd(), std::ptr::addr_of!(byte).cast(), 1) != 1
+                        || read(
+                            child_socket.as_raw_fd(),
+                            std::ptr::addr_of_mut!(byte).cast(),
+                            1,
+                        ) != 1
                     {
                         return Err(std::io::Error::last_os_error());
                     }
