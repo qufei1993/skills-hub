@@ -243,3 +243,28 @@ fn pinned_install_without_system_git_does_not_use_the_default_head() {
     );
     assert_eq!(fs::read_to_string(dest.join("SKILL.md")).unwrap(), "first");
 }
+
+#[test]
+fn issue_182_sparse_checkout_accepts_windows_paths_on_clone_and_update() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("source");
+    let repo = git2::Repository::init(&source).unwrap();
+    commit_file(&repo, "skills/a/SKILL.md", b"first", "first");
+    commit_file(&repo, "skills/b/SKILL.md", b"other", "other");
+    let dest = temp.path().join("cache");
+    for content in [b"first".as_slice(), b"second".as_slice()] {
+        let expected = commit_file(&repo, "skills/a/SKILL.md", content, "update");
+        let head = clone_or_pull_sparse(
+            source.to_str().unwrap(),
+            &dest,
+            None,
+            r"skills\a",
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(head, expected.to_string());
+        assert_eq!(fs::read(dest.join("skills/a/SKILL.md")).unwrap(), content);
+        assert!(!dest.join("skills/b/SKILL.md").exists());
+    }
+}
