@@ -32,3 +32,10 @@ plans/
 bun.lock
 
 .release-pages-*/
+
+# Project Skill deployments are managed by Skills Hub, not source files.
+/.agents/skills/
+/.claude/skills/
+/.dsh/skills/
+/.kimi-code/skills/
+/.cline/skills/

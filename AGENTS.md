@@ -23,7 +23,7 @@ Skills Hub is a cross-platform desktop app (Tauri 2 + React 19) for managing AI 
 npm run dev              # Vite dev server (port 5173)
 npm run tauri:dev        # Tauri dev window (frontend + backend)
 npm run build            # tsc + vite build
-npm run check            # Full check: lint + test + build + rust:fmt:check + rust:clippy + rust:test
+npm run check            # Full gate; exact steps are owned by package.json
 npm test                 # Frontend regression tests
 npm run lint             # ESLint (flat config v9)
 npm run rust:test        # cargo test
@@ -141,6 +141,13 @@ src-tauri/src/                # Rust backend
 6. **Manual review**: After user-facing bug fixes, run `npm run tauri:dev` from the working branch and confirm startup, unless requested otherwise. Reuse or restart only this checkout's development processes.
 7. **Release records**: Record user-visible fixes under the current project version in `CHANGELOG.md`, `docs/CHANGELOG.zh.md`, and `docs/releases/v<version>/`; do not bump the version unless requested.
 8. **Pull requests**: When requested, submit code, tests, and release records against `main`, updating an existing branch PR when available. Describe the problem, fix, and validation; verify the PR and return its link. Do not merge without authorization.
+
+## AI Engineering
+
+- Use [AI engineering workflow](docs/AI-ENGINEERING.md) to select a DSH Engineering Skill for the current task. Project rules and the required full check remain authoritative.
+- Tie conclusions to the inspected changes and actual command output. Distinguish passed, failed, not run, and environment-blocked checks; a targeted test does not replace `npm run check`.
+- Keep current behavior in its existing owner document. When behavior changes, update relevant documentation and links in the same task.
+- Skill upgrades do not migrate project rules automatically. Compare the adoption baseline with current documents before updating or reverting guidance; preserve local changes.
 
 ## Security Red Lines
 

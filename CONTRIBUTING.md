@@ -19,10 +19,15 @@ npm run tauri:dev
 
 ## Quality Checks
 
+Run the complete gate on the final changes before committing:
+
 ```bash
-npm run lint
-npm run build
+npm run check
 ```
+
+The exact sequence is maintained in `package.json`. Targeted checks help during development but do not replace the full gate. Report checks that could not run rather than treating them as passing.
+
+Rust checks need a debug CLI sidecar and manifest matching the current commit. If `CLI_MANIFEST_REQUIRED` or a source mismatch is reported, prepare them with `npm run cli:prepare -- --target <host-target> --debug`, using the `host` value from `rustc -vV` (for example, `aarch64-apple-darwin`), then rerun the full gate. This prepares local build artifacts; it does not install or enable the CLI bridge.
 
 ## Run Unit Tests
 
@@ -35,10 +40,11 @@ cargo test
 
 ## Before Submitting a PR
 
-- Ensure `npm run lint` and `npm run build` pass
-- Ensure `cd src-tauri && cargo test` pass
+- Ensure `npm run check` passes on the final changes
 - Keep changes small and focused (do not commit local configs/caches/build artifacts)
 - For UI changes, include screenshots or a short recording
+
+For AI-assisted work, follow [the project rules](AGENTS.md) and [AI engineering workflow](docs/AI-ENGINEERING.md).
 
 ## Reporting Issues
 
