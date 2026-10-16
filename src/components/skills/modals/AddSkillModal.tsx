@@ -10,6 +10,7 @@ type AddSkillModalProps = {
   addModalTab: 'local' | 'git'
   localPath: string
   gitUrl: string
+  error?: string
   onRequestClose: () => void
   onTabChange: (tab: 'local' | 'git') => void
   onLocalPathChange: (value: string) => void
@@ -20,7 +21,7 @@ type AddSkillModalProps = {
   t: TFunction
 }
 
-const AddSkillModal = ({ open, loading, canClose, addModalTab, localPath, gitUrl,
+const AddSkillModal = ({ open, loading, canClose, addModalTab, localPath, gitUrl, error,
   onRequestClose, onTabChange, onLocalPathChange, onPickLocalPath, onGitUrlChange, onCancelOperation, onSubmit, t }: AddSkillModalProps) => {
   const sourceId = useId()
   const dialogRef = useInstallDialog(open, !canClose, onRequestClose)
@@ -40,10 +41,11 @@ const AddSkillModal = ({ open, loading, canClose, addModalTab, localPath, gitUrl
         <div className="install-source-field">
           <label htmlFor={sourceId}>{t(local ? 'localFolder' : 'repositoryUrl')}</label>
           <span className="input-row">
-            <input id={sourceId} className="input" disabled={loading} placeholder={t(local ? 'localPathPlaceholder' : 'gitUrlPlaceholder')} value={local ? localPath : gitUrl} onChange={event => local ? onLocalPathChange(event.target.value) : onGitUrlChange(event.target.value)} />
+            <input id={sourceId} aria-invalid={Boolean(error)} aria-describedby={error ? `${sourceId}-error` : undefined} className="input" disabled={loading} placeholder={t(local ? 'localPathPlaceholder' : 'gitUrlPlaceholder')} value={local ? localPath : gitUrl} onChange={event => local ? onLocalPathChange(event.target.value) : onGitUrlChange(event.target.value)} />
             {local && <button className="btn btn-secondary" type="button" disabled={loading} onClick={onPickLocalPath}>{t('browse')}</button>}
           </span>
         </div>
+        {error && <p id={`${sourceId}-error`} className="install-source-error" role="alert">{error}</p>}
         <p className="install-source-help"><Info size={15} aria-hidden="true" /><span>{t(loading ? 'installFlow.detecting' : 'installFlow.detectHint')}</span></p>
         <footer className="modal-footer">
           <button type="button" className="btn btn-secondary" disabled={loading && !onCancelOperation} onClick={loading ? onCancelOperation : onRequestClose}>{t('cancel')}</button>

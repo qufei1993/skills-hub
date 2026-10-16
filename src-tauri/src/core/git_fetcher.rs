@@ -130,7 +130,12 @@ pub fn clone_or_pull_sparse(
         return clone_pinned_commit(repo_url, dest, revision, cancel, proxy_url);
     }
     let normalized_subpath = subpath.replace('\\', "/");
-    let clean_subpath = normalized_subpath.trim_matches('/');
+    let normalized_subpath = normalized_subpath
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect::<Vec<_>>()
+        .join("/");
+    let clean_subpath = normalized_subpath.as_str();
     if clean_subpath.is_empty() {
         anyhow::bail!("sparse checkout path is empty");
     }
@@ -138,6 +143,17 @@ pub fn clone_or_pull_sparse(
     if resolve_git_bin().is_none() {
         anyhow::bail!("system git is required for sparse checkout");
     }
+
+    // Non-cone entries are gitignore patterns: "skills" also matches
+    // .agents/skills and .claude/skills. Anchor the literal directory at root.
+    let mut sparse_pattern = String::from("/");
+    for character in clean_subpath.chars() {
+        if matches!(character, '*' | '?' | '[' | ']' | '\\') {
+            sparse_pattern.push('\\');
+        }
+        sparse_pattern.push(character);
+    }
+    sparse_pattern.push('/');
 
     // Ensure parent exists so `git clone` can create dest.
     if let Some(parent) = dest.parent() {
@@ -162,7 +178,7 @@ pub fn clone_or_pull_sparse(
                     "sparse-checkout",
                     "set",
                     "--no-cone",
-                    clean_subpath,
+                    &sparse_pattern,
                 ]);
                 cmd
             },
@@ -263,7 +279,7 @@ pub fn clone_or_pull_sparse(
                     "sparse-checkout",
                     "set",
                     "--no-cone",
-                    clean_subpath,
+                    &sparse_pattern,
                 ]);
                 cmd
             },
@@ -315,6 +331,10 @@ fn git_fetch_timeout() -> Duration {
 }
 
 static GIT_BIN: OnceLock<Option<String>> = OnceLock::new();
+
+pub(crate) fn system_git_available() -> bool {
+    resolve_git_bin().is_some()
+}
 
 fn resolve_git_bin() -> Option<String> {
     GIT_BIN

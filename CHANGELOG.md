@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Git subdirectory discovery and selected installation now avoid checking out unrelated repository assets, preventing unrelated Git LFS failures from blocking Skill installation. LFS failures are no longer reported as missing repositories, and Git discovery errors remain visible in the source dialog. ([#195](https://github.com/qufei1993/skills-hub/issues/195))
+
 ## [1.0.0]
 
 ### Added
