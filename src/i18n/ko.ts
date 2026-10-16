@@ -51,6 +51,7 @@ export const ko = {
 },
     "collectionInstall": {
   "title": "컬렉션 설치",
+  "latestVersion": "새 스킬은 기본 브랜치의 최신 버전으로 설치하며, 기존 스킬은 유지합니다.",
   "checking": "라이브러리 확인 중…",
   "conflictState": "이름 충돌",
   "previewFailed": "라이브러리를 확인할 수 없습니다. 설치 전에 다시 시도하세요.",

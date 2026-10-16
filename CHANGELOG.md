@@ -12,6 +12,10 @@ All notable changes to this project will be documented in this file.
 
 - **Tool sync icons on Skill cards**: Show the tool name and sync state immediately when hovering or focusing an icon, instead of waiting for the delayed native tooltip. Icons no longer overlap, so each one has its full click area.
 
+### Fixed
+
+- Collection installs now resolve the latest default-branch commit once per repository and keep it consistent across the batch and retries. New installs track the default branch for future updates; existing same-source Skills are preserved. Website links and published collection data remain compatible.
+
 ## [1.0.0]
 
 ### Added

@@ -58,8 +58,8 @@ export default memo(function CollectionInstallModal({ open = true, manifest, too
         const next: Record<number, GitSkillCandidate> = {}
         for (const [sourceIndex, source] of manifest.sources.entries()) {
           const entries = manifest.skills.map((skill, index) => ({ skill, index })).filter(({ skill }) => skill.source === sourceIndex)
-          const candidates = await invoke<GitSkillCandidate[]>('preview_git_skills_local', {
-            repoUrl: `https://github.com/${source.repo}/tree/${source.ref}`,
+          const candidates = await invoke<GitSkillCandidate[]>('preview_collection_skills_local', {
+            repoUrl: `https://github.com/${source.repo}`,
             candidates: entries.map(({ skill }) => ({ name: skill.name, subpath: skill.path, description: null })),
           })
           for (const { skill, index } of entries) {
@@ -82,6 +82,7 @@ export default memo(function CollectionInstallModal({ open = true, manifest, too
   }, [manifest, invoke, previewAttempt])
   const busy = useRef(false)
   const createdTag = useRef<TagDto | null>(null)
+  const revisions = useRef(new Map<string, string>())
   const installed = useRef<Record<number, InstallResultDto>>({})
   const close = () => { if (!busy.current) onClose() }
   const missingProject = selectedTools.length > 0 && scope === 'project' && normalizeProjectPaths(projects).length === 0
@@ -107,7 +108,7 @@ export default memo(function CollectionInstallModal({ open = true, manifest, too
         if (results[index] && results[index].state !== 'failed') continue
         setActive(index)
         try {
-          const result = await installCollectionEntry(invoke, manifest, index, selectedTools, installed.current[index], created => { installed.current[index] = created }, { tagIds, scope, projects, candidates })
+          const result = await installCollectionEntry(invoke, manifest, index, selectedTools, installed.current[index], created => { installed.current[index] = created }, { tagIds, scope, projects, candidates, revisions: revisions.current })
           setResults(previous => ({ ...previous, [index]: result }))
         } catch (failure) {
           hasFailures = true
@@ -154,7 +155,8 @@ export default memo(function CollectionInstallModal({ open = true, manifest, too
     body={<div className="collection-install-body install-wizard">
       <header className="collection-install-heading">
         <h3>{manifest.title}</h3>
-        <div className="collection-install-sources">{manifest.sources.map(source => <span key={`${source.repo}/${source.ref}`} title={source.ref}>{source.repo}<code>{source.ref.slice(0, 7)}</code></span>)}</div>
+        <div className="collection-install-sources">{manifest.sources.map(source => <span key={`${source.repo}/${source.ref}`}>{source.repo}</span>)}</div>
+        <p className="collection-install-note">{t('collectionInstall.latestVersion')}</p>
       </header>
       <InstallFlowSteps step={step} t={t} />
       <div className="collection-install-workspace">

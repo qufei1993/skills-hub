@@ -268,3 +268,20 @@ fn issue_182_sparse_checkout_accepts_windows_paths_on_clone_and_update() {
         assert!(!dest.join("skills/b/SKILL.md").exists());
     }
 }
+
+#[test]
+fn default_revision_resolution_reads_current_remote_head() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    let first = commit_file(&repo, "SKILL.md", b"first", "first");
+    let reference = dir.path().to_str().unwrap();
+    assert_eq!(
+        super::resolve_default_revision(reference, None).unwrap(),
+        first.to_string()
+    );
+    let second = commit_file(&repo, "SKILL.md", b"second", "second");
+    assert_eq!(
+        super::resolve_default_revision(reference, None).unwrap(),
+        second.to_string()
+    );
+}

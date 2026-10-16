@@ -6,6 +6,7 @@ export type CollectionInstallOptions = {
   scope?: InstallScope
   projects?: string[]
   tagIds?: number[]
+  revisions?: Map<string, string>
   candidates?: Map<string, GitSkillCandidate[]>
 }
 
@@ -21,12 +22,18 @@ export async function installCollectionEntry(
   }
   const skill = manifest.skills[index]
   const source = manifest.sources[skill.source]
-  const repoUrl = `https://github.com/${source.repo}/tree/${source.ref}`
+  const trackingUrl = `https://github.com/${source.repo.toLowerCase()}`
   let created = previous
   if (!created) {
+    let revision = options.revisions?.get(trackingUrl)
+    if (!revision) {
+      revision = await invoke<string>('resolve_collection_revision', { repoUrl: trackingUrl })
+      options.revisions?.set(trackingUrl, revision)
+    }
+    const repoUrl = `${trackingUrl}/tree/${revision}`
     let candidates = options.candidates?.get(repoUrl)
     if (!candidates) {
-      candidates = await invoke<GitSkillCandidate[]>('list_git_skills_cmd', { repoUrl })
+      candidates = await invoke<GitSkillCandidate[]>('list_collection_skills', { repoUrl: trackingUrl, revision })
       options.candidates?.set(repoUrl, candidates)
     }
     const candidate = candidates.find(item => item.subpath.replace(/\\/g, '/') === skill.path && item.name === skill.name)
@@ -39,7 +46,7 @@ export async function installCollectionEntry(
       if (!existing) throw new Error('collectionInstall.missing')
       created = { skill_id: existing.id, central_path: existing.central_path, name: existing.name, action: 'unchanged' }
     } else {
-      created = await invoke<InstallResultDto>('install_git_selection', { repoUrl, subpath: skill.path, name: skill.name })
+      created = await invoke<InstallResultDto>('install_collection_selection', { repoUrl: trackingUrl, revision, subpath: skill.path, name: skill.name })
     }
     onInstalled?.(created)
   }
