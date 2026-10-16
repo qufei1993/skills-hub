@@ -1235,6 +1235,7 @@ export const resources = {
         targetExists: 'Target folder already exists. Please remove it and try again.',
         targetExistsDetail:
           'Target folder already exists: {{path}}. For safety it was not overwritten.',
+        gitLfsFailed: 'Git LFS could not check out repository assets. Check that Git LFS is installed and the assets are accessible, or retry with the specific Skill folder URL.',
         toolNotInstalled: 'The selected tool is not installed. Please refresh and retry.',
         toolPathChanged: '{{tool}} now uses a different sync directory: {{path}}. The old deployment has not been cleared. Disable and re-enable this Skill; if it still fails, report this message.',
         toolNotWritable:
@@ -2615,6 +2616,7 @@ export const resources = {
         targetExists: '目标目录已存在，请先清理后重试。',
         targetExistsDetail:
           '目标目录已存在同名 Skill：{{path}}。为安全起见未覆盖。\n你可以：先手动清理该目录后重试。',
+        gitLfsFailed: 'Git LFS 资源检出失败。请检查是否已安装 Git LFS、相关资源是否可访问，或使用具体 Skill 文件夹的链接重试。',
         toolNotInstalled: '未检测到该工具已安装，请刷新后重试。',
         toolPathChanged: '{{tool}} 的同步目录已变更为 {{path}}，旧同步记录尚未清理。请先停用再启用这个 Skill；仍失败时，请反馈此提示。',
         toolNotWritable:

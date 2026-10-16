@@ -1979,3 +1979,121 @@ fn issue_182_repairs_fresh_sparse_cache_missing_requested_directory() {
     .unwrap();
     assert!(repaired.join("skills/example/SKILL.md").is_file());
 }
+
+#[test]
+fn issue_195_subdirectory_install_avoids_unrelated_checkout_filters() {
+    const CHILD: &str = "SKILLS_HUB_ISSUE_195_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let source = tempfile::tempdir().unwrap();
+        fs::create_dir_all(source.path().join("skills/figma")).unwrap();
+        fs::create_dir_all(source.path().join(".agents/skills/broken")).unwrap();
+        fs::write(
+            source.path().join("skills/figma/SKILL.md"),
+            "---\nname: figma\ndescription: test\n---\n# Figma\n",
+        )
+        .unwrap();
+        fs::write(
+            source.path().join(".agents/skills/broken/demo.asset"),
+            "asset",
+        )
+        .unwrap();
+        fs::write(
+            source.path().join(".gitattributes"),
+            "*.asset filter=issue195\n",
+        )
+        .unwrap();
+        let repo = init_git_repo(source.path());
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("main", &head, true).unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "core::installer::tests::issue_195_subdirectory_install_avoids_unrelated_checkout_filters", "--nocapture"])
+            .env(CHILD, "1")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", source.path().join("empty-config"))
+            .env("GIT_CONFIG_COUNT", "3")
+            .env("GIT_CONFIG_KEY_0", format!("url.file://{}/.insteadOf", source.path().display()))
+            .env("GIT_CONFIG_VALUE_0", "https://github.com/issue-195/fixture.git")
+            .env("GIT_CONFIG_KEY_1", "filter.issue195.smudge")
+            .env("GIT_CONFIG_VALUE_1", "skills-hub-issue-195-missing-filter")
+            .env("GIT_CONFIG_KEY_2", "filter.issue195.required")
+            .env("GIT_CONFIG_VALUE_2", "true")
+            .output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let (dir, store) = make_store();
+    let paths = RuntimePaths::from_roots(
+        crate::core::runtime_paths::RuntimeProfile::Test,
+        dir.path(),
+        dir.path(),
+    );
+    set_central_path(&store, &dir.path().join("central"));
+    store.set_setting("github_proxy_url", "").unwrap();
+    // Verify the fixture really fails when unrelated media is checked out.
+    assert!(crate::core::git_fetcher::clone_or_pull(
+        "https://github.com/issue-195/fixture.git",
+        &dir.path().join("full"),
+        Some("main"),
+        None,
+        Some("")
+    )
+    .is_err());
+    for subpath in ["skills", "skills/figma"] {
+        let url = format!("https://github.com/issue-195/fixture/tree/main/{subpath}");
+        let candidates = super::list_git_skills(&paths, &store, &url, None).unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].subpath, "skills/figma");
+    }
+    let url = "https://github.com/issue-195/fixture/tree/main/skills";
+    let candidate =
+        super::git_skill_candidate_from_selection(&paths, &store, url, "skills/figma", None)
+            .unwrap();
+    assert_eq!(candidate.name, "figma");
+    let result =
+        super::install_git_skill_from_selection(&paths, &store, url, "skills/figma", None, None)
+            .unwrap();
+    assert!(result.central_path.join("SKILL.md").is_file());
+    assert!(!result.central_path.join(".agents/skills/broken").exists());
+}
+
+#[test]
+#[ignore = "requires live GitHub access; uses isolated data and cache directories"]
+fn issue_195_live_hyperframes_subdirectory_install() {
+    for subpath in ["skills", "skills/figma"] {
+        let (dir, store) = make_store();
+        let paths = RuntimePaths::from_roots(
+            crate::core::runtime_paths::RuntimeProfile::Test,
+            dir.path(),
+            dir.path(),
+        );
+        set_central_path(&store, &dir.path().join("central"));
+        let url = format!("https://github.com/heygen-com/hyperframes/tree/main/{subpath}");
+        let candidates = super::list_git_skills(&paths, &store, &url, None).unwrap();
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.subpath == "skills/figma"));
+        let candidate =
+            super::git_skill_candidate_from_selection(&paths, &store, &url, "skills/figma", None)
+                .unwrap();
+        assert!(!candidate.name.is_empty());
+        let result = super::install_git_skill_from_selection(
+            &paths,
+            &store,
+            &url,
+            "skills/figma",
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(result.central_path.join("SKILL.md").is_file());
+        println!(
+            "{subpath}: discovered {} Skills and installed figma",
+            candidates.len()
+        );
+    }
+}

@@ -252,3 +252,30 @@ it.each(['git', 'local'] as const)('keeps a failed single %s install available f
   expect(screen.queryByRole('dialog', { name: 'installFlow.confirmTitle' })).toBeNull()
   expect(attempts).toBe(2)
 })
+
+it('keeps Git LFS discovery errors visible and allows editing and retrying', async () => {
+  const initial = invoke.getMockImplementation()!
+  invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+    if (command === 'list_git_skills_cmd') throw new Error('GIT_LFS_ERROR')
+    return initial(command, args)
+  })
+  render(<App />)
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  fireEvent.click(screen.getByRole('button', { name: 'addSkills' }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  fireEvent.click(screen.getByRole('button', { name: 'discovery.git' }))
+  const input = screen.getByPlaceholderText('gitUrlPlaceholder') as HTMLInputElement
+  fireEvent.change(input, { target: { value: 'https://github.com/example/repo' } })
+  fireEvent.click(screen.getByRole('button', { name: 'installFlow.detect' }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+  expect(screen.getByRole('alert').textContent).toBe('errors.gitLfsFailed')
+  expect(input.value).toBe('https://github.com/example/repo')
+  fireEvent.change(input, { target: { value: 'https://github.com/example/repo/tree/main/skills/figma' } })
+  expect(screen.queryByRole('alert')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'installFlow.detect' }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  expect(screen.getByRole('alert').textContent).toBe('errors.gitLfsFailed')
+  fireEvent.click(screen.getByRole('button', { name: 'cancel' }))
+  fireEvent.click(screen.getByRole('button', { name: 'discovery.git' }))
+  expect(screen.queryByRole('alert')).toBeNull()
+})

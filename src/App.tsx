@@ -183,6 +183,7 @@ function App() {
   const [localPath, setLocalPath] = useState('')
   const [localName, setLocalName] = useState('')
   const [gitUrl, setGitUrl] = useState('')
+  const [gitDetectionError, setGitDetectionError] = useState<string | null>(null)
   const [gitName, setGitName] = useState('')
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const [gitCandidates, setGitCandidates] = useState<GitSkillCandidate[]>([])
@@ -351,6 +352,7 @@ function App() {
         }
         return t('errors.skillExistsInHub')
       }
+      if (raw === 'GIT_LFS_ERROR') return t('errors.gitLfsFailed')
       if (raw.startsWith('TARGET_EXISTS|')) {
         return t('errors.targetExists')
       }
@@ -1605,6 +1607,7 @@ function App() {
 
 
   const handleOpenAdd = useCallback((tab: 'git' | 'local' = 'git') => {
+    setGitDetectionError(null)
     setGitCandidatesRepoUrl('')
     setLocalCandidatesBasePath('')
     setPendingSyncTargetChange(null)
@@ -1645,6 +1648,7 @@ function App() {
 
   const handleCloseAdd = useCallback(() => {
     if (!loading) {
+      setGitDetectionError(null)
       setShowAddModal(false)
       setAddModalTagIds([])
       resetInstallScope()
@@ -2791,6 +2795,7 @@ function App() {
     setLoading(true)
     setLoadingStartAt(Date.now())
     setError(null)
+    setGitDetectionError(null)
     setActionMessage(t('installFlow.detecting'))
     try {
       const url = gitUrl.trim()
@@ -2821,7 +2826,12 @@ function App() {
       setShowGitPickModal(true)
     } catch (err) {
       if (request !== sourceDetectionRequest.current) return
-      setError(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : String(err)
+      if (!message.includes('CANCELLED|')) {
+        setGitDetectionError(message)
+        setAddModalTab('git')
+        setShowAddModal(true)
+      }
     } finally {
       if (request === sourceDetectionRequest.current) {
       setActionMessage(null)
@@ -4067,11 +4077,12 @@ function App() {
         addModalTab={addModalTab}
         localPath={localPath}
         gitUrl={gitUrl}
+        error={addModalTab === 'git' && gitDetectionError ? formatErrorMessage(gitDetectionError) : undefined}
         onRequestClose={handleCloseAdd}
-        onTabChange={setAddModalTab}
+        onTabChange={tab => { setGitDetectionError(null); setAddModalTab(tab) }}
         onLocalPathChange={setLocalPath}
         onPickLocalPath={handlePickLocalPath}
-        onGitUrlChange={setGitUrl}
+        onGitUrlChange={value => { setGitDetectionError(null); setGitUrl(value) }}
         onSubmit={addModalTab === 'local' ? handleCreateLocal : handleCreateGit}
         t={t}
       />
