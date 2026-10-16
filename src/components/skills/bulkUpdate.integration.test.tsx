@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { toast } from 'sonner'
 import App from '../../App'
 import i18n from '../../i18n'
 import type { AutoUpdateConfigDto, ManagedSkill, UpdateResultDto } from './types'
@@ -50,6 +51,7 @@ beforeEach(async () => {
     skill.description = `Updated ${skill.name}`
     return result(skill, skill.id !== 'two')
   }
+  vi.mocked(toast.success).mockClear()
   invoke.mockReset()
   invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
     if (command === 'get_managed_skills') return structuredClone(skills)
@@ -115,7 +117,8 @@ it.each(['zh', 'en', 'ko'])('updates only selected Skills and refreshes results 
   expect(screen.getByText('Updated two')).toBeTruthy()
   expect(skills[2].description).toBeUndefined()
   expect(skills.map(skill => ({ targets: skill.targets, tags: skill.tags, enabled: skill.enabled }))).toEqual(saved)
-  expect(report().getByText(i18n.t('bulk.updateResult', { updated: 1, unchanged: 1, skipped: 0, failed: 0 }))).toBeTruthy()
+  expect(screen.queryByRole('region', { name: i18n.t('bulk.updateResultTitle') })).toBeNull()
+  expect(toast.success).toHaveBeenCalledWith(i18n.t('bulk.updateResult', { updated: 1, unchanged: 1, skipped: 0, failed: 0 }), { duration: 1800 })
   expect(invoke.mock.calls.some(([command]) => ['sync_skill_to_tool', 'unsync_skill_from_tool', 'set_skill_enabled', 'set_skill_tags'].includes(command))).toBe(false)
 })
 
@@ -158,7 +161,7 @@ it('continues after a source failure, reports pending tools, and keeps failed Sk
   update = async skill => result(skill)
   await clickButton(i18n.t('bulk.update'), true)
   expect(updatedIds()).toEqual(['failed', 'pending', 'failed'])
-  expect(report().queryByText(i18n.t('bulk.updateFailedTitle', { name: 'failed' }))).toBeNull()
+  expect(screen.queryByRole('region', { name: i18n.t('bulk.updateResultTitle') })).toBeNull()
 })
 
 it('waits for the current update before cancellation and keeps unprocessed Skills selected', async () => {
@@ -185,4 +188,26 @@ it('waits for the current update before cancellation and keeps unprocessed Skill
   update = async skill => result(skill)
   await clickButton(i18n.t('bulk.update'), true)
   expect(updatedIds()).toEqual(['one', 'two'])
+})
+
+it('finishes an unchanged batch without leaving a result panel to close', async () => {
+  update = async skill => result(skill, false)
+  await openBulk()
+  await clickButton(i18n.t('bulk.update'), true)
+  expect(updatedIds()).toEqual(['one', 'two', 'unselected'])
+  expect(screen.queryByRole('region', { name: i18n.t('bulk.updateResultTitle') })).toBeNull()
+  expect(document.querySelector('.bulk-action-bar')).toBeNull()
+  expect(toast.success).toHaveBeenCalledWith(i18n.t('bulk.updateResult', { updated: 0, unchanged: 3, skipped: 0, failed: 0 }), { duration: 1800 })
+})
+
+it('keeps pending tool details visible even when every source update succeeds', async () => {
+  skills = [fixture('pending')]
+  update = async skill => ({ ...result(skill), pending_targets: ['codex'] })
+  await openBulk()
+  await clickButton(i18n.t('bulk.update'), true)
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+  expect(report().getByText(i18n.t('deviceSync.skillUpdatedToolsPending', { name: 'pending', count: 1 }))).toBeTruthy()
+  expect(toast.success).not.toHaveBeenCalled()
+  await clickButton(i18n.t('close'))
+  expect(screen.queryByRole('region', { name: i18n.t('bulk.updateResultTitle') })).toBeNull()
 })
