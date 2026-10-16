@@ -2,7 +2,7 @@
 
 [Chinese](README.zh.md)
 
-Unreleased. This version is being prepared for publication.
+Released on October 16, 2026. Download installers and read the bilingual release notes in the [Skills Hub v1.0.1 release](https://github.com/qufei1993/skills-hub/releases/tag/v1.0.1).
 
 ## Features and improvements
 

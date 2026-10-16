@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-尚未发布，正在准备本版本的发布内容。
+本版本已于 2026 年 10 月 16 日发布。安装包与中英文发布说明见 [Skills Hub v1.0.1 发布页](https://github.com/qufei1993/skills-hub/releases/tag/v1.0.1)。
 
 ## 功能与优化
 
