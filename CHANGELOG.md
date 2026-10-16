@@ -8,6 +8,10 @@ All notable changes to this project will be documented in this file.
 
 - **Status and tool filters for Skills**: Filter the library by enabled or disabled state and by the tools each Skill is currently synced to (match any). Counts reflect the other active filters, and Clear filters resets them together with search, scope, and tags.
 
+### Improved
+
+- **Tool sync icons on Skill cards**: Show the tool name and sync state immediately when hovering or focusing an icon, instead of waiting for the delayed native tooltip. Icons no longer overlap, so each one has its full click area.
+
 ## [1.0.0]
 
 ### Added
