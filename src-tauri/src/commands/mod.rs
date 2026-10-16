@@ -1463,6 +1463,71 @@ pub async fn list_git_skills_cmd(
 
 #[tauri::command]
 #[allow(non_snake_case)]
+pub async fn preview_collection_skills_local(
+    service: State<'_, SkillsHubService>,
+    repoUrl: String,
+    candidates: Vec<crate::core::installer::GitSkillCandidate>,
+) -> Result<Vec<GitInstallCandidate>, String> {
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.collection_install_preview(&repoUrl, candidates)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(format_service_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn list_collection_skills(
+    service: State<'_, SkillsHubService>,
+    repoUrl: String,
+    revision: String,
+) -> Result<Vec<GitInstallCandidate>, String> {
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.list_collection_skills(&repoUrl, &revision)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(format_service_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn resolve_collection_revision(
+    service: State<'_, SkillsHubService>,
+    repoUrl: String,
+) -> Result<String, String> {
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || service.resolve_collection_revision(&repoUrl))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(format_service_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn install_collection_selection(
+    service: State<'_, SkillsHubService>,
+    repoUrl: String,
+    revision: String,
+    subpath: String,
+    name: String,
+) -> Result<InstallResultDto, String> {
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service
+            .install_collection_selection(&repoUrl, &revision, &subpath, name)
+            .map(to_service_install_dto)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(format_service_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
 pub async fn install_git_selection(
     service: State<'_, SkillsHubService>,
     cancel: State<'_, Arc<CancelToken>>,

@@ -2097,3 +2097,57 @@ fn issue_195_live_hyperframes_subdirectory_install() {
         );
     }
 }
+
+#[test]
+fn collection_snapshot_records_revision_and_keeps_default_branch_update_source() {
+    let (dir, store) = make_store();
+    let paths = RuntimePaths::from_roots(
+        crate::core::runtime_paths::RuntimeProfile::Test,
+        dir.path(),
+        dir.path(),
+    );
+    set_central_path(&store, &dir.path().join("central"));
+    let source = tempfile::tempdir().unwrap();
+    fs::write(
+        source.path().join("SKILL.md"),
+        "---\nname: example\n---\nfirst",
+    )
+    .unwrap();
+    let repo = init_git_repo(source.path());
+    let reference = source.path().to_str().unwrap();
+    let revision = crate::core::git_fetcher::resolve_default_revision(reference, None).unwrap();
+    fs::write(
+        source.path().join("SKILL.md"),
+        "---\nname: example\n---\nsecond",
+    )
+    .unwrap();
+    let newest = commit_all(&repo, "upstream advances after batch resolution");
+    let installed = super::install_git_skill_from_selection_at_revision(
+        &paths,
+        &store,
+        reference,
+        ".",
+        Some("example".into()),
+        None,
+        Some(&revision),
+    )
+    .unwrap();
+    assert!(fs::read_to_string(installed.central_path.join("SKILL.md"))
+        .unwrap()
+        .ends_with("first"));
+    let record = store
+        .list_skills()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == installed.skill_id)
+        .unwrap();
+    assert_eq!(record.source_ref.as_deref(), Some(reference));
+    assert_eq!(record.source_revision.as_deref(), Some(revision.as_str()));
+    let updated =
+        super::update_managed_skill_from_source(&paths, &store, &installed.skill_id).unwrap();
+    assert!(updated.changed);
+    assert_eq!(updated.source_revision, Some(newest.to_string()));
+    assert!(fs::read_to_string(installed.central_path.join("SKILL.md"))
+        .unwrap()
+        .ends_with("second"));
+}

@@ -54,6 +54,7 @@ export const resources = {
 },
       collectionInstall: {
   "title": "Install collection",
+  "latestVersion": "New Skills use the latest default-branch version. Existing Skills are preserved.",
   "checking": "Checking library…",
   "conflictState": "Name conflict",
   "previewFailed": "Unable to check your library. Retry before installing.",
@@ -1464,6 +1465,7 @@ export const resources = {
 },
       collectionInstall: {
   "title": "安装合集",
+  "latestVersion": "新安装的 Skills 使用默认分支最新版本，已安装的 Skills 保持不变。",
   "checking": "正在检查技能库…",
   "conflictState": "名称冲突",
   "previewFailed": "无法检查技能库，请重试后再安装。",

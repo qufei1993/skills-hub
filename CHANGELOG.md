@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Collection installs now resolve the latest default-branch commit once per repository and keep it consistent across the batch and retries. New installs track the default branch for future updates; existing same-source Skills are preserved. Website links and published collection data remain compatible.
 - Git subdirectory discovery and selected installation now avoid checking out unrelated repository assets, preventing unrelated Git LFS failures from blocking Skill installation. LFS failures are no longer reported as missing repositories, and Git discovery errors remain visible in the source dialog. ([#195](https://github.com/qufei1993/skills-hub/issues/195))
 
 ## [1.0.0]

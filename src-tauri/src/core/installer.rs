@@ -686,6 +686,25 @@ pub(crate) fn same_git_skill_source(
     reference: &str,
     subpath: &str,
 ) -> bool {
+    same_git_source(source, source_subpath, reference, subpath, true)
+}
+
+pub(crate) fn same_collection_skill_source(
+    source: &str,
+    source_subpath: Option<&str>,
+    reference: &str,
+    subpath: &str,
+) -> bool {
+    same_git_source(source, source_subpath, reference, subpath, false)
+}
+
+fn same_git_source(
+    source: &str,
+    source_subpath: Option<&str>,
+    reference: &str,
+    subpath: &str,
+    compare_revision: bool,
+) -> bool {
     fn identity(reference: &str) -> ParsedGitSource {
         let reference = reference.trim();
         let normalized = reference
@@ -702,7 +721,7 @@ pub(crate) fn same_git_skill_source(
     let requested = identity(reference);
     let stored_path = source_subpath.or(source.subpath.as_deref()).unwrap_or(".");
     source.clone_url == requested.clone_url
-        && source.branch == requested.branch
+        && (!compare_revision || source.branch == requested.branch)
         && Path::new(stored_path) == Path::new(subpath)
 }
 
@@ -2151,6 +2170,20 @@ pub fn install_git_skill_from_selection(
     name: Option<String>,
     cancel: Option<&CancelToken>,
 ) -> Result<InstallResult> {
+    install_git_skill_from_selection_at_revision(
+        paths, store, repo_url, subpath, name, cancel, None,
+    )
+}
+
+pub fn install_git_skill_from_selection_at_revision(
+    paths: &RuntimePaths,
+    store: &SkillStore,
+    repo_url: &str,
+    subpath: &str,
+    name: Option<String>,
+    cancel: Option<&CancelToken>,
+    revision: Option<&str>,
+) -> Result<InstallResult> {
     let normalized_subpath = subpath.replace('\\', "/");
     let subpath = normalized_subpath.as_str();
     let parsed = parse_github_url(repo_url);
@@ -2178,7 +2211,7 @@ pub fn install_git_skill_from_selection(
         paths,
         store,
         &parsed.clone_url,
-        parsed.branch.as_deref(),
+        revision.or(parsed.branch.as_deref()),
         Some(subpath),
         cancel,
     )?;
