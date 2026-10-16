@@ -15,7 +15,7 @@ fn sanitize_value(value: &Value, inherited_auth_context: bool) -> Value {
                 .map(|value| sanitize_value(value, inherited_auth_context))
                 .collect(),
         ),
-        Value::String(value) => Value::String(sanitize_string(value)),
+        Value::String(value) => Value::String(sanitize_string(value, false)),
         Value::Null | Value::Bool(_) | Value::Number(_) => value.clone(),
     }
 }
@@ -32,6 +32,11 @@ fn sanitize_object(
             let value =
                 if is_sensitive_key(&normalized) || (normalized == "code" && object_auth_context) {
                     Value::String(REDACTED.to_string())
+                } else if normalized == "reference"
+                    && object.get("kind").and_then(Value::as_str) == Some("local")
+                    && value.is_string()
+                {
+                    Value::String(sanitize_string(value.as_str().unwrap(), true))
                 } else {
                     sanitize_value(value, is_auth_context_container(&normalized))
                 };
@@ -123,8 +128,17 @@ fn oauth_value_establishes_context(value: &Value) -> bool {
     }
 }
 
-fn sanitize_string(value: &str) -> String {
-    if let Ok(mut url) = reqwest::Url::parse(value) {
+fn sanitize_string(value: &str, local_reference: bool) -> String {
+    // A drive letter is parsed as a URL scheme, but '#' is a valid filename character.
+    // Keep scanning paths for embedded credentials below; only skip whole-value URL parsing.
+    let drive_path = local_reference
+        && value
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphabetic)
+        && matches!(value.as_bytes().get(1..3), Some(b":\\" | b":/"))
+        && !value[2..].starts_with("//");
+    if let Some(mut url) = reqwest::Url::parse(value).ok().filter(|_| !drive_path) {
         if has_sensitive_url_components(&url) {
             return sanitize_url(&mut url)
                 .map(|()| url.to_string())

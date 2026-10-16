@@ -236,6 +236,65 @@ fn source_dto_redacts_credentials_and_sensitive_query_values() {
 }
 
 #[test]
+fn local_source_dto_preserves_paths_including_windows_verbatim_prefixes() {
+    let fixture = Fixture::new();
+    let service = fixture.open();
+    let mut record = skill("local", "Local", "/central/local");
+    record.source_type = "local".into();
+    for reference in [
+        r"\\?\C:\Users\测试\.skillshub\demo",
+        r"\\?\UNC\server\share\demo",
+        r"\\server\share\demo",
+        r"C:\Users\test\skills\demo#draft",
+        "/Users/test/skills/demo?draft#one",
+    ] {
+        record.source_ref = Some(reference.into());
+        service.store().upsert_skill(&record).unwrap();
+        assert_eq!(
+            service
+                .show_skill("local".into())
+                .unwrap()
+                .source
+                .reference
+                .as_deref(),
+            Some(reference),
+        );
+        assert_eq!(
+            service
+                .store()
+                .get_skill_by_id("local")
+                .unwrap()
+                .unwrap()
+                .source_ref,
+            record.source_ref,
+        );
+    }
+    // A malformed local record must not expose URL credentials either.
+    record.source_ref = Some("https://user:secret@example.com/repo?token=secret#secret".into());
+    service.store().upsert_skill(&record).unwrap();
+    assert_eq!(
+        service
+            .show_skill("local".into())
+            .unwrap()
+            .source
+            .reference
+            .as_deref(),
+        Some("https://example.com/repo"),
+    );
+    record.source_ref = Some("not a path?token=secret#secret".into());
+    service.store().upsert_skill(&record).unwrap();
+    assert_eq!(
+        service
+            .show_skill("local".into())
+            .unwrap()
+            .source
+            .reference
+            .as_deref(),
+        Some("not a path"),
+    );
+}
+
+#[test]
 fn list_agents_reports_detected_custom_agent_state() {
     let fixture = Fixture::new();
     let service = fixture.open();

@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Windows junction deployment now uses the upstream fix for canonical `\\?\` paths, preventing broken links from failing during execution after a successful preview. CLI local source paths retain their literal path characters, and deployment errors include safe stage and system-error diagnostics. ([#196](https://github.com/qufei1993/skills-hub/issues/196))
+
 - Collection installs now resolve the latest default-branch commit once per repository and keep it consistent across the batch and retries. New installs track the default branch for future updates; existing same-source Skills are preserved. Website links and published collection data remain compatible.
 
 ## [1.0.0]
