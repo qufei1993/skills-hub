@@ -12,7 +12,7 @@ Download Skills Hub for **macOS, Windows, and Linux** from the [official downloa
 
 If macOS says the app is damaged or the developer cannot be verified, see the [installation help](https://aiskillshub.link/docs/installation).
 
-[What's new in v1.0.0](https://github.com/qufei1993/skills-hub/releases/tag/v1.0.0)
+[What's new in v1.0.1](https://github.com/qufei1993/skills-hub/releases/tag/v1.0.1)
 
 ## What you can do
 
@@ -51,7 +51,7 @@ For AI management, open **Settings → AI Management → Enable in one click**. 
 - [User guide](https://aiskillshub.link/docs) · [Troubleshooting](https://aiskillshub.link/docs/settings)
 - [Standalone CLI installation and reference](https://aiskillshub.link/docs/cli)
 - [Development and builds](docs/development.en.md)
-- [Changelog](CHANGELOG.md) · [v1.0.0 details](docs/releases/v1.0.0/README.md)
+- [Changelog](CHANGELOG.md) · [v1.0.1 details](docs/releases/v1.0.1/README.md)
 - [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 Collections are maintained in [Awesome Skills](https://github.com/qufei1993/awesome-skills). Contributions are welcome.
