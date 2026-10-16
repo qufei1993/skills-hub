@@ -992,3 +992,51 @@ fn source_mirror_update_batch_applies_source_deletions() {
         assert!(Path::new(&central).join("SKILL.md").is_file());
     }
 }
+
+#[test]
+fn latest_collection_preview_preserves_old_pinned_sources_without_changing_git_install_policy() {
+    let fixture = Fixture::new();
+    let local = fixture.paths.app_data_dir.join("local-collection-skill");
+    write_skill(&local, "design");
+    let service = fixture.open();
+    let installed = service.install(InstallRequest::local(&local)).unwrap();
+    let mut record = service
+        .store()
+        .list_skills()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == installed.id)
+        .unwrap();
+    record.source_type = "git".into();
+    record.source_ref = Some(format!(
+        "https://github.com/owner/repo/tree/{}",
+        "a".repeat(40)
+    ));
+    record.source_subpath = Some("skills/design".into());
+    service.store().upsert_skill(&record).unwrap();
+    let candidates = vec![crate::core::installer::GitSkillCandidate {
+        name: "design".into(),
+        subpath: "skills/design".into(),
+        description: None,
+    }];
+    let collection = service
+        .collection_install_preview("https://github.com/owner/repo", candidates.clone())
+        .unwrap();
+    assert_eq!(collection[0].status, "update");
+    assert_eq!(
+        collection[0].existing_skill_id.as_deref(),
+        Some(installed.id.as_str())
+    );
+    let ordinary = service
+        .git_install_local_preview("https://github.com/owner/repo", candidates.clone(), None)
+        .unwrap();
+    assert_eq!(ordinary[0].status, "conflict");
+    let different = service
+        .collection_install_preview("https://github.com/other/repo", candidates)
+        .unwrap();
+    assert_eq!(different[0].status, "conflict");
+    assert_eq!(
+        service.store().list_skills().unwrap()[0].source_ref,
+        record.source_ref
+    );
+}

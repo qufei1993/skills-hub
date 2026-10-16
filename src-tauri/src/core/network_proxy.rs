@@ -150,7 +150,7 @@ pub fn git_push_options<'a>(proxy_url: &str) -> PushOptions<'a> {
     options
 }
 
-fn git_proxy_options(proxy_url: &str) -> ProxyOptions<'static> {
+pub(crate) fn git_proxy_options(proxy_url: &str) -> ProxyOptions<'static> {
     let mut options = ProxyOptions::new();
     let proxy_url = proxy_url.trim();
     if !proxy_url.is_empty() {

@@ -708,3 +708,48 @@ fn clone_pinned_commit_via_libgit2(
     repo.set_head_detached(oid)?;
     Ok(oid.to_string())
 }
+
+/// Resolve remote HEAD without consulting the installation cache.
+pub fn resolve_default_revision(repo_url: &str, proxy_url: Option<&str>) -> Result<String> {
+    if resolve_git_bin().is_none() {
+        let mut remote = git2::Remote::create_detached(repo_url)?;
+        let connection = remote.connect_auth(
+            git2::Direction::Fetch,
+            None,
+            Some(super::network_proxy::git_proxy_options(
+                proxy_url.unwrap_or_default(),
+            )),
+        )?;
+        return connection
+            .list()?
+            .iter()
+            .find(|head| head.name() == "HEAD")
+            .map(|head| head.oid().to_string())
+            .context("remote default branch is unavailable");
+    }
+    let mut command = git_cmd_for_remote(proxy_url, Some(repo_url));
+    command.args(["ls-remote", repo_url, "HEAD"]);
+    let output = run_cmd_with_timeout(
+        command,
+        git_fetch_timeout(),
+        "resolve default branch".into(),
+        None,
+    )?;
+    anyhow::ensure!(
+        output.status.success(),
+        "could not resolve default branch: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout)?;
+    let revision = text
+        .lines()
+        .find_map(|line| {
+            let (revision, name) = line.split_once('\t')?;
+            (name == "HEAD"
+                && revision.len() == 40
+                && revision.bytes().all(|b| b.is_ascii_hexdigit()))
+            .then(|| revision.to_lowercase())
+        })
+        .context("remote default branch is unavailable")?;
+    Ok(revision)
+}

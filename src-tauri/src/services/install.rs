@@ -368,6 +368,66 @@ impl SkillsHubService {
         }
     }
 
+    pub(crate) fn resolve_collection_revision(&self, repo: &str) -> Result<String, ServiceError> {
+        validate_collection_repository(repo)?;
+        let proxy = get_github_proxy_url(self.store()).map_err(map_install_error)?;
+        crate::core::git_fetcher::resolve_default_revision(repo, Some(&proxy))
+            .map_err(map_install_error)
+    }
+
+    pub(crate) fn install_collection_selection(
+        &self,
+        repo: &str,
+        revision: &str,
+        subpath: &str,
+        name: String,
+    ) -> Result<InstallOutcome, ServiceError> {
+        let _operation_lock = self.begin_write(OperationKind::Install)?;
+        validate_collection_repository(repo)?;
+        validate_subpath(subpath)?;
+        validate_skill_name(&name)?;
+        if revision.len() != 40 || !revision.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(invalid_source());
+        }
+        let pinned = format!("{}/tree/{revision}", repo.trim_end_matches('/'));
+        let candidate =
+            git_skill_candidate_from_selection(self.paths(), self.store(), &pinned, subpath, None)
+                .map_err(map_install_error)?;
+        let (skill, action) = if let Some(existing) =
+            classify_git_candidate_with_policy(self, repo, &candidate, Some(&name), true)?
+        {
+            (
+                self.show_skill(SkillSelector::Id(existing.id))?,
+                InstallAction::Unchanged,
+            )
+        } else {
+            let installed = crate::core::installer::install_git_skill_from_selection_at_revision(
+                self.paths(),
+                self.store(),
+                repo,
+                subpath,
+                Some(name),
+                None,
+                Some(revision),
+            )
+            .map_err(map_install_error)?;
+            (
+                self.show_skill(SkillSelector::Id(installed.skill_id))?,
+                InstallAction::Installed,
+            )
+        };
+        Ok(InstallOutcome {
+            action,
+            pending_targets: Vec::new(),
+            id: skill.id,
+            name: skill.name,
+            central_path: skill.central_path,
+            content_hash: skill.content_hash,
+            source: skill.source,
+            targets: skill.targets,
+        })
+    }
+
     pub fn install(&self, request: InstallRequest) -> Result<InstallOutcome, ServiceError> {
         self.install_with_cancel(request, None)
     }
@@ -473,19 +533,53 @@ impl SkillsHubService {
         candidates: Vec<GitSkillCandidate>,
         name: Option<&str>,
     ) -> Result<Vec<GitInstallCandidate>, ServiceError> {
+        self.git_install_local_preview_with_policy(reference, candidates, name, false)
+    }
+
+    pub(crate) fn collection_install_preview(
+        &self,
+        reference: &str,
+        candidates: Vec<GitSkillCandidate>,
+    ) -> Result<Vec<GitInstallCandidate>, ServiceError> {
+        validate_collection_repository(reference)?;
+        self.git_install_local_preview_with_policy(reference, candidates, None, true)
+    }
+
+    pub(crate) fn list_collection_skills(
+        &self,
+        reference: &str,
+        revision: &str,
+    ) -> Result<Vec<GitInstallCandidate>, ServiceError> {
+        validate_collection_repository(reference)?;
+        if revision.len() != 40 || !revision.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(invalid_source());
+        }
+        let pinned = format!("{}/tree/{revision}", reference.trim_end_matches('/'));
+        let candidates = self.git_install_candidates_with_cancel(&pinned, None)?;
+        self.collection_install_preview(reference, candidates)
+    }
+
+    fn git_install_local_preview_with_policy(
+        &self,
+        reference: &str,
+        candidates: Vec<GitSkillCandidate>,
+        name: Option<&str>,
+        collection: bool,
+    ) -> Result<Vec<GitInstallCandidate>, ServiceError> {
         self.ensure_database_compatible()?;
         validate_git_reference(reference)?;
         candidates
             .into_iter()
             .map(|candidate| {
                 validate_subpath(&candidate.subpath)?;
-                let (status, existing_skill_id) =
-                    match classify_git_candidate(self, reference, &candidate, name) {
-                        Ok(Some(existing)) => ("update", Some(existing.id)),
-                        Ok(None) => ("install", None),
-                        Err(error) if error.code == ErrorCode::TargetConflict => ("conflict", None),
-                        Err(error) => return Err(error),
-                    };
+                let (status, existing_skill_id) = match classify_git_candidate_with_policy(
+                    self, reference, &candidate, name, collection,
+                ) {
+                    Ok(Some(existing)) => ("update", Some(existing.id)),
+                    Ok(None) => ("install", None),
+                    Err(error) if error.code == ErrorCode::TargetConflict => ("conflict", None),
+                    Err(error) => return Err(error),
+                };
                 Ok(GitInstallCandidate {
                     candidate,
                     status,
@@ -535,6 +629,30 @@ impl SkillsHubService {
             changed: updated.changed,
         })
     }
+}
+
+fn validate_collection_repository(repo: &str) -> Result<(), ServiceError> {
+    let url = reqwest::Url::parse(repo).map_err(|_| invalid_source())?;
+    let parts = url.path().trim_matches('/').split('/').collect::<Vec<_>>();
+    if url.scheme() != "https"
+        || url.host_str() != Some("github.com")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || parts.len() != 2
+        || parts.iter().any(|part| {
+            part.is_empty()
+                || matches!(*part, "." | "..")
+                || !part
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+        })
+    {
+        return Err(invalid_source());
+    }
+    Ok(())
 }
 
 fn bundled_conflict(path: &Path, reason: &str) -> ServiceError {
@@ -693,6 +811,16 @@ fn classify_git_candidate(
     candidate: &GitSkillCandidate,
     name: Option<&str>,
 ) -> Result<Option<crate::core::skill_store::SkillRecord>, ServiceError> {
+    classify_git_candidate_with_policy(service, reference, candidate, name, false)
+}
+
+fn classify_git_candidate_with_policy(
+    service: &SkillsHubService,
+    reference: &str,
+    candidate: &GitSkillCandidate,
+    name: Option<&str>,
+    collection: bool,
+) -> Result<Option<crate::core::skill_store::SkillRecord>, ServiceError> {
     let desired_name = name.unwrap_or(&candidate.name);
     validate_skill_name(desired_name)?;
     let records = service
@@ -704,7 +832,12 @@ fn classify_git_candidate(
         .filter(|record| {
             record.source_type == "git"
                 && record.source_ref.as_deref().is_some_and(|source| {
-                    same_git_skill_source(
+                    let same_source = if collection {
+                        crate::core::installer::same_collection_skill_source
+                    } else {
+                        same_git_skill_source
+                    };
+                    same_source(
                         source,
                         record.source_subpath.as_deref(),
                         reference,
