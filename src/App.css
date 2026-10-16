@@ -7134,6 +7134,7 @@
 .install-source-field { display: flex; flex-direction: column; gap: 8px; margin: 24px 24px 0; font-size: 13px; font-weight: 500; }
 .install-source-field .input-row { display: flex; gap: 8px; }
 .install-source-field .input { min-width: 0; flex: 1; font-weight: 400; }
+.install-source-error { margin: 14px 24px 0; color: var(--status-error); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .install-source-help { display: flex; align-items: flex-start; gap: 8px; margin: 14px 24px 24px; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
 .install-source-help svg { flex-shrink: 0; margin-top: 2px; color: var(--accent-primary); }
 .modal.install-source-dialog .modal-footer { background: var(--bg-app); padding: 14px 24px; }

@@ -1752,11 +1752,12 @@ pub fn list_git_skills(
     cancel: Option<&CancelToken>,
 ) -> Result<Vec<GitSkillCandidate>> {
     let parsed = parse_github_url(repo_url);
-    let (repo_dir, _rev) = clone_to_cache(
+    let (repo_dir, _rev) = clone_to_cache_for_subpath(
         paths,
         store,
         &parsed.clone_url,
         parsed.branch.as_deref(),
+        parsed.subpath.as_deref(),
         cancel,
     )?;
 
@@ -2056,11 +2057,12 @@ pub(crate) fn git_skill_candidate_from_selection(
     cancel: Option<&CancelToken>,
 ) -> Result<GitSkillCandidate> {
     let parsed = parse_github_url(reference);
-    let (repo_dir, _) = clone_to_cache(
+    let (repo_dir, _) = clone_to_cache_for_subpath(
         paths,
         store,
         &parsed.clone_url,
         parsed.branch.as_deref(),
+        Some(subpath),
         cancel,
     )?;
     let selected = repo_dir.join(subpath);
@@ -2105,11 +2107,15 @@ pub(crate) fn git_install_content_is_unmodified(
         return Ok(false);
     };
     let parsed = parse_github_url(reference);
-    let (repo_dir, _) = clone_to_cache(
+    let (repo_dir, _) = clone_to_cache_for_subpath(
         paths,
         store,
         &parsed.clone_url,
         parsed.branch.as_deref(),
+        record
+            .source_subpath
+            .as_deref()
+            .or(parsed.subpath.as_deref()),
         cancel,
     )?;
     let repo = git2::Repository::open(repo_dir)?;
@@ -2201,11 +2207,12 @@ pub fn install_git_skill_from_selection_at_revision(
         return Err(SkillAlreadyExistsError::new(central_path).into());
     }
 
-    let (repo_dir, revision) = clone_to_cache(
+    let (repo_dir, revision) = clone_to_cache_for_subpath(
         paths,
         store,
         &parsed.clone_url,
         revision.or(parsed.branch.as_deref()),
+        Some(subpath),
         cancel,
     )?;
 
@@ -2317,6 +2324,25 @@ struct RepoCacheMeta {
 }
 
 static GIT_CACHE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+// Keep discovery, selection validation, and installation scoped to the same source.
+// A full checkout can fail on unrelated LFS assets even when the Skill is ordinary text.
+fn clone_to_cache_for_subpath(
+    paths: &RuntimePaths,
+    store: &SkillStore,
+    clone_url: &str,
+    branch: Option<&str>,
+    subpath: Option<&str>,
+    cancel: Option<&CancelToken>,
+) -> Result<(PathBuf, String)> {
+    if let Some(subpath) = subpath.filter(|path| *path != ".") {
+        if super::git_fetcher::system_git_available() {
+            return clone_to_cache_subpath(paths, store, clone_url, branch, subpath, cancel);
+        }
+    }
+    // Preserve support for installations that only have the built-in Git implementation.
+    clone_to_cache(paths, store, clone_url, branch, cancel)
+}
 
 fn clone_to_cache(
     paths: &RuntimePaths,

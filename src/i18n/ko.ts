@@ -1226,6 +1226,7 @@ export const ko = {
       "skillExistsInHubNamed": "중앙 저장소 폴더는 Skills Hub에서 관리하며 수동 배치에 사용할 수 없습니다. \"{{name}}\"을 다른 곳으로 이동한 다음 로컬 디렉터리에서 다시 추가하세요.",
       "targetExists": "대상 폴더가 이미 존재합니다. 제거한 후 다시 시도해 주세요.",
       "targetExistsDetail": "대상 폴더가 이미 존재합니다: {{path}}. 안전을 위해 덮어쓰지 않았습니다.",
+      "gitLfsFailed": "Git LFS 리소스를 체크아웃하지 못했습니다. Git LFS 설치 및 리소스 접근 권한을 확인하거나 해당 Skill 폴더 URL로 다시 시도하세요.",
       "toolNotInstalled": "선택한 도구가 설치되지 않았습니다. 새로고침하고 다시 시도하세요.",
       "toolPathChanged": "{{tool}}의 동기화 디렉터리가 {{path}}(으)로 변경되었지만 이전 배포 기록이 아직 정리되지 않았습니다. 이 스킬을 비활성화한 다음 다시 활성화하세요. 계속 실패하면 이 메시지를 알려 주세요.",
       "toolNotWritable": "{{tool}}에 동기화할 수 없습니다. {{path}}에 대한 권한이 거부되었습니다. 디렉터리 권한을 확인하거나 관리자 권한으로 실행하세요.",

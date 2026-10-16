@@ -1123,6 +1123,17 @@ fn map_update_error(error: anyhow::Error) -> ServiceError {
 
 fn map_remote_error(safe_error: &str) -> Option<ServiceError> {
     let lower = safe_error.to_lowercase();
+    // LFS checkout failures may contain "not found" for a local executable or an
+    // asset. They do not establish that the Git repository itself is missing.
+    if (lower.contains("lfs") && lower.contains("filter"))
+        || lower.contains("git: 'lfs' is not a git command")
+    {
+        return Some(ServiceError::new(
+            ErrorCode::InvalidSource,
+            "Git LFS checkout failed; check Git LFS installation and asset access, or use a Skill subdirectory URL",
+            json!({ "legacy_category": "git_lfs" }),
+        ));
+    }
     let category = crate::core::skill_issues::safe_code(safe_error);
     let remote_context = lower.contains("github")
         || lower.contains("git ")
@@ -1192,6 +1203,20 @@ fn map_remote_error(safe_error: &str) -> Option<ServiceError> {
 #[cfg(test)]
 mod error_mapping_tests {
     use super::*;
+
+    #[test]
+    fn issue_195_lfs_failure_is_not_a_missing_repository() {
+        for reason in [
+            "git-lfs filter-process: git-lfs: command not found",
+            "error: external filter git-lfs filter-process failed: object not found",
+        ] {
+            let error = map_install_error(anyhow::anyhow!(
+                "git clone https://github.com/owner/repo failed: {reason} token=secret"
+            ));
+            assert_eq!(error.details["legacy_category"], "git_lfs");
+            assert!(!serde_json::to_string(&error).unwrap().contains("secret"));
+        }
+    }
 
     #[test]
     fn localized_git_failures_keep_stable_safe_categories() {

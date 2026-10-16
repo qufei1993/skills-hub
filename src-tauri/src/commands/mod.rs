@@ -460,6 +460,7 @@ fn format_service_error(error: crate::services::error::ServiceError) -> String {
             }
         }
         _ => match error.details["legacy_category"].as_str() {
+            Some("git_lfs") => "GIT_LFS_ERROR".to_string(),
             Some("github_auth") => format_anyhow_error(anyhow::anyhow!(
                 "git clone https://github.com/<owner>/<repo> failed: authentication failed"
             )),
