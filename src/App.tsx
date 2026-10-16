@@ -24,7 +24,7 @@ import DeviceSyncPage from './components/skills/DeviceSyncPage'
 import RecycleBinPage from './components/skills/RecycleBinPage'
 import ConfirmActionModal from './components/skills/modals/ConfirmActionModal'
 import FilterBar from './components/skills/FilterBar'
-import { getSkillsView } from './components/skills/skillsView'
+import { getSkillsView, type SkillStatusFilter } from './components/skills/skillsView'
 import SkillDetailView from './components/skills/SkillDetailView'
 import Header from './components/skills/Header'
 import LoadingOverlay from './components/skills/LoadingOverlay'
@@ -244,6 +244,8 @@ function App() {
   const [tags, setTags] = useState<TagWithCountDto[]>([])
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([])
   const [includeUntagged, setIncludeUntagged] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<SkillStatusFilter>('all')
+  const [selectedToolIds, setSelectedToolIds] = useState<string[]>([])
   const [tagEditorSkill, setTagEditorSkill] = useState<ManagedSkill | null>(null)
   const [pendingRenameTag, setPendingRenameTag] = useState<TagWithCountDto | null>(null)
   const [pendingDeleteTag, setPendingDeleteTag] = useState<TagWithCountDto | null>(null)
@@ -1004,16 +1006,18 @@ function App() {
     [skillScopeState],
   )
 
-  const { visibleSkills, filterTags, filterUntaggedCount, bulkSelectedSkills } = useMemo(
+  const { visibleSkills, filterTags, filterUntaggedCount, statusCounts, toolCounts, bulkSelectedSkills } = useMemo(
     () => getSkillsView({
       managedSkills, tags, scopeFilter, searchQuery, selectedTagIds,
       includeUntagged, sortBy, bulkSelectedIds, getSkillScope, issuesOnly,
+      statusFilter, selectedToolIds,
     }),
     [managedSkills, tags, scopeFilter, searchQuery, selectedTagIds,
-      includeUntagged, sortBy, bulkSelectedIds, getSkillScope, issuesOnly],
+      includeUntagged, sortBy, bulkSelectedIds, getSkillScope, issuesOnly,
+      statusFilter, selectedToolIds],
   )
   const hasListFilters = issuesOnly || scopeFilter !== 'all' || searchQuery.trim() !== '' ||
-    selectedTagIds.length > 0 || includeUntagged
+    selectedTagIds.length > 0 || includeUntagged || statusFilter !== 'all' || selectedToolIds.length > 0
   const untaggedCount = useMemo(
     () => managedSkills.filter((skill) => skill.tags.length === 0).length,
     [managedSkills],
@@ -1742,6 +1746,19 @@ function App() {
     setIncludeUntagged(false)
   }, [])
 
+  const handleToggleToolFilter = useCallback((toolId: string) => {
+    setSelectedToolIds((current) =>
+      current.includes(toolId)
+        ? current.filter((id) => id !== toolId)
+        : [...current, toolId],
+    )
+  }, [])
+
+  const handleClearSkillFilters = useCallback(() => {
+    setStatusFilter('all')
+    setSelectedToolIds([])
+  }, [])
+
   const handleOpenTagsPage = useCallback(() => {
     if (activeView === 'manage' && managementTab === 'tags') refreshLibrary()
     setManagementTab('tags')
@@ -1754,6 +1771,8 @@ function App() {
     setSearchQuery('')
     setSelectedTagIds([])
     setIncludeUntagged(false)
+    setStatusFilter('all')
+    setSelectedToolIds([])
   }, [])
 
   const handleReviewUntagged = useCallback(() => {
@@ -1761,6 +1780,8 @@ function App() {
     setSearchQuery('')
     setSelectedTagIds([])
     setIncludeUntagged(true)
+    setStatusFilter('all')
+    setSelectedToolIds([])
     setActiveView('myskills')
   }, [])
 
@@ -1769,6 +1790,8 @@ function App() {
     setSearchQuery('')
     setSelectedTagIds([tagId])
     setIncludeUntagged(false)
+    setStatusFilter('all')
+    setSelectedToolIds([])
     setActiveView('myskills')
   }, [])
 
@@ -3788,6 +3811,11 @@ function App() {
               selectedTagIds={selectedTagIds}
               includeUntagged={includeUntagged}
               untaggedCount={filterUntaggedCount}
+              statusFilter={statusFilter}
+              statusCounts={statusCounts}
+              tools={installedTools}
+              toolCounts={toolCounts}
+              selectedToolIds={selectedToolIds}
               bulkMode={bulkMode}
               bulkSelectedCount={bulkSelectedSkills.length}
               viewMode={skillViewMode}
@@ -3796,6 +3824,9 @@ function App() {
               onToggleTag={handleToggleTagFilter}
               onToggleUntagged={handleToggleUntaggedFilter}
               onClearTags={handleClearTagFilters}
+              onStatusFilterChange={setStatusFilter}
+              onToggleTool={handleToggleToolFilter}
+              onClearSkillFilters={handleClearSkillFilters}
               onManageTags={handleOpenTagsPage}
               onOpenTags={refreshLibrary}
               onToggleBulkMode={handleToggleBulkMode}

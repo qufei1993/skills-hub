@@ -1,7 +1,9 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUpDown, Check, CheckSquare, ChevronDown, LayoutGrid, List, Search, Tags } from 'lucide-react'
+import { ArrowUpDown, Check, CheckSquare, ChevronDown, LayoutGrid, List, ListFilter, Search, Tags } from 'lucide-react'
 import type { TFunction } from 'i18next'
-import type { TagWithCountDto } from './types'
+import type { TagWithCountDto, ToolOption } from './types'
+import type { SkillStatusFilter } from './skillsView'
+import ToolIcon from './ToolIcon'
 
 type FilterBarProps = {
   sortBy: 'updated' | 'name'
@@ -10,6 +12,11 @@ type FilterBarProps = {
   selectedTagIds: number[]
   includeUntagged: boolean
   untaggedCount: number
+  statusFilter: SkillStatusFilter
+  statusCounts: Record<SkillStatusFilter, number>
+  tools: ToolOption[]
+  toolCounts: Map<string, number>
+  selectedToolIds: string[]
   bulkMode: boolean
   bulkSelectedCount: number
   viewMode: 'list' | 'cards'
@@ -18,6 +25,9 @@ type FilterBarProps = {
   onToggleTag: (tagId: number) => void
   onToggleUntagged: () => void
   onClearTags: () => void
+  onStatusFilterChange: (value: SkillStatusFilter) => void
+  onToggleTool: (toolId: string) => void
+  onClearSkillFilters: () => void
   onManageTags: () => void
   onOpenTags?: () => void
   onToggleBulkMode: () => void
@@ -32,6 +42,11 @@ const FilterBar = ({
   selectedTagIds,
   includeUntagged,
   untaggedCount,
+  statusFilter,
+  statusCounts,
+  tools,
+  toolCounts,
+  selectedToolIds,
   bulkMode,
   bulkSelectedCount,
   viewMode,
@@ -40,6 +55,9 @@ const FilterBar = ({
   onToggleTag,
   onToggleUntagged,
   onClearTags,
+  onStatusFilterChange,
+  onToggleTool,
+  onClearSkillFilters,
   onManageTags,
   onOpenTags,
   onToggleBulkMode,
@@ -49,6 +67,10 @@ const FilterBar = ({
   const [tagMenuOpen, setTagMenuOpen] = useState(false)
   const [tagQuery, setTagQuery] = useState('')
   const tagMenuRef = useRef<HTMLDivElement | null>(null)
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false)
+  const filterMenuRef = useRef<HTMLDivElement | null>(null)
+  const selectedToolSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds])
+  const activeFilterCount = selectedToolIds.length + (statusFilter === 'all' ? 0 : 1)
   const selectedTagSet = useMemo(() => new Set(selectedTagIds), [selectedTagIds])
   const selectedCount = selectedTagIds.length + (includeUntagged ? 1 : 0)
   const filteredTags = useMemo(() => {
@@ -67,6 +89,17 @@ const FilterBar = ({
     document.addEventListener('mousedown', handlePointerDown)
     return () => document.removeEventListener('mousedown', handlePointerDown)
   }, [tagMenuOpen])
+
+  useEffect(() => {
+    if (!filterMenuOpen) return
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!filterMenuRef.current?.contains(event.target as Node)) {
+        setFilterMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handlePointerDown)
+    return () => document.removeEventListener('mousedown', handlePointerDown)
+  }, [filterMenuOpen])
 
   return (
     <div className="filter-bar">
@@ -93,6 +126,74 @@ const FilterBar = ({
             ? t('bulk.selectedShort', { count: bulkSelectedCount })
             : t('bulk.manage')}
         </button>
+        <div className="tag-filter-wrap" ref={filterMenuRef}>
+          <button
+            className={`btn btn-secondary tag-filter-btn${activeFilterCount > 0 ? ' active' : ''}`}
+            type="button"
+            aria-expanded={filterMenuOpen}
+            onClick={() => setFilterMenuOpen(!filterMenuOpen)}
+          >
+            <ListFilter size={14} />
+            {activeFilterCount > 0
+              ? t('filters.menuSelected', { count: activeFilterCount })
+              : t('filters.menu')}
+            <ChevronDown size={12} />
+          </button>
+          {filterMenuOpen ? (
+            <div className="tag-filter-menu">
+              <div className="tag-filter-head">
+                <span>{t('filters.status')}</span>
+                <span />
+              </div>
+              <div className="skill-status-filter settings-segmented" role="group" aria-label={t('filters.status')}>
+                {(['all', 'enabled', 'disabled'] as const).map((value) => (
+                  <button
+                    key={value}
+                    className={statusFilter === value ? 'active' : ''}
+                    type="button"
+                    aria-pressed={statusFilter === value}
+                    onClick={() => onStatusFilterChange(value)}
+                  >
+                    {t(`filters.status_${value}`)}
+                    <span className="tag-count">{statusCounts[value]}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="tag-filter-head">
+                <span>{t('filters.tools')}</span>
+                <span>{t('matchAny')}</span>
+              </div>
+              <div className="tag-filter-options">
+                {tools.map((tool) => {
+                  const selected = selectedToolSet.has(tool.id)
+                  const count = toolCounts.get(tool.id) ?? 0
+                  return (
+                    <button
+                      key={tool.id}
+                      className={`tag-filter-option${selected ? ' selected' : ''}`}
+                      type="button"
+                      onClick={() => onToggleTool(tool.id)}
+                      disabled={count === 0 && !selected}
+                      aria-pressed={selected}
+                    >
+                      <span className="tag-check">{selected ? <Check size={14} /> : null}</span>
+                      <span className="tool-filter-label">
+                        <ToolIcon toolKey={tool.id} label={tool.label} avatar={tool.avatar} />
+                        {tool.label}
+                      </span>
+                      <span className="tag-count">{count}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="tag-filter-footer">
+                <button type="button" onClick={onClearSkillFilters} disabled={activeFilterCount === 0}>
+                  {t('clearAll')}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
         <div className="tag-filter-wrap" ref={tagMenuRef}>
           <button
             className={`btn btn-secondary tag-filter-btn${selectedCount > 0 ? ' active' : ''}`}

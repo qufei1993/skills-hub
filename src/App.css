@@ -316,6 +316,48 @@
   cursor: not-allowed;
 }
 
+.tag-filter-menu .skill-status-filter {
+  display: flex;
+  width: auto;
+  margin: 0 12px 10px;
+}
+
+.tag-filter-menu .skill-status-filter button {
+  flex: 1;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.tag-filter-menu .skill-status-filter button.active {
+  background: var(--accent-soft-bg);
+  color: var(--accent-primary);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.45);
+}
+
+.tag-filter-menu .skill-status-filter button.active .tag-count {
+  color: inherit;
+}
+
+.tool-filter-label {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tool-filter-label .tool-brand-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+}
+
 .sort-btn {
   height: 36px;
   padding: 0 12px;

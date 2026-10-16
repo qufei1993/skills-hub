@@ -45,6 +45,31 @@ describe('scope-aware Skills view', () => {
     expect(restored.bulkSelectedSkills.map((item) => item.id)).toEqual(['global-write', 'project-both', 'project-write'])
   })
 
+  it('filters by enabled state and counts each status within the other filters', () => {
+    const view = getSkillsView({
+      ...defaults,
+      managedSkills: [skill('on', [1]), { ...skill('off', [1]), enabled: false }, { ...skill('off-code', [2]), enabled: false }],
+      statusFilter: 'disabled', selectedTagIds: [1],
+    })
+    expect(view.visibleSkills.map((item) => item.id)).toEqual(['off'])
+    expect(view.statusCounts).toEqual({ all: 2, enabled: 1, disabled: 1 })
+    expect(view.filterTags.map((tag) => tag.skill_count)).toEqual([1, 1])
+  })
+
+  it('filters by any selected tool with a healthy active target and counts tools independently', () => {
+    const target = (tool: string, status = 'ok') => ({ tool, scope: 'global', mode: 'symlink', status, target_path: `/${tool}` })
+    const managedSkills = [
+      { ...skill('both', []), targets: [target('codex'), target('cursor')] },
+      { ...skill('codex-only', []), targets: [target('codex')] },
+      { ...skill('cursor-failed', []), targets: [target('cursor', 'error')] },
+      { ...skill('cursor-disabled', []), enabled: false, targets: [target('cursor', 'disabled')] },
+    ]
+    const view = getSkillsView({ ...defaults, managedSkills, selectedToolIds: ['cursor', 'missing'] })
+    expect(view.visibleSkills.map((item) => item.id)).toEqual(['both'])
+    expect(Object.fromEntries(view.toolCounts)).toEqual({ codex: 2, cursor: 1 })
+    expect(view.statusCounts).toEqual({ all: 1, enabled: 1, disabled: 0 })
+  })
+
   it('keeps any-match tag filtering, untagged selection, and scope constraints together', () => {
     const view = getSkillsView({ ...defaults, scopeFilter: 'global', selectedTagIds: [2], includeUntagged: true })
     expect(view.visibleSkills.map((item) => item.id)).toEqual(['global-none'])
