@@ -331,8 +331,11 @@ impl SkillsHubService {
             name: record.name,
             description: record.description,
             source: SkillSource {
+                reference: record
+                    .source_ref
+                    .as_deref()
+                    .map(|reference| redact_source_reference(reference, &record.source_type)),
                 kind: record.source_type,
-                reference: record.source_ref.as_deref().map(redact_source_reference),
                 subpath: record.source_subpath,
                 revision: record.source_revision,
             },
@@ -390,7 +393,19 @@ fn expand_home_path_in(input: &str, home_root: &Path) -> PathBuf {
     PathBuf::from(input)
 }
 
-fn redact_source_reference(reference: &str) -> String {
+fn redact_source_reference(reference: &str, source_type: &str) -> String {
+    // Local paths can contain literal '?' and '#', including Windows' \\?\ prefix.
+    // Still redact URL-shaped values in malformed local records.
+    let absolute_local_path = reference.starts_with('/')
+        || reference.starts_with(r"\\")
+        || (reference
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphabetic)
+            && matches!(reference.as_bytes().get(1..3), Some(b":\\" | b":/")));
+    if source_type == "local" && absolute_local_path && !reference.contains("://") {
+        return reference.to_string();
+    }
     let Ok(mut url) = reqwest::Url::parse(reference) else {
         return reference
             .split(['?', '#'])

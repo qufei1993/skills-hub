@@ -59,7 +59,7 @@ tempfile = "3"
 git2 = { version = "0.19", features = ["vendored-openssl"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "socks"] }
 dotenvy = "0.15"
-junction = "1.1"
+junction = "1.4.2"
 uuid = { version = "1", features = ["v4"] }
 urlencoding = "2.1"
 trash = "=3.3.1"

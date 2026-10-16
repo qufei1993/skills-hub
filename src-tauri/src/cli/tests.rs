@@ -351,6 +351,30 @@ fn json_success_recursively_redacts_sensitive_payload_values() {
 }
 
 #[test]
+fn sanitizer_preserves_local_drive_paths_without_exempting_url_credentials() {
+    let payload = super::sanitize::sanitize_payload(&json!({
+        "sources": [
+            {"kind": "local", "reference": r"C:\skills\demo#draft"},
+            {"kind": "local", "reference": r"\\?\C:\skills\demo"},
+            {"kind": "git", "reference": "x:/repo?custom=secret#secret"},
+            {"kind": "local", "reference": "x://user:secret@example.com/repo?custom=secret"},
+            {"kind": "local", "reference": r"C:\skills\https://user:secret@example.com/repo?token=secret"}
+        ],
+        "token": r"C:\skills\secret",
+    }));
+    assert_eq!(payload["sources"][0]["reference"], r"C:\skills\demo#draft");
+    assert_eq!(payload["sources"][1]["reference"], r"\\?\C:\skills\demo");
+    assert_eq!(payload["sources"][2]["reference"], "x:/repo");
+    assert_eq!(payload["sources"][3]["reference"], "x://example.com/repo");
+    assert_eq!(
+        payload["sources"][4]["reference"],
+        r"C:\skills\https://example.com/repo"
+    );
+    assert_eq!(payload["token"], "[REDACTED]");
+    assert!(!payload.to_string().contains("secret"));
+}
+
+#[test]
 fn sanitizer_handles_arbitrary_url_schemes_and_whitespace_auth_credentials() {
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();

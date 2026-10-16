@@ -533,6 +533,7 @@ impl SkillsHubService {
         mut plan: DeploymentPlan,
     ) -> Result<DeploymentOutcome, ServiceError> {
         let mut prepared = Vec::new();
+        let mut stage = "prepare_target";
         let result = (|| -> anyhow::Result<()> {
             for ((target, expected), parents) in plan
                 .targets
@@ -548,6 +549,7 @@ impl SkillsHubService {
                     parents.clone(),
                 )?);
             }
+            stage = "activate_target";
             for replacement in &mut prepared {
                 replacement.activate()?;
             }
@@ -561,6 +563,7 @@ impl SkillsHubService {
                 DeploymentScope::Global => None,
                 DeploymentScope::Project(path) => Some(path.to_string_lossy().into_owned()),
             };
+            stage = "read_baseline";
             if !plan.undeploy {
                 for (target, replacement) in plan.targets.iter_mut().zip(&prepared) {
                     #[cfg(test)]
@@ -610,14 +613,17 @@ impl SkillsHubService {
                     }
                 }
             }
+            stage = "verify_source";
             anyhow::ensure!(
                 Some(hash_dir_strict(&plan.source)?.as_str())
                     == plan.snapshot["source_hash"].as_str(),
                 "PLAN_STALE"
             );
+            stage = "verify_target";
             for replacement in &prepared {
                 replacement.verify_unchanged()?;
             }
+            stage = "commit_records";
             self.store().commit_deployment_targets(
                 &upserts,
                 if plan.undeploy { &plan.rows } else { &[] },
@@ -636,6 +642,20 @@ impl SkillsHubService {
             Ok(())
         })();
         if let Err(error) = result {
+            // Return only structured diagnostics: raw causes may contain credentials or SQL.
+            let io_error = error
+                .chain()
+                .find_map(|cause| cause.downcast_ref::<std::io::Error>());
+            let reason = if error.to_string().contains("PLAN_STALE") {
+                "state_changed"
+            } else if io_error.is_some() {
+                "filesystem_error"
+            } else if error.chain().any(|cause| cause.is::<rusqlite::Error>()) {
+                "database_error"
+            } else {
+                "operation_failed"
+            };
+            let os_error = io_error.and_then(std::io::Error::raw_os_error);
             let mut recovery = Vec::new();
             for (target, replacement) in plan.targets.iter().zip(prepared.iter_mut()).rev() {
                 if replacement.rollback().is_err() {
@@ -649,7 +669,7 @@ impl SkillsHubService {
                     ErrorCode::InternalError
                 },
                 "deployment failed; original targets were retained",
-                json!({"recovery":recovery}),
+                json!({"stage":stage,"reason":reason,"os_error":os_error,"recovery":recovery}),
             ));
         }
         for replacement in &mut prepared {

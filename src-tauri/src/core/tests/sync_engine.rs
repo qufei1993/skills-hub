@@ -523,6 +523,31 @@ fn explicit_junction_mode_reports_unsupported_platform() {
 
 #[cfg(windows)]
 #[test]
+fn junction_with_canonical_long_unicode_source_remains_readable() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root
+        .path()
+        .join("本地技能")
+        .join("a".repeat(90))
+        .join("b".repeat(90))
+        .join("c".repeat(90));
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("SKILL.md"), b"local skill").unwrap();
+    let source = fs::canonicalize(source).unwrap();
+    let target = fs::canonicalize(root.path()).unwrap().join("deployed");
+
+    let outcome =
+        sync_dir_with_mode_with_overwrite(SyncMode::Junction, &source, &target, false).unwrap();
+
+    assert_eq!(outcome.mode_used, SyncMode::Junction);
+    assert_eq!(fs::read(target.join("SKILL.md")).unwrap(), b"local skill");
+    assert_eq!(fs::canonicalize(&target).unwrap(), source);
+    crate::core::sync_engine::remove_path_permanently(&target).unwrap();
+    assert!(source.join("SKILL.md").is_file());
+}
+
+#[cfg(windows)]
+#[test]
 fn overwrite_removes_junction_without_removing_its_target() {
     let source = tempfile::tempdir().unwrap();
     fs::write(source.path().join("source.txt"), b"source").unwrap();
