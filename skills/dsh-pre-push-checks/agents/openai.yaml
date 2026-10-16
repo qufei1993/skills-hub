@@ -1,0 +1,6 @@
+interface:
+  display_name: "DSH 交付检查"
+  short_description: "交付前核实项目必需检查、当前构建产物，以及真实用户行为"
+  default_prompt: "使用 $dsh-pre-push-checks 验证当前改动是否具备交付条件。"
+policy:
+  allow_implicit_invocation: true

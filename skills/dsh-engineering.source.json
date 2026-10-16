@@ -1,0 +1,23 @@
+{
+  "project": "DSH Engineering",
+  "version": "1.0.0",
+  "commit": "42e7c4f10546995f9a8e57ba91b2c98303818039",
+  "path": "skills/",
+  "skills": [
+    "dsh-ci-test-reliability",
+    "dsh-client-ui-ux",
+    "dsh-code-review",
+    "dsh-doc",
+    "dsh-engineering",
+    "dsh-error-handling",
+    "dsh-find-simplifications",
+    "dsh-pre-push-checks",
+    "dsh-record-browser-gif",
+    "dsh-speed-up-perf",
+    "dsh-translate-docs"
+  ],
+  "upstream": {
+    "url": "https://github.com/deepseek-ai/deepseek-harness",
+    "commit": "571902028a75c64c1d767f4ae5fd099485f0ddf0"
+  }
+}
