@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep open Skill tooltips in sync with the latest tool sync state, and hide them when the Skill is disabled or the tool is removed.
+
 ### Added
 
 - **Status and tool filters for Skills**: Filter the library by enabled or disabled state and by the tools each Skill is currently synced to (match any). Counts reflect the other active filters, and Clear filters resets them together with search, scope, and tags.
