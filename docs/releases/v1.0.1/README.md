@@ -16,7 +16,7 @@ Unreleased. This version is being prepared for publication.
 | Problem | Issue | Pull request | Details |
 | --- | --- | --- | --- |
 | Open tooltips could show stale sync states after a tool was toggled. | — | [#202](https://github.com/qufei1993/skills-hub/pull/202) | Refresh the hint with the current state; hide it when the Skill is disabled or the tool is removed. |
-| Successful or unchanged batch updates left a result panel requiring manual dismissal. | — | — | Show a brief completion notification; retain results requiring attention. |
+| Successful or unchanged batch updates left a result panel requiring manual dismissal. | — | [#203](https://github.com/qufei1993/skills-hub/pull/203) | Show a brief completion notification; retain results requiring attention. |
 | Collection installs now use the latest default-branch commit consistently across a batch and retries, and new installs support future updates. | — | [#199](https://github.com/qufei1993/skills-hub/pull/199) | Existing same-source Skills, website links and collection data remain compatible. |
 | Windows junction deployment could fail after preview, and CLI local paths could lose literal characters. | [#196](https://github.com/qufei1993/skills-hub/issues/196) | [#201](https://github.com/qufei1993/skills-hub/pull/201) | Fix canonical-path handling and include safe deployment failure diagnostics. |
 | Unrelated Git LFS assets could block subdirectory Skill discovery and installation. | [#195](https://github.com/qufei1993/skills-hub/issues/195) | [#200](https://github.com/qufei1993/skills-hub/pull/200) | Limit checkout to the requested subdirectory and keep discovery errors visible. |

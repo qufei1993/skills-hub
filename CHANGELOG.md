@@ -18,7 +18,7 @@ All notable changes to this project will be documented in this file.
 
 - Keep open Skill tooltips in sync with the latest tool sync state, and hide them when the Skill is disabled or the tool is removed. ([PR #202](https://github.com/qufei1993/skills-hub/pull/202))
 
-- Successful batch updates, including batches with no changes, now show a brief completion notification instead of leaving a result panel open. Failed, skipped, cancelled and pending-tool results remain available until dismissed.
+- Successful batch updates, including batches with no changes, now show a brief completion notification instead of leaving a result panel open. Failed, skipped, cancelled and pending-tool results remain available until dismissed. ([PR #203](https://github.com/qufei1993/skills-hub/pull/203))
 
 - Collection installs now resolve the latest default-branch commit once per repository and keep it consistent across the batch and retries. New installs track the default branch for future updates; existing same-source Skills are preserved. Website links and published collection data remain compatible. ([PR #199](https://github.com/qufei1993/skills-hub/pull/199))
 
