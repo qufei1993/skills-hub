@@ -53,26 +53,24 @@ it('installs and upgrades atomically with a valid checksum and idempotent shell 
   assert.equal(existsSync(path.join(home, '.skills-hub')), false)
 }))
 
-it('maps all four supported Unix targets to release asset names', () => {
-  for (const [os, arch, target] of [['Darwin','arm64','darwin-arm64'], ['Darwin','x86_64','darwin-x64'], ['Linux','aarch64','linux-arm64'], ['Linux','x86_64','linux-x64']]) {
-    fixture(({ root, install }) => {
-      const result = install({ TEST_OS: os, TEST_ARCH: arch })
-      assert.equal(result.status, 0, result.stderr)
-      assert.match(readFileSync(path.join(root, 'requests'), 'utf8'), /https:\/\/github.com\/qufei1993\/skills-hub\/releases\/download\//)
-      assert.match(readFileSync(path.join(root, 'requests'), 'utf8'), new RegExp(`skillshub-cli-0.11.0-${target}`))
-    })
-  }
-})
+for (const [os, arch, target] of [['Darwin','arm64','darwin-arm64'], ['Darwin','x86_64','darwin-x64'], ['Linux','aarch64','linux-arm64'], ['Linux','x86_64','linux-x64']]) {
+  it(`maps ${os}/${arch} to the ${target} release asset`, () => fixture(({ root, install }) => {
+    const result = install({ TEST_OS: os, TEST_ARCH: arch })
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(readFileSync(path.join(root, 'requests'), 'utf8'), /https:\/\/github.com\/qufei1993\/skills-hub\/releases\/download\//)
+    assert.match(readFileSync(path.join(root, 'requests'), 'utf8'), new RegExp(`skillshub-cli-0.11.0-${target}`))
+  }))
+}
 
-it('leaves the existing CLI and shell profile untouched on download or checksum errors', () => {
-  for (const failure of ['download', 'checksum', 'filename']) fixture(({ root, home, dest, install }) => {
+for (const failure of ['download', 'checksum', 'filename']) {
+  it(`preserves the existing CLI and shell profile on ${failure} failure`, () => fixture(({ root, home, dest, install }) => {
     mkdirSync(path.dirname(dest), { recursive: true }); writeFileSync(dest, 'old-cli')
     assert.notEqual(install({ TEST_FAIL: failure }).status, 0)
     assert.equal(readFileSync(dest, 'utf8'), 'old-cli')
     assert.equal(existsSync(path.join(home, '.zshrc')), false)
     assert.equal(readdirSync(root).some(name => name.startsWith('skillshub-install.')), false)
-  })
-})
+  }))
+}
 
 it('rejects unsupported targets and malformed release tags before installation', () => {
   for (const overrides of [{ TEST_OS: 'FreeBSD' }, { TEST_ARCH: 'riscv64' }, { TEST_TAG: 'v0.11.0/evil' }]) fixture(({ install, dest }) => {

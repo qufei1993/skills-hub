@@ -3604,7 +3604,11 @@ function App() {
       retryIds.push(...bulkUpdatableSkills.slice(completed).map(skill => skill.id))
       setBulkSelectedIds(retryIds)
       setBulkMode(retryIds.length > 0)
-      setBulkUpdateResult(outcome)
+      if (outcome.failed > 0 || outcome.skipped > 0 || outcome.cancelled || outcome.remaining > 0 || outcome.pending.length > 0) {
+        setBulkUpdateResult(outcome)
+      } else {
+        setSuccessToastMessage(t('bulk.updateResult', outcome))
+      }
       bulkUpdateRunRef.current = null
       setBulkUpdating(false)
       setLoading(false)

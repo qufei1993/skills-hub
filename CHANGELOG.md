@@ -4,24 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Fixed
-
-- Keep open Skill tooltips in sync with the latest tool sync state, and hide them when the Skill is disabled or the tool is removed.
+## [1.0.1]
 
 ### Added
 
-- **Status and tool filters for Skills**: Filter the library by enabled or disabled state and by the tools each Skill is currently synced to (match any). Counts reflect the other active filters, and Clear filters resets them together with search, scope, and tags.
+- **Status and tool filters for Skills**: Filter the library by enabled or disabled state and by the tools each Skill is currently synced to (match any). Counts reflect the other active filters, and Clear filters resets them together with search, scope, and tags. ([PR #197](https://github.com/qufei1993/skills-hub/pull/197))
 
 ### Improved
 
-- **Tool sync icons on Skill cards**: Show the tool name and sync state immediately when hovering or focusing an icon, instead of waiting for the delayed native tooltip. Icons no longer overlap, so each one has its full click area.
+- **Tool sync icons on Skill cards**: Show the tool name and sync state immediately when hovering or focusing an icon, instead of waiting for the delayed native tooltip. Icons no longer overlap, so each one has its full click area. ([PR #198](https://github.com/qufei1993/skills-hub/pull/198))
 
 ### Fixed
 
-- Windows junction deployment now uses the upstream fix for canonical `\\?\` paths, preventing broken links from failing during execution after a successful preview. CLI local source paths retain their literal path characters, and deployment errors include safe stage and system-error diagnostics. ([#196](https://github.com/qufei1993/skills-hub/issues/196))
+- Keep open Skill tooltips in sync with the latest tool sync state, and hide them when the Skill is disabled or the tool is removed. ([PR #202](https://github.com/qufei1993/skills-hub/pull/202))
 
-- Collection installs now resolve the latest default-branch commit once per repository and keep it consistent across the batch and retries. New installs track the default branch for future updates; existing same-source Skills are preserved. Website links and published collection data remain compatible.
-- Git subdirectory discovery and selected installation now avoid checking out unrelated repository assets, preventing unrelated Git LFS failures from blocking Skill installation. LFS failures are no longer reported as missing repositories, and Git discovery errors remain visible in the source dialog. ([#195](https://github.com/qufei1993/skills-hub/issues/195))
+- Successful batch updates, including batches with no changes, now show a brief completion notification instead of leaving a result panel open. Failed, skipped, cancelled and pending-tool results remain available until dismissed.
+
+- Collection installs now resolve the latest default-branch commit once per repository and keep it consistent across the batch and retries. New installs track the default branch for future updates; existing same-source Skills are preserved. Website links and published collection data remain compatible. ([PR #199](https://github.com/qufei1993/skills-hub/pull/199))
+
+- Windows junction deployment now uses the upstream fix for canonical `\\?\` paths, preventing broken links from failing during execution after a successful preview. CLI local source paths retain their literal path characters, and deployment errors include safe stage and system-error diagnostics. ([#196](https://github.com/qufei1993/skills-hub/issues/196)) ([PR #201](https://github.com/qufei1993/skills-hub/pull/201))
+- Git subdirectory discovery and selected installation now avoid checking out unrelated repository assets, preventing unrelated Git LFS failures from blocking Skill installation. LFS failures are no longer reported as missing repositories, and Git discovery errors remain visible in the source dialog. ([#195](https://github.com/qufei1993/skills-hub/issues/195)) ([PR #200](https://github.com/qufei1993/skills-hub/pull/200))
 
 ## [1.0.0]
 
