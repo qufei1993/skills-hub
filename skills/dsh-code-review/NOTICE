@@ -1,0 +1,6 @@
+DSH Engineering 是独立改编项目，并非 DeepSeek 官方产品。
+改编指令与 GIF 编码器来源于 DeepSeek Harness，采用 MIT 许可。
+Copyright (c) 2026 DeepSeek
+每个安装单元包含 UPSTREAM.json，记录准确仓库、提交、源文件哈希及改编说明。
+这些信息在源码仓库中由 manifest.json 和 upstream/sources.json 统一维护。
+项目接入工具和通用发行层为新增工作。
