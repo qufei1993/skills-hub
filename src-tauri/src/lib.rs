@@ -40,6 +40,10 @@ fn runtime_context(is_background_update: bool) -> tauri::Context<tauri::Wry> {
 }
 
 fn runtime_paths<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> anyhow::Result<RuntimePaths> {
+    #[cfg(debug_assertions)]
+    if let Some(root) = std::env::var_os("SKILLSHUB_DESKTOP_TEST_ROOT") {
+        return RuntimePaths::from_desktop_test_root(std::path::PathBuf::from(root));
+    }
     if cfg!(feature = "local-test") {
         return RuntimePaths::for_cli(RuntimeProfile::Development);
     }
@@ -156,6 +160,7 @@ pub fn run() {
             }
 
             app.manage(Arc::new(CancelToken::new()));
+            app.manage(commands::content_check::ContentCheckRegistry::default());
 
             let sync_workspace = paths.app_data_dir.join("device-sync");
             let sync_central = core::central_repo::resolve_central_repo_path(&paths, &store)?;
@@ -278,6 +283,24 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::workspace::workspace_recheck,
+            commands::workspace::workspace_content_preview,
+            commands::content_check::workspace_content_check,
+            commands::content_check::workspace_content_check_cached,
+            commands::content_check::workspace_content_check_cancel,
+            commands::workspace::workspace_content_execute,
+            commands::workspace::workspace_recoveries,
+            commands::workspace::workspace_source_preview,
+            commands::workspace::workspace_source_execute,
+            commands::workspace::workspace_presets,
+            commands::workspace::workspace_save_preset,
+            commands::workspace::workspace_delete_preset,
+            commands::workspace::workspace_preview,
+            commands::workspace::workspace_execute,
+            commands::workspace::workspace_discard,
+            commands::workspace::workspace_history,
+            commands::workspace::workspace_preview_undo,
+            commands::workspace::workspace_undo,
             commands::collection_link::parse_collection_link,
             commands::collection_link::validate_collection_manifest,
             commands::get_central_repo_path,
@@ -311,6 +334,10 @@ pub fn run() {
             commands::list_git_skills_cmd,
             commands::preview_git_skills_local,
             commands::install_git_selection,
+            commands::resolve_collection_revision,
+            commands::preview_collection_skills_local,
+            commands::list_collection_skills,
+            commands::install_collection_selection,
             commands::sync_skill_dir,
             commands::sync_skill_to_tool,
             commands::unsync_skill_from_tool,

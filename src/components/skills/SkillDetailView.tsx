@@ -1,3 +1,4 @@
+import SkillUsage from './workspace/SkillUsage'
 import { hasUnboundLocalSource } from './skillSourceState'
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import SkillIssueNotice from './SkillIssueNotice'
@@ -34,6 +35,8 @@ import type { ManagedSkill, SkillFileEntry, ToolOption } from './types'
 
 // ─── Types ───────────────────────────────────────────
 type SkillDetailViewProps = {
+  onRepairSource?: () => void
+  onRepairTargets?: () => void
   skill: ManagedSkill
   onBack: () => void
   invokeTauri: <T>(command: string, args?: Record<string, unknown>) => Promise<T>
@@ -424,6 +427,8 @@ FileContentRenderer.displayName = 'FileContentRenderer'
 // ─── Main component ──────────────────────────────────
 const SkillDetailView = ({
   skill,
+  onRepairSource,
+  onRepairTargets,
   onBack,
   invokeTauri,
   formatRelative,
@@ -563,7 +568,7 @@ const SkillDetailView = ({
 
   return (
     <div className="detail-view">
-      <SkillIssueNotice skill={skill} tools={tools} t={t} />
+      <SkillIssueNotice onRepairTargets={onRepairTargets} onRepairSource={onRepairSource} skill={skill} tools={tools} t={t} />
       <div className="detail-header">
         <button className="detail-back-btn" type="button" onClick={onBack}>
           <ArrowLeft size={16} />
@@ -660,6 +665,7 @@ const SkillDetailView = ({
         </div>
       </div>
 
+      <SkillUsage skill={skill} invokeTauri={invokeTauri} t={t} />
       <div className="detail-body">
         <div className="detail-file-list">
           <div className="file-list-title">{t('detail.files')}</div>

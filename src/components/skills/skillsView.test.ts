@@ -52,3 +52,18 @@ describe('scope-aware Skills view', () => {
     expect(view.filterUntaggedCount).toBe(1)
   })
 })
+
+it('includes a mixed-scope Skill in global and each actual project without migration', () => {
+  const mixed = skill('mixed', [])
+  mixed.targets = [
+    { tool: 'codex', scope: 'global', target_path: '/global/mixed', mode: 'symlink', status: 'ok' },
+    { tool: 'codex', scope: 'project', project_path: '/one', target_path: '/one/.agents/skills/mixed', mode: 'symlink', status: 'ok' },
+    { tool: 'cursor', scope: 'project', project_path: '/two', target_path: '/two/.agents/skills/mixed', mode: 'copy', status: 'ok' },
+  ]
+  const options = { ...defaults, managedSkills: [mixed], getSkillScope: () => 'project' as const }
+  expect(getSkillsView({ ...options, scopeFilter: 'global' }).visibleSkills.map(s => s.id)).toEqual(['mixed'])
+  expect(getSkillsView({ ...options, scopeFilter: 'project', projectPath: '/one' }).visibleSkills.map(s => s.id)).toEqual(['mixed'])
+  expect(getSkillsView({ ...options, scopeFilter: 'project', projectPath: '/two' }).visibleSkills.map(s => s.id)).toEqual(['mixed'])
+  expect(getSkillsView({ ...options, scopeFilter: 'project', projectPath: '/missing' }).visibleSkills).toEqual([])
+  expect(mixed.targets).toHaveLength(3)
+})

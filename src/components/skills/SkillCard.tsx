@@ -11,6 +11,9 @@ import SkillIssueNotice from './SkillIssueNotice'
 type GithubInfo = { label: string; href: string }
 
 type SkillCardProps = {
+  onRepairSource?: (skill: ManagedSkill) => void
+  projectContext?: boolean
+  onRemoveProject?: (skill: ManagedSkill) => void
   skill: ManagedSkill
   installedTools: ToolOption[]
   loading: boolean
@@ -34,6 +37,9 @@ type SkillCardProps = {
 
 const SkillCard = ({
   skill,
+  onRepairSource,
+  projectContext = false,
+  onRemoveProject,
   installedTools,
   loading,
   bulkMode,
@@ -62,7 +68,8 @@ const SkillCard = ({
   const scope = getSkillScope(skill)
   const projectCount = getSkillProjects(skill).length
   const enabled = skill.enabled !== false
-  const syncedToolCount = getFullySyncedTools(skill, installedTools, scope).length
+  // The list already narrows targets for a selected scope or project.
+  const syncedToolCount = getFullySyncedTools(skill, installedTools, 'all').length
   const handleCopySource = async () => {
     if (!copyValue) return
     try {
@@ -107,7 +114,7 @@ const SkillCard = ({
               >
                 <Copy size={12} />
               </button>
-              <SkillIssueNotice compact skill={skill} tools={installedTools} t={t} />
+              <SkillIssueNotice onRepairSource={() => onRepairSource?.(skill)} onRepairTargets={() => onOpenScope(skill)} compact skill={skill} tools={installedTools} t={t} />
             </div>
             <div className={`skill-description${skill.description?.trim() ? '' : ' empty'}`} title={description}>
               {description}
@@ -116,13 +123,13 @@ const SkillCard = ({
           </div>
         </div>
 
-        <button
+        {projectContext ? <button className="btn btn-secondary skill-manage-targets" onClick={() => onOpenScope(skill)}>{t('workspace110.manageTargets')}</button> : <button
           className={`skill-switch${enabled ? ' enabled' : ''}`}
           type="button"
           onClick={() => onToggleEnabled(skill)}
           disabled={loading}
           aria-label={enabled ? t('disableSkill') : t('enableSkill')}
-        ><span /></button>
+        ><span /></button>}
       </div>
 
       <div className="skill-card-meta">
@@ -135,7 +142,7 @@ const SkillCard = ({
         </div>
 
         <button className={`scope-badge ${scope}`} type="button" onClick={() => onOpenScope(skill)}>
-          {scope === 'project' ? t('scope.projectCount', { count: projectCount }) : t('scope.globalBadge')}
+          {skill.targets.some(target => target.scope === 'global') && projectCount > 0 ? t('workspace110.mixedScope', { count: projectCount }) : scope === 'project' ? t('scope.projectCount', { count: projectCount }) : t('scope.globalBadge')}
         </button>
 
         <div className="skill-updated">{formatRelative(skill.updated_at)}</div>
@@ -151,7 +158,7 @@ const SkillCard = ({
           </span>
           <div className="skill-tool-avatars">
             {installedTools.map((tool) => {
-              const syncState = getToolSyncState(skill, tool.id, scope)
+              const syncState = getToolSyncState(skill, tool.id, 'all')
               const synced = syncState === 'synced'
               const stateLabel =
                 syncState === 'failed'
@@ -186,7 +193,7 @@ const SkillCard = ({
         <div className="skill-actions-col">
           <button type="button" onClick={() => onEditTags(skill)} disabled={loading} aria-label={t('editTags')}><Tag size={16} /></button>
           <button type="button" onClick={() => onUpdate(skill)} disabled={loading || !enabled || unboundSource} title={unboundSource ? t('deviceSync.unboundSourceHelp') : t('update')} aria-label={t('update')}><RefreshCw size={16} /></button>
-          <button type="button" onClick={() => onDelete(skill.id)} disabled={loading} aria-label={t('remove')}><Trash2 size={16} /></button>
+          <button type="button" onClick={() => projectContext ? onRemoveProject?.(skill) : onDelete(skill.id)} disabled={loading} aria-label={t(projectContext ? 'workspace110.removeTargets' : 'remove')}><Trash2 size={16} /></button>
         </div>
       </div>
     </div>

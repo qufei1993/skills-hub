@@ -386,6 +386,7 @@ impl SkillStore {
 
             conn.execute_batch(DEVICE_SYNC_SCHEMA_V1)?;
             ensure_recycle_bin_schema(conn)?;
+            super::workspace::migrate(conn)?;
             conn.execute_batch("CREATE TABLE IF NOT EXISTS skill_source_checks (
                 skill_id TEXT PRIMARY KEY REFERENCES skills(id) ON DELETE CASCADE,
                 error_code TEXT NULL, checked_at INTEGER NOT NULL
@@ -1265,6 +1266,7 @@ impl SkillStore {
             }
             for (record, hash) in upserts {
                 upsert_skill_target_with_conn(&tx, record)?;
+                tx.execute("INSERT INTO workspace_documents(kind,id,payload,updated_at) VALUES ('target-use',?1,?2,?3) ON CONFLICT(kind,id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at",params![record.id,serde_json::to_string(&Uuid::new_v4().to_string())?,now_ms()])?;
                 tx.execute("INSERT INTO settings (key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                     params![format!("device_sync.target_baseline.{}", record.id), serde_json::to_string(&(&record.target_path, hash))?])?;
             }
@@ -1278,6 +1280,16 @@ impl SkillStore {
         &self,
         skill: &SkillRecord,
         targets: &[SkillTargetRecord],
+    ) -> Result<()> {
+        self.commit_skill_update_with_recovery(skill, targets, None, false)
+    }
+
+    pub(crate) fn commit_skill_update_with_recovery(
+        &self,
+        skill: &SkillRecord,
+        targets: &[SkillTargetRecord],
+        recovery: Option<&super::content_recovery::Recovery>,
+        restored: bool,
     ) -> Result<()> {
         self.with_conn(|conn| {
             let transaction = conn.unchecked_transaction()?;
@@ -1294,6 +1306,19 @@ impl SkillStore {
                 ON CONFLICT(skill_id) DO UPDATE SET error_code=NULL,checked_at=excluded.checked_at", params![skill.id, now_ms()])?;
             for target in targets {
                 upsert_skill_target_with_conn(&transaction, target)?;
+            }
+            if let Some(recovery) = recovery {
+                if restored {
+                    transaction.execute("DELETE FROM workspace_documents WHERE kind='content-recovery' AND id=?1", [&skill.id])?;
+                    transaction.execute("INSERT INTO settings(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![format!("workspace.update_hold.{}",skill.id), recovery.after_content_hash])?;
+                    let key = format!("device_sync.source_baseline.{}",skill.id);
+                    if let Some(baseline) = &recovery.before_baseline {
+                        transaction.execute("INSERT INTO settings(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![key,baseline])?;
+                    } else { transaction.execute("DELETE FROM settings WHERE key=?1",[key])?; }
+                } else {
+                    transaction.execute("INSERT INTO workspace_documents(kind,id,payload,updated_at) VALUES ('content-recovery',?1,?2,?3) ON CONFLICT(kind,id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at",params![skill.id,serde_json::to_string(recovery)?,now_ms()])?;
+                    transaction.execute("DELETE FROM settings WHERE key=?1",[format!("workspace.update_hold.{}",skill.id)])?;
+                }
             }
             transaction.commit()?;
             Ok(())
@@ -1371,6 +1396,22 @@ impl SkillStore {
         self.get_setting(&format!("device_sync.source_baseline.{id}"))?
             .map(|value| serde_json::from_str(&value).context("read Skill source baseline"))
             .transpose()
+    }
+
+    pub(crate) fn commit_source_repair(
+        &self,
+        skill: &SkillRecord,
+        source_hash: String,
+    ) -> Result<()> {
+        let baseline = SourceBaseline::from_skill(skill, source_hash).context("missing source")?;
+        self.with_conn(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute("UPDATE skills SET source_type=?2,source_ref=?3,source_subpath=?4,source_revision=?5,status='ok' WHERE id=?1",params![skill.id,skill.source_type,skill.source_ref,skill.source_subpath,skill.source_revision])?;
+            tx.execute("INSERT INTO settings(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![format!("device_sync.source_baseline.{}",skill.id),serde_json::to_string(&baseline)?])?;
+            tx.execute("INSERT INTO skill_source_checks(skill_id,error_code,checked_at) VALUES (?1,NULL,?2) ON CONFLICT(skill_id) DO UPDATE SET error_code=NULL,checked_at=excluded.checked_at",params![skill.id,now_ms()])?;
+            tx.execute("DELETE FROM workspace_documents WHERE kind='content-recovery' AND id=?1",[&skill.id])?;
+            tx.commit()?; Ok(())
+        })
     }
 
     pub(crate) fn record_source_check_success(

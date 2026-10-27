@@ -1,4 +1,6 @@
 pub mod collection_link;
+pub mod content_check;
+pub mod workspace;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -431,6 +433,9 @@ fn format_anyhow_error(err: anyhow::Error) -> String {
 
 fn format_service_error(error: crate::services::error::ServiceError) -> String {
     match error.code {
+        crate::services::error::ErrorCode::PlanStale => {
+            format!("PLAN_STALE|{}", error.message)
+        }
         crate::services::error::ErrorCode::MultiSkills => {
             let candidates = error
                 .details
@@ -454,7 +459,7 @@ fn format_service_error(error: crate::services::error::ServiceError) -> String {
                 (Some("shared_directory_scope_expansion"), _) => {
                     "SHARED_DIRECTORY_SCOPE_EXPANSION".into()
                 }
-                (Some("target_modified"), Some(path)) => format!("TARGET_MODIFIED|{path}"),
+                (Some("target_modified" | "modified_target"), Some(path)) => format!("TARGET_MODIFIED|{path}"),
                 (_, Some(path)) => format!("TARGET_EXISTS|{path}"),
                 _ => format_anyhow_error(anyhow::anyhow!(error.message)),
             }
@@ -1463,6 +1468,71 @@ pub async fn list_git_skills_cmd(
 
 #[tauri::command]
 #[allow(non_snake_case)]
+pub async fn preview_collection_skills_local(
+    service: State<'_, SkillsHubService>,
+    repoUrl: String,
+    candidates: Vec<crate::core::installer::GitSkillCandidate>,
+) -> Result<Vec<GitInstallCandidate>, String> {
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.collection_install_preview(&repoUrl, candidates)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(format_service_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn list_collection_skills(
+    service: State<'_, SkillsHubService>,
+    repoUrl: String,
+    revision: String,
+) -> Result<Vec<GitInstallCandidate>, String> {
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.list_collection_skills(&repoUrl, &revision)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(format_service_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn resolve_collection_revision(
+    service: State<'_, SkillsHubService>,
+    repoUrl: String,
+) -> Result<String, String> {
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || service.resolve_collection_revision(&repoUrl))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(format_service_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn install_collection_selection(
+    service: State<'_, SkillsHubService>,
+    repoUrl: String,
+    revision: String,
+    subpath: String,
+    name: String,
+) -> Result<InstallResultDto, String> {
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service
+            .install_collection_selection(&repoUrl, &revision, &subpath, name)
+            .map(to_service_install_dto)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(format_service_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
 pub async fn install_git_selection(
     service: State<'_, SkillsHubService>,
     cancel: State<'_, Arc<CancelToken>>,
@@ -1931,6 +2001,9 @@ pub struct ManagedSkillDto {
     pub description: Option<String>,
     pub source_type: String,
     pub source_ref: Option<String>,
+    pub source_revision: Option<String>,
+    pub source_subpath: Option<String>,
+    pub content_hash: Option<String>,
     pub central_path: String,
     pub created_at: i64,
     pub updated_at: i64,
@@ -1977,6 +2050,9 @@ impl From<ServiceSkill> for ManagedSkillDto {
             description: skill.description,
             source_type: skill.source.kind,
             source_ref: skill.source.reference,
+            source_revision: skill.source.revision,
+            source_subpath: skill.source.subpath,
+            content_hash: skill.content_hash,
             central_path: skill.central_path,
             created_at: skill.created_at,
             updated_at: skill.updated_at,

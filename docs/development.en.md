@@ -23,6 +23,19 @@ npm install
 npm run tauri:dev
 ```
 
+### Isolated desktop acceptance testing
+
+Normal development startup shares application data with production. For desktop tests that write skills or settings, start a debug build with an empty temporary directory:
+
+```bash
+skills_hub_desktop_test_root="$(mktemp -d)"
+SKILLSHUB_DESKTOP_TEST_ROOT="$skills_hub_desktop_test_root" npm run tauri:dev
+```
+
+The directory must already exist and use an absolute path; invalid values stop startup. This debug-only override selects the test runtime profile and places the database, default central library, Git cache, recycle bin, and CLI bridge directory under its `home/` and `data/` subdirectories. It does not import production or legacy data. Release builds, including local test packages, do not read this variable. Without the variable, startup behavior is unchanged.
+
+Use explicit source, project, and custom tool paths within the temporary directory for write tests. This override does not change the operating system home directory, built-in tool discovery, system credentials, application logs, or external integration targets; do not use it as isolation for authorization, AI management enablement, or terminal PATH changes. Keep the temporary directory while reviewing results, then remove only that test directory after stopping its application process.
+
 ## Build
 
 For local installation testing, build on the target operating system:

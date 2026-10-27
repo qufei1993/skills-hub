@@ -1,0 +1,12 @@
+{
+  "baseline": "v1.1.0-design-r1",
+  "created_on": "2026-10-24",
+  "status": "development-reference",
+  "note": "Prototype and product requirements only; production implementation and real filesystem validation are pending. Future designs must not replace this baseline.",
+  "files": {
+    "design.md": "02d41fc2ae5f6b391c028f46f3305908e9f47a8df3eaee89442a54dd5d4fc866",
+    "design-review.md": "2c4225f76903cffb78d14f0e4c13b3d654b851ca99db0cd913779ad17c6e973f",
+    "prototypes/skills-hub.html": "108f9a3f4e36542251af6dc89fa5d83d9fda3677a0c3049db8b99713a5dd25ad",
+    "development-handoff.md": "b459fa3a137fce4019ad4c45ccce2036779aabd8580a1a1b16126353360b5032"
+  }
+}

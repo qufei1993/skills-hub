@@ -80,11 +80,12 @@ it('keeps discovery useful before searching, searches in place, and restores col
 
 it('renders collections in batches, resets on search and preserves the batch on returning from details', async () => {
   let intersect: (visible: boolean) => void = () => {}
+  const observe = vi.fn()
   vi.stubGlobal('IntersectionObserver', class {
     constructor(callback: IntersectionObserverCallback) {
       intersect = visible => callback([{ isIntersecting: visible } as IntersectionObserverEntry], this as unknown as IntersectionObserver)
     }
-    observe() {}
+    observe() { observe() }
     disconnect() {}
   })
   await i18n.changeLanguage('zh')
@@ -104,6 +105,8 @@ it('renders collections in batches, resets on search and preserves the batch on 
   render(<Page />)
   const cards = () => screen.getAllByRole('button', { name: /^查看 / })
   await waitFor(() => expect(cards()).toHaveLength(12))
+  // The cards can commit before the passive effect registers the pagination observer.
+  await waitFor(() => expect(observe).toHaveBeenCalled())
   act(() => { intersect(true); intersect(true) })
   expect(cards()).toHaveLength(24)
   act(() => intersect(false))

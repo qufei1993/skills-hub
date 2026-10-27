@@ -32,3 +32,7 @@ pub mod website_collections;
 #[cfg(test)]
 #[path = "tests/runtime_paths.rs"]
 mod runtime_paths_tests;
+
+pub mod workspace;
+
+pub mod content_recovery;

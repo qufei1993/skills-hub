@@ -53,16 +53,15 @@ it('installs and upgrades atomically with a valid checksum and idempotent shell 
   assert.equal(existsSync(path.join(home, '.skills-hub')), false)
 }))
 
-it('maps all four supported Unix targets to release asset names', () => {
-  for (const [os, arch, target] of [['Darwin','arm64','darwin-arm64'], ['Darwin','x86_64','darwin-x64'], ['Linux','aarch64','linux-arm64'], ['Linux','x86_64','linux-x64']]) {
-    fixture(({ root, install }) => {
-      const result = install({ TEST_OS: os, TEST_ARCH: arch })
-      assert.equal(result.status, 0, result.stderr)
-      assert.match(readFileSync(path.join(root, 'requests'), 'utf8'), /https:\/\/github.com\/qufei1993\/skills-hub\/releases\/download\//)
-      assert.match(readFileSync(path.join(root, 'requests'), 'utf8'), new RegExp(`skillshub-cli-0.11.0-${target}`))
-    })
-  }
-})
+// Each complete installer run gets its own test budget; this also supports node:test.
+for (const [os, arch, target] of [['Darwin','arm64','darwin-arm64'], ['Darwin','x86_64','darwin-x64'], ['Linux','aarch64','linux-arm64'], ['Linux','x86_64','linux-x64']]) {
+  it(`maps ${os}/${arch} to the ${target} release asset`, () => fixture(({ root, install }) => {
+    const result = install({ TEST_OS: os, TEST_ARCH: arch })
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(readFileSync(path.join(root, 'requests'), 'utf8'), /https:\/\/github.com\/qufei1993\/skills-hub\/releases\/download\//)
+    assert.match(readFileSync(path.join(root, 'requests'), 'utf8'), new RegExp(`skillshub-cli-0.11.0-${target}`))
+  }))
+}
 
 it('leaves the existing CLI and shell profile untouched on download or checksum errors', () => {
   for (const failure of ['download', 'checksum', 'filename']) fixture(({ root, home, dest, install }) => {

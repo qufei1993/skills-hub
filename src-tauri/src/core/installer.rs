@@ -686,6 +686,25 @@ pub(crate) fn same_git_skill_source(
     reference: &str,
     subpath: &str,
 ) -> bool {
+    same_git_source(source, source_subpath, reference, subpath, true)
+}
+
+pub(crate) fn same_collection_skill_source(
+    source: &str,
+    source_subpath: Option<&str>,
+    reference: &str,
+    subpath: &str,
+) -> bool {
+    same_git_source(source, source_subpath, reference, subpath, false)
+}
+
+fn same_git_source(
+    source: &str,
+    source_subpath: Option<&str>,
+    reference: &str,
+    subpath: &str,
+    compare_revision: bool,
+) -> bool {
     fn identity(reference: &str) -> ParsedGitSource {
         let reference = reference.trim();
         let normalized = reference
@@ -702,7 +721,7 @@ pub(crate) fn same_git_skill_source(
     let requested = identity(reference);
     let stored_path = source_subpath.or(source.subpath.as_deref()).unwrap_or(".");
     source.clone_url == requested.clone_url
-        && source.branch == requested.branch
+        && (!compare_revision || source.branch == requested.branch)
         && Path::new(stored_path) == Path::new(subpath)
 }
 
@@ -1089,6 +1108,31 @@ pub(crate) fn update_managed_skill_from_source_with_cancel(
     update_managed_skill_with_cancel_and_lock(paths, store, skill_id, false, cancel)
 }
 
+pub fn update_from_preview(
+    paths: &RuntimePaths,
+    store: &SkillStore,
+    plan_id: &str,
+) -> Result<UpdateResult> {
+    let _lock = acquire_skill_update_lock(paths, store)?;
+    let plan: super::content_recovery::ContentPreview = store
+        .workspace_get("content-preview", plan_id)?
+        .context("PLAN_STALE")?;
+    anyhow::ensure!(!plan.restore, "PLAN_STALE");
+    preflight_managed_skill_update_targets(store, &plan.skill_id)?;
+    let mut source_updated = false;
+    let result = update_managed_skill_from_source_inner(
+        paths,
+        store,
+        &plan.skill_id,
+        false,
+        &mut source_updated,
+        None,
+        Some(&plan.fingerprint),
+    )?;
+    store.workspace_delete("content-preview", plan_id)?;
+    Ok(result)
+}
+
 fn ensure_not_cancelled(cancel: Option<&CancelToken>) -> Result<()> {
     anyhow::ensure!(!cancel.is_some_and(CancelToken::is_cancelled), "CANCELLED|");
     Ok(())
@@ -1239,12 +1283,14 @@ fn update_managed_skill_with_cancel_and_lock(
         preserve_newer_managed_content,
         &mut source_updated,
         cancel,
+        None,
     );
     let non_source_failure = result.as_ref().err().is_some_and(|err| {
         let error = err.to_string();
         error.starts_with("UPDATE_IN_PROGRESS|")
             || error.starts_with("UPDATE_HELD_BACK|")
             || error.starts_with("CANCELLED|")
+            || error.starts_with("CENTRAL_MODIFIED|")
     });
     if result.is_err()
         && !source_updated
@@ -1265,6 +1311,7 @@ fn update_managed_skill_from_source_inner(
     preserve_newer_managed_content: bool,
     source_updated: &mut bool,
     cancel: Option<&CancelToken>,
+    expected_preview: Option<&str>,
 ) -> Result<UpdateResult> {
     let record = store
         .get_skill_by_id(skill_id)?
@@ -1298,6 +1345,28 @@ fn update_managed_skill_from_source_inner(
             return Err(err);
         }
     };
+    if let Some(expected) = expected_preview {
+        let actual = super::content_recovery::update_fingerprint(store, &record, &staging_dir)?;
+        if actual != expected {
+            std::fs::remove_dir_all(&staging_dir)?;
+            anyhow::bail!("PLAN_STALE");
+        }
+    }
+    let held = store.get_setting(&format!("workspace.update_hold.{}", record.id))?;
+    if preserve_newer_managed_content && held.as_deref() == Some(next_content_hash.as_str()) {
+        std::fs::remove_dir_all(&staging_dir)?;
+        *source_updated = true;
+        return Ok(UpdateResult {
+            skill_id: record.id,
+            name: record.name,
+            central_path,
+            content_hash: Some(previous_content_hash),
+            source_revision: record.source_revision,
+            updated_targets: Vec::new(),
+            pending_targets: Vec::new(),
+            changed: false,
+        });
+    }
     let source_baseline = if preserve_newer_managed_content {
         store.source_baseline(&record.id)?
     } else {
@@ -1336,6 +1405,16 @@ fn update_managed_skill_from_source_inner(
         });
     }
     let changed = previous_content_hash != next_content_hash;
+    if changed
+        && preserve_newer_managed_content
+        && record
+            .content_hash
+            .as_ref()
+            .is_some_and(|hash| hash != &previous_content_hash)
+    {
+        std::fs::remove_dir_all(&staging_dir)?;
+        anyhow::bail!("CENTRAL_MODIFIED|{}", central_path.display());
+    }
     let description = parse_skill_md(&staging_dir.join("SKILL.md"))
         .and_then(|(_, desc)| desc)
         .or(record.description.clone());
@@ -1381,6 +1460,16 @@ fn update_managed_skill_from_source_inner(
         });
     }
 
+    let previous_recovery: Option<super::content_recovery::Recovery> =
+        store.workspace_get("content-recovery", skill_id)?;
+    let (recovery, recovery_directory) = super::content_recovery::prepare(
+        paths,
+        store,
+        &record,
+        &staging_dir,
+        updated.source_revision.clone(),
+        updated.source_subpath.clone(),
+    )?;
     let mut central_replacement = PreparedDirReplacement::from_staging(
         staging_dir.clone(),
         central_path.clone(),
@@ -1394,9 +1483,9 @@ fn update_managed_skill_from_source_inner(
         }
         return Err(err);
     }
-    let central_result = central_replacement
-        .verify_backup_unchanged()
-        .and_then(|_| store.commit_skill_update(&updated, &[]));
+    let central_result = central_replacement.verify_backup_unchanged().and_then(|_| {
+        store.commit_skill_update_with_recovery(&updated, &[], Some(&recovery), false)
+    });
     if let Err(err) = central_result {
         central_replacement
             .rollback()
@@ -1404,6 +1493,10 @@ fn update_managed_skill_from_source_inner(
         return Err(err).context("commit central Skill update");
     }
     central_replacement.commit();
+    let _recovery_path = recovery_directory.keep();
+    if let Some(previous) = previous_recovery {
+        super::content_recovery::cleanup(paths, &previous);
+    }
     *source_updated = true;
 
     let mut updated_targets = Vec::new();
@@ -1496,11 +1589,32 @@ fn update_managed_skill_from_source_inner(
     })
 }
 
-fn stage_skill_source(
+pub(crate) fn stage_skill_source(
     paths: &RuntimePaths,
     store: &SkillStore,
     record: &SkillRecord,
     cancel: Option<&CancelToken>,
+) -> Result<(PathBuf, Option<String>, Option<String>)> {
+    stage_skill_source_with_refresh(paths, store, record, cancel, false)
+}
+
+// An explicit preview/check must observe the current Git source even while an
+// installation cache is fresh. Other callers retain the configured cache TTL.
+pub(crate) fn stage_skill_source_fresh(
+    paths: &RuntimePaths,
+    store: &SkillStore,
+    record: &SkillRecord,
+    cancel: Option<&CancelToken>,
+) -> Result<(PathBuf, Option<String>, Option<String>)> {
+    stage_skill_source_with_refresh(paths, store, record, cancel, true)
+}
+
+fn stage_skill_source_with_refresh(
+    paths: &RuntimePaths,
+    store: &SkillStore,
+    record: &SkillRecord,
+    cancel: Option<&CancelToken>,
+    refresh: bool,
 ) -> Result<(PathBuf, Option<String>, Option<String>)> {
     ensure_not_cancelled(cancel)?;
     let central_path = PathBuf::from(&record.central_path);
@@ -1551,53 +1665,33 @@ fn stage_skill_source(
                 .as_deref()
                 .map(|path| path.replace('\\', "/"));
             let (repo_dir, revision) = if let Some(subpath) = stored_subpath.as_deref() {
-                clone_to_cache_subpath(
+                clone_to_cache_subpath_with_refresh(
                     paths,
                     store,
                     &parsed.clone_url,
                     parsed.branch.as_deref(),
                     subpath,
                     cancel,
+                    refresh,
                 )?
             } else {
-                clone_to_cache(
+                clone_to_cache_with_refresh(
                     paths,
                     store,
                     &parsed.clone_url,
                     parsed.branch.as_deref(),
                     cancel,
+                    refresh,
                 )?
             };
-            let mut resolved_subpath = stored_subpath
-                .as_deref()
-                .or(parsed.subpath.as_deref())
-                .map(str::to_string);
-            if resolved_subpath.is_none() && count_skills_in_repo(&repo_dir) >= 2 {
-                let candidates = scan_skill_candidates_in_dir(&repo_dir);
-                let skill_name = record.name.to_lowercase();
-                if let Some(matched) = candidates
-                    .iter()
-                    .find(|candidate| candidate.0 == record.name)
-                    .or_else(|| {
-                        let fuzzy = candidates
-                            .iter()
-                            .filter(|candidate| {
-                                let candidate_name = candidate.0.to_lowercase();
-                                candidate_name.contains(&skill_name)
-                                    || skill_name.contains(&candidate_name)
-                            })
-                            .collect::<Vec<_>>();
-                        match fuzzy.as_slice() {
-                            [candidate] => Some(*candidate),
-                            _ => None,
-                        }
-                    })
-                {
-                    resolved_subpath = Some(matched.1.clone());
-                } else {
-                    anyhow::bail!("SKILL_SOURCE_SELECTION_REQUIRED");
-                }
-            }
+            let resolved_subpath = resolve_git_skill_subpath(
+                &repo_dir,
+                record,
+                stored_subpath
+                    .as_deref()
+                    .or(parsed.subpath.as_deref())
+                    .map(str::to_string),
+            )?;
             let copy_source = resolved_subpath
                 .as_deref()
                 .map_or_else(|| repo_dir.clone(), |subpath| repo_dir.join(subpath));
@@ -2151,6 +2245,20 @@ pub fn install_git_skill_from_selection(
     name: Option<String>,
     cancel: Option<&CancelToken>,
 ) -> Result<InstallResult> {
+    install_git_skill_from_selection_at_revision(
+        paths, store, repo_url, subpath, name, cancel, None,
+    )
+}
+
+pub fn install_git_skill_from_selection_at_revision(
+    paths: &RuntimePaths,
+    store: &SkillStore,
+    repo_url: &str,
+    subpath: &str,
+    name: Option<String>,
+    cancel: Option<&CancelToken>,
+    revision: Option<&str>,
+) -> Result<InstallResult> {
     let normalized_subpath = subpath.replace('\\', "/");
     let subpath = normalized_subpath.as_str();
     let parsed = parse_github_url(repo_url);
@@ -2178,7 +2286,7 @@ pub fn install_git_skill_from_selection(
         paths,
         store,
         &parsed.clone_url,
-        parsed.branch.as_deref(),
+        revision.or(parsed.branch.as_deref()),
         Some(subpath),
         cancel,
     )?;
@@ -2290,6 +2398,48 @@ struct RepoCacheMeta {
     head: Option<String>,
 }
 
+pub(crate) const LEGACY_CACHE_META: &str = ".skills-hub-cache.json";
+
+pub(crate) fn is_legacy_cache_metadata(path: &Path) -> bool {
+    std::fs::read(path)
+        .ok()
+        .filter(|bytes| bytes.len() < 4096)
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|value| value.as_object().cloned())
+        .is_some_and(|value| {
+            value.len() == 2
+                && value
+                    .get("last_fetched_ms")
+                    .and_then(|v| v.as_i64())
+                    .is_some_and(|value| value > 0)
+                && value
+                    .get("head")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|head| {
+                        head.len() == 40 && head.bytes().all(|b| b.is_ascii_hexdigit())
+                    })
+        })
+}
+
+fn cache_metadata_path(repo: &Path) -> PathBuf {
+    let current = repo.join(".git").join(LEGACY_CACHE_META);
+    let legacy = repo.join(LEGACY_CACHE_META);
+    if is_legacy_cache_metadata(&legacy) {
+        let tracked = git2::Repository::open(repo)
+            .and_then(|repo| repo.index())
+            .map(|index| index.get_path(Path::new(LEGACY_CACHE_META), 0).is_some())
+            .unwrap_or(true);
+        if !tracked {
+            if current.exists() {
+                let _ = std::fs::remove_file(legacy);
+            } else {
+                let _ = std::fs::rename(legacy, &current);
+            }
+        }
+    }
+    current
+}
+
 static GIT_CACHE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 // Keep discovery, selection validation, and installation scoped to the same source.
@@ -2318,18 +2468,28 @@ fn clone_to_cache(
     branch: Option<&str>,
     cancel: Option<&CancelToken>,
 ) -> Result<(PathBuf, String)> {
+    clone_to_cache_with_refresh(paths, store, clone_url, branch, cancel, false)
+}
+
+fn clone_to_cache_with_refresh(
+    paths: &RuntimePaths,
+    store: &SkillStore,
+    clone_url: &str,
+    branch: Option<&str>,
+    cancel: Option<&CancelToken>,
+    refresh: bool,
+) -> Result<(PathBuf, String)> {
     let started = std::time::Instant::now();
     let cache_root = &paths.git_cache_dir;
     std::fs::create_dir_all(cache_root)
         .with_context(|| format!("failed to create cache dir {:?}", cache_root))?;
 
     let repo_dir = cache_root.join(repo_cache_key(clone_url, branch, None));
-    let meta_path = repo_dir.join(".skills-hub-cache.json");
-
     let lock = GIT_CACHE_LOCK.get_or_init(|| Mutex::new(()));
     let _guard = lock.lock().unwrap_or_else(|err| err.into_inner());
+    let meta_path = cache_metadata_path(&repo_dir);
 
-    if repo_dir.join(".git").exists() {
+    if !refresh && repo_dir.join(".git").exists() {
         if let Ok(meta) = std::fs::read_to_string(&meta_path) {
             if let Ok(meta) = serde_json::from_str::<RepoCacheMeta>(&meta) {
                 if let Some(head) = meta.head {
@@ -2397,6 +2557,18 @@ fn clone_to_cache_subpath(
     subpath: &str,
     cancel: Option<&CancelToken>,
 ) -> Result<(PathBuf, String)> {
+    clone_to_cache_subpath_with_refresh(paths, store, clone_url, branch, subpath, cancel, false)
+}
+
+fn clone_to_cache_subpath_with_refresh(
+    paths: &RuntimePaths,
+    store: &SkillStore,
+    clone_url: &str,
+    branch: Option<&str>,
+    subpath: &str,
+    cancel: Option<&CancelToken>,
+    refresh: bool,
+) -> Result<(PathBuf, String)> {
     let normalized_subpath = subpath.replace('\\', "/");
     let subpath = normalized_subpath.as_str();
     let started = std::time::Instant::now();
@@ -2405,12 +2577,11 @@ fn clone_to_cache_subpath(
         .with_context(|| format!("failed to create cache dir {:?}", cache_root))?;
 
     let repo_dir = cache_root.join(repo_cache_key(clone_url, branch, Some(subpath)));
-    let meta_path = repo_dir.join(".skills-hub-cache.json");
-
     let lock = GIT_CACHE_LOCK.get_or_init(|| Mutex::new(()));
     let _guard = lock.lock().unwrap_or_else(|err| err.into_inner());
+    let meta_path = cache_metadata_path(&repo_dir);
 
-    if repo_dir.join(".git").exists() && repo_dir.join(subpath).is_dir() {
+    if !refresh && repo_dir.join(".git").exists() && repo_dir.join(subpath).is_dir() {
         if let Ok(meta) = std::fs::read_to_string(&meta_path) {
             if let Ok(meta) = serde_json::from_str::<RepoCacheMeta>(&meta) {
                 if let Some(head) = meta.head {
@@ -2484,6 +2655,228 @@ fn clone_to_cache_subpath(
         rev
     );
     Ok((repo_dir, rev))
+}
+
+fn resolve_git_skill_subpath(
+    repo_dir: &Path,
+    record: &SkillRecord,
+    mut resolved_subpath: Option<String>,
+) -> Result<Option<String>> {
+    if resolved_subpath.is_none()
+        && (count_skills_in_repo(repo_dir) >= 2 || !repo_dir.join("SKILL.md").is_file())
+    {
+        let candidates = scan_skill_candidates_in_dir(repo_dir);
+        let skill_name = record.name.to_lowercase();
+        if let Some(matched) = candidates
+            .iter()
+            .find(|candidate| candidate.0 == record.name)
+            .or_else(|| {
+                let fuzzy = candidates
+                    .iter()
+                    .filter(|candidate| {
+                        let candidate_name = candidate.0.to_lowercase();
+                        candidate_name.contains(&skill_name) || skill_name.contains(&candidate_name)
+                    })
+                    .collect::<Vec<_>>();
+                match fuzzy.as_slice() {
+                    [candidate] => Some(*candidate),
+                    _ => None,
+                }
+            })
+        {
+            resolved_subpath = Some(matched.1.clone());
+        } else {
+            anyhow::bail!("SKILL_SOURCE_SELECTION_REQUIRED");
+        }
+    }
+    Ok(resolved_subpath)
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct GitCheckSource {
+    pub clone_url: String,
+    pub branch: Option<String>,
+    pub subpath: String,
+    pub resolve_subpath: bool,
+}
+
+pub(crate) fn git_check_source(record: &SkillRecord) -> Result<GitCheckSource> {
+    let parsed = parse_github_url(record.source_ref.as_deref().context("missing Git source")?);
+    let resolve_subpath = record.source_subpath.is_none() && parsed.subpath.is_none();
+    let subpath = record
+        .source_subpath
+        .clone()
+        .or(parsed.subpath)
+        .unwrap_or_else(|| ".".into())
+        .replace('\\', "/");
+    anyhow::ensure!(
+        !Path::new(&subpath).is_absolute()
+            && !subpath
+                .split('/')
+                .any(|part| part == ".." || part.contains(':')),
+        "invalid Skill source subpath"
+    );
+    Ok(GitCheckSource {
+        clone_url: parsed.clone_url,
+        branch: parsed.branch,
+        subpath,
+        resolve_subpath,
+    })
+}
+
+pub(crate) struct GitCheckSnapshot {
+    pub revision: String,
+    pub contents: std::collections::BTreeMap<String, std::result::Result<(String, bool), String>>,
+}
+
+pub(crate) fn refresh_git_check_group(
+    paths: &RuntimePaths,
+    store: &SkillStore,
+    source: &GitCheckSource,
+    records: &[SkillRecord],
+    cancel: Option<&CancelToken>,
+) -> Result<GitCheckSnapshot> {
+    ensure_not_cancelled(cancel)?;
+    let sources = records
+        .iter()
+        .map(git_check_source)
+        .collect::<Result<Vec<_>>>()?;
+    let discover = sources.iter().any(|source| source.resolve_subpath);
+    let subpaths = sources
+        .iter()
+        .map(|source| source.subpath.clone())
+        .collect::<Vec<_>>();
+    std::fs::create_dir_all(&paths.git_cache_dir)?;
+    // A bounded cache per repository/ref, independent of the number of subsets
+    // checked over time. Every batch refreshes it exactly once.
+    let repo_dir = paths.git_cache_dir.join(format!(
+        "check-{}",
+        repo_cache_key(&source.clone_url, source.branch.as_deref(), None)
+    ));
+    let lock = GIT_CACHE_LOCK.get_or_init(|| Mutex::new(()));
+    let _guard = lock.lock().unwrap_or_else(|error| error.into_inner());
+    let proxy = get_github_proxy_url(store)?;
+    let fetch = || {
+        if super::git_fetcher::system_git_available() {
+            if discover {
+                super::git_fetcher::clone_or_pull_skill_manifests(
+                    &source.clone_url,
+                    &repo_dir,
+                    source.branch.as_deref(),
+                    cancel,
+                    Some(&proxy),
+                )
+            } else {
+                super::git_fetcher::clone_or_pull_sparse_many(
+                    &source.clone_url,
+                    &repo_dir,
+                    source.branch.as_deref(),
+                    &subpaths,
+                    cancel,
+                    Some(&proxy),
+                )
+            }
+        } else {
+            clone_or_pull(
+                &source.clone_url,
+                &repo_dir,
+                source.branch.as_deref(),
+                cancel,
+                Some(&proxy),
+            )
+        }
+    };
+    let fetched = match fetch() {
+        Err(error)
+            if error
+                .downcast_ref::<super::git_fetcher::SparseCheckoutFailure>()
+                .is_none() =>
+        {
+            ensure_not_cancelled(cancel)?;
+            if repo_dir.exists() {
+                std::fs::remove_dir_all(&repo_dir)?;
+            }
+            fetch().with_context(|| format!("{error:#}"))
+        }
+        result => result,
+    };
+    ensure_not_cancelled(cancel)?;
+    let (revision, mut individual_checkout) = match fetched {
+        Ok(revision) => (revision, false),
+        Err(error) => match error.downcast_ref::<super::git_fetcher::SparseCheckoutFailure>() {
+            Some(error) => (error.revision.clone(), true),
+            None => return Err(error),
+        },
+    };
+    let mut resolved = std::collections::BTreeMap::new();
+    for (record, source) in records.iter().zip(&sources) {
+        let path = resolve_git_skill_subpath(
+            &repo_dir,
+            record,
+            (!source.resolve_subpath).then(|| source.subpath.clone()),
+        )
+        .map(|path| path.unwrap_or_else(|| ".".into()))
+        .map_err(|error| format!("{error:#}"));
+        resolved.insert(record.id.clone(), path);
+    }
+    let selected = resolved
+        .values()
+        .filter_map(|path| path.as_ref().ok().cloned())
+        .collect::<Vec<_>>();
+    if discover
+        && !selected.is_empty()
+        && super::git_fetcher::system_git_available()
+        && !individual_checkout
+    {
+        individual_checkout = super::git_fetcher::materialize_sparse_paths(
+            &source.clone_url,
+            &repo_dir,
+            &selected,
+            cancel,
+            Some(&proxy),
+        )
+        .is_err();
+    }
+    ensure_not_cancelled(cancel)?;
+    let mut contents = std::collections::BTreeMap::new();
+    for (id, path) in resolved {
+        ensure_not_cancelled(cancel)?;
+        let content = path
+            .map_err(anyhow::Error::msg)
+            .and_then(|path| {
+                if individual_checkout {
+                    super::git_fetcher::materialize_sparse_paths_at_revision(
+                        &source.clone_url,
+                        &repo_dir,
+                        std::slice::from_ref(&path),
+                        &revision,
+                        cancel,
+                        Some(&proxy),
+                    )?;
+                }
+                // Snapshot before another per-Skill checkout may remove this path.
+                // Include metadata-file presence so legacy comparisons remain exact.
+                content_check_source_hash(&repo_dir.join(path))
+            })
+            .map_err(|error| format!("{error:#}"));
+        contents.insert(id, content);
+    }
+    let _ = std::fs::write(
+        repo_dir.join(".git").join(LEGACY_CACHE_META),
+        serde_json::to_vec(&RepoCacheMeta {
+            last_fetched_ms: now_ms(),
+            head: Some(revision.clone()),
+        })?,
+    );
+    Ok(GitCheckSnapshot { revision, contents })
+}
+
+pub(crate) fn content_check_source_hash(source: &Path) -> Result<(String, bool)> {
+    anyhow::ensure!(
+        std::fs::symlink_metadata(source.join("SKILL.md")).is_ok_and(|metadata| metadata.is_file()),
+        "SKILL_INVALID|missing_skill_md"
+    );
+    Ok((hash_dir(source)?, source.join(LEGACY_CACHE_META).exists()))
 }
 
 fn repo_cache_key(clone_url: &str, branch: Option<&str>, subpath: Option<&str>) -> String {

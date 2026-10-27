@@ -2,6 +2,7 @@ import type { ManagedSkill, TagWithCountDto } from './types'
 import { getSkillSyncState } from './skillSyncStatus'
 
 type SkillsViewOptions = {
+  projectPath?: string
   issuesOnly?: boolean
   managedSkills: ManagedSkill[]
   tags: TagWithCountDto[]
@@ -16,12 +17,12 @@ type SkillsViewOptions = {
 
 export function getSkillsView({
   managedSkills, tags, scopeFilter, searchQuery, selectedTagIds,
-  includeUntagged, sortBy, bulkSelectedIds, getSkillScope, issuesOnly = false,
+  includeUntagged, sortBy, bulkSelectedIds, getSkillScope, issuesOnly = false, projectPath = '',
 }: SkillsViewOptions) {
   const query = searchQuery.trim().toLowerCase()
   const scopedSkills = managedSkills.filter((skill) => {
     if (issuesOnly && !['source-error', 'partial', 'failed'].includes(getSkillSyncState(skill))) return false
-    if (scopeFilter !== 'all' && getSkillScope(skill) !== scopeFilter) return false
+    if (scopeFilter !== 'all' && !(skill.targets.length ? skill.targets.some(target => (target.scope || 'global') === scopeFilter && (!projectPath || target.project_path === projectPath)) : !projectPath && getSkillScope(skill) === scopeFilter)) return false
     return !query || skill.name.toLowerCase().includes(query) ||
       skill.central_path.toLowerCase().includes(query) ||
       skill.source_type.toLowerCase().includes(query) ||

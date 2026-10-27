@@ -94,6 +94,48 @@ fn sparse_clone_only_materializes_requested_subpath() {
 }
 
 #[test]
+fn sparse_many_materializes_the_union_and_drops_paths_from_the_next_round() {
+    let origin_dir = tempfile::tempdir().unwrap();
+    let origin = git2::Repository::init(origin_dir.path()).unwrap();
+    commit_file(&origin, "skills/a/SKILL.md", b"a", "a");
+    commit_file(&origin, "skills/b/SKILL.md", b"b", "b");
+    let revision = commit_file(&origin, "unrelated/root.asset", b"unrelated", "unrelated");
+    let root = tempfile::tempdir().unwrap();
+    let dest = root.path().join("checkout");
+    let reference = origin_dir.path().to_str().unwrap();
+    let head = super::clone_or_pull_sparse_many(
+        reference,
+        &dest,
+        None,
+        &["skills/a".into(), "skills/b".into()],
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(head, revision.to_string());
+    assert!(dest.join("skills/a/SKILL.md").is_file());
+    assert!(dest.join("skills/b/SKILL.md").is_file());
+    assert!(!dest.join("unrelated").exists());
+    super::clone_or_pull_sparse_many(reference, &dest, None, &["skills/a".into()], None, None)
+        .unwrap();
+    assert!(dest.join("skills/a/SKILL.md").is_file());
+    assert!(!dest.join("skills/b/SKILL.md").exists());
+    let pinned = root.path().join("pinned");
+    super::clone_or_pull_sparse_many(
+        reference,
+        &pinned,
+        Some(&revision.to_string()),
+        &["skills/b".into()],
+        None,
+        None,
+    )
+    .unwrap();
+    assert!(pinned.join("skills/b/SKILL.md").is_file());
+    assert!(!pinned.join("skills/a").exists());
+    assert!(!pinned.join("unrelated").exists());
+}
+
+#[test]
 fn git_command_injects_configured_proxy() {
     let cmd = git_cmd(Some("http://127.0.0.1:7890"));
     let args = cmd
@@ -267,4 +309,163 @@ fn issue_182_sparse_checkout_accepts_windows_paths_on_clone_and_update() {
         assert_eq!(fs::read(dest.join("skills/a/SKILL.md")).unwrap(), content);
         assert!(!dest.join("skills/b/SKILL.md").exists());
     }
+}
+
+#[test]
+fn default_revision_resolution_reads_current_remote_head() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    let first = commit_file(&repo, "SKILL.md", b"first", "first");
+    let reference = dir.path().to_str().unwrap();
+    assert_eq!(
+        super::resolve_default_revision(reference, None).unwrap(),
+        first.to_string()
+    );
+    let second = commit_file(&repo, "SKILL.md", b"second", "second");
+    assert_eq!(
+        super::resolve_default_revision(reference, None).unwrap(),
+        second.to_string()
+    );
+}
+
+const PROCESS_FIXTURE_TEST: &str = "core::git_fetcher::tests::git_command_process_fixture";
+
+fn process_fixture_command(root: &std::path::Path, role: &str) -> std::process::Command {
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    command
+        .args(["--exact", PROCESS_FIXTURE_TEST, "--nocapture"])
+        .env("SKILLS_HUB_GIT_PROCESS_FIXTURE_ROOT", root)
+        .env("SKILLS_HUB_GIT_PROCESS_FIXTURE_ROLE", role);
+    command
+}
+
+#[test]
+fn git_command_process_fixture() {
+    let Some(root) = std::env::var_os("SKILLS_HUB_GIT_PROCESS_FIXTURE_ROOT") else {
+        return;
+    };
+    let root = std::path::PathBuf::from(root);
+    let role = std::env::var("SKILLS_HUB_GIT_PROCESS_FIXTURE_ROLE").unwrap();
+    if role == "output" {
+        // More than a pipe buffer: a command runner must drain output while the
+        // command is alive, or use a capture that cannot block the writer.
+        std::io::stdout()
+            .write_all(&vec![b'o'; 256 * 1024])
+            .unwrap();
+        std::io::stderr()
+            .write_all(&vec![b'e'; 256 * 1024])
+            .unwrap();
+        return;
+    }
+    let lock = fs::File::create(root.join(format!("{role}.lock"))).unwrap();
+    fs2::FileExt::lock_exclusive(&lock).unwrap();
+    if role == "parent" {
+        let mut child = process_fixture_command(&root, "descendant")
+            .spawn()
+            .unwrap();
+        // The test parent owns a disposable process. A finite fixture lifetime
+        // also bounds the old buggy implementation and cleans up on assertion
+        // failure without affecting any other process.
+        child.wait().unwrap();
+    } else {
+        std::io::stderr().write_all(b"descendant-ready\n").unwrap();
+        fs::write(root.join("descendant.ready"), b"ready").unwrap();
+        std::thread::sleep(Duration::from_secs(6));
+    }
+}
+
+fn assert_fixture_stopped(root: &std::path::Path) {
+    for role in ["parent", "descendant"] {
+        let file = fs::File::open(root.join(format!("{role}.lock"))).unwrap();
+        // The OS releases the fixture's lock only after its process exits.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if fs2::FileExt::try_lock_exclusive(&file).is_ok() {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "{role} survived termination"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+#[test]
+fn git_timeout_terminates_descendants_holding_output_and_returns_within_deadline() {
+    let root = tempfile::tempdir().unwrap();
+    let started = std::time::Instant::now();
+    let error = super::run_cmd_with_timeout(
+        process_fixture_command(root.path(), "parent"),
+        Duration::from_secs(2),
+        "process-tree timeout fixture".into(),
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        root.path().join("descendant.ready").exists(),
+        "fixture was not ready"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "timeout waited for a descendant's output handle"
+    );
+    assert!(error.to_string().contains("git 操作超时（2s）"));
+    assert!(error.to_string().contains("descendant-ready"));
+    assert_fixture_stopped(root.path());
+}
+
+#[test]
+fn git_cancellation_terminates_descendants_and_releases_resources() {
+    let root = tempfile::tempdir().unwrap();
+    let token = crate::core::cancel_token::CancelToken::new();
+    std::thread::scope(|scope| {
+        let token_ref = &token;
+        let root_ref = root.path();
+        let ready = scope.spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(4);
+            while !root_ref.join("descendant.ready").exists() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "fixture was not ready"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            token_ref.cancel();
+            std::time::Instant::now()
+        });
+        let error = super::run_cmd_with_timeout(
+            process_fixture_command(root.path(), "parent"),
+            Duration::from_secs(5),
+            "process-tree cancellation fixture".into(),
+            Some(&token),
+        )
+        .unwrap_err();
+        let cancelled_at = ready.join().unwrap();
+        assert!(cancelled_at.elapsed() < Duration::from_secs(2));
+        assert!(error.to_string().starts_with("CANCELLED|"));
+    });
+    assert_fixture_stopped(root.path());
+}
+
+#[test]
+fn git_command_captures_output_larger_than_pipe_buffers() {
+    let root = tempfile::tempdir().unwrap();
+    let output = super::run_cmd_with_timeout(
+        process_fixture_command(root.path(), "output"),
+        Duration::from_secs(3),
+        "large command output fixture".into(),
+        None,
+    )
+    .unwrap();
+    assert!(output.status.success());
+    assert!(output
+        .stdout
+        .windows(256 * 1024)
+        .any(|bytes| bytes.iter().all(|byte| *byte == b'o')));
+    assert!(output
+        .stderr
+        .windows(256 * 1024)
+        .any(|bytes| bytes.iter().all(|byte| *byte == b'e')));
 }

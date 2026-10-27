@@ -2,6 +2,7 @@ import { memo, useMemo, useState } from 'react'
 import { Download, Search } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import type { OnboardingPlan } from '../types'
+import { useInstallDialog } from './useInstallDialog'
 
 type ImportModalProps = {
   open: boolean
@@ -28,6 +29,7 @@ const ImportModal = ({
   onImport,
   t,
 }: ImportModalProps) => {
+  const dialogRef = useInstallDialog(open, loading, onRequestClose)
   const [query, setQuery] = useState('')
   const normalizedQuery = query.trim().toLowerCase()
   const filteredGroups = useMemo(() => {
@@ -45,7 +47,7 @@ const ImportModal = ({
       return fields.some((value) => value.toLowerCase().includes(normalizedQuery))
     })
   }, [normalizedQuery, plan.groups])
-  const selectedCount = filteredGroups.filter((group) => selected[group.name]).length
+  const selectedCount = plan.groups.filter((group) => selected[group.name]).length
   const allVisibleSelected =
     filteredGroups.length > 0 &&
     filteredGroups.every((group) => selected[group.name])
@@ -57,8 +59,13 @@ const ImportModal = ({
   if (!open) return null
 
   return (
-    <div className="modal-backdrop" onClick={onRequestClose}>
+    <div className="modal-backdrop" onClick={loading ? undefined : onRequestClose}>
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('importTitle')}
+        tabIndex={-1}
         className="modal modal-lg modal-discovered"
         onClick={(e) => e.stopPropagation()}
       >
@@ -69,6 +76,7 @@ const ImportModal = ({
             type="button"
             onClick={onRequestClose}
             aria-label={t('close')}
+            disabled={loading}
           >
             ✕
           </button>
@@ -88,6 +96,8 @@ const ImportModal = ({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder={t('searchPlaceholder')}
+              aria-label={t('searchPlaceholder')}
+              disabled={loading}
             />
           </div>
           <div className="sync-row">
@@ -96,14 +106,14 @@ const ImportModal = ({
                 type="checkbox"
                 checked={allVisibleSelected}
                 onChange={(event) => toggleVisibleGroups(event.target.checked)}
-                disabled={filteredGroups.length === 0}
+                disabled={loading || filteredGroups.length === 0}
               />
               {t('selectAll')}
             </label>
             <span className="pick-toolbar-count">
               {t('selectedCount', {
                 selected: selectedCount,
-                total: filteredGroups.length,
+                total: plan.groups.length,
               })}
             </span>
           </div>
@@ -118,6 +128,7 @@ const ImportModal = ({
                     <input
                       type="checkbox"
                       checked={Boolean(selected[group.name])}
+                      disabled={loading}
                       onChange={(event) =>
                         onToggleGroup(group.name, event.target.checked)
                       }
@@ -151,6 +162,8 @@ const ImportModal = ({
                         {group.has_conflict ? (
                           <input
                             type="radio"
+                            disabled={loading}
+                            aria-label={variant.path}
                             name={`variant-${group.name}`}
                             checked={variantChoice[group.name] === variant.path}
                             onChange={() =>

@@ -90,6 +90,25 @@ pub struct DeploymentOutcome {
     pub undeploy: bool,
 }
 
+impl DeploymentPlan {
+    pub(crate) fn workspace_fingerprint(&self) -> String {
+        use sha2::{Digest, Sha256};
+        // Unrelated deployments must not invalidate another item in the batch.
+        let mut snapshot = self.snapshot.clone();
+        if let Some(skill) = snapshot.get_mut("skill").and_then(Value::as_object_mut) {
+            skill.remove("targets");
+        }
+        if let Some(records) = snapshot.get_mut("records").and_then(Value::as_array_mut) {
+            records.retain(|row| {
+                self.targets
+                    .iter()
+                    .any(|target| row["target_path"].as_str() == target.path.to_str())
+            });
+        }
+        format!("{:x}", Sha256::digest(snapshot.to_string().as_bytes()))
+    }
+}
+
 impl SkillsHubService {
     pub(super) fn execute_bundled_deployment(
         &self,
@@ -459,7 +478,11 @@ impl SkillsHubService {
                 }
             }
             if undeploy {
-                rows.extend(matching);
+                rows.extend(
+                    matching
+                        .into_iter()
+                        .filter(|row| request.agents.contains(&row.tool)),
+                );
             }
             let mut mode = SyncMode::Auto;
             for agent in &group {
@@ -492,7 +515,10 @@ impl SkillsHubService {
             affected_agents.sort();
             affected_agents.dedup();
             targets.push(DeploymentTarget {
-                agents: keys,
+                agents: keys
+                    .into_iter()
+                    .filter(|key| request.agents.contains(key))
+                    .collect(),
                 affected_agents,
                 path,
                 mode,
@@ -532,7 +558,44 @@ impl SkillsHubService {
         &self,
         mut plan: DeploymentPlan,
     ) -> Result<DeploymentOutcome, ServiceError> {
+        // Logical references may share one physical directory. Removing one reference
+        // must not remove the directory or the remaining records.
+        if plan.undeploy {
+            let all_rows = self
+                .store()
+                .list_skill_targets(&plan.skill_id)
+                .map_err(|_| ServiceError::internal("failed to inspect shared targets"))?;
+            let retained: Vec<_> = plan
+                .targets
+                .iter()
+                .map(|target| {
+                    all_rows.iter().any(|row| {
+                        row.target_path == target.path.to_string_lossy()
+                            && !plan.rows.iter().any(|removed| removed.id == row.id)
+                    })
+                })
+                .collect();
+            let mut index = 0;
+            plan.targets.retain(|_| {
+                let keep = !retained[index];
+                index += 1;
+                keep
+            });
+            let mut index = 0;
+            plan.fingerprints.retain(|_| {
+                let keep = !retained[index];
+                index += 1;
+                keep
+            });
+            let mut index = 0;
+            plan.parent_snapshots.retain(|_| {
+                let keep = !retained[index];
+                index += 1;
+                keep
+            });
+        }
         let mut prepared = Vec::new();
+        let mut stage = "prepare_target";
         let result = (|| -> anyhow::Result<()> {
             for ((target, expected), parents) in plan
                 .targets
@@ -548,6 +611,7 @@ impl SkillsHubService {
                     parents.clone(),
                 )?);
             }
+            stage = "activate_target";
             for replacement in &mut prepared {
                 replacement.activate()?;
             }
@@ -561,6 +625,7 @@ impl SkillsHubService {
                 DeploymentScope::Global => None,
                 DeploymentScope::Project(path) => Some(path.to_string_lossy().into_owned()),
             };
+            stage = "read_baseline";
             if !plan.undeploy {
                 for (target, replacement) in plan.targets.iter_mut().zip(&prepared) {
                     #[cfg(test)]
@@ -610,14 +675,17 @@ impl SkillsHubService {
                     }
                 }
             }
+            stage = "verify_source";
             anyhow::ensure!(
                 Some(hash_dir_strict(&plan.source)?.as_str())
                     == plan.snapshot["source_hash"].as_str(),
                 "PLAN_STALE"
             );
+            stage = "verify_target";
             for replacement in &prepared {
                 replacement.verify_unchanged()?;
             }
+            stage = "commit_records";
             self.store().commit_deployment_targets(
                 &upserts,
                 if plan.undeploy { &plan.rows } else { &[] },
@@ -636,6 +704,20 @@ impl SkillsHubService {
             Ok(())
         })();
         if let Err(error) = result {
+            // Return only structured diagnostics: raw causes may contain credentials or SQL.
+            let io_error = error
+                .chain()
+                .find_map(|cause| cause.downcast_ref::<std::io::Error>());
+            let reason = if error.to_string().contains("PLAN_STALE") {
+                "state_changed"
+            } else if io_error.is_some() {
+                "filesystem_error"
+            } else if error.chain().any(|cause| cause.is::<rusqlite::Error>()) {
+                "database_error"
+            } else {
+                "operation_failed"
+            };
+            let os_error = io_error.and_then(std::io::Error::raw_os_error);
             let mut recovery = Vec::new();
             for (target, replacement) in plan.targets.iter().zip(prepared.iter_mut()).rev() {
                 if replacement.rollback().is_err() {
@@ -649,7 +731,7 @@ impl SkillsHubService {
                     ErrorCode::InternalError
                 },
                 "deployment failed; original targets were retained",
-                json!({"recovery":recovery}),
+                json!({"stage":stage,"reason":reason,"os_error":os_error,"recovery":recovery}),
             ));
         }
         for replacement in &mut prepared {

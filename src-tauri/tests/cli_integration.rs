@@ -219,6 +219,144 @@ fn legacy_multi_skill_zero_match_preserves_json_check_and_update_errors() {
 }
 
 #[test]
+fn cli_local_source_paths_are_preserved_in_json_output() {
+    let f = Fixture::new();
+    let installed = f.install("local-path");
+    let id = installed["id"].as_str().unwrap();
+    let store = f.store();
+    let mut record = store.get_skill_by_id(id).unwrap().unwrap();
+    for reference in [
+        r"\\?\C:\Users\测试\skills\local-path",
+        r"\\?\UNC\server\share\local-path",
+        r"C:\Users\test\skills\local-path#draft",
+        "C:/Users/test/skills/local-path#draft",
+        "/Users/test/skills/local-path?draft#one",
+    ] {
+        record.source_ref = Some(reference.into());
+        store.upsert_skill(&record).unwrap();
+        let shown = f.json(&["skills", "show", id], None);
+        assert_eq!(shown["data"]["source"]["reference"], reference);
+    }
+}
+
+#[test]
+fn cli_first_deployment_uses_central_content_even_without_a_source_reference() {
+    for reference in [None, Some("")] {
+        let f = Fixture::new();
+        f.install("local-only");
+        let store = f.store();
+        let mut record = store.list_skills().unwrap().remove(0);
+        record.source_ref = reference.map(str::to_owned);
+        store.upsert_skill(&record).unwrap();
+        let args = ["skills", "deploy", &record.id, "--agent", "codex"];
+        let mut preview_args = args.to_vec();
+        preview_args.push("--dry-run");
+        let preview = f.json(&preview_args, None);
+        assert_eq!(preview["data"]["targets"][0]["exists"], false);
+        let target = f.root.path().join("home/.codex/skills/local-only");
+        assert!(!target.exists());
+        assert!(store.list_skill_targets(&record.id).unwrap().is_empty());
+        f.json(&args, None);
+        assert_eq!(
+            fs::read(target.join("SKILL.md")).unwrap(),
+            fs::read(Path::new(&record.central_path).join("SKILL.md")).unwrap(),
+        );
+        let status = f.json(&["skills", "status", &record.id], None);
+        assert_eq!(status["data"]["targets"][0]["status"], "ok");
+        f.json(&args, None);
+        assert_eq!(store.list_skill_targets(&record.id).unwrap().len(), 1);
+        assert_eq!(
+            store
+                .get_skill_by_id(&record.id)
+                .unwrap()
+                .unwrap()
+                .source_ref,
+            record.source_ref
+        );
+    }
+}
+
+#[test]
+fn cli_deployment_failure_reports_safe_stage_and_rolls_back() {
+    let f = Fixture::new();
+    let installed = f.install("failure");
+    let id = installed["id"].as_str().unwrap();
+    let connection = rusqlite::Connection::open(&f.paths.database_path).unwrap();
+    connection.execute_batch("CREATE TRIGGER reject_deploy BEFORE INSERT ON skill_targets BEGIN SELECT RAISE(FAIL, 'https://user:database-secret@example.com/?token=private'); END;").unwrap();
+    let failure = f.json(
+        &["skills", "deploy", id, "--agent", "codex"],
+        Some(("INTERNAL_ERROR", 10)),
+    );
+    assert_eq!(failure["details"]["stage"], "commit_records");
+    assert_eq!(failure["details"]["reason"], "database_error");
+    assert_eq!(failure["details"]["recovery"], serde_json::json!([]));
+    let serialized = failure.to_string();
+    assert!(!serialized.contains("database-secret"));
+    assert!(!serialized.contains("private"));
+    assert!(!f.root.path().join("home/.codex/skills/failure").exists());
+    assert!(f.store().list_skill_targets(id).unwrap().is_empty());
+}
+
+#[test]
+fn cli_first_link_deployment_accepts_canonical_central_storage() {
+    use app_lib::core::sync_engine::SyncMode;
+    use app_lib::core::tool_adapters::{save_tool_config, CustomToolConfig, ToolConfig};
+
+    let f = Fixture::new();
+    let store = f.store();
+    let central = f.root.path().join("中央技能库");
+    let agent = f.root.path().join("工具/skills");
+    fs::create_dir_all(&central).unwrap();
+    fs::create_dir_all(&agent).unwrap();
+    let central = fs::canonicalize(central).unwrap();
+    store
+        .set_setting("central_repo_path", central.to_str().unwrap())
+        .unwrap();
+    save_tool_config(
+        &store,
+        ToolConfig {
+            disabled_builtin_tools: Vec::new(),
+            custom_tools: vec![CustomToolConfig {
+                key: "link_agent".into(),
+                label: "Link Agent".into(),
+                avatar: None,
+                skills_dir: agent.to_string_lossy().into_owned(),
+                project_skills_dir: None,
+                sync_mode: if cfg!(windows) {
+                    SyncMode::Junction
+                } else {
+                    SyncMode::Symlink
+                },
+                enabled: true,
+            }],
+        },
+    )
+    .unwrap();
+    let installed = f.install("canonical-local");
+    let id = installed["id"].as_str().unwrap();
+    let preview = f.json(
+        &["skills", "deploy", id, "--agent", "link_agent", "--dry-run"],
+        None,
+    );
+    assert_eq!(preview["data"]["targets"][0]["exists"], false);
+    for _ in 0..2 {
+        let deployed = f.json(&["skills", "deploy", id, "--agent", "link_agent"], None);
+        assert_eq!(
+            deployed["data"]["targets"][0]["mode"],
+            if cfg!(windows) { "junction" } else { "symlink" }
+        );
+        assert_eq!(
+            fs::read(agent.join("canonical-local/SKILL.md")).unwrap(),
+            fs::read(central.join("canonical-local/SKILL.md")).unwrap()
+        );
+        assert_eq!(f.store().list_skill_targets(id).unwrap().len(), 1);
+    }
+    f.json(&["skills", "undeploy", id, "--agent", "link_agent"], None);
+    assert!(!agent.join("canonical-local").exists());
+    assert!(central.join("canonical-local/SKILL.md").is_file());
+}
+
+#[test]
 fn cli_install_tag_deploy_reopens_the_same_desktop_service_state() {
     let fixture = Fixture::new();
     let installed = fixture.install("demo");

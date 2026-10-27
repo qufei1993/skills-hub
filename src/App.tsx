@@ -1,3 +1,10 @@
+import ContentReview from './components/skills/workspace/ContentReview'
+import { useUpdateCheck } from './components/skills/workspace/useUpdateCheck'
+import type { CheckSources, ContentCheckProgress, ContentCheckRunResult } from './components/skills/workspace/contentCheck'
+import SourceRepair from './components/skills/workspace/SourceRepair'
+import { open as openDirectoryDialog } from '@tauri-apps/plugin-dialog'
+import PresetPage from './components/skills/workspace/PresetPage'
+import type { WorkspaceIntent, WorkspaceScope, PresetMember } from './components/skills/types'
 import CollectionInstallModal from './components/skills/modals/CollectionInstallModal'
 import { useCollectionInstallLink } from './components/skills/useCollectionInstallLink'
 import { hasUnboundLocalSource } from './components/skills/skillSourceState'
@@ -11,10 +18,11 @@ import {
   type MutableRefObject,
   type SetStateAction,
 } from 'react'
-import { AlertTriangle, ArrowRight } from 'lucide-react'
+import { AlertTriangle, ArrowRight, ArrowLeft } from 'lucide-react'
 import type { DownloadOptions, Update } from '@tauri-apps/plugin-updater'
 import './App.css'
 import './figma.css'
+import './components/skills/skills-library-toolbar.css'
 import { useTranslation } from 'react-i18next'
 import { Toaster, toast } from 'sonner'
 import Markdown from 'react-markdown'
@@ -24,12 +32,14 @@ import DeviceSyncPage from './components/skills/DeviceSyncPage'
 import RecycleBinPage from './components/skills/RecycleBinPage'
 import ConfirmActionModal from './components/skills/modals/ConfirmActionModal'
 import FilterBar from './components/skills/FilterBar'
+import ProjectPicker from './components/skills/ProjectPicker'
 import { getSkillsView } from './components/skills/skillsView'
 import SkillDetailView from './components/skills/SkillDetailView'
 import Header from './components/skills/Header'
 import LoadingOverlay from './components/skills/LoadingOverlay'
 import SkillsList from './components/skills/SkillsList'
 import AiManagementNotice from './components/skills/AiManagementNotice'
+import DiscoveryNotice from './components/skills/DiscoveryNotice'
 import TagsPage from './components/skills/TagsPage'
 import AddInstallSettings from './components/skills/modals/AddInstallSettings'
 import AddSkillModal from './components/skills/modals/AddSkillModal'
@@ -114,6 +124,7 @@ type SkillScopeState = Record<
 >
 
 type ActiveView =
+  | 'presets'
   | 'myskills'
   | 'explore'
   | 'detail'
@@ -180,6 +191,7 @@ function App() {
     null,
   )
   const [managedSkills, setManagedSkills] = useState<ManagedSkill[]>([])
+  const [managedSkillsReady, setManagedSkillsReady] = useState(false)
   const [localPath, setLocalPath] = useState('')
   const [localName, setLocalName] = useState('')
   const [gitUrl, setGitUrl] = useState('')
@@ -237,6 +249,48 @@ function App() {
     typeof window !== 'undefined' && window.localStorage.getItem(sidebarCollapsedStorageKey) === 'true',
   )
   const [activeView, setActiveView] = useState<ActiveView>('myskills')
+  const [projectFilter, setProjectFilter] = useState('')
+  const [contentRequest, setContentRequest] = useState<{ skills: ManagedSkill[]; restore: boolean; bulk: boolean; updateCheckSelection?: Record<string, string> } | null>(null)
+  const [repairSourceSkill, setRepairSourceSkill] = useState<ManagedSkill | null>(null)
+  const [recoverableIds, setRecoverableIds] = useState<string[]>([])
+  const [recoveriesFailed, setRecoveriesFailed] = useState(false)
+  const [recoveriesAttempt, setRecoveriesAttempt] = useState(0)
+
+  const [workspaceIntent, setWorkspaceIntent] = useState<WorkspaceIntent | undefined>()
+  const [workspaceKey, setWorkspaceKey] = useState(0)
+  const [workspaceReturn, setWorkspaceReturn] = useState(false)
+  const workspaceDirty = useRef(false)
+  const [workspaceNavigation, setWorkspaceNavigation] = useState<{ action: () => void } | null>(null)
+  const navigateWorkspace = (action: () => void) => {
+    if (activeView === 'presets' && workspaceDirty.current) setWorkspaceNavigation({ action })
+    else action()
+  }
+
+  const detailFromWorkspace = useRef(false)
+  const enterWorkspace = useCallback((intent: WorkspaceIntent) => {
+    setWorkspaceIntent(intent); setWorkspaceKey(k => k + 1); setActiveView('presets')
+  }, [])
+  const membersForSkills = (skills: ManagedSkill[]): PresetMember[] => skills.map(skill => ({
+    skillId: skill.id,
+    tools: [...new Set(skill.targets.filter(target => scopeFilter === 'all' || target.scope === scopeFilter).filter(target => !projectFilter || target.project_path === projectFilter).map(target => target.tool))],
+  }))
+  const currentWorkspaceScope: WorkspaceScope | undefined = scopeFilter === 'global' ? { kind: 'global' } : scopeFilter === 'project' && projectFilter ? { kind: 'project', path: projectFilter } : undefined
+
+  const handleRepairTargets = (skill: ManagedSkill) => {
+    const targets = skill.targets.filter(target => target.status !== 'ok' && target.status !== 'disabled')
+    const scopes = new Map<string, WorkspaceScope>()
+    for (const target of targets) {
+      if (target.scope === 'project') {
+        if (target.project_path) scopes.set(target.project_path, { kind: 'project', path: target.project_path })
+      } else scopes.set('global', { kind: 'global' })
+    }
+    enterWorkspace({
+      mode: 'select',
+      members: [{ skillId: skill.id, tools: [...new Set(targets.map(target => target.tool))] }],
+      scope: scopes.size === 1 && targets.every(target => target.scope !== 'project' || target.project_path) ? [...scopes.values()][0] : undefined,
+    })
+  }
+
   const [managementTab, setManagementTab] = useState<ManagementTab>('tags')
   const [deviceSyncConflictCount, setDeviceSyncConflictCount] = useState(0)
   const [recycleBinCount, setRecycleBinCount] = useState(0)
@@ -324,6 +378,14 @@ function App() {
     },
     [isTauri],
   )
+  const checkSources = useCallback<CheckSources>(async (checkId, skillIds, onProgress) => {
+    const { Channel } = await import('@tauri-apps/api/core')
+    const channel = new Channel<ContentCheckProgress>()
+    channel.onmessage = onProgress
+    return invokeTauri<ContentCheckRunResult>('workspace_content_check', {
+      checkId, skillIds, onProgress: channel,
+    })
+  }, [invokeTauri])
   const refreshRecycleBinCount = useCallback(async () => {
     if (!isTauri) return
     try {
@@ -534,17 +596,28 @@ function App() {
 
   const skillsReadSequence = useRef(0)
   const tagsReadSequence = useRef(0)
-  const loadManagedSkills = useCallback(async () => {
+  const readManagedSkills = useCallback(async () => {
     const sequence = ++skillsReadSequence.current
     try {
       const result = await invokeTauri<ManagedSkill[]>('get_managed_skills')
       if (sequence !== skillsReadSequence.current) return
       setManagedSkills(result)
+      setManagedSkillsReady(true)
       setDetailSkill(current => current ? result.find(skill => skill.id === current.id) ?? null : null)
+      return true
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+      return false
     }
   }, [invokeTauri])
+
+  const loadManagedSkills = useCallback(async () => {
+    await readManagedSkills()
+  }, [readManagedSkills])
+
+  const reloadAfterContentUpdate = useCallback(async () => {
+    if (await readManagedSkills() === false) throw new Error('Managed Skills reload failed')
+  }, [readManagedSkills])
 
   const loadTags = useCallback(async () => {
     const sequence = ++tagsReadSequence.current
@@ -880,10 +953,6 @@ function App() {
       tools.find((tool) => tool.id === toolId)?.supports_project_scope ?? true,
     [tools],
   )
-  const installedProjectToolIds = useMemo(
-    () => installedToolIds.filter((toolId) => toolSupportsProjectScope(toolId)),
-    [installedToolIds, toolSupportsProjectScope],
-  )
 
   const syncInstalledSkill = useCallback(
     async (
@@ -1007,10 +1076,10 @@ function App() {
   const { visibleSkills, filterTags, filterUntaggedCount, bulkSelectedSkills } = useMemo(
     () => getSkillsView({
       managedSkills, tags, scopeFilter, searchQuery, selectedTagIds,
-      includeUntagged, sortBy, bulkSelectedIds, getSkillScope, issuesOnly,
+      includeUntagged, sortBy, bulkSelectedIds, getSkillScope, issuesOnly, projectPath: projectFilter,
     }),
     [managedSkills, tags, scopeFilter, searchQuery, selectedTagIds,
-      includeUntagged, sortBy, bulkSelectedIds, getSkillScope, issuesOnly],
+      includeUntagged, sortBy, bulkSelectedIds, getSkillScope, issuesOnly, projectFilter],
   )
   const hasListFilters = issuesOnly || scopeFilter !== 'all' || searchQuery.trim() !== '' ||
     selectedTagIds.length > 0 || includeUntagged
@@ -1541,9 +1610,10 @@ function App() {
   )
 
   const handleViewChange = useCallback(
-    (view: 'myskills' | 'explore' | 'manage' | 'device-sync' | 'recycle-bin') => {
+    (view: 'myskills' | 'presets' | 'explore' | 'manage' | 'device-sync' | 'recycle-bin') => {
       setShowAddModal(false)
       setActiveView(view)
+      if (view === 'presets') { setWorkspaceIntent(undefined); setWorkspaceKey(k => k + 1) }
       if (view !== 'myskills') {
         setBulkMode(false)
         setBulkSelectedIds([])
@@ -1562,7 +1632,8 @@ function App() {
     [activeView, refreshLibrary],
   )
 
-  const handleOpenDetail = useCallback((skill: ManagedSkill) => {
+  const handleOpenDetail = useCallback((skill: ManagedSkill, fromWorkspace = false) => {
+    detailFromWorkspace.current = fromWorkspace
     setBulkMode(false)
     setBulkSelectedIds([])
     setDetailSkill(skill)
@@ -1570,6 +1641,7 @@ function App() {
   }, [])
 
   const handleBackToList = useCallback(() => {
+    if (detailFromWorkspace.current) { detailFromWorkspace.current = false; setActiveView('presets'); return }
     setDetailSkill(null)
     setActiveView('myskills')
   }, [])
@@ -1751,6 +1823,7 @@ function App() {
   const handleClearListFilters = useCallback(() => {
     setIssuesOnly(false)
     setScopeFilter('all')
+    setProjectFilter('')
     setSearchQuery('')
     setSelectedTagIds([])
     setIncludeUntagged(false)
@@ -1758,6 +1831,7 @@ function App() {
 
   const handleReviewUntagged = useCallback(() => {
     setScopeFilter('all')
+    setProjectFilter('')
     setSearchQuery('')
     setSelectedTagIds([])
     setIncludeUntagged(true)
@@ -1766,6 +1840,7 @@ function App() {
 
   const handleViewTag = useCallback((tagId: number) => {
     setScopeFilter('all')
+    setProjectFilter('')
     setSearchQuery('')
     setSelectedTagIds([tagId])
     setIncludeUntagged(false)
@@ -1808,34 +1883,8 @@ function App() {
   }, [visibleSkills])
 
   const handleOpenBulkSync = useCallback(() => {
-    if (bulkSelectedSkills.length === 0) return
-    if (bulkSelectedSkills.some((skill) => skill.enabled === false)) {
-      toast.error(t('bulk.enableBeforeSync'))
-      return
-    }
-    const installedToolSet = new Set(installedToolIds)
-    const selectedToolSet = new Set<string>()
-    for (const skill of bulkSelectedSkills) {
-      const skillScope = getSkillScope(skill)
-      for (const target of skill.targets) {
-        if ((target.scope ?? 'global') !== skillScope) continue
-        if (!installedToolSet.has(target.tool)) continue
-        selectedToolSet.add(target.tool)
-      }
-    }
-    setBulkSyncToolIds(
-      installedTools
-        .map((tool) => tool.id)
-        .filter((toolId) => selectedToolSet.has(toolId)),
-    )
-    setShowBulkSyncModal(true)
-  }, [
-    bulkSelectedSkills,
-    getSkillScope,
-    installedToolIds,
-    installedTools,
-    t,
-  ])
+    enterWorkspace({ mode: 'select', members: bulkSelectedSkills.map(skill => ({ skillId: skill.id, tools: [...new Set(skill.targets.filter(target => scopeFilter === 'all' || target.scope === scopeFilter).filter(target => !projectFilter || target.project_path === projectFilter).map(target => target.tool))] })), scope: scopeFilter === 'global' ? { kind: 'global' } : projectFilter ? { kind: 'project', path: projectFilter } : undefined })
+  }, [bulkSelectedSkills, scopeFilter, projectFilter, enterWorkspace])
 
   const handleToggleBulkSyncTool = useCallback((toolId: string) => {
     setBulkSyncToolIds((current) =>
@@ -2087,163 +2136,9 @@ function App() {
   ])
 
   const handleConfirmBulkSync = useCallback(async () => {
-    if (bulkSelectedSkills.length === 0) return
-
-    const errors: { title: string; message: string }[] = []
-    setLoading(true)
-    setLoadingStartAt(Date.now())
-    setError(null)
-    try {
-      let completed = 0
-      const selectedBaseToolSet = new Set(bulkSyncToolIds)
-      const total = Math.max(1, bulkSelectedSkills.length * installedToolIds.length)
-      for (const skill of bulkSelectedSkills) {
-        const skillScope = getSkillScope(skill)
-        const projects = getSkillProjects(skill)
-        const sharedByToolId =
-          skillScope === 'project'
-            ? sharedProjectToolIdsByToolId
-            : sharedToolIdsByToolId
-        const selectedToolSet = new Set<string>()
-        for (const toolId of selectedBaseToolSet) {
-          const shared = sharedByToolId[toolId] ?? [toolId]
-          for (const id of shared) selectedToolSet.add(id)
-        }
-
-        const activeInstalledToolIds =
-          skillScope === 'project' ? installedProjectToolIds : installedToolIds
-
-        const targetsToRemove = skill.targets.filter(
-          (target) =>
-            (target.scope ?? 'global') === skillScope &&
-            activeInstalledToolIds.includes(target.tool) &&
-            !selectedToolSet.has(target.tool),
-        )
-
-        const seenRemoveKeys = new Set<string>()
-        for (const target of targetsToRemove) {
-          const key = `${target.tool}|${target.scope}|${target.project_path ?? ''}`
-          if (seenRemoveKeys.has(key)) continue
-          seenRemoveKeys.add(key)
-          completed += 1
-          const toolLabel = toolLabelById[target.tool] ?? target.tool
-          setActionMessage(
-            t('bulk.unsyncProgress', {
-              current: Math.min(completed, total),
-              total,
-              name: skill.name,
-              tool: toolLabel,
-            }),
-          )
-          try {
-            await invokeTauri('unsync_skill_from_tool', {
-              skillId: skill.id,
-              tool: target.tool,
-              scope: skillScope,
-              projectPath: target.project_path ?? undefined,
-            })
-          } catch (err) {
-            errors.push({
-              title: t('errors.syncFailedTitle', {
-                name: skill.name,
-                tool: toolLabel,
-              }),
-              message: err instanceof Error ? err.message : String(err),
-            })
-          }
-        }
-
-        for (const toolId of Array.from(selectedToolSet).filter((id) =>
-          activeInstalledToolIds.includes(id),
-        )) {
-          completed += 1
-          const toolLabel = toolLabelById[toolId] ?? toolId
-          setActionMessage(
-            t('bulk.syncProgress', {
-              current: Math.min(completed, total),
-              total,
-              name: skill.name,
-              tool: toolLabel,
-            }),
-          )
-          try {
-            if (skillScope === 'project') {
-              if (!toolSupportsProjectScope(toolId)) {
-                throw new Error(t('projectSync.unsupportedTool', { tool: toolLabel }))
-              }
-              if (projects.length === 0) {
-                throw new Error(t('projectSync.noProjectsForSync'))
-              }
-              for (const projectPath of projects) {
-                await invokeTauri('sync_skill_to_tool', {
-                  sourcePath: skill.central_path,
-                  skillId: skill.id,
-                  tool: toolId,
-                  name: skill.name,
-                  overwriteIfSameContent: true,
-                  scope: 'project',
-                  projectPath,
-                })
-              }
-            } else {
-              await invokeTauri('sync_skill_to_tool', {
-                sourcePath: skill.central_path,
-                skillId: skill.id,
-                tool: toolId,
-                name: skill.name,
-                overwriteIfSameContent: true,
-                scope: 'global',
-              })
-            }
-          } catch (err) {
-            errors.push({
-              title: t('errors.syncFailedTitle', {
-                name: skill.name,
-                tool: toolLabel,
-              }),
-              message: err instanceof Error ? err.message : String(err),
-            })
-          }
-        }
-      }
-      await loadManagedSkills()
-      setShowBulkSyncModal(false)
-      setBulkSyncToolIds([])
-      if (errors.length > 0) {
-        showActionErrors(errors)
-      } else {
-        setBulkSelectedIds([])
-        setBulkMode(false)
-        setSuccessToastMessage(
-          t('bulk.syncSuccess', {
-            count: bulkSelectedSkills.length,
-            tools: bulkSyncToolIds.length,
-          }),
-        )
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-      setLoadingStartAt(null)
-      setActionMessage(null)
-    }
-  }, [
-    bulkSelectedSkills,
-    bulkSyncToolIds,
-    getSkillProjects,
-    getSkillScope,
-    installedProjectToolIds,
-    installedToolIds,
-    invokeTauri,
-    loadManagedSkills,
-    sharedProjectToolIdsByToolId,
-    sharedToolIdsByToolId,
-    showActionErrors,
-    t,
-    toolLabelById,
-    toolSupportsProjectScope,
-  ])
+    setShowBulkSyncModal(false)
+    enterWorkspace({ mode: 'select', members: bulkSelectedSkills.map(skill => ({ skillId: skill.id, tools: bulkSyncToolIds })), scope: scopeFilter === 'global' ? { kind: 'global' } : projectFilter ? { kind: 'project', path: projectFilter } : undefined })
+  }, [bulkSelectedSkills, bulkSyncToolIds, scopeFilter, projectFilter, enterWorkspace])
 
   const handleConfirmBulkDelete = useCallback(async () => {
     if (bulkSelectedSkills.length === 0) return
@@ -3195,134 +3090,19 @@ function App() {
     void handleSyncAllManagedToTools(toolStatus.newly_installed)
   }, [handleSyncAllManagedToTools, sharedToolIdsByToolId, toolStatus])
 
-  const handleOpenScope = useCallback((skill: ManagedSkill) => {
-    setScopeModalSkill(skill)
-  }, [])
 
   const handleCloseScope = useCallback(() => {
     if (!loading) setScopeModalSkill(null)
   }, [loading])
 
-  const setSkillScopeAndProjects = useCallback(
-    (skillId: string, scope: 'global' | 'project', projects: string[]) => {
-      const uniqueProjects = Array.from(new Set(projects.filter(Boolean)))
-      setSkillScopeState((prev) => ({
-        ...prev,
-        [skillId]: {
-          scope,
-          projects: uniqueProjects,
-        },
-      }))
-    },
-    [],
-  )
 
   const handleScopeChange = useCallback(
     async (nextScope: 'global' | 'project', nextProjects: string[]) => {
       const skill = scopeModalSkill
-      if (!skill || loading) return
-      const projects = Array.from(new Set(nextProjects.filter(Boolean)))
-      const hasStaleTargets = skill.targets.some(
-        (target) =>
-          (target.scope ?? 'global') !== nextScope ||
-          (nextScope === 'project' &&
-            (target.scope ?? 'global') === 'project' &&
-            (!target.project_path || !projects.includes(target.project_path))),
-      )
-      const activeTargets = skill.targets.filter(
-        (target) =>
-          (target.scope ?? 'global') !== nextScope ||
-          (nextScope === 'project' &&
-            (target.scope ?? 'global') === 'project' &&
-            (!target.project_path || !projects.includes(target.project_path))),
-      )
-      const existingProjects = getSkillProjects(skill)
-      const projectsChanged =
-        projects.length !== existingProjects.length ||
-        projects.some((project) => !existingProjects.includes(project))
-      if (getSkillScope(skill) === nextScope && !hasStaleTargets && !projectsChanged) {
-        return
-      }
-
-      setLoading(true)
-      setLoadingStartAt(Date.now())
-      setError(null)
-      try {
-        const seen = new Set<string>()
-        for (const target of activeTargets) {
-          const targetScope = target.scope ?? 'global'
-          const key = `${target.tool}|${targetScope}|${target.project_path ?? ''}`
-          if (seen.has(key)) continue
-          seen.add(key)
-          await invokeTauri('unsync_skill_from_tool', {
-            skillId: skill.id,
-            tool: target.tool,
-            scope: targetScope,
-            projectPath: target.project_path ?? undefined,
-          })
-        }
-        if (nextScope === 'project' && projects.length > 0) {
-          for (const toolId of installedProjectToolIds) {
-            for (const projectPath of projects) {
-              await invokeTauri('sync_skill_to_tool', {
-                sourcePath: skill.central_path,
-                skillId: skill.id,
-                tool: toolId,
-                name: skill.name,
-                overwriteIfSameContent: true,
-                scope: 'project',
-                projectPath,
-              })
-            }
-          }
-        } else if (nextScope === 'global') {
-          for (const toolId of installedToolIds) {
-            await invokeTauri('sync_skill_to_tool', {
-              sourcePath: skill.central_path,
-              skillId: skill.id,
-              tool: toolId,
-              name: skill.name,
-              overwriteIfSameContent: true,
-              scope: 'global',
-            })
-          }
-        }
-        await loadManagedSkills()
-        if (nextScope === 'project') {
-          for (const projectPath of projects) {
-            const saved = await invokeTauri<string[]>('save_recent_project', {
-              projectPath,
-            })
-            setRecentProjects(saved)
-          }
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-        await loadManagedSkills()
-        return
-      } finally {
-        setLoading(false)
-        setLoadingStartAt(null)
-      }
-
-      setSkillScopeAndProjects(
-        skill.id,
-        nextScope,
-        nextScope === 'project' ? projects : [],
-      )
+      if (!skill) return
+      enterWorkspace({ mode: 'select', members: [{ skillId: skill.id, tools: [...new Set(skill.targets.map(target => target.tool))] }], scope: nextScope === 'global' ? { kind: 'global' } : nextProjects[0] ? { kind: 'project', path: nextProjects[0] } : undefined })
       setScopeModalSkill(null)
-    },
-    [
-      getSkillProjects,
-      getSkillScope,
-      installedToolIds,
-      installedProjectToolIds,
-      invokeTauri,
-      loadManagedSkills,
-      loading,
-      scopeModalSkill,
-      setSkillScopeAndProjects,
-    ],
+    }, [scopeModalSkill, enterWorkspace],
   )
 
   const handlePickProject = useCallback(async () => {
@@ -3467,33 +3247,10 @@ function App() {
     ],
   )
 
-  const handleToggleToolForSkill = useCallback(
-    (skill: ManagedSkill, toolId: string) => {
-      if (loading) return
-      const skillScope = getSkillScope(skill)
-      const currentTarget = skill.targets.find(
-        (target) => target.tool === toolId && (target.scope ?? 'global') === skillScope,
-      )
-      const shared = currentTarget
-        ? skill.targets
-            .filter(
-              (target) =>
-                (target.scope ?? 'global') === skillScope &&
-                target.target_path === currentTarget.target_path,
-            )
-            .map((target) => target.tool)
-        : sharedToolIdsByToolId[toolId] ?? null
-      if (shared && shared.length > 1) {
-        setPendingSharedToggle({ skill, toolId, affectedToolIds: shared })
-        return
-      }
-      void runToggleToolForSkill(skill, toolId)
-    },
-    [getSkillScope, loading, runToggleToolForSkill, sharedToolIdsByToolId],
-  )
 
   const handleUpdateManaged = useCallback(
-    async (skill: ManagedSkill) => {
+    async (skill: ManagedSkill, previewId?: string) => {
+    if (!previewId) { setContentRequest({ skills: [skill], restore: false, bulk: false }); return }
     if (hasUnboundLocalSource(skill)) {
       toast.info(t('deviceSync.unboundSourceHelp'))
       return
@@ -3503,7 +3260,7 @@ function App() {
     setError(null)
     try {
       setActionMessage(t('actions.updating', { name: skill.name }))
-      const result = await invokeTauri<UpdateResultDto>('update_managed_skill', { skillId: skill.id })
+      const result = await invokeTauri<UpdateResultDto>('workspace_content_execute', { id: previewId })
       const updatedText = t(result.changed ? 'status.updated' : 'status.unchanged', { name: skill.name })
       setActionMessage(updatedText)
       if (result.pending_targets?.length) {
@@ -3532,7 +3289,8 @@ function App() {
     [handleUpdateManaged],
   )
 
-  const handleUpdateBulkSkills = useCallback(async () => {
+  const handleUpdateBulkSkills = useCallback(async (previewIds?: Record<string, string>) => {
+    if (!previewIds) { setContentRequest({ skills: bulkUpdatableSkills, restore: false, bulk: true }); return }
     if (loading || bulkUpdateRunRef.current || bulkUpdatableSkills.length === 0) return
     const run = { cancelled: false }
     bulkUpdateRunRef.current = run
@@ -3556,7 +3314,8 @@ function App() {
           current: index + 1, total: bulkUpdatableSkills.length, name: skill.name,
         }))
         try {
-          const result = await invokeTauri<UpdateResultDto>('update_managed_skill', { skillId: skill.id })
+          if (!previewIds[skill.id]) throw new Error(t('workspace110.contentBlocked'))
+          const result = await invokeTauri<UpdateResultDto>('workspace_content_execute', { id: previewIds[skill.id] })
           if (result.changed) outcome.updated += 1
           else outcome.unchanged += 1
           if (result.pending_targets?.length) {
@@ -3581,7 +3340,11 @@ function App() {
       retryIds.push(...bulkUpdatableSkills.slice(completed).map(skill => skill.id))
       setBulkSelectedIds(retryIds)
       setBulkMode(retryIds.length > 0)
-      setBulkUpdateResult(outcome)
+      if (outcome.failed > 0 || outcome.skipped > 0 || outcome.cancelled || outcome.remaining > 0 || outcome.pending.length > 0) {
+        setBulkUpdateResult(outcome)
+      } else {
+        setSuccessToastMessage(t('bulk.updateResult', outcome))
+      }
       bulkUpdateRunRef.current = null
       setBulkUpdating(false)
       setLoading(false)
@@ -3619,14 +3382,32 @@ function App() {
   }, [managedSkills, scopeModalSkill])
 
   const globalSkillCount = managedSkills.filter(
-    (skill) => getSkillScope(skill) === 'global',
+    (skill) => skill.targets.some(target => (target.scope || 'global') === 'global') || !skill.targets.length,
   ).length
-  const projectSkillCount = managedSkills.length - globalSkillCount
+  const projectSkillCount = managedSkills.filter(skill => skill.targets.some(target => target.scope === 'project')).length
   const syncIssueCount = managedSkills.filter((skill) => {
     const state = getSkillSyncState(skill)
     return state === 'source-error' || state === 'partial' || state === 'failed'
   }).length
-  const pendingUpdateCount = autoUpdateConfig?.last_failed ?? 0
+  const updateCheck = useUpdateCheck({ skills: managedSkills, ready: managedSkillsReady, invokeTauri, checkSources, onReload: reloadAfterContentUpdate })
+  const notifiedUpdateCheck = useRef<string | null>(null)
+  useEffect(() => {
+    const result = updateCheck.state.lastCheck
+    if (!result || notifiedUpdateCheck.current === result.checkId) return
+    notifiedUpdateCheck.current = result.checkId
+    const title = t(`updatesWorkflow.${result.cancelled ? 'checkStopped' : result.failed === result.total ? 'checkAllFailed' : result.failed ? 'checkPartial' : 'checkCompleted'}`)
+    const description = t('updatesWorkflow.checkBreakdown', result) + (result.failed ? ` · ${t('updatesWorkflow.checkFailureCount', { count: result.failed })}` : '')
+    const notify = result.cancelled || result.failed ? toast.warning : toast.success
+    notify(title, { id: 'skills-update-check-result', description, duration: 3500, position: 'bottom-right' })
+  }, [updateCheck.state.lastCheck, t])
+  const pendingUpdateCount = updateCheck.state.plans.length
+  useEffect(() => {
+    if (activeView !== 'manage' || managementTab !== 'updates') return
+    let cancelled = false
+    invokeTauri<string[]>('workspace_recoveries').then(ids => { if (!cancelled) { setRecoverableIds(ids); setRecoveriesFailed(false) } }).catch(() => { if (!cancelled) setRecoveriesFailed(true) })
+    return () => { cancelled = true }
+  }, [activeView, managementTab, invokeTauri, managedSkills, recoveriesAttempt])
+
 
   const handleRecycleBinChanged = useCallback((count?: number) => {
     if (typeof count === 'number') {
@@ -3680,6 +3461,17 @@ function App() {
           onPickProject={handlePickProject} sharedTools={sharedToolIdsByToolId} sharedProjectTools={sharedProjectToolIdsByToolId} invoke={invokeTauri}
           onClose={collectionInstall.dismiss} onComplete={async () => { await loadManagedSkills(); await loadTags() }} />
       )}
+      {contentRequest ? <ContentReview skills={contentRequest.skills} restore={contentRequest.restore} invokeTauri={invokeTauri} onClose={() => setContentRequest(null)} t={t} onConfirm={async plans => {
+        if (contentRequest.updateCheckSelection) { setContentRequest(null); await updateCheck.apply(plans, contentRequest.updateCheckSelection); return }
+        if (contentRequest.restore) { for (const id of Object.values(plans)) { const result = await invokeTauri<UpdateResultDto>('workspace_content_execute', { id }); if (result.pending_targets?.length) setError(t('workspace110.restorePending')) } await loadManagedSkills() }
+        else {
+          setContentRequest(null)
+          if (contentRequest.bulk) await handleUpdateBulkSkills(plans)
+          else { const skill = contentRequest.skills[0]; await handleUpdateManaged(skill, plans[skill.id]) }
+        }
+      }} /> : null}
+      {repairSourceSkill ? <SourceRepair skill={repairSourceSkill} invokeTauri={invokeTauri} onChanged={loadManagedSkills} onClose={() => setRepairSourceSkill(null)} t={t} /> : null}
+      <ConfirmActionModal open={workspaceNavigation !== null} loading={false} title={t('workspace110.discard')} body={t('workspace110.discardHint')} cancelLabel={t('workspace110.cancel')} confirmLabel={t('workspace110.confirm')} onRequestClose={() => setWorkspaceNavigation(null)} onConfirm={() => { workspaceDirty.current = false; setWorkspaceIntent(undefined); setWorkspaceKey(key => key + 1); workspaceNavigation?.action(); setWorkspaceNavigation(null) }} />
       <Toaster
         position="top-right"
         richColors
@@ -3710,16 +3502,18 @@ function App() {
         updateDone={updateDone}
         collapsed={sidebarCollapsed}
         onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)}
-        onOpenSettings={handleOpenSettings}
+        onOpenSettings={() => navigateWorkspace(handleOpenSettings)}
         onOpenUpdate={handleOpenUpdate}
         onRestart={handleRestartApp}
-        onViewChange={handleViewChange}
-        onManagementTabChange={handleManagementTabChange}
+        onViewChange={view => navigateWorkspace(() => handleViewChange(view))}
+        onManagementTabChange={tab => navigateWorkspace(() => handleManagementTabChange(tab))}
         t={t}
       />
       <WindowResizeHandles enabled={isTauri} />
 
       <main className="skills-main">
+        <PresetPage onDirtyChange={dirty => { workspaceDirty.current = dirty }} key={workspaceKey} active={activeView === 'presets'} intent={workspaceIntent} skills={managedSkills} tools={installedTools} projects={[...new Set([...recentProjects, ...managedSkills.flatMap(skill => skill.targets.map(target => target.project_path).filter((path): path is string => Boolean(path)))])]} invokeTauri={invokeTauri} onChanged={loadManagedSkills} onBack={() => setActiveView('myskills')} onSkill={skill => handleOpenDetail(skill, true)} onProject={scope => { setWorkspaceReturn(true); setScopeFilter(scope.kind); setProjectFilter(scope.kind === 'project' ? scope.path : ''); setActiveView('myskills') }} t={t} />
+
         <RecycleBinPage
           installedTools={installedTools}
           active={activeView === 'recycle-bin'}
@@ -3737,9 +3531,11 @@ function App() {
           onConflictCountChange={setDeviceSyncConflictCount}
           t={t}
         />
-        {activeView === 'device-sync' || activeView === 'recycle-bin' ? null : activeView === 'detail' && detailSkill ? (
+        {activeView === 'presets' || activeView === 'device-sync' || activeView === 'recycle-bin' ? null : activeView === 'detail' && detailSkill ? (
           <SkillDetailView
             skill={detailSkill}
+            onRepairSource={() => setRepairSourceSkill(detailSkill)}
+            onRepairTargets={() => handleRepairTargets(detailSkill)}
             onBack={handleBackToList}
             invokeTauri={invokeTauri}
             formatRelative={formatRelative}
@@ -3749,7 +3545,7 @@ function App() {
             t={t}
           />
         ) : activeView === 'myskills' ? (
-          <div className="dashboard-stack">
+          <div className="dashboard-stack skills-library">
             <section className="skills-overview" aria-label={t('navMySkills')}>
               <div className="skills-scope-tabs" role="group" aria-label={t('scope.filterLabel')}>
                 {(['all', 'global', 'project'] as const).map((scope) => (
@@ -3758,13 +3554,15 @@ function App() {
                     type="button"
                     className={`skills-scope-tab${scopeFilter === scope ? ' active' : ''}`}
                     aria-pressed={scopeFilter === scope}
-                    onClick={() => handleScopeFilterChange(scope)}
+                    onClick={() => { setProjectFilter(''); handleScopeFilterChange(scope) }}
                   >
                     {t(`scope.${scope}`)}
                     <span>{scope === 'all' ? managedSkills.length : scope === 'global' ? globalSkillCount : projectSkillCount}</span>
                   </button>
                 ))}
               </div>
+              {workspaceReturn || syncIssueCount > 0 ? <div className="skills-overview-actions">
+                {workspaceReturn ? <button className="btn btn-secondary" onClick={() => { setWorkspaceReturn(false); setActiveView('presets') }}><ArrowLeft size={15} aria-hidden="true" />{t('workspace110.back')}</button> : null}
               {syncIssueCount > 0 ? (
                 <button
                   className="skills-sync-issue"
@@ -3780,7 +3578,24 @@ function App() {
                   </span>
                 </button>
               ) : null}
+              </div> : null}
             </section>
+            {scopeFilter === 'project' ? <div className="skills-project-toolbar">
+              <ProjectPicker
+                projects={[...new Set([...recentProjects, ...managedSkills.flatMap(skill => skill.targets.map(target => target.project_path).filter((path): path is string => Boolean(path))), ...(projectFilter ? [projectFilter] : [])])]}
+                value={projectFilter}
+                onChange={setProjectFilter}
+                onBrowse={async () => { const path = await openDirectoryDialog({ directory: true, multiple: false }); if (typeof path === 'string') setProjectFilter(path) }}
+                t={t}
+              />
+            </div> : null}
+            <div className="skills-library-notices">
+              <AiManagementNotice isTauri={isTauri} invokeTauri={invokeTauri} skills={managedSkills} onStatusChanged={setAiManagementStatus} onOpen={() => {
+                setFocusAiManagement(true)
+                setActiveView('settings')
+              }} t={t} />
+              <DiscoveryNotice count={plan?.total_skills_found ?? 0} loading={loading} onReviewImport={handleReviewImport} onOpenScanSettings={handleOpenDiscoveryScanSettings} t={t} />
+            </div>
             <FilterBar
               sortBy={sortBy}
               searchQuery={searchQuery}
@@ -3809,15 +3624,10 @@ function App() {
               </div>
             ) : null}
             <SkillsList
-              notice={<AiManagementNotice isTauri={isTauri} invokeTauri={invokeTauri} skills={managedSkills} onStatusChanged={setAiManagementStatus} onOpen={() => {
-                setFocusAiManagement(true)
-                setActiveView('settings')
-              }} t={t} />}
               hasManagedSkills={managedSkills.length > 0}
               hasFilters={hasListFilters}
               onClearFilters={handleClearListFilters}
-              plan={plan}
-              visibleSkills={visibleSkills}
+              visibleSkills={scopeFilter === 'all' ? visibleSkills : visibleSkills.map(skill => ({ ...skill, targets: skill.targets.filter(target => target.scope === scopeFilter && (!projectFilter || target.project_path === projectFilter)) }))}
               installedTools={installedTools}
               loading={loading}
               bulkMode={bulkMode}
@@ -3826,14 +3636,18 @@ function App() {
               getGithubInfo={getGithubInfo}
               getSkillSourceLabel={getSkillSourceLabel}
               formatRelative={formatRelative}
-              onReviewImport={handleReviewImport}
-              onOpenScanSettings={handleOpenDiscoveryScanSettings}
               onUpdateSkill={handleUpdateSkill}
               onDeleteSkill={handleDeletePrompt}
               onToggleSkillEnabled={handleToggleSkillEnabled}
-              onToggleTool={handleToggleToolForSkill}
-              onOpenScope={handleOpenScope}
-              onOpenDetail={handleOpenDetail}
+              onToggleTool={(skill, tool) => {
+                if (projectFilter || scopeFilter === 'global') enterWorkspace({ mode: 'select', members: [{ skillId: skill.id, tools: [tool] }], scope: currentWorkspaceScope, remove: skill.targets.some(target => target.tool === tool && (projectFilter ? target.project_path === projectFilter : target.scope === 'global')) })
+                else enterWorkspace({ mode: 'select', members: [{ skillId: skill.id, tools: [tool] }] })
+              }}
+              onOpenScope={skill => enterWorkspace({ mode: 'select', members: membersForSkills([skill]), scope: currentWorkspaceScope })}
+              onRepairSource={setRepairSourceSkill}
+              projectContext={Boolean(projectFilter && scopeFilter === 'project')}
+              onRemoveProject={skill => enterWorkspace({ mode: 'select', members: membersForSkills([skill]), scope: currentWorkspaceScope, remove: true })}
+              onOpenDetail={skill => handleOpenDetail(managedSkills.find(s => s.id === skill.id) ?? skill)}
               onEditTags={handleOpenEditTags}
               onToggleBulkSelection={handleToggleBulkSelection}
               getSkillScope={getSkillScope}
@@ -3874,7 +3688,7 @@ function App() {
             ) : null}
             {bulkMode ? (
               <div className="bulk-action-bar">
-                <div className="bulk-action-copy">
+                <div className="bulk-action-copy">{projectFilter ? <span>{t('workspace110.assetActions')}</span> : null}
                   <strong>{t('bulk.selected', { count: bulkSelectedSkills.length })}</strong>
                   <span>{t('bulk.helper')}</span>
                 </div>
@@ -4000,6 +3814,12 @@ function App() {
                 />
               ) : (
                 <UpdatesPage
+                  recoverableIds={recoverableIds}
+                  updateCheck={updateCheck}
+                  onReview={plans => setContentRequest({ skills: plans.flatMap(plan => managedSkills.filter(skill => skill.id === plan.skillId)), restore: false, bulk: false, updateCheckSelection: Object.fromEntries(plans.map(plan => [plan.skillId, plan.id])) })}
+                  recoveryError={recoveriesFailed}
+                  onRetryRecoveries={() => setRecoveriesAttempt(attempt => attempt + 1)}
+                  onRestore={skill => setContentRequest({ skills: [skill], restore: true, bulk: false })}
                   skills={managedSkills}
                   autoUpdateConfig={autoUpdateConfig}
                   onAutoUpdateConfigChange={handleAutoUpdateConfigChange}
@@ -4064,6 +3884,8 @@ function App() {
             onExploreFilterChange={handleExploreFilterChange}
             onInstallSkill={handleExploreInstall}
             onOpenManualAdd={handleOpenAdd}
+            discoveredCount={plan?.total_skills_found ?? 0}
+            onReviewDiscovered={handleReviewImport}
             t={t}
           />
         )}

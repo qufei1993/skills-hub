@@ -1460,6 +1460,19 @@ fn format_service_error_maps_target_conflict_back_to_the_desktop_prefix() {
 }
 
 #[test]
+fn format_service_error_preserves_plan_stale_category_for_workspace_updates() {
+    let error = crate::services::error::ServiceError::new(
+        crate::services::error::ErrorCode::PlanStale,
+        "state changed; preview the operation again",
+        serde_json::json!({}),
+    );
+    assert_eq!(
+        format_service_error(error),
+        "PLAN_STALE|state changed; preview the operation again"
+    );
+}
+
+#[test]
 fn format_service_error_preserves_modified_target_semantics_for_safe_removal() {
     let error = crate::services::error::ServiceError::new(
         crate::services::error::ErrorCode::TargetConflict,
@@ -1513,6 +1526,42 @@ fn init_install_test_git_repo(path: &Path) {
     let tree = repo.find_tree(tree_id).unwrap();
     repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
         .unwrap();
+}
+
+#[test]
+fn workspace_content_preview_reports_a_modified_target_through_the_desktop_protocol() {
+    let (_home, _data, paths, service) = make_install_service();
+    let source = paths.app_data_dir.join("preview-source");
+    write_install_test_skill(&source, "preview-demo");
+    let installed = service.install(InstallRequest::local(&source)).unwrap();
+    let target = paths.app_data_dir.join("user-modified-target");
+    write_install_test_skill(&target, "preview-demo");
+    std::fs::write(target.join("SKILL.md"), "user edits that must be preserved").unwrap();
+    service
+        .store()
+        .upsert_skill_target(&crate::core::skill_store::SkillTargetRecord {
+            id: "preview-target".into(),
+            skill_id: installed.id.clone(),
+            tool: "codex".into(),
+            scope: "global".into(),
+            project_path: None,
+            target_path: target.to_string_lossy().into_owned(),
+            mode: "copy".into(),
+            status: "ok".into(),
+            last_error: None,
+            synced_at: Some(1),
+        })
+        .unwrap();
+    let error = service.preview_content(&installed.id, false).unwrap_err();
+    assert_eq!(error.details["reason"], "modified_target");
+    assert_eq!(
+        format_service_error(error),
+        format!("TARGET_MODIFIED|{}", target.display())
+    );
+    assert_eq!(
+        std::fs::read_to_string(target.join("SKILL.md")).unwrap(),
+        "user edits that must be preserved"
+    );
 }
 
 #[test]
@@ -1824,10 +1873,10 @@ fn get_managed_skills_impl_maps_targets() {
                 .to_string_lossy()
                 .to_string(),
         ),
-        source_subpath: None,
-        source_revision: None,
+        source_subpath: Some("skills/demo".to_string()),
+        source_revision: Some("reviewed-revision".to_string()),
         central_path: "/tmp/central".to_string(),
-        content_hash: None,
+        content_hash: Some("reviewed-content-hash".to_string()),
         created_at: 1,
         updated_at: 2,
         last_sync_at: None,
@@ -1855,6 +1904,12 @@ fn get_managed_skills_impl_maps_targets() {
 
     let out = get_managed_skills_impl(&store).unwrap();
     assert_eq!(out.len(), 1);
+    assert_eq!(out[0].source_subpath.as_deref(), Some("skills/demo"));
+    assert_eq!(out[0].source_revision.as_deref(), Some("reviewed-revision"));
+    assert_eq!(
+        out[0].content_hash.as_deref(),
+        Some("reviewed-content-hash")
+    );
     assert!(out[0].enabled);
     assert_eq!(out[0].tags.len(), 1);
     assert_eq!(out[0].tags[0].name, "Frontend");

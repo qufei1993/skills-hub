@@ -2,6 +2,7 @@ import { memo, useEffect, useId, useRef, type ReactNode, type RefObject } from '
 import { PackagePlus, Trash2, TriangleAlert } from 'lucide-react'
 
 type ConfirmActionModalProps = {
+  className?: string
   intent?: 'default' | 'danger'
   recoverable?: boolean
   open: boolean
@@ -19,6 +20,7 @@ type ConfirmActionModalProps = {
 }
 
 const ConfirmActionModal = ({
+  className,
   open,
   intent = 'danger',
   recoverable = false,
@@ -51,11 +53,12 @@ const ConfirmActionModal = ({
     const fallbackFocus = returnFocusRef?.current
     const dialog = dialogRef.current
     const focusableSelector =
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])'
     const focusableElements = () =>
       Array.from(dialog?.querySelectorAll<HTMLElement>(focusableSelector) ?? []).filter(element => !element.closest('[hidden]') && !element.matches(':disabled'))
 
-    focusableElements()[0]?.focus({ preventScroll: true })
+    const initialFocus = focusableElements()[0] ?? dialog
+    initialFocus?.focus({ preventScroll: true })
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !loadingRef.current) {
         event.preventDefault()
@@ -99,7 +102,7 @@ const ConfirmActionModal = ({
     >
       <div
         ref={dialogRef}
-        className={`modal modal-delete${recoverable ? ' modal-recoverable-delete' : ''}${intent === 'default' ? ' modal-collection-install' : ''}`}
+        className={`modal modal-delete${recoverable ? ' modal-recoverable-delete' : ''}${intent === 'default' ? ' modal-collection-install' : ''}${className ? ` ${className}` : ''}`}
         tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
         role="dialog"

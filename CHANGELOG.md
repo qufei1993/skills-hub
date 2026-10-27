@@ -4,9 +4,43 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Project management**: Filter My Skills by a specific project and manage its deployment targets while preserving global and unrelated project deployments. The project picker supports search, readable names and complete paths; preset editing and saving are centralized in Skill Presets.
+- **Skill presets**: Save reusable combinations with per-Skill tool assignments, then apply them to global or project locations from one dialog. Saved assignments are reused by default, with optional adjustments and automatic conflict checks. Editing or deleting a preset does not change existing deployments.
+- **Application history and undo**: Record actual outcomes, retry unfinished items and undo eligible additions while preserving modified or subsequently reused targets. Keep the 100 most recent finished records plus in-progress and interrupted runs; discard cancelled, unexecuted previews. Removing old records does not remove installed Skills, but ends undo access through those records.
+- **Updates, recovery and repair**: List confirmed source changes, update all or selected Skills, and optionally review highlighted file differences and affected deployments. Each Skill keeps its latest pre-update recovery snapshot. Source rebinding and missing-target repair preserve central identity and unrelated deployments; recovery also works for disabled Skills without re-enabling them.
+
+### Improved
+
+- **Update checking**: Compare sources without building full previews, refresh each Git repository and branch once per check, and restore the last summary after restart without automatically checking on page entry. Rechecks retain the previous list and finish with persistent counts, timestamps and measured duration; full previews are prepared when needed for review or execution.
+- **Focused, accessible interfaces**: Separate library management, preset configuration and update scheduling; keep setup and discovery tips outside Skill results and independently dismissible, with discovery still available from Add Skills. Use compact member/tool summaries, expandable paths and history, responsive layouts, keyboard focus handling, and English, Simplified Chinese and Korean copy.
+
 ### Fixed
 
-- Git subdirectory discovery and selected installation now avoid checking out unrelated repository assets, preventing unrelated Git LFS failures from blocking Skill installation. LFS failures are no longer reported as missing repositories, and Git discovery errors remain visible in the source dialog. ([#195](https://github.com/qufei1993/skills-hub/issues/195))
+- **Conflict and recovery handling**: Show the tool, path and reason for blocked applications, preserve selections when returning to adjust them, and avoid repeating completed work. Protect concurrent preset edits and stale plans, retain progress after partial undo or display-refresh failures, and preserve recoverable backups when recycling removed deployments fails.
+- **Git update reliability**: Stop helper processes on timeout or cancellation, isolate individual source-check failures, and keep internal cache metadata out of root-level Skills so stalled or broken sources do not block healthy checks.
+
+## [1.0.1]
+
+### Added
+
+- **Status and tool filters for Skills**: Filter the library by enabled or disabled state and by the tools each Skill is currently synced to (match any). Counts reflect the other active filters, and Clear filters resets them together with search, scope, and tags. ([PR #197](https://github.com/qufei1993/skills-hub/pull/197))
+
+### Improved
+
+- **Tool sync icons on Skill cards**: Show the tool name and sync state immediately when hovering or focusing an icon, instead of waiting for the delayed native tooltip. Icons no longer overlap, so each one has its full click area. ([PR #198](https://github.com/qufei1993/skills-hub/pull/198))
+
+### Fixed
+
+- Keep open Skill tooltips in sync with the latest tool sync state, and hide them when the Skill is disabled or the tool is removed. ([PR #202](https://github.com/qufei1993/skills-hub/pull/202))
+
+- Successful batch updates, including batches with no changes, now show a brief completion notification instead of leaving a result panel open. Failed, skipped, cancelled and pending-tool results remain available until dismissed. ([PR #203](https://github.com/qufei1993/skills-hub/pull/203))
+
+- Collection installs now resolve the latest default-branch commit once per repository and keep it consistent across the batch and retries. New installs track the default branch for future updates; existing same-source Skills are preserved. Website links and published collection data remain compatible. ([PR #199](https://github.com/qufei1993/skills-hub/pull/199))
+
+- Windows junction deployment now uses the upstream fix for canonical `\\?\` paths, preventing broken links from failing during execution after a successful preview. CLI local source paths retain their literal path characters, and deployment errors include safe stage and system-error diagnostics. ([#196](https://github.com/qufei1993/skills-hub/issues/196)) ([PR #201](https://github.com/qufei1993/skills-hub/pull/201))
+- Git subdirectory discovery and selected installation now avoid checking out unrelated repository assets, preventing unrelated Git LFS failures from blocking Skill installation. LFS failures are no longer reported as missing repositories, and Git discovery errors remain visible in the source dialog. ([#195](https://github.com/qufei1993/skills-hub/issues/195)) ([PR #200](https://github.com/qufei1993/skills-hub/pull/200))
 
 ## [1.0.0]
 

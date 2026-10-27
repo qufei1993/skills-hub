@@ -27,26 +27,30 @@ describe('collection confirmation', () => {
     await i18n.changeLanguage('zh')
     const calls: string[] = []
     render(<I18nextProvider i18n={i18n}><CollectionInstallModal manifest={manifest} tools={[]} invoke={async <T,>(command: string) => {
-      if (command === 'preview_git_skills_local') return [] as T
+      if (command === 'resolve_collection_revision') return 'b'.repeat(40) as T
+      if (command === 'preview_collection_skills_local') return [] as T
       calls.push(command)
-      return (command === 'list_git_skills_cmd' ? [{ name: 'design', subpath: 'skills/design', status: 'install' }] : { skill_id: 'id', name: 'design', central_path: '/tmp/design', action: 'installed' }) as T
+      return (command === 'list_collection_skills' ? [{ name: 'design', subpath: 'skills/design', status: 'install' }] : { skill_id: 'id', name: 'design', central_path: '/tmp/design', action: 'installed' }) as T
     }} onComplete={async () => {}} onClose={() => {}} /></I18nextProvider>)
     expect(screen.getByText('真实合集')).toBeTruthy()
+    expect(screen.getByText('新安装的 Skills 使用默认分支最新版本，已安装的 Skills 保持不变。')).toBeTruthy()
+    expect(screen.queryByText('aaaaaaa')).toBeNull()
     expect(screen.getByText('skills/design')).toBeTruthy()
     expect(calls).toEqual([])
     await clickInstall()
     await waitFor(() => expect(screen.getByText('已安装')).toBeTruthy())
-    expect(calls).toEqual(['list_git_skills_cmd', 'install_git_selection'])
+    expect(calls).toEqual(['list_collection_skills', 'install_collection_selection'])
     expect(screen.getByRole('button', { name: '完成' }).className).toContain('btn-primary')
   })
   it('keeps successfully installed items when retrying a failed distribution', async () => {
     const calls: string[] = []
     let attempts = 0
     render(<I18nextProvider i18n={i18n}><CollectionInstallModal manifest={manifest} tools={[{ id: 'cursor', label: 'Cursor' }]} invoke={async <T,>(command: string) => {
-      if (command === 'preview_git_skills_local') return [] as T
+      if (command === 'resolve_collection_revision') return 'b'.repeat(40) as T
+      if (command === 'preview_collection_skills_local') return [] as T
       calls.push(command)
       if (command === 'sync_skill_to_tool' && attempts++ === 0) throw new Error('Failed to distribute')
-      return (command === 'list_git_skills_cmd' ? [{ name: 'design', subpath: 'skills/design', status: 'install' }] : { skill_id: 'id', name: 'design', central_path: '/tmp/design', action: 'installed' }) as T
+      return (command === 'list_collection_skills' ? [{ name: 'design', subpath: 'skills/design', status: 'install' }] : { skill_id: 'id', name: 'design', central_path: '/tmp/design', action: 'installed' }) as T
     }} onComplete={async () => {}} onClose={() => {}} /></I18nextProvider>)
     await nextStep()
   fireEvent.click(screen.getByLabelText('Cursor'))
@@ -54,7 +58,7 @@ describe('collection confirmation', () => {
     await waitFor(() => expect(screen.getByText('Failed to distribute')).toBeTruthy())
     fireEvent.click(screen.getByRole('button', { name: '重试失败项' }))
     await waitFor(() => expect(screen.getByRole('button', { name: '完成' })).toBeTruthy())
-    expect(calls).toEqual(['list_git_skills_cmd', 'install_git_selection', 'sync_skill_to_tool', 'sync_skill_to_tool'])
+    expect(calls).toEqual(['list_collection_skills', 'install_collection_selection', 'sync_skill_to_tool', 'sync_skill_to_tool'])
   })
 })
 
@@ -62,8 +66,9 @@ it('preserves installation state while another dialog temporarily takes priority
   let release: () => void = () => {}
   const wait = new Promise<void>(resolve => { release = resolve })
   const invoke = async <T,>(command: string) => {
-    if (command === 'preview_git_skills_local') return [] as T
-    if (command === 'list_git_skills_cmd') {
+      if (command === 'resolve_collection_revision') return 'b'.repeat(40) as T
+    if (command === 'preview_collection_skills_local') return [] as T
+    if (command === 'list_collection_skills') {
       await wait
       return [{ name: 'design', subpath: 'skills/design', status: 'install' }] as T
     }
@@ -84,9 +89,10 @@ it('filters the visible list without changing the installation set', async () =>
   const names: string[] = []
   const batch = { ...manifest, skills: [...manifest.skills, { name: 'review', path: 'skills/review', source: 0 }] }
   render(<I18nextProvider i18n={i18n}><CollectionInstallModal manifest={batch} tools={[]} invoke={async <T,>(command: string, args?: Record<string, unknown>) => {
-    if (command === 'preview_git_skills_local') return [] as T
-    if (command === 'list_git_skills_cmd') return batch.skills.map(skill => ({ ...skill, subpath: skill.path, status: 'install' })) as T
-    if (command === 'install_git_selection') { names.push(String(args?.name)); return { skill_id: String(args?.name), name: args?.name, central_path: '/tmp/item', action: 'installed' } as T }
+      if (command === 'resolve_collection_revision') return 'b'.repeat(40) as T
+    if (command === 'preview_collection_skills_local') return [] as T
+    if (command === 'list_collection_skills') return batch.skills.map(skill => ({ ...skill, subpath: skill.path, status: 'install' })) as T
+    if (command === 'install_collection_selection') { names.push(String(args?.name)); return { skill_id: String(args?.name), name: args?.name, central_path: '/tmp/item', action: 'installed' } as T }
     return undefined as T
   }} onComplete={async () => {}} onClose={() => {}} /></I18nextProvider>)
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'review' } })
@@ -101,11 +107,12 @@ it('creates one tag for new installs and reuses it after distribution failure', 
   const calls: string[] = []
   let syncs = 0
   render(<I18nextProvider i18n={i18n}><CollectionInstallModal manifest={manifest} tools={[{ id: 'cursor', label: 'Cursor' }]} invoke={async <T,>(command: string, args?: Record<string, unknown>) => {
-    if (command === 'preview_git_skills_local') return [] as T
+      if (command === 'resolve_collection_revision') return 'b'.repeat(40) as T
+    if (command === 'preview_collection_skills_local') return [] as T
       calls.push(command)
     if (command === 'create_tag') { expect(args).toEqual({ name: '工程测试' }); return { id: 7, name: '工程测试' } as T }
-    if (command === 'preview_git_skills_local') return [] as T
-    if (command === 'list_git_skills_cmd') return [{ name: 'design', subpath: 'skills/design', status: 'install' }] as T
+    if (command === 'preview_collection_skills_local') return [] as T
+    if (command === 'list_collection_skills') return [{ name: 'design', subpath: 'skills/design', status: 'install' }] as T
     if (command === 'get_managed_skills') return [{ id: 'new', tags: [] }] as T
     if (command === 'sync_skill_to_tool' && syncs++ === 0) throw new Error('sync failed')
     return { skill_id: 'new', name: 'design', central_path: '/tmp/design', action: 'installed' } as T
@@ -119,7 +126,7 @@ it('creates one tag for new installs and reuses it after distribution failure', 
   fireEvent.click(screen.getByRole('button', { name: '重试失败项' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '完成' })).toBeTruthy())
   expect(calls.filter(command => command === 'create_tag')).toHaveLength(1)
-  expect(calls.filter(command => command === 'install_git_selection')).toHaveLength(1)
+  expect(calls.filter(command => command === 'install_collection_selection')).toHaveLength(1)
   expect(calls.indexOf('set_skill_tags')).toBeLessThan(calls.indexOf('sync_skill_to_tool'))
 })
 
@@ -129,7 +136,8 @@ it('requires a project before installation and keeps shared targets selected tog
   render(<I18nextProvider i18n={i18n}><CollectionInstallModal manifest={manifest}
     tools={[{ id: 'cursor', label: 'Cursor' }, { id: 'codex', label: 'Codex' }, { id: 'legacy', label: 'Legacy', supports_project_scope: false }]}
     sharedTools={{ cursor: ['cursor', 'codex'], codex: ['cursor', 'codex'] }}
-    recentProjects={['/work/project']} invoke={async <T,>(command: string) => { if (command === 'preview_git_skills_local') return [] as T
+    recentProjects={['/work/project']} invoke={async <T,>(command: string) => {
+      if (command === 'resolve_collection_revision') return 'b'.repeat(40) as T; if (command === 'preview_collection_skills_local') return [] as T
       calls.push(command); return undefined as T }} onComplete={async () => {}} onClose={() => {}} /></I18nextProvider>)
   await nextStep()
   fireEvent.click(screen.getByLabelText('Cursor'))
@@ -170,9 +178,10 @@ it('keeps explicit selection through search and retries only selected failures',
   const batch = { ...manifest, skills: [...manifest.skills, { name: 'review', path: 'skills/review', source: 0 }] }
   const names: string[] = []
   render(<I18nextProvider i18n={i18n}><CollectionInstallModal manifest={batch} tools={[]} invoke={async <T,>(command: string, args?: Record<string, unknown>) => {
-    if (command === 'preview_git_skills_local') return [] as T
-    if (command === 'list_git_skills_cmd') return batch.skills.map(skill => ({ ...skill, subpath: skill.path, status: 'install' })) as T
-    if (command === 'install_git_selection') {
+      if (command === 'resolve_collection_revision') return 'b'.repeat(40) as T
+    if (command === 'preview_collection_skills_local') return [] as T
+    if (command === 'list_collection_skills') return batch.skills.map(skill => ({ ...skill, subpath: skill.path, status: 'install' })) as T
+    if (command === 'install_collection_selection') {
       names.push(String(args?.name))
       if (names.length === 1) throw new Error('temporary failure')
       return { skill_id: 'review', name: 'review', central_path: '/tmp/review', action: 'installed' } as T
@@ -196,7 +205,8 @@ it('keeps explicit selection through search and retries only selected failures',
 it('disables installation when all skills are deselected and restores the entire collection', async () => {
   await i18n.changeLanguage('zh')
   const calls: string[] = []
-  render(<I18nextProvider i18n={i18n}><CollectionInstallModal manifest={manifest} tools={[]} invoke={async <T,>(command: string) => { if (command === 'preview_git_skills_local') return [] as T
+  render(<I18nextProvider i18n={i18n}><CollectionInstallModal manifest={manifest} tools={[]} invoke={async <T,>(command: string) => {
+      if (command === 'resolve_collection_revision') return 'b'.repeat(40) as T; if (command === 'preview_collection_skills_local') return [] as T
       calls.push(command); return undefined as T }} onComplete={async () => {}} onClose={() => {}} /></I18nextProvider>)
   fireEvent.click(screen.getByRole('checkbox', { name: '全选' }))
   const install = screen.getByRole('button', { name: '下一步' }) as HTMLButtonElement
@@ -217,8 +227,9 @@ it('keeps failures open, then closes and announces success once after retry and 
     const [open, setOpen] = useState(true)
     return <I18nextProvider i18n={i18n}><CollectionInstallModal open={open} manifest={manifest} tools={[]}
       invoke={async <T,>(command: string) => {
-        if (command === 'preview_git_skills_local') return [] as T
-    if (command === 'list_git_skills_cmd') return [{ name: 'design', subpath: 'skills/design', status: 'install' }] as T
+      if (command === 'resolve_collection_revision') return 'b'.repeat(40) as T
+        if (command === 'preview_collection_skills_local') return [] as T
+    if (command === 'list_collection_skills') return [{ name: 'design', subpath: 'skills/design', status: 'install' }] as T
         if (attempts++ === 0) throw new Error('retry me')
         return { skill_id: 'id', name: 'design', central_path: '/tmp/design', action: 'installed' } as T
       }} onComplete={async () => { events.push('refresh') }} onClose={() => { events.push('close'); setOpen(false) }} /></I18nextProvider>
@@ -240,12 +251,13 @@ it('previews installed and conflicting sources before installation without downl
   const calls: string[] = []
   render(<I18nextProvider i18n={i18n}><CollectionInstallModal manifest={manifest} tools={[]}
     invoke={async <T,>(command: string) => {
+      if (command === 'resolve_collection_revision') return 'b'.repeat(40) as T
       calls.push(command)
       return [{ name: 'design', subpath: 'skills/design', status: 'update', existing_skill_id: 'renamed-id' }] as T
     }} onComplete={async () => {}} onClose={() => {}} /></I18nextProvider>)
   await waitFor(() => expect(screen.getByText('已在技能库中')).toBeTruthy())
   expect(screen.queryByText('待安装')).toBeNull()
-  expect(calls).toEqual(['preview_git_skills_local'])
+  expect(calls).toEqual(['preview_collection_skills_local'])
   expect((screen.getByRole('button', { name: '下一步' }) as HTMLButtonElement).disabled).toBe(false)
 })
 
@@ -254,7 +266,8 @@ it('blocks installation when the local preview fails and allows retrying the che
   let attempts = 0
   render(<I18nextProvider i18n={i18n}><CollectionInstallModal manifest={manifest} tools={[]}
     invoke={async <T,>(command: string) => {
-      expect(command).toBe('preview_git_skills_local')
+      if (command === 'resolve_collection_revision') return 'b'.repeat(40) as T
+      expect(command).toBe('preview_collection_skills_local')
       if (attempts++ === 0) throw new Error('database unavailable')
       return [{ name: 'design', subpath: 'skills/design', status: 'conflict' }] as T
     }} onComplete={async () => {}} onClose={() => {}} /></I18nextProvider>)
@@ -269,7 +282,8 @@ it('blocks installation when the local preview fails and allows retrying the che
 it('keeps selection and settings across both steps without installing on Next', async () => {
   await i18n.changeLanguage('zh')
   const calls: string[] = []
-  const invoke = async <T,>(command: string) => { calls.push(command); return [] as T }
+  const invoke = async <T,>(command: string) => {
+      if (command === 'resolve_collection_revision') return 'b'.repeat(40) as T; calls.push(command); return [] as T }
   const batch = { ...manifest, skills: [...manifest.skills, { name: 'review', path: 'skills/review', source: 0 }] }
   render(<I18nextProvider i18n={i18n}><CollectionInstallModal manifest={batch} tools={[{ id: 'cursor', label: 'Cursor' }]} invoke={invoke} onComplete={async () => {}} onClose={() => {}} /></I18nextProvider>)
   expect(screen.queryByRole('checkbox', { name: 'Cursor' })).toBeNull()
@@ -283,7 +297,7 @@ it('keeps selection and settings across both steps without installing on Next', 
   expect((screen.getByRole('checkbox', { name: '选择 design' }) as HTMLInputElement).checked).toBe(false)
   await nextStep()
   expect((screen.getByRole('checkbox', { name: 'Cursor' }) as HTMLInputElement).checked).toBe(true)
-  expect(calls).toEqual(['preview_git_skills_local'])
+  expect(calls).toEqual(['preview_collection_skills_local'])
 })
 
 it('excludes preview conflicts from selection, select-all and the installation request', async () => {
@@ -291,8 +305,9 @@ it('excludes preview conflicts from selection, select-all and the installation r
   const batch = { ...manifest, skills: [...manifest.skills, { name: 'review', path: 'skills/review', source: 0 }] }
   const installed: string[] = []
   const invoke = async <T,>(command: string, args?: Record<string, unknown>) => {
-    if (command === 'preview_git_skills_local' || command === 'list_git_skills_cmd') return batch.skills.map((skill, index) => ({ name: skill.name, subpath: skill.path, status: index === 0 ? 'conflict' : 'install' })) as T
-    if (command === 'install_git_selection') {
+      if (command === 'resolve_collection_revision') return 'b'.repeat(40) as T
+    if (command === 'preview_collection_skills_local' || command === 'list_collection_skills') return batch.skills.map((skill, index) => ({ name: skill.name, subpath: skill.path, status: index === 0 ? 'conflict' : 'install' })) as T
+    if (command === 'install_collection_selection') {
       installed.push(String(args?.name))
       return { skill_id: 'review', name: 'review', central_path: '/tmp/review', action: 'installed' } as T
     }

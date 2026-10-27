@@ -34,12 +34,12 @@ export function getSkillSyncState(
 export function getToolSyncState(
   skill: Pick<ManagedSkill, 'targets'>,
   toolId: string,
-  scope: 'global' | 'project',
+  scope: 'all' | 'global' | 'project',
 ): ToolSyncState {
   const targets = skill.targets.filter(
     (target) =>
       target.tool === toolId &&
-      (target.scope ?? 'global') === scope &&
+      (scope === 'all' || (target.scope ?? 'global') === scope) &&
       isActiveSkillTarget(target),
   )
   if (targets.length === 0) return 'not-synced'
@@ -52,7 +52,7 @@ export function getToolSyncState(
 export function getFullySyncedTools<T extends { id: string }>(
   skill: Pick<ManagedSkill, 'targets'>,
   tools: T[],
-  scope: 'global' | 'project',
+  scope: 'all' | 'global' | 'project',
 ): T[] {
   return tools.filter(
     (tool) => getToolSyncState(skill, tool.id, scope) === 'synced',

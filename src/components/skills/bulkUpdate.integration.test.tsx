@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { toast } from 'sonner'
 import App from '../../App'
 import i18n from '../../i18n'
 import type { AutoUpdateConfigDto, ManagedSkill, UpdateResultDto } from './types'
@@ -50,11 +51,13 @@ beforeEach(async () => {
     skill.description = `Updated ${skill.name}`
     return result(skill, skill.id !== 'two')
   }
+  vi.mocked(toast.success).mockClear()
   invoke.mockReset()
   invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
     if (command === 'get_managed_skills') return structuredClone(skills)
-    if (command === 'update_managed_skill') {
-      const skill = skills.find(skill => skill.id === args?.skillId)
+    if (command === 'workspace_content_preview') return { id: `preview-${args?.skillId}`, skillId: args?.skillId, name: String(args?.skillId), changes: [], targets: [], restore: false }
+    if (command === 'workspace_content_execute') {
+      const skill = skills.find(skill => `preview-${skill.id}` === args?.id)
       if (!skill) throw new Error('Unknown Skill')
       return update(skill)
     }
@@ -89,6 +92,10 @@ afterEach(() => {
 async function clickButton(name: string, bulk = false) {
   const query = bulk ? within(document.querySelector('.bulk-action-bar') as HTMLElement) : screen
   await act(async () => { fireEvent.click(query.getByRole('button', { name })); await vi.advanceTimersByTimeAsync(0) })
+  if (name === i18n.t('bulk.update')) {
+    expect(invoke.mock.calls.filter(([command]) => command === 'workspace_content_preview').length).toBeGreaterThan(0)
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: i18n.t('workspace110.confirmUpdate') })); await vi.advanceTimersByTimeAsync(0) })
+  }
 }
 
 async function openBulk(selectAll = true) {
@@ -98,14 +105,41 @@ async function openBulk(selectAll = true) {
   if (selectAll) await clickButton(i18n.t('bulk.selectVisible'), true)
 }
 
-const updatedIds = () => invoke.mock.calls.filter(([command]) => command === 'update_managed_skill').map(([, args]) => args.skillId)
+const updatedIds = () => invoke.mock.calls.filter(([command]) => command === 'workspace_content_execute').map(([, args]) => String(args.id).replace('preview-', ''))
 const report = () => within(screen.getByRole('region', { name: i18n.t('bulk.updateResultTitle') }))
 
-it.each(['zh', 'en', 'ko'])('updates only selected Skills and refreshes results in %s without changing deployment choices', async language => {
+it('requires a fresh target after clearing a concrete project filter', async () => {
+  render(<App />)
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  const scopes = document.querySelector('.skills-scope-tabs') as HTMLElement
+  await act(async () => { fireEvent.click(within(scopes).getByRole('button', { name: new RegExp(i18n.t('scope.project')) })) })
+  await clickButton(i18n.t('workspace110.project'))
+  await act(async () => { fireEvent.click(screen.getByRole('option', { name: /\/test\/project/ })) })
+  expect(screen.queryByRole('button', { name: '配置项目 Skills' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '保存当前配置' })).toBeNull()
+  await clickButton(i18n.t('filters.clear'))
+  expect(screen.queryByRole('button', { name: '配置项目 Skills' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '保存当前配置' })).toBeNull()
+  expect(screen.queryByRole('button', { name: i18n.t('workspace110.addExisting') })).toBeNull()
+  await clickButton(i18n.t('bulk.manage'))
+  await clickButton(i18n.t('bulk.selectVisible'), true)
+  expect(screen.queryByRole('button', { name: '保存为预设' })).toBeNull()
+  await clickButton(i18n.t('bulk.sync'), true)
+  expect((screen.getByRole('radio', { name: i18n.t('workspace110.global') }) as HTMLInputElement).checked).toBe(false)
+  expect((screen.getByRole('radio', { name: i18n.t('workspace110.project') }) as HTMLInputElement).checked).toBe(false)
+  expect((screen.getByRole('button', { name: i18n.t('workspace110.applyNow') }) as HTMLButtonElement).disabled).toBe(true)
+  expect(invoke.mock.calls.some(([command]) => command === 'workspace_execute')).toBe(false)
+})
+
+it.each(['zh', 'en', 'ko'] as const)('updates only selected Skills and refreshes results in %s without changing deployment choices', async language => {
   await i18n.changeLanguage(language)
   const saved = structuredClone(skills.map(skill => ({ targets: skill.targets, tags: skill.tags, enabled: skill.enabled })))
   await openBulk(false)
   const bar = within(document.querySelector('.bulk-action-bar') as HTMLElement)
+  const removedPresetLabel = { zh: '保存为预设', en: 'Save as preset', ko: '프리셋으로 저장' }[language]
+  expect(bar.queryByRole('button', { name: removedPresetLabel })).toBeNull()
+  expect(bar.getByRole('button', { name: i18n.t('bulk.sync') })).toBeTruthy()
+  expect(bar.getByRole('button', { name: i18n.t('bulk.delete') })).toBeTruthy()
   expect((bar.getByRole('button', { name: i18n.t('bulk.update') }) as HTMLButtonElement).disabled).toBe(true)
   const boxes = screen.getAllByRole('checkbox', { name: i18n.t('bulk.toggleSkill') })
   await act(async () => { fireEvent.click(boxes[0]); fireEvent.click(boxes[1]) })
@@ -115,7 +149,8 @@ it.each(['zh', 'en', 'ko'])('updates only selected Skills and refreshes results 
   expect(screen.getByText('Updated two')).toBeTruthy()
   expect(skills[2].description).toBeUndefined()
   expect(skills.map(skill => ({ targets: skill.targets, tags: skill.tags, enabled: skill.enabled }))).toEqual(saved)
-  expect(report().getByText(i18n.t('bulk.updateResult', { updated: 1, unchanged: 1, skipped: 0, failed: 0 }))).toBeTruthy()
+  expect(screen.queryByRole('region', { name: i18n.t('bulk.updateResultTitle') })).toBeNull()
+  expect(toast.success).toHaveBeenCalledWith(i18n.t('bulk.updateResult', { updated: 1, unchanged: 1, skipped: 0, failed: 0 }), { duration: 1800 })
   expect(invoke.mock.calls.some(([command]) => ['sync_skill_to_tool', 'unsync_skill_from_tool', 'set_skill_enabled', 'set_skill_tags'].includes(command))).toBe(false)
 })
 
@@ -158,7 +193,7 @@ it('continues after a source failure, reports pending tools, and keeps failed Sk
   update = async skill => result(skill)
   await clickButton(i18n.t('bulk.update'), true)
   expect(updatedIds()).toEqual(['failed', 'pending', 'failed'])
-  expect(report().queryByText(i18n.t('bulk.updateFailedTitle', { name: 'failed' }))).toBeNull()
+  expect(screen.queryByRole('region', { name: i18n.t('bulk.updateResultTitle') })).toBeNull()
 })
 
 it('waits for the current update before cancellation and keeps unprocessed Skills selected', async () => {
@@ -185,4 +220,26 @@ it('waits for the current update before cancellation and keeps unprocessed Skill
   update = async skill => result(skill)
   await clickButton(i18n.t('bulk.update'), true)
   expect(updatedIds()).toEqual(['one', 'two'])
+})
+
+it('finishes an unchanged batch without leaving a result panel to close', async () => {
+  update = async skill => result(skill, false)
+  await openBulk()
+  await clickButton(i18n.t('bulk.update'), true)
+  expect(updatedIds()).toEqual(['one', 'two', 'unselected'])
+  expect(screen.queryByRole('region', { name: i18n.t('bulk.updateResultTitle') })).toBeNull()
+  expect(document.querySelector('.bulk-action-bar')).toBeNull()
+  expect(toast.success).toHaveBeenCalledWith(i18n.t('bulk.updateResult', { updated: 0, unchanged: 3, skipped: 0, failed: 0 }), { duration: 1800 })
+})
+
+it('keeps pending tool details visible even when every source update succeeds', async () => {
+  skills = [fixture('pending')]
+  update = async skill => ({ ...result(skill), pending_targets: ['codex'] })
+  await openBulk()
+  await clickButton(i18n.t('bulk.update'), true)
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+  expect(report().getByText(i18n.t('deviceSync.skillUpdatedToolsPending', { name: 'pending', count: 1 }))).toBeTruthy()
+  expect(toast.success).not.toHaveBeenCalled()
+  await clickButton(i18n.t('close'))
+  expect(screen.queryByRole('region', { name: i18n.t('bulk.updateResultTitle') })).toBeNull()
 })

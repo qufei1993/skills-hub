@@ -6,12 +6,13 @@ import type { ManagedSkill, ToolOption } from './types'
 import { getSkillSyncState } from './skillSyncStatus'
 import { issueReasonKey } from './skillIssueState'
 
-export default memo(function SkillIssueNotice({ skill, tools, t, compact = false }: { skill: ManagedSkill; tools: ToolOption[]; t: TFunction; compact?: boolean }) {
+type RepairProps = { onRepairSource?: () => void; onRepairTargets?: () => void }
+export default memo(function SkillIssueNotice({ skill, tools, t, compact = false, onRepairSource, onRepairTargets }: { skill: ManagedSkill; tools: ToolOption[]; t: TFunction; compact?: boolean } & RepairProps) {
   const state = getSkillSyncState(skill)
-  return ['source-error', 'partial', 'failed'].includes(state) ? <IssueContent key={skill.id} skill={skill} tools={tools} t={t} compact={compact} /> : null
+  return ['source-error', 'partial', 'failed'].includes(state) ? <IssueContent onRepairSource={onRepairSource} onRepairTargets={onRepairTargets} key={skill.id} skill={skill} tools={tools} t={t} compact={compact} /> : null
 })
 
-function IssueContent({ skill, tools, t, compact }: { skill: ManagedSkill; tools: ToolOption[]; t: TFunction; compact: boolean }) {
+function IssueContent({ skill, tools, t, compact, onRepairSource, onRepairTargets }: { skill: ManagedSkill; tools: ToolOption[]; t: TFunction; compact: boolean } & RepairProps) {
   const state = getSkillSyncState(skill)
   const [position, setPosition] = useState<{ left: number; top: number; maxHeight: number } | null>(null)
   const trigger = useRef<HTMLButtonElement>(null)
@@ -47,6 +48,8 @@ function IssueContent({ skill, tools, t, compact }: { skill: ManagedSkill; tools
   const targets = skill.targets.filter(target => target.status !== 'ok' && target.status !== 'disabled')
   const title = t(state === 'source-error' ? 'deviceSync.sourceNeedsAttention' : 'deviceSync.toolUpdatesPending', { count: targets.length })
   const content = <div className="skill-issue-content">
+      {state === 'source-error' && onRepairSource ? <button className="btn btn-secondary" onClick={onRepairSource}>{t('workspace110.repairSource')}</button> : null}
+      {targets.length > 0 && onRepairTargets ? <button className="btn btn-secondary" onClick={onRepairTargets}>{t('workspace110.repairTargets')}</button> : null}
       {state === 'source-error' ? <p>{t(issueReasonKey(skill.source_error))}<br />{t('deviceSync.sourceIssueHelp')}</p> : null}
       {targets.map((target, index) => <p key={index}><strong>{tools.find(tool => tool.id === target.tool)?.label || target.tool}</strong><span>{t(issueReasonKey(target.last_error))}<br />{t('deviceSync.toolIssueHelp')}</span></p>)}
     </div>

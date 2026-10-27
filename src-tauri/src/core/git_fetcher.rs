@@ -1,3 +1,4 @@
+use std::io::{Read, Seek};
 use std::path::Path;
 use std::process::Command;
 use std::process::Stdio;
@@ -10,6 +11,9 @@ use git2::{build::RepoBuilder, Repository};
 use super::cancel_token::CancelToken;
 use super::network_proxy::git_fetch_options;
 use super::process::background_command;
+
+#[path = "git_process_tree.rs"]
+mod process_tree;
 
 pub fn clone_or_pull(
     repo_url: &str,
@@ -129,189 +133,293 @@ pub fn clone_or_pull_sparse(
     {
         return clone_pinned_commit(repo_url, dest, revision, cancel, proxy_url);
     }
-    let normalized_subpath = subpath.replace('\\', "/");
-    let normalized_subpath = normalized_subpath
-        .split('/')
-        .filter(|part| !part.is_empty() && *part != ".")
-        .collect::<Vec<_>>()
-        .join("/");
-    let clean_subpath = normalized_subpath.as_str();
-    if clean_subpath.is_empty() {
-        anyhow::bail!("sparse checkout path is empty");
-    }
+    anyhow::ensure!(
+        subpath
+            .replace('\\', "/")
+            .split('/')
+            .any(|part| !part.is_empty() && part != "."),
+        "sparse checkout path is empty"
+    );
+    clone_or_pull_sparse_many(
+        repo_url,
+        dest,
+        branch,
+        &[subpath.to_string()],
+        cancel,
+        proxy_url,
+    )
+}
 
-    if resolve_git_bin().is_none() {
-        anyhow::bail!("system git is required for sparse checkout");
-    }
+/// Refresh one repository and materialize only the selected Skill directories.
+/// The union is supplied for each check, rather than retained as an unbounded
+/// set of all paths ever visited by the application.
+pub(crate) fn clone_or_pull_sparse_many(
+    repo_url: &str,
+    dest: &Path,
+    branch: Option<&str>,
+    subpaths: &[String],
+    cancel: Option<&CancelToken>,
+    proxy_url: Option<&str>,
+) -> Result<String> {
+    let patterns = sparse_patterns(subpaths)?;
+    clone_or_pull_sparse_patterns(repo_url, dest, branch, &patterns, cancel, proxy_url)
+}
 
-    // Non-cone entries are gitignore patterns: "skills" also matches
-    // .agents/skills and .claude/skills. Anchor the literal directory at root.
-    let mut sparse_pattern = String::from("/");
-    for character in clean_subpath.chars() {
-        if matches!(character, '*' | '?' | '[' | ']' | '\\') {
-            sparse_pattern.push('\\');
+pub(crate) fn clone_or_pull_skill_manifests(
+    repo_url: &str,
+    dest: &Path,
+    branch: Option<&str>,
+    cancel: Option<&CancelToken>,
+    proxy_url: Option<&str>,
+) -> Result<String> {
+    clone_or_pull_sparse_patterns(
+        repo_url,
+        dest,
+        branch,
+        &["/SKILL.md".into(), "/**/SKILL.md".into()],
+        cancel,
+        proxy_url,
+    )
+}
+
+fn sparse_patterns(subpaths: &[String]) -> Result<Vec<String>> {
+    anyhow::ensure!(!subpaths.is_empty(), "sparse checkout paths are empty");
+    let mut sparse_patterns = Vec::new();
+    for subpath in subpaths {
+        let normalized = subpath.replace('\\', "/");
+        let parts = normalized
+            .split('/')
+            .filter(|part| !part.is_empty() && *part != ".")
+            .collect::<Vec<_>>();
+        anyhow::ensure!(
+            !parts.contains(&"..") && !normalized.starts_with('/'),
+            "invalid sparse checkout path"
+        );
+        if parts.is_empty() {
+            sparse_patterns.push("/*".to_string());
+            continue;
         }
-        sparse_pattern.push(character);
+        let mut pattern = String::from("/");
+        for character in parts.join("/").chars() {
+            if matches!(character, '*' | '?' | '[' | ']' | '\\') {
+                pattern.push('\\');
+            }
+            pattern.push(character);
+        }
+        pattern.push('/');
+        sparse_patterns.push(pattern);
     }
-    sparse_pattern.push('/');
+    sparse_patterns.sort();
+    sparse_patterns.dedup();
 
-    // Ensure parent exists so `git clone` can create dest.
+    Ok(sparse_patterns)
+}
+
+pub(crate) fn materialize_sparse_paths(
+    repo_url: &str,
+    dest: &Path,
+    subpaths: &[String],
+    cancel: Option<&CancelToken>,
+    proxy_url: Option<&str>,
+) -> Result<()> {
+    let patterns = sparse_patterns(subpaths)?;
+    let mut cmd = git_cmd_for_remote(proxy_url, Some(repo_url));
+    cmd.arg("-C")
+        .arg(dest)
+        .args(["sparse-checkout", "set", "--no-cone"])
+        .args(patterns);
+    let out = run_cmd_with_timeout(
+        cmd,
+        git_fetch_timeout(),
+        "materialize selected Skill paths".into(),
+        cancel,
+    )?;
+    anyhow::ensure!(
+        out.status.success(),
+        "could not materialize selected Skill paths: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    Ok(())
+}
+
+#[derive(Debug)]
+pub(crate) struct SparseCheckoutFailure {
+    pub revision: String,
+    reason: String,
+}
+impl std::fmt::Display for SparseCheckoutFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.reason)
+    }
+}
+impl std::error::Error for SparseCheckoutFailure {}
+
+pub(crate) fn materialize_sparse_paths_at_revision(
+    repo_url: &str,
+    dest: &Path,
+    subpaths: &[String],
+    revision: &str,
+    cancel: Option<&CancelToken>,
+    proxy_url: Option<&str>,
+) -> Result<()> {
+    materialize_sparse_patterns(
+        repo_url,
+        dest,
+        &sparse_patterns(subpaths)?,
+        revision,
+        cancel,
+        proxy_url,
+    )
+}
+
+fn materialize_sparse_patterns(
+    repo_url: &str,
+    dest: &Path,
+    patterns: &[String],
+    revision: &str,
+    cancel: Option<&CancelToken>,
+    proxy_url: Option<&str>,
+) -> Result<()> {
+    let mut set = git_cmd_for_remote(proxy_url, Some(repo_url));
+    set.arg("-C")
+        .arg(dest)
+        .args(["sparse-checkout", "set", "--no-cone"])
+        .args(patterns);
+    let out = run_cmd_with_timeout(
+        set,
+        git_fetch_timeout(),
+        "configure sparse checkout".into(),
+        cancel,
+    )?;
+    anyhow::ensure!(
+        out.status.success(),
+        "could not configure sparse checkout: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let mut checkout = git_cmd_for_remote(proxy_url, Some(repo_url));
+    checkout
+        .arg("-C")
+        .arg(dest)
+        .args(["reset", "--hard", revision]);
+    let out = run_cmd_with_timeout(
+        checkout,
+        git_fetch_timeout(),
+        "materialize sparse checkout".into(),
+        cancel,
+    )?;
+    anyhow::ensure!(
+        out.status.success(),
+        "could not materialize sparse checkout: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    Ok(())
+}
+
+fn clone_or_pull_sparse_patterns(
+    repo_url: &str,
+    dest: &Path,
+    branch: Option<&str>,
+    sparse_patterns: &[String],
+    cancel: Option<&CancelToken>,
+    proxy_url: Option<&str>,
+) -> Result<String> {
+    anyhow::ensure!(
+        resolve_git_bin().is_some(),
+        "system git is required for sparse checkout"
+    );
     if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create parent dir {:?}", parent))?;
+        std::fs::create_dir_all(parent)?;
     }
-
-    if dest.exists() {
-        let git_dir = dest.join(".git");
-        for lock_name in &["index.lock", "shallow.lock", "HEAD.lock"] {
-            let lock_path = git_dir.join(lock_name);
-            if lock_path.exists() {
-                log::warn!("[git_fetcher] removing stale lock file: {:?}", lock_path);
-                let _ = std::fs::remove_file(&lock_path);
-            }
-        }
-
+    let pinned =
+        branch.filter(|value| value.len() == 40 && value.bytes().all(|b| b.is_ascii_hexdigit()));
+    if pinned.is_some() && !dest.join(".git").exists() {
+        let mut init = git_cmd(proxy_url);
+        init.arg("init").arg(dest);
         let out = run_cmd_with_timeout(
-            {
-                let mut cmd = git_cmd_for_remote(proxy_url, Some(repo_url));
-                cmd.arg("-C").arg(dest).args([
-                    "sparse-checkout",
-                    "set",
-                    "--no-cone",
-                    &sparse_pattern,
-                ]);
-                cmd
-            },
-            git_fetch_timeout(),
-            format!("git sparse-checkout set {} in {:?}", clean_subpath, dest),
+            init,
+            git_timeout(),
+            "initialize pinned sparse cache".into(),
             cancel,
         )?;
-        if !out.status.success() {
-            anyhow::bail!(
-                "git sparse-checkout set failed: {}",
-                String::from_utf8_lossy(&out.stderr)
-            );
+        anyhow::ensure!(
+            out.status.success(),
+            "could not initialize pinned sparse cache"
+        );
+    }
+    let reference = if dest.join(".git").exists() {
+        for lock in ["index.lock", "shallow.lock", "HEAD.lock"] {
+            let _ = std::fs::remove_file(dest.join(".git").join(lock));
         }
-
-        let out = run_cmd_with_timeout(
-            {
-                let mut cmd = git_cmd_for_remote(proxy_url, Some(repo_url));
-                cmd.arg("-C").arg(dest).args(["fetch", "--prune", "origin"]);
-                cmd
-            },
-            git_fetch_timeout(),
-            format!("git fetch in {:?}", dest),
-            cancel,
-        )?;
-        if !out.status.success() {
-            anyhow::bail!("git fetch failed: {}", String::from_utf8_lossy(&out.stderr));
-        }
-
-        if let Some(branch) = branch {
-            let out = run_cmd_with_timeout(
-                {
-                    let mut cmd = git_cmd(proxy_url);
-                    cmd.arg("-C").arg(dest).args([
-                        "checkout",
-                        "-B",
-                        branch,
-                        &format!("origin/{}", branch),
-                    ]);
-                    cmd
-                },
-                git_fetch_timeout(),
-                format!("git checkout -B {} in {:?}", branch, dest),
-                cancel,
-            )?;
-            if !out.status.success() {
-                anyhow::bail!(
-                    "git checkout branch failed: {}",
-                    String::from_utf8_lossy(&out.stderr)
-                );
-            }
+        let mut fetch = git_cmd_for_remote(proxy_url, Some(repo_url));
+        fetch.arg("-C").arg(dest);
+        if let Some(revision) = pinned {
+            fetch.args(["fetch", "--depth", "1", "--no-tags", repo_url, revision]);
         } else {
-            let out = run_cmd_with_timeout(
-                {
-                    let mut cmd = git_cmd(proxy_url);
-                    cmd.arg("-C")
-                        .arg(dest)
-                        .args(["reset", "--hard", "FETCH_HEAD"]);
-                    cmd
-                },
-                git_fetch_timeout(),
-                format!("git reset --hard in {:?}", dest),
-                cancel,
-            )?;
-            if !out.status.success() {
-                anyhow::bail!(
-                    "git reset --hard failed: {}",
-                    String::from_utf8_lossy(&out.stderr)
-                );
-            }
+            fetch.args(["fetch", "--prune", "origin"]);
         }
+        let out = run_cmd_with_timeout(
+            fetch,
+            git_fetch_timeout(),
+            "refresh sparse repository".into(),
+            cancel,
+        )?;
+        anyhow::ensure!(
+            out.status.success(),
+            "git fetch failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        "FETCH_HEAD"
     } else {
-        let mut cmd = git_cmd_for_remote(proxy_url, Some(repo_url));
-        cmd.arg("clone").args([
+        let mut clone = git_cmd_for_remote(proxy_url, Some(repo_url));
+        clone.args([
+            "clone",
             "--depth",
             "1",
             "--filter=blob:none",
             "--sparse",
+            "--no-checkout",
             "--no-tags",
         ]);
         if let Some(branch) = branch {
-            cmd.arg("--branch").arg(branch).arg("--single-branch");
+            clone.args(["--branch", branch, "--single-branch"]);
         }
-        cmd.arg(repo_url).arg(dest);
+        clone.arg(repo_url).arg(dest);
         let out = run_cmd_with_timeout(
-            cmd,
+            clone,
             git_timeout(),
-            format!("git clone {} into {:?}", repo_url, dest),
+            "clone sparse repository".into(),
             cancel,
         )?;
-        if !out.status.success() {
-            anyhow::bail!("git clone failed: {}", String::from_utf8_lossy(&out.stderr));
-        }
-
-        let out = run_cmd_with_timeout(
-            {
-                let mut cmd = git_cmd_for_remote(proxy_url, Some(repo_url));
-                cmd.arg("-C").arg(dest).args([
-                    "sparse-checkout",
-                    "set",
-                    "--no-cone",
-                    &sparse_pattern,
-                ]);
-                cmd
-            },
-            git_fetch_timeout(),
-            format!("git sparse-checkout set {} in {:?}", clean_subpath, dest),
-            cancel,
-        )?;
-        if !out.status.success() {
-            anyhow::bail!(
-                "git sparse-checkout set failed: {}",
-                String::from_utf8_lossy(&out.stderr)
-            );
-        }
-    }
-
-    let out = run_cmd_with_timeout(
-        {
-            let mut cmd = git_cmd(proxy_url);
-            cmd.arg("-C").arg(dest).args(["rev-parse", "HEAD"]);
-            cmd
-        },
-        git_fetch_timeout(),
-        format!("git rev-parse HEAD in {:?}", dest),
-        cancel,
-    )?;
-    if !out.status.success() {
-        anyhow::bail!(
-            "git rev-parse failed: {}",
+        anyhow::ensure!(
+            out.status.success(),
+            "git clone failed: {}",
             String::from_utf8_lossy(&out.stderr)
         );
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        "HEAD"
+    };
+    let mut rev = git_cmd(proxy_url);
+    rev.arg("-C").arg(dest).args(["rev-parse", reference]);
+    let out = run_cmd_with_timeout(
+        rev,
+        git_fetch_timeout(),
+        "read refreshed revision".into(),
+        cancel,
+    )?;
+    anyhow::ensure!(out.status.success(), "could not read refreshed revision");
+    let revision = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    materialize_sparse_patterns(
+        repo_url,
+        dest,
+        sparse_patterns,
+        &revision,
+        cancel,
+        proxy_url,
+    )
+    .map_err(|error| SparseCheckoutFailure {
+        revision: revision.clone(),
+        reason: format!("{error:#}"),
+    })?;
+    Ok(revision)
 }
 
 fn git_timeout() -> Duration {
@@ -436,38 +544,63 @@ fn run_cmd_with_timeout(
     context: String,
     cancel: Option<&CancelToken>,
 ) -> Result<std::process::Output> {
+    // Regular temporary files cannot fill a pipe or wait for inherited writer
+    // handles to close. They are private, unlinked/delete-on-close and never
+    // become persistent logs. Read only after the owned process tree is stopped.
+    let mut stdout = tempfile::tempfile().context("create Git stdout capture")?;
+    let mut stderr = tempfile::tempfile().context("create Git stderr capture")?;
     cmd.stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stdout(Stdio::from(stdout.try_clone()?))
+        .stderr(Stdio::from(stderr.try_clone()?));
 
-    let mut child = cmd.spawn().with_context(|| context.clone())?;
+    let (mut child, tree) =
+        process_tree::ProcessTree::spawn(&mut cmd).with_context(|| context.clone())?;
     let start = Instant::now();
     loop {
         if cancel.is_some_and(|c| c.is_cancelled()) {
+            tree.terminate();
             let _ = child.kill();
             let _ = child.wait();
             anyhow::bail!("CANCELLED|操作已被用户取消。");
         }
 
         if start.elapsed() > timeout {
+            tree.terminate();
             let _ = child.kill();
-            let stderr = child
-                .wait_with_output()
-                .map(|out| String::from_utf8_lossy(&out.stderr).to_string())
-                .unwrap_or_default();
+            let _ = child.wait();
+            let error_output = read_capture(&mut stderr).unwrap_or_default();
             anyhow::bail!(
                 "git 操作超时（{}s）。请检查网络/代理是否可访问 GitHub；也可设置环境变量 SKILLS_HUB_GIT_TIMEOUT_SECS 增大超时。\n{}",
                 timeout.as_secs(),
-                stderr.trim()
+                String::from_utf8_lossy(&error_output).trim()
             );
         }
 
         match child.try_wait() {
-            Ok(Some(_)) => return child.wait_with_output().with_context(|| context.clone()),
-            Ok(None) => std::thread::sleep(Duration::from_millis(200)),
-            Err(err) => return Err(err).with_context(|| context.clone()),
+            Ok(Some(status)) => {
+                tree.terminate();
+                return Ok(std::process::Output {
+                    status,
+                    stdout: read_capture(&mut stdout).with_context(|| context.clone())?,
+                    stderr: read_capture(&mut stderr).with_context(|| context.clone())?,
+                });
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(err) => {
+                tree.terminate();
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(err).with_context(|| context.clone());
+            }
         }
     }
+}
+
+fn read_capture(file: &mut std::fs::File) -> std::io::Result<Vec<u8>> {
+    file.rewind()?;
+    let mut output = Vec::new();
+    file.read_to_end(&mut output)?;
+    Ok(output)
 }
 
 fn clone_or_pull_via_git_cli(
@@ -727,4 +860,49 @@ fn clone_pinned_commit_via_libgit2(
     repo.checkout_tree(commit.as_object(), Some(&mut checkout))?;
     repo.set_head_detached(oid)?;
     Ok(oid.to_string())
+}
+
+/// Resolve remote HEAD without consulting the installation cache.
+pub fn resolve_default_revision(repo_url: &str, proxy_url: Option<&str>) -> Result<String> {
+    if resolve_git_bin().is_none() {
+        let mut remote = git2::Remote::create_detached(repo_url)?;
+        let connection = remote.connect_auth(
+            git2::Direction::Fetch,
+            None,
+            Some(super::network_proxy::git_proxy_options(
+                proxy_url.unwrap_or_default(),
+            )),
+        )?;
+        return connection
+            .list()?
+            .iter()
+            .find(|head| head.name() == "HEAD")
+            .map(|head| head.oid().to_string())
+            .context("remote default branch is unavailable");
+    }
+    let mut command = git_cmd_for_remote(proxy_url, Some(repo_url));
+    command.args(["ls-remote", repo_url, "HEAD"]);
+    let output = run_cmd_with_timeout(
+        command,
+        git_fetch_timeout(),
+        "resolve default branch".into(),
+        None,
+    )?;
+    anyhow::ensure!(
+        output.status.success(),
+        "could not resolve default branch: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout)?;
+    let revision = text
+        .lines()
+        .find_map(|line| {
+            let (revision, name) = line.split_once('\t')?;
+            (name == "HEAD"
+                && revision.len() == 40
+                && revision.bytes().all(|b| b.is_ascii_hexdigit()))
+            .then(|| revision.to_lowercase())
+        })
+        .context("remote default branch is unavailable")?;
+    Ok(revision)
 }
