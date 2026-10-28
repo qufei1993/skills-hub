@@ -63,15 +63,15 @@ for (const [os, arch, target] of [['Darwin','arm64','darwin-arm64'], ['Darwin','
   }))
 }
 
-it('leaves the existing CLI and shell profile untouched on download or checksum errors', () => {
-  for (const failure of ['download', 'checksum', 'filename']) fixture(({ root, home, dest, install }) => {
+for (const failure of ['download', 'checksum', 'filename']) {
+  it(`preserves the existing CLI and shell profile on ${failure} failure`, () => fixture(({ root, home, dest, install }) => {
     mkdirSync(path.dirname(dest), { recursive: true }); writeFileSync(dest, 'old-cli')
     assert.notEqual(install({ TEST_FAIL: failure }).status, 0)
     assert.equal(readFileSync(dest, 'utf8'), 'old-cli')
     assert.equal(existsSync(path.join(home, '.zshrc')), false)
     assert.equal(readdirSync(root).some(name => name.startsWith('skillshub-install.')), false)
-  })
-})
+  }))
+}
 
 it('rejects unsupported targets and malformed release tags before installation', () => {
   for (const overrides of [{ TEST_OS: 'FreeBSD' }, { TEST_ARCH: 'riscv64' }, { TEST_TAG: 'v0.11.0/evil' }]) fixture(({ install, dest }) => {

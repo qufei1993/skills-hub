@@ -228,3 +228,9 @@ jobs:
       - name: Verify auto-update recovery after terminating a worker
         working-directory: src-tauri
         run: cargo test --locked --features cli core::auto_update::tests
+      - name: Verify canonical-path junction and first CLI deployments on Windows
+        working-directory: src-tauri
+        run: |
+          cargo test --locked --features cli --lib junction_with_canonical_long_unicode_source_remains_readable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked --features cli --test cli_integration cli_first_

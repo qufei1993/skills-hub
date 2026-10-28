@@ -1,5 +1,6 @@
 import { hasUnboundLocalSource } from './skillSourceState'
-import { memo } from 'react'
+import { Fragment, memo, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Copy, Folder, Github, RefreshCw, Tag, Trash2 } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { toast } from 'sonner'
@@ -60,6 +61,22 @@ const SkillCard = ({
   t,
 }: SkillCardProps) => {
   const unboundSource = hasUnboundLocalSource(skill)
+  const [toolHint, setToolHint] = useState<{ toolId: string; left: number; top: number } | null>(null)
+  const showToolHint = (button: HTMLElement, toolId: string) => {
+    const rect = button.getBoundingClientRect()
+    setToolHint({ toolId, left: rect.left + rect.width / 2, top: rect.top })
+  }
+
+  useEffect(() => {
+    if (!toolHint) return
+    const hide = () => setToolHint(null)
+    window.addEventListener('scroll', hide, true)
+    window.addEventListener('resize', hide)
+    return () => {
+      window.removeEventListener('scroll', hide, true)
+      window.removeEventListener('resize', hide)
+    }
+  }, [toolHint])
   const github = getGithubInfo(skill.source_ref)
   const isGit = skill.source_type.toLowerCase().includes('git')
   const sourceLabel = github?.label ?? getSkillSourceLabel(skill)
@@ -168,23 +185,37 @@ const SkillCard = ({
                     : synced
                       ? t('toolManagement.synced')
                       : t('toolManagement.notSynced')
+              const toolLabel = `${tool.label} · ${stateLabel}`
               return (
-                <button
-                  key={tool.id}
-                  className={syncState}
-                  type="button"
-                  title={`${tool.label} · ${stateLabel}`}
-                  aria-label={`${tool.label} · ${stateLabel}`}
-                  aria-pressed={synced}
-                  onClick={() => enabled && onToggleTool(skill, tool.id)}
-                  disabled={!enabled}
-                >
-                  <ToolIcon
-                    toolKey={tool.id}
-                    label={tool.label}
-                    avatar={tool.avatar}
-                  />
-                </button>
+                <Fragment key={tool.id}>
+                  <button
+                    className={syncState}
+                    type="button"
+                    title={enabled ? undefined : toolLabel}
+                    aria-label={toolLabel}
+                    aria-pressed={synced}
+                    onClick={() => enabled && onToggleTool(skill, tool.id)}
+                    onMouseEnter={(event) => showToolHint(event.currentTarget, tool.id)}
+                    onFocus={(event) => showToolHint(event.currentTarget, tool.id)}
+                    onMouseLeave={() => setToolHint(null)}
+                    onBlur={() => setToolHint(null)}
+                    disabled={!enabled}
+                  >
+                    <ToolIcon
+                      toolKey={tool.id}
+                      label={tool.label}
+                      avatar={tool.avatar}
+                    />
+                  </button>
+                  {enabled && toolHint?.toolId === tool.id
+                    ? createPortal(
+                        <span className="skill-tool-tooltip" role="tooltip" style={{ left: toolHint.left, top: toolHint.top }}>
+                          {toolLabel}
+                        </span>,
+                        document.body,
+                      )
+                    : null}
+                </Fragment>
               )
             })}
           </div>

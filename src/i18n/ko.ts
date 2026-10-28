@@ -1175,7 +1175,14 @@ export const ko = {
     "filters": {
       "resultCount": "스킬 {{count}}개 발견",
       "clear": "필터 지우기",
-      "noResults": "현재 필터와 일치하는 스킬이 없습니다."
+      "noResults": "현재 필터와 일치하는 스킬이 없습니다.",
+      "menu": "필터",
+      "menuSelected": "필터: {{count}}",
+      "status": "상태",
+      "status_all": "전체",
+      "status_enabled": "활성화됨",
+      "status_disabled": "비활성화됨",
+      "tools": "동기화된 도구"
     },
     "skillsEmpty": "아직 관리되는 스킬이 없습니다.",
     "toolsLabel": "도구",
