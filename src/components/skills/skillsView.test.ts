@@ -77,3 +77,40 @@ describe('scope-aware Skills view', () => {
     expect(view.filterUntaggedCount).toBe(1)
   })
 })
+
+it('includes a mixed-scope Skill in global and each actual project without migration', () => {
+  const mixed = skill('mixed', [])
+  mixed.targets = [
+    { tool: 'codex', scope: 'global', target_path: '/global/mixed', mode: 'symlink', status: 'ok' },
+    { tool: 'codex', scope: 'project', project_path: '/one', target_path: '/one/.agents/skills/mixed', mode: 'symlink', status: 'ok' },
+    { tool: 'cursor', scope: 'project', project_path: '/two', target_path: '/two/.agents/skills/mixed', mode: 'copy', status: 'ok' },
+  ]
+  const options = { ...defaults, managedSkills: [mixed], getSkillScope: () => 'project' as const }
+  expect(getSkillsView({ ...options, scopeFilter: 'global' }).visibleSkills.map(s => s.id)).toEqual(['mixed'])
+  expect(getSkillsView({ ...options, scopeFilter: 'project', projectPath: '/one' }).visibleSkills.map(s => s.id)).toEqual(['mixed'])
+  expect(getSkillsView({ ...options, scopeFilter: 'project', projectPath: '/two' }).visibleSkills.map(s => s.id)).toEqual(['mixed'])
+  expect(getSkillsView({ ...options, scopeFilter: 'project', projectPath: '/missing' }).visibleSkills).toEqual([])
+  expect(mixed.targets).toHaveLength(3)
+})
+
+it('matches tool filters and counts only deployments in the selected project or global scope', () => {
+  const mixed = {
+    ...skill('mixed', [1]),
+    targets: [
+      { tool: 'codex', scope: 'global', target_path: '/global/mixed', mode: 'symlink', status: 'ok' },
+      { tool: 'cursor', scope: 'project', project_path: '/one', target_path: '/one/mixed', mode: 'symlink', status: 'ok' },
+      { tool: 'codex', scope: 'project', project_path: '/two', target_path: '/two/mixed', mode: 'symlink', status: 'ok' },
+    ],
+  }
+  const options = { ...defaults, managedSkills: [mixed] }
+  const project = getSkillsView({ ...options, scopeFilter: 'project', projectPath: '/one', selectedToolIds: ['codex'] })
+  expect(project.visibleSkills).toEqual([])
+  expect(Object.fromEntries(project.toolCounts)).toEqual({ cursor: 1 })
+  expect(project.statusCounts).toEqual({ all: 0, enabled: 0, disabled: 0 })
+  expect(project.filterTags.map(tag => tag.skill_count)).toEqual([0, 0])
+  expect(getSkillsView({ ...options, scopeFilter: 'project', projectPath: '/one', selectedToolIds: ['cursor'] }).visibleSkills.map(item => item.id)).toEqual(['mixed'])
+  const global = getSkillsView({ ...options, scopeFilter: 'global', selectedToolIds: ['cursor'] })
+  expect(global.visibleSkills).toEqual([])
+  expect(Object.fromEntries(global.toolCounts)).toEqual({ codex: 1 })
+  expect(getSkillsView({ ...options, selectedToolIds: ['codex', 'cursor'] }).visibleSkills.map(item => item.id)).toEqual(['mixed'])
+})

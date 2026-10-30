@@ -4,6 +4,7 @@ import { getSkillSyncState, isActiveSkillTarget, isSuccessfulSkillTarget } from 
 export type SkillStatusFilter = 'all' | 'enabled' | 'disabled'
 
 type SkillsViewOptions = {
+  projectPath?: string
   issuesOnly?: boolean
   managedSkills: ManagedSkill[]
   tags: TagWithCountDto[]
@@ -18,19 +19,22 @@ type SkillsViewOptions = {
   getSkillScope: (skill: ManagedSkill) => 'global' | 'project'
 }
 
-const isSyncedToTool = (skill: ManagedSkill, toolId: string) =>
-  skill.targets.some((target) =>
-    target.tool === toolId && isActiveSkillTarget(target) && isSuccessfulSkillTarget(target))
-
 export function getSkillsView({
   managedSkills, tags, scopeFilter, searchQuery, selectedTagIds,
-  includeUntagged, sortBy, bulkSelectedIds, getSkillScope, issuesOnly = false,
+  includeUntagged, sortBy, bulkSelectedIds, getSkillScope, issuesOnly = false, projectPath = '',
   statusFilter = 'all', selectedToolIds = [],
 }: SkillsViewOptions) {
   const query = searchQuery.trim().toLowerCase()
+  const matchesTargetScope = (target: ManagedSkill['targets'][number]) =>
+    scopeFilter === 'all' || ((target.scope || 'global') === scopeFilter &&
+      (!projectPath || target.project_path === projectPath))
+  const isSyncedToTool = (skill: ManagedSkill, toolId: string) =>
+    skill.targets.some((target) =>
+      target.tool === toolId && matchesTargetScope(target) &&
+      isActiveSkillTarget(target) && isSuccessfulSkillTarget(target))
   const scopedSkills = managedSkills.filter((skill) => {
     if (issuesOnly && !['source-error', 'partial', 'failed'].includes(getSkillSyncState(skill))) return false
-    if (scopeFilter !== 'all' && getSkillScope(skill) !== scopeFilter) return false
+    if (scopeFilter !== 'all' && !(skill.targets.length ? skill.targets.some(matchesTargetScope) : !projectPath && getSkillScope(skill) === scopeFilter)) return false
     return !query || skill.name.toLowerCase().includes(query) ||
       skill.central_path.toLowerCase().includes(query) ||
       skill.source_type.toLowerCase().includes(query) ||

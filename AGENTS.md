@@ -1,167 +1,62 @@
-# Skills Hub - Project Rules
+# Skills Hub Project Rules
 
-Reply in Chinese; write PR titles and descriptions in English.
+This English file is the canonical project instruction entry. Keep the [Chinese reference](docs/AGENTS.zh.md) aligned when updating it.
 
-## Overview
+## Communication and Scope
 
-Skills Hub is a cross-platform desktop app (Tauri 2 + React 19) for managing AI Agent Skills and syncing them to 48+ AI coding tools. Core concept: "Install once, sync everywhere."
+- Write project rule documents in English and maintain corresponding Chinese references under `docs/`. Use one prose language per file; preserve commands, paths, code identifiers, and proper names.
+- Before implementation, briefly describe the approach and affected files. Continue work the user has already authorized without repeated confirmation. Ask when requirements, scope, or authorization for irreversible actions are unclear. Keep review and advice requests read-only.
+- Change only what the task requires, preserve existing user changes, and avoid unrelated refactoring or cleanup.
 
-## Tech Stack
+## Project Entry Points
 
-- **Frontend**: React 19 + TypeScript 5.9 (strict) + Vite 7 + Tailwind CSS 4
-- **Backend**: Rust (Edition 2021, MSRV 1.77.2) + Tauri 2
-- **Database**: SQLite (rusqlite, bundled)
-- **Git**: libgit2 (git2 crate, vendored-openssl)
-- **HTTP**: reqwest (rustls-tls, blocking)
-- **i18n**: i18next (English / Simplified Chinese / Korean)
-- **Notifications**: sonner (toast)
-- **Icons**: lucide-react
+Skills Hub is a cross-platform desktop app for managing and distributing AI skills, built with React, TypeScript, Tauri, and Rust. Dependency versions, compiler options, and check commands are maintained in [package.json](package.json), [Cargo.toml](src-tauri/Cargo.toml), and their associated configuration files.
 
-## Common Commands
+| Area | Entry points |
+| --- | --- |
+| Frontend UI and interactions | `src/App.tsx`, `src/components/` |
+| Desktop commands and registration | `src-tauri/src/commands/`, `src-tauri/src/lib.rs` |
+| Shared business logic | `src-tauri/src/core/` |
+| Command-line interface | `src-tauri/src/cli/`, `src-tauri/src/bin/skillshub-cli.rs` |
+| Development, builds, and verification | [Contributing](CONTRIBUTING.md), [Development and builds](docs/development.en.md) |
+| Selecting skills for a task | [AI engineering workflow](docs/AI-ENGINEERING.md) |
+| Importing project Skills into your tools | [Project Skills](skills/README.md) |
 
-```bash
-npm run dev              # Vite dev server (port 5173)
-npm run tauri:dev        # Tauri dev window (frontend + backend)
-npm run build            # tsc + vite build
-npm run check            # Full check: lint + test + build + rust:fmt:check + rust:clippy + rust:test
-npm test                 # Frontend regression tests
-npm run lint             # ESLint (flat config v9)
-npm run rust:test        # cargo test
-npm run rust:clippy      # Rust lint
-npm run rust:fmt         # Rust format
-npm run rust:fmt:check   # Rust format check
-```
+## Implementation Conventions
 
-## Directory Structure
+- The frontend calls desktop commands through Tauri `invoke`. Define new commands in the command layer and register them in `lib.rs`. Keep `src/components/skills/types.ts` aligned with backend transport types; use `camelCase` command parameters.
+- The command layer handles parameters, transport types, and error conversion; business logic belongs in `core/`. Use `tauri::async_runtime::spawn_blocking` for blocking work inside async commands. Export new core modules from `core/mod.rs`; the Rust library is named `app_lib`.
+- Follow the responsibilities of existing frontend components, local state, and hooks. Do not force all state into `App.tsx` or introduce a state management framework for a local change.
+- Handle state reset, focus, and resource cleanup according to the dialog's interaction requirements. A component returning `null` does not mean that component has unmounted.
+- Preserve existing error categories and conversion conventions, using `anyhow::Context` to retain causes. User feedback must explain failure state and recovery actions; transient notifications must not be the sole source of essential information.
+- All UI copy must use localization resources and include English, Simplified Chinese, and Korean. English and Chinese resources live in `src/i18n/resources.ts`; Korean resources live in `src/i18n/ko.ts`.
+- Follow the existing style organization in the affected area, with semantic class names and theme variables from `src/index.css`. Read the [UI design guidelines](docs/UI-DESIGN-GUIDELINES.md) before changing layout, visuals, shared components, navigation, overlays, responsiveness, or interaction feedback. Other tasks need not load them.
+- Preserve `~` path expansion and the skill distribution fallback order: symlink, Windows junction, then copy. When adding a tool adapter, update both the tool identifier and adapter registration in `tool_adapters/mod.rs`.
 
-```
-src/                          # React frontend
-├── App.tsx                   # Root component (centralized state, all modal states)
-├── App.css                   # Global styles (all component styles live here)
-├── index.css                 # CSS variables (theming) + Tailwind entry
-├── components/
-│   ├── Layout.tsx            # Main layout (sidebar + content area)
-│   └── skills/               # Skills feature module
-│       ├── Header.tsx        # Top bar (branding + language toggle + new button)
-│       ├── FilterBar.tsx     # Filter/sort bar
-│       ├── SkillsList.tsx    # Skills list container
-│       ├── SkillCard.tsx     # Individual skill card
-│       ├── LoadingOverlay.tsx
-│       ├── types.ts          # Shared DTO type definitions (frontend ↔ backend)
-│       └── modals/           # Modal components (8 total)
-└── i18n/
-    ├── index.ts              # i18next initialization
-    ├── resources.ts          # English/Chinese resources + locale registration
-    └── ko.ts                 # Korean translation resources
+## Development and Delivery
 
-src-tauri/src/                # Rust backend
-├── main.rs                   # Entry point (calls app_lib::run)
-├── lib.rs                    # App initialization (plugin registration, DB, cleanup tasks)
-├── commands/
-│   ├── mod.rs                # Tauri command layer (23 commands + DTOs)
-│   └── tests/
-└── core/                     # Core business logic
-    ├── skill_store.rs        # SQLite ORM (4 tables: skills, skill_targets, settings, discovered_skills)
-    ├── installer.rs          # Skill installation (local/git, with multi-skill detection)
-    ├── sync_engine.rs        # Sync engine (symlink/junction/copy triple fallback)
-    ├── git_fetcher.rs        # Git clone/pull (with cache and TTL)
-    ├── tool_adapters/mod.rs  # Tool adapter registry (48 AI tools)
-    ├── onboarding.rs         # Existing skill scanning/discovery
-    ├── github_search.rs      # GitHub API search
-    ├── central_repo.rs       # Central repository path management
-    ├── content_hash.rs       # SHA256 directory content hashing
-    ├── cache_cleanup.rs      # Git cache cleanup
-    ├── temp_cleanup.rs       # Temp directory cleanup
-    └── tests/                # One test file per module (10 total)
-```
+1. **Working branch**: Continue existing tasks on their current branch. For a new independent development task without a user-specified baseline, fetch `origin/main` and create a `codex/` branch from it. Preserve existing work, verify the baseline, and sync dependencies with the lockfile after switching.
+2. **Complete implementation**: For features spanning frontend and backend, deliver command registration, transport types, UI, and copy in all three languages together.
+3. **Verification**: Bug fixes require regression tests that detect the original defect. Targeted checks are useful during development; run `npm run check` after completing changes and ensure results cover the final changes before committing. Follow the full sequence and build prerequisites in the contribution guide. Do not substitute targeted checks for the full gate or report blocked or unrun checks as passing.
+4. **Desktop review**: After user-facing fixes, run `npm run tauri:dev` from the working branch and confirm startup unless the user requests otherwise. Reuse or restart only this checkout's development processes. A browser preview does not verify native desktop behavior.
+5. **Documentation and versions**: Follow the [change record and release rules](CONTRIBUTING.md#change-records-and-releases), including the standard bilingual release index. Until a target release is confirmed, record user-visible changes under `Unreleased` in both changelogs. Keep later changes out of published releases; a small fix does not require a separate topic document. Required multilingual updates are part of the task; do not translate unrelated documents. Release notes do not require Korean. Do not bump the version unless requested; verify consistency with `npm run version:check`.
+6. **Commits and publishing**: Follow the user's instructions on commits, pushes, and publishing. When asked to create a pull request, target `main`, prefer updating an existing request for the current branch, include code, tests, and applicable changelog and documentation updates, and verify the link. Do not merge without authorization.
 
-## Architecture
+## Security Boundaries
 
-### Frontend ↔ Backend Communication
-- Uses Tauri IPC (`invoke`) to call backend commands
-- Frontend call pattern: `const result = await invoke('command_name', { param })`
-- Backend commands are defined in `commands/mod.rs` and registered in `lib.rs` via `generate_handler!`
-- New commands must be registered in both places
+- Store tokens, passwords, and private keys only in the system credential store. Never put them in databases, configuration files, logs, URLs, or synchronization repositories.
+- Read credentials only for user-initiated operations or explicitly enabled background features, never during page load, tab changes, status display, or ordinary startup.
+- Development builds use an independent credential namespace. Changes involving authorization, credentials, or synchronization must pass leakage-prevention and access-boundary tests.
+- Development desktop and CLI builds share the production database, central skill library, settings, caches, recycle bin, and write lock; operations affect real tool directories. Credentials and the CLI bridge use independent development namespaces. Automated tests must use temporary data and tool directories. Never automatically merge or overwrite production data with an old development database.
 
-### Frontend State Management
-- **No state management library** — all state is centralized in `App.tsx` via `useState`
-- Passed to child components via props drilling (modals receive many props)
-- Data refresh pattern: call `invoke('get_managed_skills')` after operations to re-fetch the list
+## Network and Data Compatibility
 
-### Backend Layering
-- `commands/` layer: Tauri command definitions, DTO conversions, error formatting (no business logic)
-- `core/` layer: Pure business logic, independently testable
-- Async commands use `tauri::async_runtime::spawn_blocking` to wrap synchronous operations
-- Shared state injected via `app.manage(store)` + `State<'_, SkillStore>`
+- Create or configure production HTTP clients, OAuth requests, and remote Git operations through `src-tauri/src/core/network_proxy.rs`, explicitly using application proxy settings. Do not rely on process proxy environment variables or global Git proxy settings, or construct transport clients directly in business modules.
+- Run `npm run network:check` after adding or changing outbound network code. Do not bypass it through paths, naming, or test markers.
+- Follow the existing database migration mechanism. New feature tables that older versions can safely ignore must use a feature-specific schema marker in `settings`, without increasing the shared `PRAGMA user_version`.
+- Every database migration requires upgrade tests and compatibility tests against the previous stable version. Define a compatibility plan before making incompatible shared-schema changes.
 
-### Error Handling
-- Backend uses `anyhow::Result<T>`, converted to string via `format_anyhow_error()` for the frontend
-- Special error prefixes for frontend identification: `MULTI_SKILLS|`, `TARGET_EXISTS|`, `TOOL_NOT_INSTALLED|`
-- Frontend catches with try-catch and displays errors via sonner toast
+## AI Engineering
 
-## Coding Conventions
-
-### TypeScript
-- Strict mode: `noUnusedLocals` and `noUnusedParameters` are enabled — unused variables/params cause compile errors
-- Component files: PascalCase (`SkillCard.tsx`)
-- Props types: `ComponentNameProps` (`SkillCardProps`)
-- CSS class names: kebab-case (`modal-backdrop`, `skill-card`)
-- Modal conditional rendering: `if (!open) return null` (full unmount, not display:none)
-- Wrap presentational components with `memo()`
-- All user-visible text must use i18n (`t('key')`), translation keys defined in `src/i18n/resources.ts`
-- The app supports English (`en`), Simplified Chinese (`zh`), and Korean (`ko`)
-- When adding or changing user-visible text, always provide English, Simplified Chinese, and Korean translations
-- Korean users read the English release notes; release notes do not require Korean sections
-- DTO types are defined in `src/components/skills/types.ts` and must stay in sync with the Rust DTOs in `commands/mod.rs`
-
-### Rust
-- Functions/methods: snake_case
-- Constants: SCREAMING_SNAKE_CASE
-- Tauri command parameters use camelCase (to match frontend JS calling convention)
-- Use `anyhow::Context` to add context to errors
-- New core modules must be exported in `core/mod.rs`
-- Tests use `tempfile` crate for temp directories and `mockito` for HTTP mocking
-
-### Styling
-- Component styles go in `src/App.css` (not CSS Modules), using semantic CSS class names
-- Theming via CSS variables + `[data-theme="dark"]` selector, variables defined in `src/index.css`
-- Tailwind utility classes and custom CSS classes can be mixed
-
-### UI Design Reference
-- Before frontend work that changes layout, visual styling, shared components, navigation, overlays, responsive behavior, or interaction feedback, load only `docs/UI-DESIGN-GUIDELINES.md`.
-- Do not load the UI guidelines for backend-only, data-only, test-only, release, or documentation tasks unless they also change product UI.
-
-## Development Workflow
-
-1. **Branch baseline**: Unless specified otherwise, fetch `origin/main` and create a `codex/` branch from it, preserving existing work. Verify the base commit; after changing the baseline, sync dependencies with the lockfile.
-2. **Before implementing**: Briefly describe the approach and list the files to be modified. Wait for confirmation before writing code.
-3. **Implement completely**: For features involving both frontend and backend, modify both sides in one pass — including Tauri command registration, DTO types, i18n translations (both EN and ZH), and UI.
-4. **Keep changes minimal**: Only modify what is necessary for the requirement. Do not refactor, add comments, or "improve" unrelated code.
-5. **Verify**: Bug fixes must include regression tests that fail before the fix and pass afterward. Run `npm run check` on the final changes before committing; resolve all failures.
-6. **Manual review**: After user-facing bug fixes, run `npm run tauri:dev` from the working branch and confirm startup, unless requested otherwise. Reuse or restart only this checkout's development processes.
-7. **Release records**: Record user-visible fixes under the current project version in `CHANGELOG.md`, `docs/CHANGELOG.zh.md`, and `docs/releases/v<version>/`; do not bump the version unless requested.
-8. **Pull requests**: When requested, submit code, tests, and release records against `main`, updating an existing branch PR when available. Describe the problem, fix, and validation; verify the PR and return its link. Do not merge without authorization.
-
-## Security Red Lines
-
-- Token、密码和私钥只能存入系统安全凭据存储，禁止进入数据库、配置文件、日志、URL 或同步仓库。
-- 只有用户主动操作或明确开启的后台功能才能读取凭据；页面加载、Tab 切换、状态展示和普通启动不得读取。
-- 开发版必须使用独立的凭据命名空间；授权、凭据、同步相关改动必须通过防泄漏与访问边界测试。
-- 开发版桌面和 CLI 与正式版共用数据库、中央 Skills 目录、配置、缓存、回收站和写锁，操作会影响真实 Agent 目录。凭据和 CLI bridge 可执行文件仍使用独立开发命名空间；自动化测试使用临时数据及 Agent 目录。旧开发库不得自动合并或覆盖正式库。
-
-## Network Boundary
-
-- 所有生产环境的 HTTP 客户端、OAuth 请求及远端 Git 操作必须通过 `src-tauri/src/core/network_proxy.rs` 创建或配置，并显式使用应用代理设置；禁止依赖进程代理环境变量、Git 全局代理或在业务模块中直接创建传输客户端。
-- 新增或修改出站网络代码后必须运行 `npm run network:check`，不得通过路径、命名或测试标记规避边界检查。
-
-## Important Notes
-
-- Path handling must support `~` expansion (backend has `expand_home_path()`)
-- Sync strategy uses triple fallback: symlink → junction (Windows) → copy
-- Git uses vendored-openssl, HTTP uses rustls-tls — avoids system SSL issues
-- Version numbers must stay in sync between `package.json` and `src-tauri/tauri.conf.json` (validate with `npm run version:check`)
-- Rust crate is named `app_lib` (not the default package name) — use `app_lib::...` for imports
-- Database has a schema migration mechanism (`migrate_legacy_db_if_needed`) — consider migrations when modifying table structures
-- Additive, feature-only database tables must use a feature-specific schema marker in `settings`; do not raise the shared `PRAGMA user_version` when the previous stable release can safely ignore the change
-- Every database migration must include both an upgrade test and a previous-stable-version compatibility test; incompatible shared-schema changes require an explicit compatibility design before implementation
-- Tool adapter list is in `tool_adapters/mod.rs` — adding a new AI tool requires both a `ToolId` enum variant and an adapter instance
+- DSH Engineering supplies task methods; this file and the contribution guide retain authority over project constraints and the full gate. See the [AI engineering workflow](docs/AI-ENGINEERING.md) for usage order, evidence requirements, and guidance updates.
+- Completion reports should briefly describe changes, actual checks, and remaining issues. Maintain facts in their existing owner documents and link to them elsewhere. Updating skill packages does not automatically rewrite project rules.

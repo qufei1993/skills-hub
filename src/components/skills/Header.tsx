@@ -18,7 +18,7 @@ import type { TFunction } from 'i18next'
 type ManagementTab = 'tags' | 'tools' | 'updates'
 
 type HeaderProps = {
-  activeView: 'myskills' | 'explore' | 'detail' | 'settings' | 'manage' | 'device-sync' | 'recycle-bin'
+  activeView: 'myskills' | 'presets' | 'explore' | 'detail' | 'settings' | 'manage' | 'device-sync' | 'recycle-bin'
   managementTab: ManagementTab
   skillCount: number
   tagCount: number
@@ -36,7 +36,7 @@ type HeaderProps = {
   onOpenSettings: () => void
   onOpenUpdate: () => void
   onRestart: () => void
-  onViewChange: (view: 'myskills' | 'explore' | 'manage' | 'device-sync' | 'recycle-bin') => void
+  onViewChange: (view: 'myskills' | 'presets' | 'explore' | 'manage' | 'device-sync' | 'recycle-bin') => void
   onManagementTabChange: (tab: ManagementTab) => void
   t: TFunction
 }
@@ -175,6 +175,9 @@ const Header = ({
         >
           <Compass size={18} />
           <span>{t('addSkills')}</span>
+        </button>
+        <button className={activeView === 'presets' ? 'active' : ''} type="button" onClick={() => onViewChange('presets')} title={collapsed ? t('workspace110.title') : undefined}>
+          <Layers3 size={18} /><span>{t('workspace110.title')}</span>
         </button>
       </nav>
 

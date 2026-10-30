@@ -82,7 +82,12 @@ fn is_python_cache(entry: &DirEntry) -> bool {
         )
 }
 
-fn hash_dir_with_mode(path: &Path, strict: bool, ignore_python_cache: bool) -> Result<String> {
+fn hash_dir_with_mode(
+    path: &Path,
+    strict: bool,
+    ignore_python_cache: bool,
+    ignored_root_file: Option<&str>,
+) -> Result<String> {
     let mut hasher = Sha256::new();
     let mut entries: Vec<(PathBuf, DirEntry)> = Vec::new();
 
@@ -92,6 +97,9 @@ fn hash_dir_with_mode(path: &Path, strict: bool, ignore_python_cache: bool) -> R
         .filter_entry(|entry| strict || !is_ignored(entry))
     {
         let entry = entry?;
+        if entry.depth() == 1 && ignored_root_file.is_some_and(|name| entry.file_name() == name) {
+            continue;
+        }
         if ignore_python_cache && entry.depth() > 0 && is_python_cache(&entry) {
             continue;
         }
@@ -143,15 +151,24 @@ fn hash_dir_with_mode(path: &Path, strict: bool, ignore_python_cache: bool) -> R
 }
 
 pub fn hash_dir(path: &Path) -> Result<String> {
-    hash_dir_with_mode(path, false, false)
+    hash_dir_with_mode(path, false, false, None)
+}
+
+pub(crate) fn hash_dir_without_legacy_cache_metadata(path: &Path) -> Result<String> {
+    hash_dir_with_mode(
+        path,
+        false,
+        false,
+        Some(super::installer::LEGACY_CACHE_META),
+    )
 }
 
 pub fn hash_dir_strict(path: &Path) -> Result<String> {
-    hash_dir_with_mode(path, true, false)
+    hash_dir_with_mode(path, true, false, None)
 }
 
 pub fn hash_dir_for_sync_conflict(path: &Path) -> Result<String> {
-    hash_dir_with_mode(path, true, true)
+    hash_dir_with_mode(path, true, true, None)
 }
 
 #[cfg(unix)]

@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Project management**: Filter My Skills by a specific project and manage its deployment targets while preserving global and unrelated project deployments. The project picker supports search, readable names and complete paths; preset editing and saving are centralized in Skill Presets.
+- **Skill presets**: Save reusable combinations with per-Skill tool assignments, then apply them to global or project locations from one dialog. Saved assignments are reused by default, with optional adjustments and automatic conflict checks. Editing or deleting a preset does not change existing deployments.
+- **Application history and undo**: Record actual outcomes, retry unfinished items and undo eligible additions while preserving modified or subsequently reused targets. Keep the 100 most recent finished records plus in-progress and interrupted runs; discard cancelled, unexecuted previews. Removing old records does not remove installed Skills, but ends undo access through those records.
+- **Updates, recovery and repair**: List confirmed source changes, update all or selected Skills, and optionally review highlighted file differences and affected deployments. Each Skill keeps its latest pre-update recovery snapshot. Source rebinding and missing-target repair preserve central identity and unrelated deployments; recovery also works for disabled Skills without re-enabling them.
+
+### Improved
+
+- **Update checking**: Compare sources without building full previews, refresh each Git repository and branch once per check, and restore the last summary after restart without automatically checking on page entry. Rechecks retain the previous list and finish with persistent counts, timestamps and measured duration; full previews are prepared when needed for review or execution.
+- **Focused, accessible interfaces**: Separate library management, preset configuration and update scheduling; keep setup and discovery tips outside Skill results and independently dismissible, with discovery still available from Add Skills. Use compact member/tool summaries, expandable paths and history, responsive layouts, keyboard focus handling, and English, Simplified Chinese and Korean copy.
+
+### Fixed
+
+- **Conflict and recovery handling**: Show the tool, path and reason for blocked applications, preserve selections when returning to adjust them, and avoid repeating completed work. Protect concurrent preset edits and stale plans, retain progress after partial undo or display-refresh failures, and preserve recoverable backups when recycling removed deployments fails.
+- **Git update reliability**: Stop helper processes on timeout or cancellation, isolate individual source-check failures, and keep internal cache metadata out of root-level Skills so stalled or broken sources do not block healthy checks.
+
 ## [1.0.1]
 
 ### Added

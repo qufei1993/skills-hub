@@ -1,12 +1,20 @@
-import { memo, useEffect, useState } from 'react'
+import { memo, useEffect, useId, useState } from 'react'
 import {
   AlertTriangle,
   CalendarClock,
+  Clock3,
+  ChevronDown,
+  Info,
   RefreshCw,
+  Download,
 } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import type { AutoUpdateConfigDto, ManagedSkill } from './types'
 import { historicalIssueState } from './skillIssueState'
+import './updates-content.css'
+import UpdateCandidates from './UpdateCandidates'
+import type { useUpdateCheck } from './workspace/useUpdateCheck'
+import type { UpdateCandidate } from './workspace/contentCheck'
 import {
   getAutoUpdateTaskStatusKey,
   isAutoUpdatePossiblyStalled,
@@ -26,6 +34,12 @@ type AutoUpdateScheduleInput = {
 }
 
 type UpdatesPageProps = {
+  recoverableIds?: string[]
+  updateCheck: ReturnType<typeof useUpdateCheck>
+  onReview: (plans: UpdateCandidate[]) => void
+  recoveryError?: boolean
+  onRetryRecoveries?: () => void
+  onRestore?: (skill: ManagedSkill) => void
   skills?: ManagedSkill[]
   autoUpdateConfig: AutoUpdateConfigDto | null
   onAutoUpdateConfigChange: (
@@ -70,6 +84,12 @@ function formatUpdateFailure(reason: string, t: TFunction): string {
 
 const UpdatesPage = ({
   skills = [],
+  recoverableIds = [],
+  updateCheck,
+  onReview,
+  recoveryError,
+  onRetryRecoveries,
+  onRestore,
   autoUpdateConfig,
   onAutoUpdateConfigChange,
   onRunAutoUpdateNow,
@@ -77,6 +97,10 @@ const UpdatesPage = ({
   t,
 }: UpdatesPageProps) => {
   const [currentTime, setCurrentTime] = useState(0)
+  const [selected, setSelected] = useState<string[]>([])
+  const updateHintId = useId()
+  const scheduleHeadingId = useId()
+  const resultHeadingId = useId()
 
   const autoUpdateEnabled = autoUpdateConfig?.enabled ?? false
   const autoUpdateInterval = autoUpdateConfig?.interval_hours ?? 24
@@ -110,6 +134,12 @@ const UpdatesPage = ({
   const autoUpdateStalled = isAutoUpdatePossiblyStalled(autoUpdateConfig, progressTime)
   const autoUpdateButtonBusy =
     (autoUpdateRunning && !autoUpdateStalled) || autoUpdateTriggering
+  const selectedPlans = updateCheck.state.plans.filter(plan => selected.includes(plan.id))
+  const updatePlans = selectedPlans.length ? selectedPlans : updateCheck.state.plans
+  const checkReady = updateCheck.state.checkedAt !== null && !updateCheck.state.fromCache &&
+    !updateCheck.state.cancelled && !updateCheck.state.stale && !updateCheck.state.lastApply?.reloadError
+  const updateBlocked = autoUpdateButtonBusy || updateCheck.state.phase !== 'idle' || !checkReady || !updatePlans.length
+  const updateHint = t(`updatesWorkflow.${updateCheck.state.eligibleCount === 0 ? 'noSkillsHint' : !checkReady ? 'updateCheckRequired' : !updatePlans.length ? 'updateNoChanges' : 'updateScopeHint'}`)
   const autoUpdateLastRun = autoUpdateConfig?.last_run_at
     ? new Date(autoUpdateConfig.last_run_at).toLocaleString()
     : t('autoUpdateNeverRun')
@@ -149,12 +179,12 @@ const UpdatesPage = ({
     autoUpdateProgress && hasStructuredProgress
       ? autoUpdateProgress
       : {
-          total: autoUpdateConfig?.last_checked ?? 0,
-          succeeded: [],
-          failed: parseAutoUpdateFailureItems(autoUpdateConfig?.last_error),
-          running: null,
-          pending: [],
-        }
+        total: autoUpdateConfig?.last_checked ?? 0,
+        succeeded: [],
+        failed: parseAutoUpdateFailureItems(autoUpdateConfig?.last_error),
+        running: null,
+        pending: [],
+      }
   const autoUpdateStatusClass =
     autoUpdateConfig?.last_status === 'error' || autoUpdateConfig?.last_status === 'partial'
       ? 'error'
@@ -165,15 +195,15 @@ const UpdatesPage = ({
           : 'idle'
   const autoUpdateScheduleHint =
     autoUpdateScheduleType === 'daily'
-      ? t('autoUpdateDailyHint', { time: autoUpdateDailyTime })
-      : t('autoUpdateIntervalHint', {
-          value: autoUpdateIntervalValue,
-          unit: t(
-            autoUpdateIntervalUnit === 'minutes'
-              ? 'autoUpdateIntervalUnitMinutes'
-              : 'autoUpdateIntervalUnitHours',
-          ),
-        })
+      ? t('autoUpdateDailyShort', { time: autoUpdateDailyTime })
+      : t('autoUpdateIntervalShort', {
+        value: autoUpdateIntervalValue,
+        unit: t(
+          autoUpdateIntervalUnit === 'minutes'
+            ? 'autoUpdateIntervalUnitMinutes'
+            : 'autoUpdateIntervalUnitHours',
+        ),
+      })
   const autoUpdateNotice = autoUpdateStalled
     ? t('autoUpdateStalledHint')
     : autoUpdateRunningLong
@@ -189,271 +219,267 @@ const UpdatesPage = ({
 
   return (
     <div className="updates-page">
-      <div className="updates-dashboard">
-        <section className={`updates-control-card${autoUpdateEnabled ? ' enabled' : ''}`}>
-          <div className="updates-card-head">
-            <div className="updates-card-title">
-              <span className="updates-icon" aria-hidden="true">
-                <RefreshCw size={16} />
-              </span>
-              <div>
-                <span>{t('autoUpdateSkills')}</span>
-                <strong>{t('autoUpdateSystemTask')}</strong>
-              </div>
-            </div>
-            <span
-              className={`updates-state-pill${autoUpdateEnabled ? ' enabled' : ''}`}
-            >
-              <span />
-              {t(autoUpdateEnabled ? 'autoUpdateStateOn' : 'autoUpdateStateOff')}
-            </span>
-          </div>
-
-          <div className="updates-control-main">
-            <div>
-              <p>{t('autoUpdateSystemTaskDesc')}</p>
-              <div className="updates-task-line">
-                {t('autoUpdateTaskStatus', { status: t(taskStatusKey) })}
-              </div>
-            </div>
-            <button
-              type="button"
-              className={`settings-toggle updates-toggle${autoUpdateEnabled ? ' checked' : ''}`}
-              aria-pressed={autoUpdateEnabled}
-              onClick={() => {
-                onAutoUpdateConfigChange(
-                  !autoUpdateEnabled,
-                  autoUpdateSchedule,
-                )
-              }}
-            >
-              <span className="settings-toggle-knob" />
+      <header className="updates-page-header">
+        <div>
+          <h1>{t('manageTabs.updates')}</h1>
+          <p>{t('updatesLayout.description')}</p>
+        </div>
+        <div className="updates-header-controls">
+          <div className="updates-header-actions">
+            <button className="btn btn-secondary updates-run-btn" type="button"
+              disabled={autoUpdateButtonBusy || updateCheck.state.phase !== 'idle' || updateCheck.state.eligibleCount === 0}
+              aria-busy={updateCheck.state.phase === 'checking'}
+              onClick={() => { void updateCheck.check() }}>
+              <RefreshCw size={15} aria-hidden="true" />
+              {t('updatesWorkflow.check')}
+            </button>
+            <button className="btn btn-primary updates-run-btn" type="button" disabled={updateBlocked}
+              aria-busy={updateCheck.state.phase === 'applying'} aria-describedby={updateHintId}
+              onClick={() => { void updateCheck.update(updatePlans) }}>
+              <Download size={15} aria-hidden="true" />
+              {updateCheck.state.phase === 'applying' ? t('updatesWorkflow.applying') : t(`updatesWorkflow.${selectedPlans.length ? 'updateSelected' : 'updateAll'}`, { count: updatePlans.length })}
             </button>
           </div>
+          <p className="updates-action-hint" id={updateHintId}>{updateHint}</p>
+        </div>
+      </header>
+      {autoUpdateNotice ? (
+        <div className="updates-notice" role="status">
+          <AlertTriangle size={16} aria-hidden="true" />
+          <span>{autoUpdateNotice}</span>
+        </div>
+      ) : null}
+      {autoUpdateProgressForDisplay.running ? (
+        <div className="updates-current-item" role="status">
+          <RefreshCw size={16} aria-hidden="true" />
+          <span>{t('autoUpdateProgressRunning')}</span>
+          <strong>{autoUpdateProgressForDisplay.running.name || autoUpdateProgressForDisplay.running.skill_id}</strong>
+        </div>
+      ) : null}
+      <div className="updates-layout">
 
-          <div className="updates-schedule-panel">
-            <div className="updates-section-label">
-              <CalendarClock size={15} />
-              {t('autoUpdateScheduleTitle')}
-            </div>
-            <div className="settings-segmented updates-segmented" role="group" aria-label={t('autoUpdateScheduleMode')}>
+        <div className="updates-content">
+          <UpdateCandidates check={updateCheck} selectedIds={selected} onSelectionChange={setSelected} skills={skills} recoverableIds={recoverableIds} onReview={onReview} onRestore={onRestore} blocked={autoUpdateButtonBusy} recoveryError={recoveryError} onRetryRecoveries={onRetryRecoveries} t={t} />
+          {autoUpdateHasLocalSkills ? <details className="updates-permission-note"><summary><Info size={14} aria-hidden="true" />{t('updatesLayout.sourcePermissions')}</summary><p>{t(autoUpdateHasProtectedLocalSkills ? 'autoUpdateLocalPermissionProtectedHint' : 'autoUpdateLocalPermissionHint')}</p></details> : null}
+        </div>
+        <div className="updates-rail">
+          <section className="updates-control-card" aria-labelledby={scheduleHeadingId}>
+            <div className="updates-card-head">
+              <h2 id={scheduleHeadingId}><CalendarClock size={18} aria-hidden="true" />{t('autoUpdateSkills')}</h2>
               <button
                 type="button"
-                className={autoUpdateScheduleType === 'interval' ? 'active' : ''}
-                onClick={() => {
-                  onAutoUpdateConfigChange(autoUpdateEnabled, {
-                    ...autoUpdateSchedule,
-                    scheduleType: 'interval',
-                  })
-                }}
+                className={`settings-toggle updates-toggle${autoUpdateEnabled ? ' checked' : ''}`}
+                aria-label={t('autoUpdateSkills')}
+                aria-pressed={autoUpdateEnabled}
+                disabled={updateCheck.state.phase !== 'idle'}
+                onClick={() => onAutoUpdateConfigChange(!autoUpdateEnabled, autoUpdateSchedule)}
               >
-                {t('autoUpdateScheduleInterval')}
-              </button>
-              <button
-                type="button"
-                className={autoUpdateScheduleType === 'daily' ? 'active' : ''}
-                onClick={() => {
-                  onAutoUpdateConfigChange(autoUpdateEnabled, {
-                    ...autoUpdateSchedule,
-                    scheduleType: 'daily',
-                  })
-                }}
-              >
-                {t('autoUpdateScheduleDaily')}
+                <span className="settings-toggle-knob" />
               </button>
             </div>
-            <div className="updates-schedule-row">
-              {autoUpdateScheduleType === 'interval' ? (
-                <>
-                  <input
-                    id="settings-auto-update-interval"
-                    key={`interval-${autoUpdateIntervalUnit}-${autoUpdateIntervalValue}`}
-                    className="settings-input"
-                    type="number"
-                    min={autoUpdateIntervalUnit === 'minutes' ? 15 : 1}
-                    max={autoUpdateIntervalUnit === 'minutes' ? 43200 : 720}
-                    step={1}
-                    defaultValue={autoUpdateIntervalValue}
-                    onBlur={(event) => {
-                      const next = Number(event.currentTarget.value)
-                      if (!Number.isNaN(next)) {
-                        onAutoUpdateConfigChange(autoUpdateEnabled, {
-                          ...autoUpdateSchedule,
-                          intervalValue: next,
-                        })
-                      }
-                    }}
-                  />
-                  <select
-                    className="settings-select settings-unit-select"
-                    value={autoUpdateIntervalUnit}
-                    onChange={(event) => {
-                      const nextUnit = event.target.value as AutoUpdateIntervalUnit
-                      onAutoUpdateConfigChange(autoUpdateEnabled, {
-                        ...autoUpdateSchedule,
-                        intervalUnit: nextUnit,
-                      })
-                    }}
-                  >
-                    <option value="minutes">{t('autoUpdateIntervalUnitMinutes')}</option>
-                    <option value="hours">{t('autoUpdateIntervalUnitHours')}</option>
-                  </select>
-                </>
-              ) : (
-                <input
-                  id="settings-auto-update-daily-time"
-                  key={`daily-${autoUpdateDailyTime}`}
-                  className="settings-input"
-                  type="time"
-                  defaultValue={autoUpdateDailyTime}
-                  onBlur={(event) => {
+            <p className="updates-automation-description">{t('updatesLayout.automationDescription')}</p>
+            <div className={`updates-task-line${taskStatusKey === 'autoUpdateTaskNeedsAttention' ? ' attention' : ''}`}>
+              <span className={`updates-task-dot${taskStatusKey === 'autoUpdateTaskReady' ? ' ready' : ''}`} aria-hidden="true" />
+              {t('autoUpdateTaskStatus', { status: t(taskStatusKey) })}
+            </div>
+
+            <details className="updates-schedule-panel">
+              <summary>
+                <span>{t('autoUpdateScheduleTitle')}</span>
+                <span className="updates-schedule-value">{autoUpdateScheduleHint}</span>
+                <ChevronDown size={14} aria-hidden="true" />
+              </summary>
+              <div className="settings-segmented updates-segmented" role="group" aria-label={t('autoUpdateScheduleMode')}>
+                <button
+                  type="button"
+                  className={autoUpdateScheduleType === 'interval' ? 'active' : ''}
+                  aria-pressed={autoUpdateScheduleType === 'interval'}
+                  onClick={() => {
                     onAutoUpdateConfigChange(autoUpdateEnabled, {
                       ...autoUpdateSchedule,
-                      dailyTime: event.currentTarget.value,
+                      scheduleType: 'interval',
                     })
                   }}
-                />
-              )}
-              <button
-                className="btn btn-primary updates-run-btn"
-                type="button"
-                disabled={autoUpdateButtonBusy}
-                onClick={onRunAutoUpdateNow}
-              >
-                <RefreshCw size={15} />
-                {autoUpdateButtonBusy
-                  ? t('autoUpdateRunningButton')
-                  : autoUpdateStalled
-                    ? t('autoUpdateRetryUpdate')
-                    : t('autoUpdateRunNow')}
-              </button>
-            </div>
-            <div className="updates-schedule-hint">{autoUpdateScheduleHint}</div>
-          </div>
-        </section>
-
-        <aside className={`updates-summary-card ${autoUpdateStatusClass}`}>
-          <p className="device-sync-no-change-note">{t('deviceSync.historicalRunNote')}</p>
-          <div className="updates-summary-head">
-            <span>{t('autoUpdateRunResultTitle')}</span>
-            <strong>{autoUpdateStatus}</strong>
-          </div>
-          <div className="updates-summary-time">
-            <span>{t('autoUpdateLastRunTitle')}</span>
-            <strong>{autoUpdateLastRun}</strong>
-          </div>
-          <div className="updates-stat-grid">
-            <div>
-              <span>{t('autoUpdateCheckedShort')}</span>
-              <strong>{autoUpdateConfig?.last_checked ?? 0}</strong>
-              <small>{t('autoUpdateCheckedDescription')}</small>
-            </div>
-            <div>
-              <span>{t('autoUpdateUnchangedShort')}</span>
-              <strong>{autoUpdateConfig?.last_unchanged ?? 0}</strong>
-              <small>{t('autoUpdateUnchangedDescription')}</small>
-            </div>
-            <div>
-              <span>{t('autoUpdateUpdatedShort')}</span>
-              <strong>{autoUpdateConfig?.last_updated ?? 0}</strong>
-              <small>{t('autoUpdateUpdatedDescription')}</small>
-            </div>
-            <div className={(autoUpdateConfig?.last_failed ?? 0) > 0 ? 'danger' : ''}>
-              <span>{t('autoUpdateFailedShort')}</span>
-              <strong>{autoUpdateConfig?.last_failed ?? 0}</strong>
-              <small>{t('autoUpdateFailedDescription')}</small>
-            </div>
-          </div>
-          {autoUpdateHasRuntime ? (
-            <div className="updates-runtime-grid">
-              <div>
-                <span>{t('autoUpdateStartedShort')}</span>
-                <strong>{autoUpdateStartedAt}</strong>
-              </div>
-              <div>
-                <span>{t('autoUpdateFinishedShort')}</span>
-                <strong>{autoUpdateFinishedAt}</strong>
-              </div>
-              <div>
-                <span>{t('autoUpdateProgressDuration')}</span>
-                <strong>{autoUpdateDuration}</strong>
-              </div>
-            </div>
-          ) : null}
-        </aside>
-      </div>
-
-      <div className="updates-followups">
-        {autoUpdateNotice ? (
-          <div className="updates-notice">
-            <AlertTriangle size={15} />
-            <span>{autoUpdateNotice}</span>
-          </div>
-        ) : null}
-        {autoUpdateProgressForDisplay.running ? (
-          <div className="updates-current-item">
-            <span>{t('autoUpdateProgressRunning')}</span>
-            <strong>
-              {autoUpdateProgressForDisplay.running.name ||
-                autoUpdateProgressForDisplay.running.skill_id}
-            </strong>
-          </div>
-        ) : null}
-        {autoUpdateProgressForDisplay.succeeded.filter(item => item.reason?.startsWith('TOOLS_PENDING|')).map(item => <div className="updates-issue-item" key={`pending-${item.skill_id}`}><strong>{item.name || item.skill_id}</strong><p>{t('deviceSync.runToolsPending', { count: Number(item.reason?.split('|')[1]) || 0 })}</p></div>)}
-        {autoUpdateProgressForDisplay.failed.length > 0 ? (
-          <div className="updates-issue-block">
-            <div className="updates-section-label">
-              <AlertTriangle size={15} />
-              {t('autoUpdateIssuesTitle')}
-            </div>
-            <div className="updates-issue-list">
-              {autoUpdateProgressForDisplay.failed.map((item) => {
-                const pathChanged = parseToolSyncPathChangedError(item.reason)
-                const targetConflict = parseToolSyncTargetConflictError(item.reason)
-                const reason = targetConflict
-                  ? t('autoUpdateFailureToolTargetConflict', {
-                      tool: targetConflict.tool,
-                      path: targetConflict.expectedPath,
+                >
+                  {t('autoUpdateScheduleInterval')}
+                </button>
+                <button
+                  type="button"
+                  className={autoUpdateScheduleType === 'daily' ? 'active' : ''}
+                  aria-pressed={autoUpdateScheduleType === 'daily'}
+                  onClick={() => {
+                    onAutoUpdateConfigChange(autoUpdateEnabled, {
+                      ...autoUpdateSchedule,
+                      scheduleType: 'daily',
                     })
-                  : pathChanged
-                    ? t('autoUpdateFailureToolPathChanged', {
-                        tool: pathChanged.tool,
-                        path: pathChanged.expectedPath,
+                  }}
+                >
+                  {t('autoUpdateScheduleDaily')}
+                </button>
+              </div>
+              <div className="updates-schedule-row">
+                {autoUpdateScheduleType === 'interval' ? (
+                  <>
+                    <input
+                      id="settings-auto-update-interval"
+                      aria-label={t('updatesLayout.intervalValue')}
+                      key={`interval-${autoUpdateIntervalUnit}-${autoUpdateIntervalValue}`}
+                      className="settings-input"
+                      type="number"
+                      min={autoUpdateIntervalUnit === 'minutes' ? 15 : 1}
+                      max={autoUpdateIntervalUnit === 'minutes' ? 43200 : 720}
+                      step={1}
+                      defaultValue={autoUpdateIntervalValue}
+                      onBlur={(event) => {
+                        const next = Number(event.currentTarget.value)
+                        if (!Number.isNaN(next)) {
+                          onAutoUpdateConfigChange(autoUpdateEnabled, {
+                            ...autoUpdateSchedule,
+                            intervalValue: next,
+                          })
+                        }
+                      }}
+                    />
+                    <select
+                      className="settings-select settings-unit-select"
+                      aria-label={t('updatesLayout.intervalUnit')}
+                      value={autoUpdateIntervalUnit}
+                      onChange={(event) => {
+                        const nextUnit = event.target.value as AutoUpdateIntervalUnit
+                        onAutoUpdateConfigChange(autoUpdateEnabled, {
+                          ...autoUpdateSchedule,
+                          intervalUnit: nextUnit,
+                        })
+                      }}
+                    >
+                      <option value="minutes">{t('autoUpdateIntervalUnitMinutes')}</option>
+                      <option value="hours">{t('autoUpdateIntervalUnitHours')}</option>
+                    </select>
+                  </>
+                ) : (
+                  <input
+                    id="settings-auto-update-daily-time"
+                    aria-label={t('updatesLayout.dailyTime')}
+                    key={`daily-${autoUpdateDailyTime}`}
+                    className="settings-input"
+                    type="time"
+                    defaultValue={autoUpdateDailyTime}
+                    onBlur={(event) => {
+                      onAutoUpdateConfigChange(autoUpdateEnabled, {
+                        ...autoUpdateSchedule,
+                        dailyTime: event.currentTarget.value,
                       })
-                    : item.reason
-                      ? formatUpdateFailure(item.reason, t)
-                      : null
-                return (
-                  <div className="updates-issue-item" key={item.skill_id}>
-                    <strong>{item.name || item.skill_id}</strong>
-                    <span>{t(`deviceSync.issueHistory.${historicalIssueState(skills.find(skill => skill.id === item.skill_id), autoUpdateConfig?.last_finished_at ?? autoUpdateConfig?.last_run_at ?? 0)}`)}</span>
-                    {reason ? <code>{reason}</code> : null}
-                  </div>
-                )
-              })}
+                    }}
+                  />
+                )}
+
+              </div>
+              <div className="updates-run-plan"><p>{t('updatesWorkflow.runPlanHint')}</p><button className="btn btn-secondary btn-sm" type="button" disabled={autoUpdateButtonBusy || updateCheck.state.phase !== 'idle'} onClick={onRunAutoUpdateNow}>{t(autoUpdateButtonBusy ? 'autoUpdateRunningButton' : autoUpdateStalled ? 'autoUpdateRetryUpdate' : 'updatesWorkflow.runPlan')}</button></div>
+            </details>
+          </section>
+
+          <section className={`updates-summary-card ${autoUpdateStatusClass}`} aria-labelledby={resultHeadingId}>
+            <div className="updates-summary-head">
+              <h2 id={resultHeadingId}><Clock3 size={18} aria-hidden="true" />{t('autoUpdateRecentTitle')}</h2>
+              <strong>{autoUpdateStatus}</strong>
             </div>
-            {autoUpdateConfig?.last_error ? (
-              <button
-                className="btn btn-secondary btn-sm"
-                type="button"
-                onClick={() => {
-                  void handleCopyAutoUpdateError()
-                }}
-              >
-                {t('copyDetails')}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-        {autoUpdateHasLocalSkills ? (
-          <div className="updates-permission-note">
-            {t(
-              autoUpdateHasProtectedLocalSkills
-                ? 'autoUpdateLocalPermissionProtectedHint'
-                : 'autoUpdateLocalPermissionHint',
-            )}
-          </div>
-        ) : null}
+            {autoUpdateConfig?.last_status || autoUpdateConfig?.last_run_at ? <>
+              <div className="updates-summary-time">
+                <span>{t('autoUpdateLastRunTitle')}</span>
+                <strong>{autoUpdateLastRun}</strong>
+              </div>
+              <div className="updates-stat-grid">
+                <div>
+                  <span>{t('autoUpdateCheckedShort')}</span>
+                  <strong>{autoUpdateConfig?.last_checked ?? 0}</strong>
+                  <small>{t('autoUpdateCheckedDescription')}</small>
+                </div>
+                <div>
+                  <span>{t('autoUpdateUnchangedShort')}</span>
+                  <strong>{autoUpdateConfig?.last_unchanged ?? 0}</strong>
+                  <small>{t('autoUpdateUnchangedDescription')}</small>
+                </div>
+                <div>
+                  <span>{t('autoUpdateUpdatedShort')}</span>
+                  <strong>{autoUpdateConfig?.last_updated ?? 0}</strong>
+                  <small>{t('autoUpdateUpdatedDescription')}</small>
+                </div>
+                <div className={(autoUpdateConfig?.last_failed ?? 0) > 0 ? 'danger' : ''}>
+                  <span>{t('autoUpdateFailedShort')}</span>
+                  <strong>{autoUpdateConfig?.last_failed ?? 0}</strong>
+                  <small>{t('autoUpdateFailedDescription')}</small>
+                </div>
+              </div>
+              {autoUpdateHasRuntime ? (
+                <div className="updates-runtime-grid">
+                  <div>
+                    <span>{t('autoUpdateStartedShort')}</span>
+                    <strong>{autoUpdateStartedAt}</strong>
+                  </div>
+                  <div>
+                    <span>{t('autoUpdateFinishedShort')}</span>
+                    <strong>{autoUpdateFinishedAt}</strong>
+                  </div>
+                  <div>
+                    <span>{t('autoUpdateProgressDuration')}</span>
+                    <strong>{autoUpdateDuration}</strong>
+                  </div>
+                </div>
+              ) : null}
+              <p className="updates-history-note">{t('deviceSync.historicalRunNote')}</p>
+            </> : <p className="updates-result-empty">{t('updatesLayout.noRunHint')}</p>}
+            <div className="updates-followups">
+              {autoUpdateProgressForDisplay.succeeded.filter(item => item.reason?.startsWith('TOOLS_PENDING|')).map(item => <div className="updates-issue-item" key={`pending-${item.skill_id}`}><strong>{item.name || item.skill_id}</strong><p>{t('deviceSync.runToolsPending', { count: Number(item.reason?.split('|')[1]) || 0 })}</p></div>)}
+              {autoUpdateProgressForDisplay.failed.length > 0 ? (
+                <div className="updates-issue-block">
+                  <div className="updates-section-label">
+                    <AlertTriangle size={15} />
+                    {t('autoUpdateIssuesTitle')}
+                  </div>
+                  <div className="updates-issue-list">
+                    {autoUpdateProgressForDisplay.failed.map((item) => {
+                      const pathChanged = parseToolSyncPathChangedError(item.reason)
+                      const targetConflict = parseToolSyncTargetConflictError(item.reason)
+                      const reason = targetConflict
+                        ? t('autoUpdateFailureToolTargetConflict', {
+                          tool: targetConflict.tool,
+                          path: targetConflict.expectedPath,
+                        })
+                        : pathChanged
+                          ? t('autoUpdateFailureToolPathChanged', {
+                            tool: pathChanged.tool,
+                            path: pathChanged.expectedPath,
+                          })
+                          : item.reason
+                            ? formatUpdateFailure(item.reason, t)
+                            : null
+                      return (
+                        <div className="updates-issue-item" key={item.skill_id}>
+                          <strong>{item.name || item.skill_id}</strong>
+                          <span>{t(`deviceSync.issueHistory.${historicalIssueState(skills.find(skill => skill.id === item.skill_id), autoUpdateConfig?.last_finished_at ?? autoUpdateConfig?.last_run_at ?? 0)}`)}</span>
+                          {reason ? <code>{reason}</code> : null}
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {autoUpdateConfig?.last_error ? (
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      type="button"
+                      onClick={() => {
+                        void handleCopyAutoUpdateError()
+                      }}
+                    >
+                      {t('copyDetails')}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+
+            </div>
+          </section>
+        </div>
+
       </div>
     </div>
   )

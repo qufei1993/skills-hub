@@ -104,6 +104,16 @@ const FilterBar = ({
   return (
     <div className="filter-bar">
       <div className="filter-actions">
+        <div className="search-container">
+          <Search size={16} className="search-icon-abs" />
+          <input
+            className="search-input"
+            aria-label={t('searchPlaceholder')}
+            value={searchQuery}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder={t('searchPlaceholder')}
+          />
+        </div>
         <button className="btn btn-secondary sort-btn" type="button">
           {sortBy === 'updated' ? t('sortUpdated') : t('sortName')}
           <ArrowUpDown size={12} />
@@ -286,15 +296,7 @@ const FilterBar = ({
             <LayoutGrid size={15} />
           </button>
         </div>
-        <div className="search-container">
-          <Search size={16} className="search-icon-abs" />
-          <input
-            className="search-input"
-            value={searchQuery}
-            onChange={(event) => onSearchChange(event.target.value)}
-            placeholder={t('searchPlaceholder')}
-          />
-        </div>
+
       </div>
     </div>
   )

@@ -4,8 +4,16 @@ use std::path::{Path, PathBuf};
 use crate::core::runtime_paths::RuntimePaths;
 use crate::core::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
 
-fn runtime_paths<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> RuntimePaths {
-    crate::runtime_paths_for_tauri(app).unwrap()
+fn runtime_paths<R: tauri::Runtime>(
+    _app: &tauri::AppHandle<R>,
+    store: &SkillStore,
+) -> RuntimePaths {
+    let root = store.db_path().parent().unwrap();
+    RuntimePaths::from_roots(
+        crate::core::runtime_paths::RuntimeProfile::Test,
+        root.join("home"),
+        root.join("runtime"),
+    )
 }
 
 fn make_store() -> (tempfile::TempDir, SkillStore) {
@@ -292,7 +300,7 @@ fn installs_local_skill_and_updates_from_source() {
     fs::write(source.path().join("a.txt"), b"v1").unwrap();
 
     let res = super::install_local_skill(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         source.path(),
         Some("local1".to_string()),
@@ -325,7 +333,7 @@ fn installs_local_skill_and_updates_from_source() {
     fs::write(target.join("__pycache__/module.cpython-313.pyc"), b"cache").unwrap();
     fs::write(source.path().join("a.txt"), b"v2").unwrap();
     let up = super::update_managed_skill_from_source(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         &res.skill_id,
     )
@@ -347,7 +355,7 @@ fn installs_local_skill_and_updates_from_source() {
     assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"v2");
 
     let err = match super::install_local_skill(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         source.path(),
         Some("local1".to_string()),
@@ -369,7 +377,7 @@ fn unchanged_local_skill_skips_central_and_copy_target_replacement() {
     fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
     fs::write(source.path().join("a.txt"), b"same").unwrap();
     let installed = super::install_local_skill(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         source.path(),
         Some("unchanged".to_string()),
@@ -394,7 +402,7 @@ fn unchanged_local_skill_skips_central_and_copy_target_replacement() {
         .unwrap();
 
     let result = super::update_managed_skill_from_source(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         &installed.skill_id,
     )
@@ -418,7 +426,7 @@ fn changed_skill_does_not_overwrite_a_copy_target_with_unexpected_content() {
     fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
     fs::write(source.path().join("a.txt"), b"v1").unwrap();
     let installed = super::install_local_skill(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         source.path(),
         Some("modified-target".to_string()),
@@ -448,7 +456,7 @@ fn changed_skill_does_not_overwrite_a_copy_target_with_unexpected_content() {
     fs::write(source.path().join("a.txt"), b"v2").unwrap();
 
     let result = super::update_managed_skill_from_source(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         &installed.skill_id,
     )
@@ -478,7 +486,7 @@ fn changed_skill_updates_central_and_healthy_targets_despite_modified_copy() {
     fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
     fs::write(source.path().join("a.txt"), b"v1").unwrap();
     let installed = super::install_local_skill(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         source.path(),
         Some("transactional-update".to_string()),
@@ -516,7 +524,7 @@ fn changed_skill_updates_central_and_healthy_targets_despite_modified_copy() {
     fs::write(source.path().join("a.txt"), b"v2").unwrap();
 
     let result = super::update_managed_skill_from_source(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         &installed.skill_id,
     )
@@ -528,7 +536,7 @@ fn changed_skill_updates_central_and_healthy_targets_despite_modified_copy() {
     assert_eq!(result.updated_targets, vec!["aaa"]);
     assert_eq!(result.pending_targets, vec!["zzz"]);
     let unchanged = super::update_managed_skill_from_source(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         &installed.skill_id,
     )
@@ -539,7 +547,7 @@ fn changed_skill_updates_central_and_healthy_targets_despite_modified_copy() {
     assert_eq!(fs::read(second_target.join("a.txt")).unwrap(), b"manual");
     fs::write(source.path().join("a.txt"), b"v3").unwrap();
     let next = super::update_managed_skill_from_source(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         &installed.skill_id,
     )
@@ -585,7 +593,7 @@ fn unexpected_target_symlink_does_not_block_healthy_copy_updates() {
     fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
     fs::write(source.path().join("a.txt"), b"v1").unwrap();
     let installed = super::install_local_skill(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         source.path(),
         Some("rollback-conflict".to_string()),
@@ -622,7 +630,7 @@ fn unexpected_target_symlink_does_not_block_healthy_copy_updates() {
     }
     fs::write(source.path().join("a.txt"), b"v2").unwrap();
     let result = super::update_managed_skill_from_source(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         &installed.skill_id,
     )
@@ -656,7 +664,7 @@ fn changed_skill_updates_a_shared_copy_directory_only_once() {
     fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
     fs::write(source.path().join("a.txt"), b"v1").unwrap();
     let installed = super::install_local_skill(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         source.path(),
         Some("shared-copy".to_string()),
@@ -686,7 +694,7 @@ fn changed_skill_updates_a_shared_copy_directory_only_once() {
     fs::write(source.path().join("a.txt"), b"v2").unwrap();
 
     let result = super::update_managed_skill_from_source(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         &installed.skill_id,
     )
@@ -733,7 +741,7 @@ fn failed_update_marks_skill_error_and_success_clears_it() {
     store.upsert_skill(&skill).unwrap();
 
     let error = match super::update_managed_skill_from_source(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         &skill.id,
     ) {
@@ -752,8 +760,12 @@ fn failed_update_marks_skill_error_and_success_clears_it() {
 
     fs::create_dir_all(&source).unwrap();
     fs::write(source.join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
-    super::update_managed_skill_from_source(&runtime_paths(app.handle()), &store, &skill.id)
-        .unwrap();
+    super::update_managed_skill_from_source(
+        &runtime_paths(app.handle(), &store),
+        &store,
+        &skill.id,
+    )
+    .unwrap();
     assert_eq!(store.source_checks().unwrap()[&skill.id].0, None);
     assert_eq!(
         store.get_skill_by_id(&skill.id).unwrap().unwrap().status,
@@ -776,9 +788,12 @@ fn failed_update_marks_skill_error_and_success_clears_it() {
     };
     store.upsert_skill_target(&target).unwrap();
     fs::write(source.join("a.txt"), b"changed").unwrap();
-    let result =
-        super::update_managed_skill_from_source(&runtime_paths(app.handle()), &store, &skill.id)
-            .unwrap();
+    let result = super::update_managed_skill_from_source(
+        &runtime_paths(app.handle(), &store),
+        &store,
+        &skill.id,
+    )
+    .unwrap();
     assert_eq!(result.pending_targets, vec!["unknown_tool"]);
     assert_eq!(
         store.get_skill_by_id(&skill.id).unwrap().unwrap().status,
@@ -805,7 +820,7 @@ fn imports_identical_existing_local_skill_but_rejects_different_content() {
     fs::write(original.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
     fs::write(original.path().join("a.txt"), b"same").unwrap();
     let installed = super::install_local_skill(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         original.path(),
         Some("local1".to_string()),
@@ -816,7 +831,7 @@ fn imports_identical_existing_local_skill_but_rejects_different_content() {
     fs::write(discovered.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
     fs::write(discovered.path().join("a.txt"), b"same").unwrap();
     let imported = super::import_existing_local_skill(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         discovered.path(),
         Some("local1".to_string()),
@@ -827,7 +842,7 @@ fn imports_identical_existing_local_skill_but_rejects_different_content() {
 
     fs::write(discovered.path().join("a.txt"), b"different").unwrap();
     let err = match super::import_existing_local_skill(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         discovered.path(),
         Some("local1".to_string()),
@@ -849,7 +864,7 @@ fn auto_update_migrates_legacy_kimi_target_without_removing_old_path() {
     fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
     fs::write(source.path().join("content.txt"), b"v1").unwrap();
     let installed = super::install_local_skill(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         source.path(),
         Some("local1".to_string()),
@@ -877,7 +892,7 @@ fn auto_update_migrates_legacy_kimi_target_without_removing_old_path() {
 
     fs::write(source.path().join("content.txt"), b"v2").unwrap();
     let update = super::update_managed_skill_from_source(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         &installed.skill_id,
     )
@@ -915,7 +930,7 @@ fn auto_update_preserves_conflicting_new_kimi_target_and_marks_legacy_record_fai
     fs::write(source.path().join("SKILL.md"), b"---\nname: x\n---\n").unwrap();
     fs::write(source.path().join("content.txt"), b"v1").unwrap();
     let installed = super::install_local_skill(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         source.path(),
         Some("local1".to_string()),
@@ -946,7 +961,7 @@ fn auto_update_preserves_conflicting_new_kimi_target_and_marks_legacy_record_fai
 
     fs::write(source.path().join("content.txt"), b"v2").unwrap();
     let result = super::update_managed_skill_from_source(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         &installed.skill_id,
     )
@@ -993,7 +1008,7 @@ fn lists_and_installs_git_skills_without_network() {
     commit_all(&repo, "add skills");
 
     let candidates = super::list_git_skills(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         None,
@@ -1004,7 +1019,7 @@ fn lists_and_installs_git_skills_without_network() {
     assert!(subpaths.iter().any(|s| s.ends_with("skills/a")));
 
     let res = super::install_git_skill_from_selection(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         "skills/a",
@@ -1039,7 +1054,7 @@ fn install_git_skill_errors_on_multi_skills_repo_root() {
     commit_all(&repo, "multi skills");
 
     let err = match super::install_git_skill(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         None,
@@ -1103,7 +1118,7 @@ fn install_local_selection_validates_skill_md() {
     .unwrap();
 
     let res = super::install_local_skill_from_selection(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         base.path(),
         "skills/a",
@@ -1115,7 +1130,7 @@ fn install_local_selection_validates_skill_md() {
     assert_eq!(skill.name, "Local A");
 
     let err = match super::install_local_skill_from_selection(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         base.path(),
         "skills/b",
@@ -1152,7 +1167,7 @@ fn install_git_skill_uses_skill_md_name_over_subpath_skills() {
 
     // install_git_skill_from_selection with subpath "skills" (no user-provided name)
     let res = super::install_git_skill_from_selection(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         "skills",
@@ -1196,7 +1211,7 @@ fn install_git_skill_rejects_container_subpath_without_skill_md() {
     commit_all(&repo, "add container skill");
 
     let err = match super::install_git_skill_from_selection(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         "awesome_agent_skills",
@@ -1234,7 +1249,7 @@ fn install_git_skill_selection_accepts_specific_child_under_container() {
     commit_all(&repo, "add container skill");
 
     let res = super::install_git_skill_from_selection(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         "awesome_agent_skills/technical-writer",
@@ -1263,7 +1278,7 @@ fn install_git_skill_respects_user_provided_name() {
     commit_all(&repo, "add skill");
 
     let res = super::install_git_skill_from_selection(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         "skills",
@@ -1296,7 +1311,7 @@ fn install_git_skill_derives_name_from_skill_md() {
     // The repo name (derived from path) will be something like a temp dir name.
     // After install, the name should be "proper-name" from SKILL.md.
     let res = super::install_git_skill(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         None,
@@ -1336,7 +1351,7 @@ fn install_git_skill_detects_root_level_multi_skills() {
 
     // install_git_skill should detect multiple skills and bail with MULTI_SKILLS
     let err = match super::install_git_skill(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         None,
@@ -1375,7 +1390,7 @@ fn list_git_skills_finds_root_level_skills() {
     commit_all(&repo, "add root-level skills");
 
     let candidates = super::list_git_skills(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         None,
@@ -1412,7 +1427,7 @@ fn list_git_skills_finds_root_skill_container_layout() {
     commit_all(&repo, "add container skill");
 
     let candidates = super::list_git_skills(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         repo_dir.path().to_string_lossy().as_ref(),
         None,
@@ -1605,12 +1620,12 @@ fn lists_and_installs_nested_git_skill() {
     commit_all(&repo, "add nested skill");
     let url = source.path().to_string_lossy();
     let candidates =
-        super::list_git_skills(&runtime_paths(app.handle()), &store, &url, None).unwrap();
+        super::list_git_skills(&runtime_paths(app.handle(), &store), &store, &url, None).unwrap();
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0].subpath, subpath);
     assert_eq!(candidates[0].description.as_deref(), Some("Review code"));
     let installed = super::install_git_skill_from_selection(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         &url,
         &candidates[0].subpath,
@@ -1637,7 +1652,7 @@ fn unchanged_git_source_does_not_overwrite_content_received_from_device_sync() {
     let repo = init_git_repo(source.path());
     commit_all(&repo, "add skill");
     let installed = super::install_git_skill(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         source.path().to_string_lossy().as_ref(),
         None,
@@ -1654,7 +1669,7 @@ fn unchanged_git_source_does_not_overwrite_content_received_from_device_sync() {
         .unwrap();
 
     let update = super::update_managed_skill_from_source_with_lock_held(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         &installed.skill_id,
         true,
@@ -1682,7 +1697,7 @@ fn unchanged_git_source_does_not_overwrite_content_received_from_device_sync() {
         .is_none());
 
     let explicit = super::update_managed_skill_from_source(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         &installed.skill_id,
     )
@@ -1708,7 +1723,7 @@ fn newer_git_revision_is_applied_when_a_synced_skill_has_no_source_baseline() {
     let repo = init_git_repo(source.path());
     commit_all(&repo, "revision one");
     let installed = super::install_git_skill(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         source.path().to_string_lossy().as_ref(),
         None,
@@ -1730,7 +1745,7 @@ fn newer_git_revision_is_applied_when_a_synced_skill_has_no_source_baseline() {
     commit_all(&repo, "revision two");
 
     let update = super::update_managed_skill_from_source_with_lock_held(
-        &runtime_paths(app.handle()),
+        &runtime_paths(app.handle(), &store),
         &store,
         &installed.skill_id,
         true,
@@ -1771,21 +1786,27 @@ fn issue_129_discovers_and_installs_skills_across_categories() {
     let url = source.path().to_string_lossy();
 
     let candidates =
-        super::list_git_skills(&runtime_paths(app.handle()), &store, &url, None).unwrap();
+        super::list_git_skills(&runtime_paths(app.handle(), &store), &store, &url, None).unwrap();
     let actual: Vec<_> = candidates
         .iter()
         .map(|candidate| (candidate.name.as_str(), candidate.subpath.as_str()))
         .collect();
     assert_eq!(actual, skills);
 
-    let error = super::install_git_skill(&runtime_paths(app.handle()), &store, &url, None, None)
-        .err()
-        .expect("a categorized multi-skill repo must require selection");
+    let error = super::install_git_skill(
+        &runtime_paths(app.handle(), &store),
+        &store,
+        &url,
+        None,
+        None,
+    )
+    .err()
+    .expect("a categorized multi-skill repo must require selection");
     assert!(format!("{error:#}").contains("MULTI_SKILLS|"));
 
     for candidate in candidates {
         let installed = super::install_git_skill_from_selection(
-            &runtime_paths(app.handle()),
+            &runtime_paths(app.handle(), &store),
             &store,
             &url,
             &candidate.subpath,
@@ -1981,6 +2002,393 @@ fn issue_182_repairs_fresh_sparse_cache_missing_requested_directory() {
 }
 
 #[test]
+fn content_preview_refreshes_full_and_sparse_git_sources_inside_cache_ttl() {
+    for subpath in [None, Some("skills/demo")] {
+        let (dir, store) = make_store();
+        let paths = RuntimePaths::from_roots(
+            crate::core::runtime_paths::RuntimeProfile::Test,
+            dir.path().join("home"),
+            dir.path().join("runtime"),
+        );
+        let central = tempfile::tempdir().unwrap();
+        set_central_path(&store, central.path());
+        store.set_setting("git_cache_ttl_secs", "3600").unwrap();
+        let source = tempfile::tempdir().unwrap();
+        let skill_dir =
+            subpath.map_or_else(|| source.path().to_path_buf(), |s| source.path().join(s));
+        fs::create_dir_all(&skill_dir).unwrap();
+        let skill_file = skill_dir.join("SKILL.md");
+        fs::write(&skill_file, "---\nname: preview-fresh\n---\nversion one").unwrap();
+        let repo = init_git_repo(source.path());
+        let installed = if let Some(subpath) = subpath {
+            super::install_git_skill_from_selection(
+                &paths,
+                &store,
+                source.path().to_str().unwrap(),
+                subpath,
+                None,
+                None,
+            )
+            .unwrap()
+        } else {
+            super::install_git_skill(&paths, &store, source.path().to_str().unwrap(), None, None)
+                .unwrap()
+        };
+        let before = crate::core::content_hash::hash_dir_strict(&installed.central_path).unwrap();
+        fs::write(&skill_file, "---\nname: preview-fresh\n---\nversion two").unwrap();
+        commit_all(&repo, "upstream changes inside the cache TTL");
+
+        // Non-preview callers continue honoring the configured installation TTL.
+        let record = store.get_skill_by_id(&installed.skill_id).unwrap().unwrap();
+        let (cached, _, _) = super::stage_skill_source(&paths, &store, &record, None).unwrap();
+        assert!(fs::read_to_string(cached.join("SKILL.md"))
+            .unwrap()
+            .contains("version one"));
+        fs::remove_dir_all(cached).unwrap();
+
+        let plan =
+            crate::core::content_recovery::preview(&paths, &store, &installed.skill_id, false)
+                .unwrap();
+        let change = plan.changes.iter().find(|c| c.path == "SKILL.md").unwrap();
+        assert!(change.after.as_deref().unwrap().contains("version two"));
+        assert_eq!(
+            crate::core::content_hash::hash_dir_strict(&installed.central_path).unwrap(),
+            before
+        );
+        assert_eq!(
+            store.get_setting("git_cache_ttl_secs").unwrap().as_deref(),
+            Some("3600")
+        );
+
+        // An unavailable upstream must fail, rather than reusing a fresh cache
+        // and allowing the UI to incorrectly report the Skill as current.
+        let source_location = source.path().to_path_buf();
+        let moved_source = dir.path().join("moved-source");
+        drop(repo);
+        fs::rename(&source_location, &moved_source).unwrap();
+        assert!(
+            crate::core::content_recovery::preview(&paths, &store, &installed.skill_id, false)
+                .is_err()
+        );
+        assert_eq!(
+            crate::core::content_hash::hash_dir_strict(&installed.central_path).unwrap(),
+            before
+        );
+    }
+}
+
+#[test]
+fn content_check_root_git_cache_metadata_is_internal_and_legacy_cache_migrates_safely() {
+    let (dir, store) = make_store();
+    let paths = RuntimePaths::from_roots(
+        crate::core::runtime_paths::RuntimeProfile::Test,
+        dir.path().join("home"),
+        dir.path().join("runtime"),
+    );
+    set_central_path(&store, &dir.path().join("central"));
+    let source = tempfile::tempdir().unwrap();
+    fs::write(
+        source.path().join("SKILL.md"),
+        "---\nname: root-skill\n---\nbody",
+    )
+    .unwrap();
+    let repo = init_git_repo(source.path());
+    let reference = source.path().to_str().unwrap();
+    let installed = super::install_git_skill(&paths, &store, reference, None, None).unwrap();
+    assert!(!installed
+        .central_path
+        .join(super::LEGACY_CACHE_META)
+        .exists());
+    let cache = paths
+        .git_cache_dir
+        .join(super::repo_cache_key(reference, None, None));
+    let current_meta = cache.join(".git").join(super::LEGACY_CACHE_META);
+    let legacy_bytes = fs::read(&current_meta).unwrap();
+    fs::write(cache.join(super::LEGACY_CACHE_META), &legacy_bytes).unwrap();
+    fs::remove_file(&current_meta).unwrap();
+    // Reproduce a Skill installed by the old root-directory copy behavior.
+    fs::write(
+        installed.central_path.join(super::LEGACY_CACHE_META),
+        &legacy_bytes,
+    )
+    .unwrap();
+    let before = crate::core::content_hash::hash_dir_strict(&installed.central_path).unwrap();
+    let plan =
+        crate::core::content_recovery::preview(&paths, &store, &installed.skill_id, false).unwrap();
+    assert!(plan.changes.is_empty());
+    assert!(current_meta.is_file());
+    assert!(!cache.join(super::LEGACY_CACHE_META).exists());
+    let mut results = Vec::new();
+    crate::core::content_recovery::check_batch(
+        &paths,
+        &store,
+        std::slice::from_ref(&installed.skill_id),
+        None,
+        |_, result| results.push(result.unwrap()),
+    )
+    .unwrap();
+    assert!(!results[0].changed);
+    assert_eq!(
+        crate::core::content_hash::hash_dir_strict(&installed.central_path).unwrap(),
+        before
+    );
+
+    // A real tracked same-name file, even with the internal JSON shape, is data.
+    fs::write(source.path().join(super::LEGACY_CACHE_META), &legacy_bytes).unwrap();
+    commit_all(&repo, "track a user-owned same-name file");
+    let plan =
+        crate::core::content_recovery::preview(&paths, &store, &installed.skill_id, false).unwrap();
+    assert!(cache.join(super::LEGACY_CACHE_META).is_file());
+    assert_eq!(
+        fs::read(cache.join(super::LEGACY_CACHE_META)).unwrap(),
+        legacy_bytes
+    );
+    assert!(!plan
+        .changes
+        .iter()
+        .any(|change| change.path == super::LEGACY_CACHE_META));
+    fs::write(
+        source.path().join(super::LEGACY_CACHE_META),
+        "user-owned text",
+    )
+    .unwrap();
+    commit_all(&repo, "change a user-owned same-name file");
+    let plan =
+        crate::core::content_recovery::preview(&paths, &store, &installed.skill_id, false).unwrap();
+    assert!(plan
+        .changes
+        .iter()
+        .any(|change| change.path == super::LEGACY_CACHE_META
+            && change.after.as_deref() == Some("user-owned text")));
+}
+
+#[test]
+fn content_check_grouped_sources_fetch_once_and_avoid_unrelated_filters() {
+    const CHILD: &str = "SKILLS_HUB_GROUPED_CHECK_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let source = tempfile::tempdir().unwrap();
+        for name in ["alpha", "beta"] {
+            let folder = source.path().join("skills").join(name);
+            fs::create_dir_all(&folder).unwrap();
+            fs::write(
+                folder.join("SKILL.md"),
+                format!("---\nname: {name}\n---\nbody"),
+            )
+            .unwrap();
+        }
+        fs::write(source.path().join("unrelated.asset"), "must not smudge").unwrap();
+        fs::write(
+            source.path().join(".gitattributes"),
+            "*.asset filter=grouped-check\n",
+        )
+        .unwrap();
+        let _repo = init_git_repo(source.path());
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "core::installer::tests::content_check_grouped_sources_fetch_once_and_avoid_unrelated_filters", "--nocapture"])
+            .env(CHILD, source.path())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", source.path().join("empty-config"))
+            .env("GIT_CONFIG_COUNT", "2")
+            .env("GIT_CONFIG_KEY_0", "filter.grouped-check.smudge")
+            .env("GIT_CONFIG_VALUE_0", "skills-hub-missing-required-filter")
+            .env("GIT_CONFIG_KEY_1", "filter.grouped-check.required")
+            .env("GIT_CONFIG_VALUE_1", "true")
+            .env("GIT_TRACE2_EVENT", source.path().join("trace.jsonl"))
+            .output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let source = PathBuf::from(std::env::var_os(CHILD).unwrap());
+    let reference = source.to_str().unwrap();
+    let (dir, store) = make_store();
+    let paths = RuntimePaths::from_roots(
+        crate::core::runtime_paths::RuntimeProfile::Test,
+        dir.path().join("home"),
+        dir.path().join("runtime"),
+    );
+    set_central_path(&store, &dir.path().join("central"));
+    assert!(
+        crate::core::git_fetcher::clone_or_pull(
+            reference,
+            &dir.path().join("full"),
+            None,
+            None,
+            Some("")
+        )
+        .is_err(),
+        "error control must fail when unrelated filters run"
+    );
+    let ids = ["alpha", "beta"].map(|name| {
+        super::install_git_skill_from_selection(
+            &paths,
+            &store,
+            reference,
+            &format!("skills/{name}"),
+            None,
+            None,
+        )
+        .unwrap()
+        .skill_id
+    });
+    for round in 0..3 {
+        if round == 2 {
+            // Legacy records omit the selected subpath. Discover manifests and
+            // match the stored Skill names without checking out the bad asset.
+            for id in &ids {
+                let mut record = store.get_skill_by_id(id).unwrap().unwrap();
+                record.source_subpath = None;
+                store.upsert_skill(&record).unwrap();
+            }
+        }
+        fs::write(source.join("trace.jsonl"), "").unwrap();
+        let mut items = Vec::new();
+        crate::core::content_recovery::check_batch(&paths, &store, &ids, None, |_, result| {
+            items.push(result.unwrap())
+        })
+        .unwrap();
+        assert_eq!(items.len(), 2);
+        assert!(items.iter().all(|item| !item.changed));
+        let events = fs::read_to_string(source.join("trace.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        let count = |name: &str| {
+            events
+                .iter()
+                .filter(|event| {
+                    event["event"] == "start"
+                        && event["argv"]
+                            .as_array()
+                            .is_some_and(|args| args.iter().any(|arg| arg == name))
+                })
+                .count()
+        };
+        assert_eq!(count("clone"), usize::from(round == 0));
+        assert_eq!(count("fetch"), usize::from(round != 0));
+        assert!(store
+            .workspace_list::<crate::core::content_recovery::ContentPreview>("content-preview")
+            .unwrap()
+            .is_empty());
+    }
+    let mut ambiguous = store.get_skill_by_id(&ids[0]).unwrap().unwrap();
+    ambiguous.name = "cannot-match-any-Skill".into();
+    store.upsert_skill(&ambiguous).unwrap();
+    let mut known = store.get_skill_by_id(&ids[1]).unwrap().unwrap();
+    known.source_subpath = Some("skills/beta".into());
+    store.upsert_skill(&known).unwrap();
+    let mut outcomes = Vec::new();
+    crate::core::content_recovery::check_batch(&paths, &store, &ids, None, |id, result| {
+        outcomes.push((id.to_string(), result))
+    })
+    .unwrap();
+    assert_eq!(outcomes[0].0, ids[0]);
+    assert!(outcomes[0]
+        .1
+        .as_ref()
+        .unwrap_err()
+        .to_string()
+        .contains("SKILL_SOURCE_SELECTION_REQUIRED"));
+    assert_eq!(outcomes[1].0, ids[1]);
+    assert!(!outcomes[1].1.as_ref().unwrap().changed);
+
+    let mut alpha = store.get_skill_by_id(&ids[0]).unwrap().unwrap();
+    alpha.name = "alpha".into();
+    store.upsert_skill(&alpha).unwrap();
+    let user_metadata = serde_json::to_vec(
+        &serde_json::json!({"head": alpha.source_revision, "last_fetched_ms": 1000}),
+    )
+    .unwrap();
+    fs::write(
+        source.join("skills/alpha").join(super::LEGACY_CACHE_META),
+        &user_metadata,
+    )
+    .unwrap();
+    fs::write(
+        Path::new(&alpha.central_path).join(super::LEGACY_CACHE_META),
+        &user_metadata,
+    )
+    .unwrap();
+    fs::write(
+        source.join("skills/beta/broken.asset"),
+        "new required-filter asset",
+    )
+    .unwrap();
+    let repo = git2::Repository::open(&source).unwrap();
+    let mut index = repo.index().unwrap();
+    let existing_tree = repo.head().unwrap().peel_to_tree().unwrap();
+    index.read_tree(&existing_tree).unwrap();
+    index
+        .add_path(Path::new("skills/alpha/.skills-hub-cache.json"))
+        .unwrap();
+    index
+        .add_path(Path::new("skills/beta/broken.asset"))
+        .unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let parent = repo.head().unwrap().peel_to_commit().unwrap();
+    let signature = git2::Signature::now("test", "test@example.com").unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        "one selected Skill now has a failing filter",
+        &tree,
+        &[&parent],
+    )
+    .unwrap();
+    let central_before =
+        crate::core::content_hash::hash_dir_strict(Path::new(&alpha.central_path)).unwrap();
+    for round in 0..2 {
+        if round == 1 {
+            alpha.source_subpath = Some("skills/alpha".into());
+            store.upsert_skill(&alpha).unwrap();
+        }
+        fs::write(source.join("trace.jsonl"), "").unwrap();
+        let mut outcomes = Vec::new();
+        crate::core::content_recovery::check_batch(&paths, &store, &ids, None, |id, result| {
+            outcomes.push((id.to_string(), result))
+        })
+        .unwrap();
+        assert!(
+            !outcomes[0].1.as_ref().unwrap().changed,
+            "the valid Skill and its real metadata-name file must remain unchanged"
+        );
+        assert!(
+            outcomes[1].1.is_err(),
+            "the selected Skill's own failing filter must remain visible"
+        );
+        let events = fs::read_to_string(source.join("trace.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        let fetches = events
+            .iter()
+            .filter(|event| {
+                event["event"] == "start"
+                    && event["argv"]
+                        .as_array()
+                        .is_some_and(|args| args.iter().any(|arg| arg == "fetch"))
+            })
+            .count();
+        assert_eq!(
+            fetches, 1,
+            "checkout fallback must reuse the refreshed repository"
+        );
+        assert_eq!(
+            crate::core::content_hash::hash_dir_strict(Path::new(&alpha.central_path)).unwrap(),
+            central_before
+        );
+    }
+}
+
+#[test]
 fn issue_195_subdirectory_install_avoids_unrelated_checkout_filters() {
     const CHILD: &str = "SKILLS_HUB_ISSUE_195_CHILD";
     if std::env::var_os(CHILD).is_none() {
@@ -2150,4 +2558,196 @@ fn collection_snapshot_records_revision_and_keeps_default_branch_update_source()
     assert!(fs::read_to_string(installed.central_path.join("SKILL.md"))
         .unwrap()
         .ends_with("second"));
+}
+
+/// Manual, isolated service-entry baseline. Git Trace2 counts real fetch/clone
+/// commands; the child process owns all environment changes and temporary data.
+#[test]
+#[ignore = "manual update-check performance baseline"]
+fn update_check_perf_baseline() {
+    const CHILD: &str = "SKILLS_HUB_UPDATE_CHECK_PERF_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let trace_root = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "core::installer::tests::update_check_perf_baseline",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env("GIT_TRACE2_EVENT", trace_root.path().join("trace.jsonl"))
+            .output()
+            .unwrap();
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    fn git_counts() -> (usize, usize) {
+        let trace =
+            fs::read_to_string(std::env::var_os("GIT_TRACE2_EVENT").unwrap()).unwrap_or_default();
+        let mut fetches = 0;
+        let mut clones = 0;
+        for line in trace.lines() {
+            let event: serde_json::Value = serde_json::from_str(line).unwrap();
+            if event["event"] != "start" {
+                continue;
+            }
+            if let Some(args) = event["argv"].as_array() {
+                fetches += usize::from(args.iter().any(|arg| arg == "fetch"));
+                clones += usize::from(args.iter().any(|arg| arg == "clone"));
+            }
+        }
+        (fetches, clones)
+    }
+    const SKILLS: usize = 12;
+    const FILES: usize = 24;
+    let summary = std::env::var("SKILLS_HUB_UPDATE_CHECK_PERF_MODE").as_deref() == Ok("summary");
+    for trial in 1..=3 {
+        let root = tempfile::tempdir().unwrap();
+        let paths = RuntimePaths::from_roots(
+            crate::core::runtime_paths::RuntimeProfile::Test,
+            root.path().join("home"),
+            root.path().join("data"),
+        );
+        let service = crate::services::skills_hub::SkillsHubService::open(paths.clone()).unwrap();
+        let source = root.path().join("upstream");
+        for skill in 0..SKILLS {
+            let folder = source.join(format!("skills/skill-{skill:02}"));
+            fs::create_dir_all(&folder).unwrap();
+            fs::write(
+                folder.join("SKILL.md"),
+                format!("---\nname: perf-{skill:02}\n---\noriginal skill instructions"),
+            )
+            .unwrap();
+            for file in 0..FILES {
+                fs::write(
+                    folder.join(format!("reference-{file:02}.md")),
+                    format!(
+                        "skill {skill:02} reference {file:02}\n{}",
+                        "reference text. ".repeat(1024)
+                    ),
+                )
+                .unwrap();
+            }
+        }
+        let repo = init_git_repo(&source);
+        let mut installed = Vec::new();
+        for skill in 0..SKILLS {
+            installed.push(
+                service
+                    .install(
+                        crate::services::install::InstallRequest::git(format!(
+                            "file://{}",
+                            source.display()
+                        ))
+                        .with_subpath(format!("skills/skill-{skill:02}")),
+                    )
+                    .unwrap(),
+            );
+        }
+        let original_hashes = installed
+            .iter()
+            .map(|item| {
+                crate::core::content_hash::hash_dir_strict(Path::new(&item.central_path)).unwrap()
+            })
+            .collect::<Vec<_>>();
+        for skill in (0..SKILLS).step_by(3) {
+            fs::write(
+                source.join(format!("skills/skill-{skill:02}/SKILL.md")),
+                format!("---\nname: perf-{skill:02}\n---\nupdated skill instructions"),
+            )
+            .unwrap();
+        }
+        commit_all(&repo, "update four of twelve Skills");
+        fs::remove_dir_all(&paths.git_cache_dir).unwrap();
+        for round in 0..3 {
+            let counts_before = git_counts();
+            let started = std::time::Instant::now();
+            let serialized_bytes = if summary {
+                let ids = installed
+                    .iter()
+                    .map(|skill| skill.id.clone())
+                    .collect::<Vec<_>>();
+                let run = service
+                    .check_content_sources(
+                        &uuid::Uuid::new_v4().to_string(),
+                        &ids,
+                        &crate::core::cancel_token::CancelToken::new(),
+                        |_| {},
+                    )
+                    .unwrap();
+                assert_eq!(
+                    run.summaries
+                        .iter()
+                        .filter(|item| item.status == "changed")
+                        .count(),
+                    4
+                );
+                assert_eq!(
+                    run.summaries
+                        .iter()
+                        .filter(|item| item.status == "unchanged")
+                        .count(),
+                    8
+                );
+                serde_json::to_vec(&run).unwrap().len()
+            } else {
+                let plans = installed
+                    .iter()
+                    .map(|skill| service.preview_content(&skill.id, false).unwrap())
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    plans.iter().filter(|plan| !plan.changes.is_empty()).count(),
+                    4
+                );
+                assert_eq!(
+                    plans.iter().map(|plan| plan.changes.len()).sum::<usize>(),
+                    4
+                );
+                serde_json::to_vec(&plans).unwrap().len()
+            };
+            let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+            let counts_after = git_counts();
+            let fetches = counts_after.0 - counts_before.0;
+            let clones = counts_after.1 - counts_before.1;
+            let operations = if summary { 1 } else { SKILLS };
+            assert_eq!(fetches, if round == 0 { 0 } else { operations });
+            assert_eq!(clones, if round == 0 { operations } else { 0 });
+            for (skill, expected) in installed.iter().zip(&original_hashes) {
+                assert_eq!(
+                    crate::core::content_hash::hash_dir_strict(Path::new(&skill.central_path))
+                        .unwrap(),
+                    *expected
+                );
+            }
+            let plan_count = service
+                .store()
+                .workspace_list::<crate::core::content_recovery::ContentPreview>("content-preview")
+                .unwrap()
+                .len();
+            assert_eq!(plan_count, if summary { 0 } else { SKILLS });
+            println!(
+                "UPDATE_CHECK_PERF {}",
+                serde_json::json!({
+                    "implementation": if summary { "grouped-summary" } else { "per-skill-preview" },
+                    "trial": trial,
+                    "round": round,
+                    "cache": if round == 0 { "cold" } else { "warm" },
+                    "skills": SKILLS,
+                    "filesPerSkill": FILES + 1,
+                    "elapsedMs": elapsed_ms,
+                    "fetches": fetches,
+                    "clones": clones,
+                    "changed": 4,
+                    "serializedBytes": serialized_bytes,
+                    "persistedPlans": plan_count
+                })
+            );
+        }
+    }
 }

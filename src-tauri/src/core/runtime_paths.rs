@@ -67,6 +67,20 @@ pub struct RuntimePaths {
 }
 
 impl RuntimePaths {
+    #[cfg(debug_assertions)]
+    pub(crate) fn from_desktop_test_root(root: impl AsRef<Path>) -> Result<Self> {
+        let root = root.as_ref();
+        anyhow::ensure!(
+            root.is_absolute() && root.is_dir(),
+            "SKILLSHUB_DESKTOP_TEST_ROOT must be an absolute path to an existing directory"
+        );
+        Ok(Self::from_roots(
+            RuntimeProfile::Test,
+            root.join("home"),
+            root.join("data"),
+        ))
+    }
+
     #[allow(dead_code)]
     pub fn from_roots(
         profile: RuntimeProfile,

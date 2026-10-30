@@ -439,20 +439,167 @@ fn recycle(parent: &File, name: &OsStr, _original: &Path) -> Result<()> {
 
 #[cfg(all(not(test), target_os = "macos"))]
 fn recycle(parent: &File, name: &OsStr, original: &Path) -> Result<()> {
-    let home = dirs::home_dir().context("trash home unavailable")?;
-    let trash = open_absolute(&home.join(".Trash"), true)?;
+    use trash::macos::{DeleteMethod, TrashContextExtMacos};
+
+    recycle_via_staging(parent, name, original, |path| {
+        let mut context = trash::TrashContext::default();
+        context.set_delete_method(DeleteMethod::NsFileManager);
+        context.delete(path).map_err(anyhow::Error::from)
+    })
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn recycle_via_staging(
+    parent: &File,
+    name: &OsStr,
+    original: &Path,
+    recycle: impl FnOnce(&Path) -> Result<()>,
+) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    // macOS protects direct access to ~/.Trash. Transfer ownership through the
+    // opened project directory before passing a private path to the system API.
+    let temporary = tempfile::Builder::new()
+        .prefix("skills-hub-recycle-")
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir()?;
+    let staging_path = std::fs::canonicalize(temporary.path())?;
+    let staging = open_absolute(&staging_path, false)?;
     let destination = format!(
         "{}-{}",
         original.file_name().unwrap_or_default().to_string_lossy(),
         Uuid::new_v4()
     );
-    renameat_with(parent, name, &trash, destination, RenameFlags::NOREPLACE)?;
-    Ok(())
+    // A failed recycle or rollback must never recursively delete this backup.
+    let _retained = temporary.keep();
+    if let Err(error) = renameat_with(parent, name, &staging, &destination, RenameFlags::NOREPLACE)
+    {
+        let _ = std::fs::remove_dir(&staging_path);
+        return Err(error.into());
+    }
+    let staged_backup = staging_path.join(&destination);
+    let result = recycle(&staged_backup).and_then(|()| {
+        anyhow::ensure!(
+            kind(&staging, OsStr::new(&destination))?.is_none(),
+            "system recycler left the staged backup in place"
+        );
+        Ok(())
+    });
+    match result {
+        Ok(()) => {
+            let _ = std::fs::remove_dir(&staging_path);
+            Ok(())
+        }
+        Err(error) => {
+            if kind(&staging, OsStr::new(&destination))?.is_none() {
+                let _ = std::fs::remove_dir(&staging_path);
+                return Err(error.context(
+                    "system recycler reported failure after moving the backup; outcome unknown",
+                ));
+            }
+            match renameat_with(&staging, &destination, parent, name, RenameFlags::NOREPLACE) {
+                Ok(()) => {
+                    let _ = std::fs::remove_dir(&staging_path);
+                    Err(error.context("system recycle failed; backup restored"))
+                }
+                Err(restore_error) => Err(error.context(format!(
+                    "system recycle failed; backup recovery retained at {} ({restore_error})",
+                    staged_backup.display()
+                ))),
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn staged_recycling_uses_the_open_parent_after_project_path_redirection() {
+        let project = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let trash = tempfile::tempdir().unwrap();
+        let parent_path = project.path().join("skills");
+        std::fs::create_dir(&parent_path).unwrap();
+        let backup = OsStr::new(".skills-hub-backup-owned");
+        std::fs::create_dir(parent_path.join(backup)).unwrap();
+        std::fs::write(parent_path.join(backup).join("original.txt"), "recoverable").unwrap();
+        let parent = File::open(&parent_path).unwrap();
+        let moved = project.path().join("moved-skills");
+        std::fs::rename(&parent_path, &moved).unwrap();
+        std::os::unix::fs::symlink(outside.path(), &parent_path).unwrap();
+        std::fs::create_dir(outside.path().join(backup)).unwrap();
+        std::fs::write(outside.path().join(backup).join("trap"), "untouched").unwrap();
+        let mut staged_path = PathBuf::new();
+        recycle_via_staging(&parent, backup, &parent_path.join("demo"), |path| {
+            staged_path = path.to_path_buf();
+            assert!(!path.starts_with(project.path()));
+            assert_eq!(
+                std::fs::metadata(path.parent().unwrap()).unwrap().mode() & 0o777,
+                0o700
+            );
+            std::fs::rename(path, trash.path().join("recycled"))?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(trash.path().join("recycled/original.txt")).unwrap(),
+            "recoverable"
+        );
+        assert!(!moved.join(backup).exists());
+        assert!(!staged_path.parent().unwrap().exists());
+        assert_eq!(
+            std::fs::read_to_string(outside.path().join(backup).join("trap")).unwrap(),
+            "untouched"
+        );
+    }
+
+    #[test]
+    fn failed_staged_recycling_restores_backup_or_retains_recovery_without_deleting_content() {
+        for block_restore in [false, true] {
+            let project = tempfile::tempdir().unwrap();
+            let backup = OsStr::new(".skills-hub-backup-owned");
+            let original_backup = project.path().join(backup);
+            std::fs::create_dir(&original_backup).unwrap();
+            std::fs::write(original_backup.join("original.txt"), "recoverable").unwrap();
+            let parent = File::open(project.path()).unwrap();
+            let mut staged_path = PathBuf::new();
+            let error =
+                recycle_via_staging(&parent, backup, &project.path().join("demo"), |path| {
+                    staged_path = path.to_path_buf();
+                    if block_restore {
+                        std::fs::create_dir(&original_backup)?;
+                        std::fs::write(original_backup.join("trap"), "new content")?;
+                    }
+                    anyhow::bail!("simulated system recycler failure")
+                })
+                .unwrap_err();
+            assert!(format!("{error:#}").contains("simulated system recycler failure"));
+            if block_restore {
+                assert!(error
+                    .to_string()
+                    .contains(&staged_path.display().to_string()));
+                assert_eq!(
+                    std::fs::read_to_string(staged_path.join("original.txt")).unwrap(),
+                    "recoverable"
+                );
+                assert_eq!(
+                    std::fs::read_to_string(original_backup.join("trap")).unwrap(),
+                    "new content"
+                );
+                // Only this test owns the deliberately retained recovery directory.
+                std::fs::remove_dir_all(staged_path.parent().unwrap()).unwrap();
+            } else {
+                assert!(error.to_string().contains("backup restored"));
+                assert_eq!(
+                    std::fs::read_to_string(original_backup.join("original.txt")).unwrap(),
+                    "recoverable"
+                );
+                assert!(!staged_path.parent().unwrap().exists());
+            }
+        }
+    }
 
     #[test]
     fn missing_undeploy_does_not_leave_created_parent_directories() {

@@ -1,4 +1,6 @@
 pub mod collection_link;
+pub mod content_check;
+pub mod workspace;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -431,6 +433,9 @@ fn format_anyhow_error(err: anyhow::Error) -> String {
 
 fn format_service_error(error: crate::services::error::ServiceError) -> String {
     match error.code {
+        crate::services::error::ErrorCode::PlanStale => {
+            format!("PLAN_STALE|{}", error.message)
+        }
         crate::services::error::ErrorCode::MultiSkills => {
             let candidates = error
                 .details
@@ -454,7 +459,7 @@ fn format_service_error(error: crate::services::error::ServiceError) -> String {
                 (Some("shared_directory_scope_expansion"), _) => {
                     "SHARED_DIRECTORY_SCOPE_EXPANSION".into()
                 }
-                (Some("target_modified"), Some(path)) => format!("TARGET_MODIFIED|{path}"),
+                (Some("target_modified" | "modified_target"), Some(path)) => format!("TARGET_MODIFIED|{path}"),
                 (_, Some(path)) => format!("TARGET_EXISTS|{path}"),
                 _ => format_anyhow_error(anyhow::anyhow!(error.message)),
             }
@@ -1996,6 +2001,9 @@ pub struct ManagedSkillDto {
     pub description: Option<String>,
     pub source_type: String,
     pub source_ref: Option<String>,
+    pub source_revision: Option<String>,
+    pub source_subpath: Option<String>,
+    pub content_hash: Option<String>,
     pub central_path: String,
     pub created_at: i64,
     pub updated_at: i64,
@@ -2042,6 +2050,9 @@ impl From<ServiceSkill> for ManagedSkillDto {
             description: skill.description,
             source_type: skill.source.kind,
             source_ref: skill.source.reference,
+            source_revision: skill.source.revision,
+            source_subpath: skill.source.subpath,
+            content_hash: skill.content_hash,
             central_path: skill.central_path,
             created_at: skill.created_at,
             updated_at: skill.updated_at,

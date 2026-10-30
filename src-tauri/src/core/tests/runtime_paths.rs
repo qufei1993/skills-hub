@@ -48,6 +48,78 @@ fn production_legacy_fixture(data: &Path, home: &Path) -> PathBuf {
     path
 }
 
+#[cfg(debug_assertions)]
+#[test]
+fn desktop_test_root_rejects_invalid_paths_without_creating_state() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("file");
+    std::fs::write(&file, b"not a directory").unwrap();
+    let missing = root.path().join("missing");
+    let before = file_snapshot(root.path());
+    for invalid in [
+        Path::new(""),
+        Path::new("."),
+        file.as_path(),
+        missing.as_path(),
+    ] {
+        let error = RuntimePaths::from_desktop_test_root(invalid).unwrap_err();
+        assert!(error.to_string().contains("SKILLSHUB_DESKTOP_TEST_ROOT"));
+    }
+    assert_eq!(file_snapshot(root.path()), before);
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn desktop_test_root_keeps_application_writes_separate_from_production() {
+    let root = tempfile::tempdir().unwrap();
+    let production = root.path().join("production");
+    let data = production.join("data");
+    let home = production.join("home");
+    production_legacy_fixture(&data, &home);
+    let production_paths = RuntimePaths::from_roots(RuntimeProfile::Production, &home, &data);
+    open_store(&production_paths)
+        .unwrap()
+        .set_setting("desktop-isolation", "production")
+        .unwrap();
+    let before = file_snapshot(&production);
+    let desktop_root = root.path().join("desktop");
+    std::fs::create_dir(&desktop_root).unwrap();
+
+    let paths = RuntimePaths::from_desktop_test_root(&desktop_root).unwrap();
+    assert_eq!(paths.profile, RuntimeProfile::Test);
+    assert_eq!(
+        paths.database_path,
+        desktop_root.join("data/com.qufei1993.skillshub.test/skills_hub.db")
+    );
+    assert_eq!(
+        paths.default_central_repo,
+        desktop_root.join("home/.skillshub-test")
+    );
+    for path in [
+        &paths.app_data_dir,
+        &paths.database_path,
+        &paths.default_central_repo,
+        &paths.git_cache_dir,
+        &paths.recycle_bin_dir,
+        &paths.cli_bridge_dir,
+    ] {
+        assert!(path.starts_with(&desktop_root));
+    }
+    let store = open_store(&paths).unwrap();
+    assert!(store.list_skills().unwrap().is_empty());
+    assert_eq!(store.get_setting("desktop-isolation").unwrap(), None);
+    store.set_setting("desktop-isolation", "test").unwrap();
+    assert_eq!(
+        open_store(&paths)
+            .unwrap()
+            .get_setting("desktop-isolation")
+            .unwrap()
+            .as_deref(),
+        Some("test")
+    );
+    assert_eq!(file_snapshot(&production), before);
+}
+
 #[test]
 fn future_schema_is_rejected_before_legacy_migration_without_touching_any_files() {
     for wal in [false, true] {

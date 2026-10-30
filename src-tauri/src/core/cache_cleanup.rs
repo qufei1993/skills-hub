@@ -88,7 +88,12 @@ fn cleanup_git_cache_dirs_in(cache_root: &Path, max_age: Duration) -> Result<usi
             continue;
         }
 
-        let meta_path = path.join(CACHE_META_FILE);
+        let current_meta = path.join(".git").join(CACHE_META_FILE);
+        let meta_path = if current_meta.exists() {
+            current_meta
+        } else {
+            path.join(CACHE_META_FILE)
+        };
         let mut should_remove = false;
 
         if let Ok(raw) = std::fs::read_to_string(&meta_path) {

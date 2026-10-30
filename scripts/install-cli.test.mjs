@@ -53,6 +53,7 @@ it('installs and upgrades atomically with a valid checksum and idempotent shell 
   assert.equal(existsSync(path.join(home, '.skills-hub')), false)
 }))
 
+// Each complete installer run gets its own test budget; this also supports node:test.
 for (const [os, arch, target] of [['Darwin','arm64','darwin-arm64'], ['Darwin','x86_64','darwin-x64'], ['Linux','aarch64','linux-arm64'], ['Linux','x86_64','linux-x64']]) {
   it(`maps ${os}/${arch} to the ${target} release asset`, () => fixture(({ root, install }) => {
     const result = install({ TEST_OS: os, TEST_ARCH: arch })

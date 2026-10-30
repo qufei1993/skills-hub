@@ -105,6 +105,7 @@ it('renders collections in batches, resets on search and preserves the batch on 
   render(<Page />)
   const cards = () => screen.getAllByRole('button', { name: /^查看 / })
   await waitFor(() => expect(cards()).toHaveLength(12))
+  // The cards can commit before the passive effect registers the pagination observer.
   await waitFor(() => expect(observe).toHaveBeenCalledWith(document.querySelector('.discovery-pagination')))
   act(() => { intersect(true); intersect(true) })
   expect(cards()).toHaveLength(24)

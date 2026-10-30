@@ -1,7 +1,6 @@
-import { memo, type ReactNode } from 'react'
-import { MessageCircle, SlidersHorizontal } from 'lucide-react'
+import { memo } from 'react'
 import type { TFunction } from 'i18next'
-import type { ManagedSkill, OnboardingPlan, ToolOption } from './types'
+import type { ManagedSkill, ToolOption } from './types'
 import SkillCard from './SkillCard'
 
 type GithubInfo = {
@@ -10,8 +9,9 @@ type GithubInfo = {
 }
 
 type SkillsListProps = {
-  notice?: ReactNode
-  plan: OnboardingPlan | null
+  onRepairSource?: (skill: ManagedSkill) => void
+  projectContext?: boolean
+  onRemoveProject?: (skill: ManagedSkill) => void
   hasManagedSkills: boolean
   hasFilters: boolean
   onClearFilters: () => void
@@ -24,8 +24,6 @@ type SkillsListProps = {
   getGithubInfo: (url: string | null | undefined) => GithubInfo | null
   getSkillSourceLabel: (skill: ManagedSkill) => string
   formatRelative: (ms: number | null | undefined) => string
-  onReviewImport: () => void
-  onOpenScanSettings: () => void
   onUpdateSkill: (skill: ManagedSkill) => void
   onDeleteSkill: (skillId: string) => void
   onToggleSkillEnabled: (skill: ManagedSkill) => void
@@ -40,11 +38,12 @@ type SkillsListProps = {
 }
 
 const SkillsList = ({
-  notice,
+  onRepairSource,
+  projectContext = false,
+  onRemoveProject,
   hasManagedSkills,
   hasFilters,
   onClearFilters,
-  plan,
   visibleSkills,
   installedTools,
   loading,
@@ -54,8 +53,6 @@ const SkillsList = ({
   getGithubInfo,
   getSkillSourceLabel,
   formatRelative,
-  onReviewImport,
-  onOpenScanSettings,
   onUpdateSkill,
   onDeleteSkill,
   onToggleSkillEnabled,
@@ -84,42 +81,6 @@ const SkillsList = ({
         if (list.scrollTop !== previousScrollTop) event.preventDefault()
       }}
     >
-      {notice}
-      {plan && plan.total_skills_found > 0 ? (
-        <div className="discovered-banner">
-          <div className="banner-left">
-            <div className="banner-icon">
-              <MessageCircle size={18} />
-            </div>
-            <div className="banner-content">
-              <div className="banner-title">{t('discoveredTitle')}</div>
-              <div className="banner-subtitle">
-                {t('discoveredCount', { count: plan.total_skills_found })}
-              </div>
-            </div>
-          </div>
-          <div className="discovered-banner-actions">
-            <button
-              className="btn btn-secondary"
-              type="button"
-              onClick={onOpenScanSettings}
-              disabled={loading}
-            >
-              <SlidersHorizontal size={15} />
-              {t('discoveryScan.action')}
-            </button>
-            <button
-              className="btn btn-warning"
-              type="button"
-              onClick={onReviewImport}
-              disabled={loading}
-            >
-              {t('reviewImport')}
-            </button>
-          </div>
-        </div>
-      ) : null}
-
       {visibleSkills.length === 0 ? (
         <div className="empty skills-empty-state">
           <span>{t(hasManagedSkills ? 'filters.noResults' : 'skillsEmpty')}</span>
@@ -133,6 +94,9 @@ const SkillsList = ({
         <div className={`skills-table ${viewMode}-view`}>
           {visibleSkills.map((skill) => (
             <SkillCard
+              onRepairSource={onRepairSource}
+              projectContext={projectContext}
+              onRemoveProject={onRemoveProject}
               key={skill.id}
               skill={skill}
               installedTools={installedTools}

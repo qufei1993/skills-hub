@@ -83,6 +83,9 @@ export type ManagedSkill = {
   description?: string | null
   source_type: string
   source_ref?: string | null
+  source_revision?: string | null
+  source_subpath?: string | null
+  content_hash?: string | null
   central_path: string
   created_at: number
   updated_at: number
@@ -464,3 +467,16 @@ export type CollectionManifest = {
   skills: { name: string; path: string; source: number }[]
 }
 export type CollectionResult = { state: 'installed' | 'existing' | 'failed'; message?: string }
+
+export type PresetMember = { skillId: string; tools: string[] }
+export type SkillPreset = { id: string; name: string; description: string; members: PresetMember[]; revision: number }
+export type WorkspaceScope = { kind: 'global' } | { kind: 'project'; path: string }
+export type ApplicationItem = {
+  skillId: string; name: string; tools: string[]; scope: WorkspaceScope
+  targets: { agents: string[]; affected_agents: string[]; path: string; mode: SyncMode; exists: boolean }[]
+  action: string; status: string; reason: string | null
+  conflict?: { agent: string; path: string; reason: string } | null
+}
+export type ApplicationRecord = { id: string; preset: SkillPreset | null; createdAt: number; confirmed: boolean; remove: boolean; items: ApplicationItem[]; undoTargetCount: number }
+export type WorkspaceUndoItem = { targetId: string; skillId: string; path: string; tool: string; scope: WorkspaceScope; canRemove: boolean; reason: string }
+export type WorkspaceIntent = { mode: 'edit' | 'select'; members: PresetMember[]; scope?: WorkspaceScope; remove?: boolean }

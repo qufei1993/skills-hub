@@ -2684,8 +2684,11 @@ mod tests {
         store
             .delete_setting("device_sync.source_baseline.one")
             .unwrap();
-        let app = tauri::test::mock_app();
-        let paths = crate::runtime_paths_for_tauri(app.handle()).unwrap();
+        let paths = crate::core::runtime_paths::RuntimePaths::from_roots(
+            crate::core::runtime_paths::RuntimeProfile::Test,
+            root.path().join("home"),
+            root.path().join("runtime"),
+        );
         let result = crate::core::installer::update_managed_skill_from_source_with_lock_held(
             &paths, &store, "one", true,
         )
@@ -2871,8 +2874,11 @@ mod tests {
         sb.sync().unwrap();
         assert_eq!(b.get_skill_by_id("one").unwrap().unwrap().status, "ok");
         assert!(b.source_checks().unwrap().get("one").unwrap().0.is_none());
-        let app = tauri::test::mock_app();
-        let paths = crate::runtime_paths_for_tauri(app.handle()).unwrap();
+        let paths = crate::core::runtime_paths::RuntimePaths::from_roots(
+            crate::core::runtime_paths::RuntimeProfile::Test,
+            root.path().join("home"),
+            root.path().join("runtime"),
+        );
         let err = crate::core::installer::update_managed_skill_from_source(&paths, &b, "one")
             .err()
             .unwrap();

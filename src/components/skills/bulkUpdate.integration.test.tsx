@@ -55,8 +55,9 @@ beforeEach(async () => {
   invoke.mockReset()
   invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
     if (command === 'get_managed_skills') return structuredClone(skills)
-    if (command === 'update_managed_skill') {
-      const skill = skills.find(skill => skill.id === args?.skillId)
+    if (command === 'workspace_content_preview') return { id: `preview-${args?.skillId}`, skillId: args?.skillId, name: String(args?.skillId), changes: [], targets: [], restore: false }
+    if (command === 'workspace_content_execute') {
+      const skill = skills.find(skill => `preview-${skill.id}` === args?.id)
       if (!skill) throw new Error('Unknown Skill')
       return update(skill)
     }
@@ -91,6 +92,10 @@ afterEach(() => {
 async function clickButton(name: string, bulk = false) {
   const query = bulk ? within(document.querySelector('.bulk-action-bar') as HTMLElement) : screen
   await act(async () => { fireEvent.click(query.getByRole('button', { name })); await vi.advanceTimersByTimeAsync(0) })
+  if (name === i18n.t('bulk.update')) {
+    expect(invoke.mock.calls.filter(([command]) => command === 'workspace_content_preview').length).toBeGreaterThan(0)
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: i18n.t('workspace110.confirmUpdate') })); await vi.advanceTimersByTimeAsync(0) })
+  }
 }
 
 async function openBulk(selectAll = true) {
@@ -100,14 +105,41 @@ async function openBulk(selectAll = true) {
   if (selectAll) await clickButton(i18n.t('bulk.selectVisible'), true)
 }
 
-const updatedIds = () => invoke.mock.calls.filter(([command]) => command === 'update_managed_skill').map(([, args]) => args.skillId)
+const updatedIds = () => invoke.mock.calls.filter(([command]) => command === 'workspace_content_execute').map(([, args]) => String(args.id).replace('preview-', ''))
 const report = () => within(screen.getByRole('region', { name: i18n.t('bulk.updateResultTitle') }))
 
-it.each(['zh', 'en', 'ko'])('updates only selected Skills and refreshes results in %s without changing deployment choices', async language => {
+it('requires a fresh target after clearing a concrete project filter', async () => {
+  render(<App />)
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  const scopes = document.querySelector('.skills-scope-tabs') as HTMLElement
+  await act(async () => { fireEvent.click(within(scopes).getByRole('button', { name: new RegExp(i18n.t('scope.project')) })) })
+  await clickButton(i18n.t('workspace110.project'))
+  await act(async () => { fireEvent.click(screen.getByRole('option', { name: /\/test\/project/ })) })
+  expect(screen.queryByRole('button', { name: '配置项目 Skills' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '保存当前配置' })).toBeNull()
+  await clickButton(i18n.t('filters.clear'))
+  expect(screen.queryByRole('button', { name: '配置项目 Skills' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '保存当前配置' })).toBeNull()
+  expect(screen.queryByRole('button', { name: i18n.t('workspace110.addExisting') })).toBeNull()
+  await clickButton(i18n.t('bulk.manage'))
+  await clickButton(i18n.t('bulk.selectVisible'), true)
+  expect(screen.queryByRole('button', { name: '保存为预设' })).toBeNull()
+  await clickButton(i18n.t('bulk.sync'), true)
+  expect((screen.getByRole('radio', { name: i18n.t('workspace110.global') }) as HTMLInputElement).checked).toBe(false)
+  expect((screen.getByRole('radio', { name: i18n.t('workspace110.project') }) as HTMLInputElement).checked).toBe(false)
+  expect((screen.getByRole('button', { name: i18n.t('workspace110.applyNow') }) as HTMLButtonElement).disabled).toBe(true)
+  expect(invoke.mock.calls.some(([command]) => command === 'workspace_execute')).toBe(false)
+})
+
+it.each(['zh', 'en', 'ko'] as const)('updates only selected Skills and refreshes results in %s without changing deployment choices', async language => {
   await i18n.changeLanguage(language)
   const saved = structuredClone(skills.map(skill => ({ targets: skill.targets, tags: skill.tags, enabled: skill.enabled })))
   await openBulk(false)
   const bar = within(document.querySelector('.bulk-action-bar') as HTMLElement)
+  const removedPresetLabel = { zh: '保存为预设', en: 'Save as preset', ko: '프리셋으로 저장' }[language]
+  expect(bar.queryByRole('button', { name: removedPresetLabel })).toBeNull()
+  expect(bar.getByRole('button', { name: i18n.t('bulk.sync') })).toBeTruthy()
+  expect(bar.getByRole('button', { name: i18n.t('bulk.delete') })).toBeTruthy()
   expect((bar.getByRole('button', { name: i18n.t('bulk.update') }) as HTMLButtonElement).disabled).toBe(true)
   const boxes = screen.getAllByRole('checkbox', { name: i18n.t('bulk.toggleSkill') })
   await act(async () => { fireEvent.click(boxes[0]); fireEvent.click(boxes[1]) })

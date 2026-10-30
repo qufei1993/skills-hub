@@ -42,16 +42,16 @@ const AiManagementNotice = ({ isTauri, invokeTauri, skills, onStatusChanged, onO
   }, [isTauri, dismissed, invokeTauri, skills, onStatusChanged])
 
   if (!isTauri || dismissed || !status || status.installed || status.officialState !== 'missing') return null
-  return <aside className="ai-management-notice" aria-label={t('aiManagement.notice.title')}>
-    <span className="ai-management-notice-icon"><Bot size={22} aria-hidden="true" /></span>
-    <div className="ai-management-notice-copy">
+  return <aside className="ai-management-notice library-notice" aria-label={t('aiManagement.notice.title')}>
+    <span className="ai-management-notice-icon library-notice-icon"><Bot size={22} aria-hidden="true" /></span>
+    <div className="ai-management-notice-copy library-notice-copy">
       <strong>{t('aiManagement.notice.title')}</strong>
       <p>{t('aiManagement.notice.description')}</p>
     </div>
-    <button className="btn btn-primary" type="button" onClick={onOpen}>
+    <button className="library-notice-action" type="button" onClick={onOpen}>
       {t('aiManagement.notice.action')}<ArrowRight size={16} aria-hidden="true" />
     </button>
-    <button className="ai-management-notice-close" type="button" aria-label={t('aiManagement.notice.dismiss')} onClick={() => {
+    <button className="ai-management-notice-close library-notice-close" type="button" aria-label={t('aiManagement.notice.dismiss')} onClick={() => {
       setDismissed(true)
       try { localStorage.setItem(dismissalKey, 'true') } catch { /* Keep dismissal for this mounted page when storage is unavailable. */ }
     }}><X size={18} aria-hidden="true" /></button>

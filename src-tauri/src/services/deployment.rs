@@ -90,6 +90,25 @@ pub struct DeploymentOutcome {
     pub undeploy: bool,
 }
 
+impl DeploymentPlan {
+    pub(crate) fn workspace_fingerprint(&self) -> String {
+        use sha2::{Digest, Sha256};
+        // Unrelated deployments must not invalidate another item in the batch.
+        let mut snapshot = self.snapshot.clone();
+        if let Some(skill) = snapshot.get_mut("skill").and_then(Value::as_object_mut) {
+            skill.remove("targets");
+        }
+        if let Some(records) = snapshot.get_mut("records").and_then(Value::as_array_mut) {
+            records.retain(|row| {
+                self.targets
+                    .iter()
+                    .any(|target| row["target_path"].as_str() == target.path.to_str())
+            });
+        }
+        format!("{:x}", Sha256::digest(snapshot.to_string().as_bytes()))
+    }
+}
+
 impl SkillsHubService {
     pub(super) fn execute_bundled_deployment(
         &self,
@@ -459,7 +478,11 @@ impl SkillsHubService {
                 }
             }
             if undeploy {
-                rows.extend(matching);
+                rows.extend(
+                    matching
+                        .into_iter()
+                        .filter(|row| request.agents.contains(&row.tool)),
+                );
             }
             let mut mode = SyncMode::Auto;
             for agent in &group {
@@ -492,7 +515,10 @@ impl SkillsHubService {
             affected_agents.sort();
             affected_agents.dedup();
             targets.push(DeploymentTarget {
-                agents: keys,
+                agents: keys
+                    .into_iter()
+                    .filter(|key| request.agents.contains(key))
+                    .collect(),
                 affected_agents,
                 path,
                 mode,
@@ -532,6 +558,42 @@ impl SkillsHubService {
         &self,
         mut plan: DeploymentPlan,
     ) -> Result<DeploymentOutcome, ServiceError> {
+        // Logical references may share one physical directory. Removing one reference
+        // must not remove the directory or the remaining records.
+        if plan.undeploy {
+            let all_rows = self
+                .store()
+                .list_skill_targets(&plan.skill_id)
+                .map_err(|_| ServiceError::internal("failed to inspect shared targets"))?;
+            let retained: Vec<_> = plan
+                .targets
+                .iter()
+                .map(|target| {
+                    all_rows.iter().any(|row| {
+                        row.target_path == target.path.to_string_lossy()
+                            && !plan.rows.iter().any(|removed| removed.id == row.id)
+                    })
+                })
+                .collect();
+            let mut index = 0;
+            plan.targets.retain(|_| {
+                let keep = !retained[index];
+                index += 1;
+                keep
+            });
+            let mut index = 0;
+            plan.fingerprints.retain(|_| {
+                let keep = !retained[index];
+                index += 1;
+                keep
+            });
+            let mut index = 0;
+            plan.parent_snapshots.retain(|_| {
+                let keep = !retained[index];
+                index += 1;
+                keep
+            });
+        }
         let mut prepared = Vec::new();
         let mut stage = "prepare_target";
         let result = (|| -> anyhow::Result<()> {

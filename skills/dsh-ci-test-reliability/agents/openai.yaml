@@ -1,0 +1,6 @@
+interface:
+  display_name: "DSH 测试设计与可靠性"
+  short_description: "按失败风险选择测试层级与替身，诊断并修复隔离、并发和偶发失败"
+  default_prompt: "使用 $dsh-ci-test-reliability，为当前改动设计有效的测试覆盖。"
+policy:
+  allow_implicit_invocation: true

@@ -215,6 +215,7 @@ it('re-enables update after polling recovers an interrupted run with completed p
   render(<App />)
   await act(async () => { await vi.advanceTimersByTimeAsync(0) })
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: /manageTabs.updates/ })) })
+  await act(async () => { fireEvent.click(screen.getByText('autoUpdateScheduleTitle')) })
   expect((screen.getByRole('button', { name: 'autoUpdateRunningButton' }) as HTMLButtonElement).disabled).toBe(true)
   runtime = {
     ...runtime,
@@ -223,7 +224,7 @@ it('re-enables update after polling recovers an interrupted run with completed p
     progress: { ...runtime.progress!, running: null, pending: [{ skill_id: 'interrupted', name: 'Interrupted' }] },
   }
   await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
-  expect((screen.getByRole('button', { name: 'autoUpdateRunNow' }) as HTMLButtonElement).disabled).toBe(false)
+  expect((screen.getByRole('button', { name: 'updatesWorkflow.runPlan' }) as HTMLButtonElement).disabled).toBe(false)
   await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
-  expect((screen.getByRole('button', { name: 'autoUpdateRunNow' }) as HTMLButtonElement).disabled).toBe(false)
+  expect((screen.getByRole('button', { name: 'updatesWorkflow.runPlan' }) as HTMLButtonElement).disabled).toBe(false)
 })

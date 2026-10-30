@@ -22,6 +22,8 @@ type ExplorePageProps = {
   loading: boolean
   onExploreFilterChange: (value: string) => void
   onInstallSkill: (sourceUrl: string, skillName?: string) => void
+  discoveredCount?: number
+  onReviewDiscovered?: () => void
   onOpenManualAdd: (tab?: 'git' | 'local') => void
   t: TFunction
 }
@@ -31,7 +33,7 @@ const collectionBatchSize = 12
 const suggestions = ['frontend', 'testing', 'video', 'marketing'] as const
 const sourceKey = (source: string) => source.replace(/^https?:\/\/github.com\//, '').split('/tree/')[0].replace(/\.git$/, '').toLowerCase()
 
-const ExplorePage = ({ invoke, onInstallCollection, exploreFilter, searchResults, searchLoading, managedSkills, loading, onExploreFilterChange, onInstallSkill, onOpenManualAdd, t }: ExplorePageProps) => {
+const ExplorePage = ({ invoke, onInstallCollection, exploreFilter, searchResults, searchLoading, managedSkills, loading, onExploreFilterChange, onInstallSkill, onOpenManualAdd, discoveredCount, onReviewDiscovered, t }: ExplorePageProps) => {
   const { i18n } = useTranslation()
   const language = (i18n.resolvedLanguage ?? i18n.language ?? 'en').startsWith('zh') ? 'zh' : 'en'
   const [items, setItems] = useState<CollectionIndexItem[]>([])
@@ -126,7 +128,7 @@ const ExplorePage = ({ invoke, onInstallCollection, exploreFilter, searchResults
   }
 
   return <div className="discovery-page">
-    <DiscoveryHeader onImport={onOpenManualAdd} t={t} />
+    <DiscoveryHeader onImport={onOpenManualAdd} discoveredCount={discoveredCount} onReviewDiscovered={onReviewDiscovered} disabled={loading} t={t} />
     {requested ? <div className="discovery-body">
       <button type="button" ref={backButton} className="discovery-return" onClick={() => { setPending(false); setError(false); setRequested(null); setDetail(null); setInstallError(false) }}><ArrowLeft size={15} />{t('discovery.back')}</button>
       {pending ? <div className="discovery-feedback" role="status">{t('exploreLoading')}</div> : error ? <div className="discovery-feedback" role="alert"><p>{t('catalog.loadError')}</p><button className="btn btn-secondary" onClick={() => setAttempt(value => value + 1)}>{t('catalog.retry')}</button></div> : current && plan && <article className="discovery-detail" data-category={requested.category}>
