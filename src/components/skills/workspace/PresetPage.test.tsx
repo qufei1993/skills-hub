@@ -1351,8 +1351,11 @@ it.each(['Undo additions', 'Preview unfinished items again'])('restores the %s r
   const blurred = simulateInertBlur()
   const record = undoRecord('focus-result', 'Result focus restoration')
   if (action === 'Preview unfinished items again') record.items = record.items.map(item => ({ ...item, status: 'failed' }))
+  let completePreview!: () => void
+  const previewReady = new Promise<void>(resolve => { completePreview = resolve })
   invoke.mockImplementation(async command => {
     if (command === 'workspace_history') return [record]
+    if (command === 'workspace_preview_undo' || command === 'workspace_recheck') await previewReady
     if (command === 'workspace_preview_undo') return [undoReceipt('codex', 'newTarget')]
     if (command === 'workspace_recheck') return { ...record, items: record.items.map(item => ({ ...item, status: 'pending' })) }
     return []
@@ -1362,7 +1365,12 @@ it.each(['Undo additions', 'Preview unfinished items again'])('restores the %s r
   fireEvent.click(await screen.findByRole('button', { name: /Result focus restoration/ }))
   const trigger = screen.getByRole('button', { name: action })
   fireEvent.click(trigger)
-  const dialog = await screen.findByRole('dialog')
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(blurred).not.toHaveBeenCalled()
+  // DOM presence alone can precede the passive focus effect. Flush the preview
+  // response and its React effects before checking the completed focus handoff.
+  await act(async () => { completePreview() })
+  const dialog = screen.getByRole('dialog')
   expect(blurred).toHaveBeenCalledOnce()
   expect(document.activeElement).toBe(dialog)
   fireEvent.keyDown(document, { key: 'Escape' })
