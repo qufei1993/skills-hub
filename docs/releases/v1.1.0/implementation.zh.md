@@ -56,7 +56,9 @@
 <a id="verification-record"></a>
 ## 验证记录
 
-2026 年 10 月 27 日的最终功能检查通过 `npm run check`：前端 72 个测试文件、688 项通过、1 项跳过；Rust 单元测试 776 项通过、3 项忽略；兼容性测试 2 项、CLI 集成测试 24 项通过。发布数据、网络边界、lint、TypeScript/Vite 构建、rustfmt 和 Clippy 均通过，`npm run version:check` 与 `git diff --check` 也通过。日志为 `/tmp/preset-retention-check.log`；被忽略的真实网络和性能测试不计为通过。
+2026 年 10 月 30 日，主线整合和预设弹窗焦点测试修复后的 `npm run check` 完整通过，对应代码提交 `50cac4e`：前端 73 个测试文件、698 项通过、1 项跳过；Rust 单元测试 776 项通过、3 项忽略；兼容性测试 2 项、CLI 集成测试 24 项通过。发布数据、网络边界、lint、TypeScript/Vite 构建、rustfmt 和 Clippy 均通过，`npm run version:check` 与 `git diff --check` 也通过。日志为 `/tmp/skills-hub-pr209-check.log`；被忽略的真实网络和性能测试不计为通过。
+
+同一提交的 [GitHub CI](https://github.com/qufei1993/skills-hub/actions/runs/41050367077) 中，Web、Rust、Windows 自动更新、控制台与发布脚本检查通过；[Linux 桌面构建](https://github.com/qufei1993/skills-hub/actions/runs/41050367085)的 x86_64 和 aarch64 任务通过。手动触发的 Native CLI 矩阵按配置跳过，不计为本轮通过。此前 Web 失败来自测试在 React 焦点 effect 完成前断言；修复通过受控异步响应与 `act` 同步，未删除焦点检查，并用禁用弹窗聚焦的临时副本验证两条断言仍能检出缺陷。
 
 当前分支已通过 `npm run tauri:dev` 构建并启动。原生写入测试使用临时数据和工具路径，通过[开发指南](../../development.zh.md#隔离桌面验收测试)中的 debug 隔离入口运行，构建二进制与临时应用包的哈希一致。以下证据分别覆盖对应流程，不把较早的布局检查当作最终版本重复执行的完整矩阵。
 
@@ -70,4 +72,4 @@
 
 这些本地日志和截图是验收辅助证据，不是可随仓库分发的资源。当前 macOS 环境尚未验证 Windows/Linux 原生运行或用户任务耗时目标，也未注入文件系统或目标提交与执行记录持久化之间的精确崩溃窗口。固定设计稿和 next 草稿哈希保持不变。
 
-上述验证针对当前工作分支，不代表发布批准。合入前仍需与已知主线的状态／工具筛选和即时工具提示衔接，确保新项目流程保留这些已发布行为。这项整合不属于本次文档整理，也不意味着升级版本或发布。
+主线的状态／工具筛选和即时工具提示已在 `a9d155c` 合并中整合；项目工具筛选与计数已有跨全局和不同项目的范围回归。上述证据不代表发布批准，也不包含版本升级。早期需求和后续取舍见[需求决策](../../future/profile-requirements.md)与[设计决策](../../future/skills-hub-design-review.md)，对应实现核查见[核查记录](../../future/skills-hub-design-audit.md)；固定交接稿中的开工状态仅描述历史基线。
