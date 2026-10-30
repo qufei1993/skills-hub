@@ -37,3 +37,5 @@
 上述行为已经进入当前分支的 React/Tauri/Rust 实现，不能再描述为“只有 HTML 原型”。预设仍仅保存在本机，未新增预设同步或预设 CLI 命令。固定原型中的任务耗时、试用者理解率和布局矩阵属于当时的目标或原型证据，不代表当前产品已重新完成同样的验收。
 
 代码、回归测试及实际验证范围见[核查记录](skills-hub-design-audit.md)和[实施验证记录](../releases/v1.1.0/implementation.zh.md#verification-record)。不在此重复维护测试总数或作无剩余问题的笼统承诺。
+
+MCP 原型已单独归为[未来功能讨论](mcp-management.md)，当前不实现、未排期，不扩展本次技能预设范围。
