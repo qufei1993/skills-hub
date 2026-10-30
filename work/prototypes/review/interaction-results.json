@@ -1,0 +1,89 @@
+{
+  "target": "work/prototypes/skills-hub-prototype.html",
+  "at": "2026-10-23T15:54:07.317Z",
+  "passed": 20,
+  "failed": 0,
+  "passes": [
+    {
+      "name": "Profile is a permanent page, with details/editor outside modal",
+      "ms": 17
+    },
+    {
+      "name": "Project save preserves each member tool assignment without cross-product expansion",
+      "ms": 16
+    },
+    {
+      "name": "50 presets / 500 skills / 20 projects are searchable and paginated",
+      "ms": 44
+    },
+    {
+      "name": "Preset detail return restores search, page and scroll; member drill-down returns to preset",
+      "ms": 39
+    },
+    {
+      "name": "Concrete project cards and bulk actions do not masquerade as global destructive controls",
+      "ms": 12
+    },
+    {
+      "name": "Two different Skills keep independent restore records and restore preserves later targets",
+      "ms": 26
+    },
+    {
+      "name": "Restoration refuses subsequent content edits rather than silently overwriting them",
+      "ms": 11
+    },
+    {
+      "name": "Multi-project application isolates result/retry and does not expand saved member tool mappings",
+      "ms": 26
+    },
+    {
+      "name": "All application history beyond 20 records and deleted-preset snapshots remain reachable",
+      "ms": 51
+    },
+    {
+      "name": "Project-specific removal changes only chosen shared project targets",
+      "ms": 13
+    },
+    {
+      "name": "Discarding a dirty project-derived preset returns to the actual originating project view",
+      "ms": 10
+    },
+    {
+      "name": "Tool-mode and global/project changes preserve exact saved mapping unless explicitly overridden",
+      "ms": 24
+    },
+    {
+      "name": "Disabled and deleted preset members remain visible and cannot be silently installed",
+      "ms": 23
+    },
+    {
+      "name": "Stale application preview requires a fresh confirmation before writing",
+      "ms": 21
+    },
+    {
+      "name": "Overlapping presets preserve later-used shared targets when the first application is undone",
+      "ms": 47
+    },
+    {
+      "name": "Old application undo cannot remove a target that was deleted and recreated later",
+      "ms": 31
+    },
+    {
+      "name": "Saving an existing preset retains the original list return context",
+      "ms": 14
+    },
+    {
+      "name": "Cancelling record undo preserves return from record detail to its history list",
+      "ms": 33
+    },
+    {
+      "name": "Confirming record undo preserves return from record detail to its history list",
+      "ms": 30
+    },
+    {
+      "name": "A copied preset returns through its source detail to the originating filtered list",
+      "ms": 15
+    }
+  ],
+  "failures": []
+}

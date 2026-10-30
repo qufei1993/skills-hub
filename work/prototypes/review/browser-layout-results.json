@@ -1,0 +1,1601 @@
+{
+  "date": "2026-10-23",
+  "method": "Connected Chrome layout inspection; dimensions and form labels, supplemented by manual screenshot and keyboard review.",
+  "viewports": [
+    {
+      "width": 1440,
+      "pages": [
+        {
+          "name": "library",
+          "url": "#/library?scope=project&project=skills-hub",
+          "viewport": [
+            1440,
+            900
+          ],
+          "pageWidth": 1440,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 1212,
+            "height": 818,
+            "right": 1440,
+            "bottom": 900
+          },
+          "h1": [
+            "我的 Skills"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            818
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "添加已有 Skills"
+          ]
+        },
+        {
+          "name": "presets",
+          "url": "#/presets?tab=presets",
+          "viewport": [
+            1440,
+            900
+          ],
+          "pageWidth": 1440,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 1212,
+            "height": 818,
+            "right": 1440,
+            "bottom": 900
+          },
+          "h1": [
+            "技能预设"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            818
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            " 新建预设",
+            "应用",
+            "应用"
+          ]
+        },
+        {
+          "name": "records",
+          "url": "#/presets?tab=records",
+          "viewport": [
+            1440,
+            900
+          ],
+          "pageWidth": 1440,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 1212,
+            "height": 818,
+            "right": 1440,
+            "bottom": 900
+          },
+          "h1": [
+            "技能预设"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            818
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            " 新建预设"
+          ]
+        },
+        {
+          "name": "presetDetail",
+          "url": "#/presetDetail?id=frontend",
+          "viewport": [
+            1440,
+            900
+          ],
+          "pageWidth": 1440,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 1212,
+            "height": 818,
+            "right": 1440,
+            "bottom": 900
+          },
+          "h1": [
+            "前端开发"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            818
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "应用预设"
+          ]
+        },
+        {
+          "name": "presetEdit",
+          "url": "#/presetEdit?id=frontend",
+          "viewport": [
+            1440,
+            900
+          ],
+          "pageWidth": 1440,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 1212,
+            "height": 818,
+            "right": 1440,
+            "bottom": 900
+          },
+          "h1": [
+            "编辑预设"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            936
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "保存预设",
+            "保存预设"
+          ]
+        },
+        {
+          "name": "apply",
+          "url": "#/apply",
+          "viewport": [
+            1440,
+            900
+          ],
+          "pageWidth": 1440,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 1212,
+            "height": 818,
+            "right": 1440,
+            "bottom": 900
+          },
+          "h1": [
+            "应用 前端开发"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            887
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "预览应用",
+            "预览应用"
+          ]
+        },
+        {
+          "name": "updates",
+          "url": "#/updates",
+          "viewport": [
+            1440,
+            900
+          ],
+          "pageWidth": 1440,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 1212,
+            "height": 818,
+            "right": 1440,
+            "bottom": 900
+          },
+          "h1": [
+            "更新"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            818
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            " 立即运行"
+          ]
+        },
+        {
+          "name": "detail",
+          "url": "#/detail?id=react",
+          "viewport": [
+            1440,
+            900
+          ],
+          "pageWidth": 1440,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 1212,
+            "height": 818,
+            "right": 1440,
+            "bottom": 900
+          },
+          "h1": [
+            "react-best-practices"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            858
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": []
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "pages": [
+        {
+          "name": "library",
+          "url": "#/library?scope=project&project=skills-hub",
+          "viewport": [
+            1280,
+            900
+          ],
+          "pageWidth": 1280,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 1052,
+            "height": 818,
+            "right": 1280,
+            "bottom": 900
+          },
+          "h1": [
+            "我的 Skills"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            818
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "添加已有 Skills"
+          ]
+        },
+        {
+          "name": "presets",
+          "url": "#/presets?tab=presets",
+          "viewport": [
+            1280,
+            900
+          ],
+          "pageWidth": 1280,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 1052,
+            "height": 818,
+            "right": 1280,
+            "bottom": 900
+          },
+          "h1": [
+            "技能预设"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            818
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            " 新建预设",
+            "应用",
+            "应用"
+          ]
+        },
+        {
+          "name": "records",
+          "url": "#/presets?tab=records",
+          "viewport": [
+            1280,
+            900
+          ],
+          "pageWidth": 1280,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 1052,
+            "height": 818,
+            "right": 1280,
+            "bottom": 900
+          },
+          "h1": [
+            "技能预设"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            818
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            " 新建预设"
+          ]
+        },
+        {
+          "name": "presetDetail",
+          "url": "#/presetDetail?id=frontend",
+          "viewport": [
+            1280,
+            900
+          ],
+          "pageWidth": 1280,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 1052,
+            "height": 818,
+            "right": 1280,
+            "bottom": 900
+          },
+          "h1": [
+            "前端开发"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            896
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "应用预设"
+          ]
+        },
+        {
+          "name": "presetEdit",
+          "url": "#/presetEdit?id=frontend",
+          "viewport": [
+            1280,
+            900
+          ],
+          "pageWidth": 1280,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 1052,
+            "height": 818,
+            "right": 1280,
+            "bottom": 900
+          },
+          "h1": [
+            "编辑预设"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            936
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "保存预设",
+            "保存预设"
+          ]
+        },
+        {
+          "name": "apply",
+          "url": "#/apply",
+          "viewport": [
+            1280,
+            900
+          ],
+          "pageWidth": 1280,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 1052,
+            "height": 818,
+            "right": 1280,
+            "bottom": 900
+          },
+          "h1": [
+            "应用 前端开发"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            887
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "预览应用",
+            "预览应用"
+          ]
+        },
+        {
+          "name": "updates",
+          "url": "#/updates",
+          "viewport": [
+            1280,
+            900
+          ],
+          "pageWidth": 1280,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 1052,
+            "height": 818,
+            "right": 1280,
+            "bottom": 900
+          },
+          "h1": [
+            "更新"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            818
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            " 立即运行"
+          ]
+        },
+        {
+          "name": "detail",
+          "url": "#/detail?id=react",
+          "viewport": [
+            1280,
+            900
+          ],
+          "pageWidth": 1280,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 1052,
+            "height": 818,
+            "right": 1280,
+            "bottom": 900
+          },
+          "h1": [
+            "react-best-practices"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            858
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": []
+        }
+      ]
+    },
+    {
+      "width": 1024,
+      "pages": [
+        {
+          "name": "library",
+          "url": "#/library?scope=project&project=skills-hub",
+          "viewport": [
+            1024,
+            900
+          ],
+          "pageWidth": 1024,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 796,
+            "height": 818,
+            "right": 1024,
+            "bottom": 900
+          },
+          "h1": [
+            "我的 Skills"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            818
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "添加已有 Skills"
+          ]
+        },
+        {
+          "name": "presets",
+          "url": "#/presets?tab=presets",
+          "viewport": [
+            1024,
+            900
+          ],
+          "pageWidth": 1024,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 796,
+            "height": 818,
+            "right": 1024,
+            "bottom": 900
+          },
+          "h1": [
+            "技能预设"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            818
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            " 新建预设",
+            "应用",
+            "应用"
+          ]
+        },
+        {
+          "name": "records",
+          "url": "#/presets?tab=records",
+          "viewport": [
+            1024,
+            900
+          ],
+          "pageWidth": 1024,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 796,
+            "height": 818,
+            "right": 1024,
+            "bottom": 900
+          },
+          "h1": [
+            "技能预设"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            818
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            " 新建预设"
+          ]
+        },
+        {
+          "name": "presetDetail",
+          "url": "#/presetDetail?id=frontend",
+          "viewport": [
+            1024,
+            900
+          ],
+          "pageWidth": 1024,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 796,
+            "height": 818,
+            "right": 1024,
+            "bottom": 900
+          },
+          "h1": [
+            "前端开发"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            896
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "应用预设"
+          ]
+        },
+        {
+          "name": "presetEdit",
+          "url": "#/presetEdit?id=frontend",
+          "viewport": [
+            1024,
+            900
+          ],
+          "pageWidth": 1024,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 796,
+            "height": 818,
+            "right": 1024,
+            "bottom": 900
+          },
+          "h1": [
+            "编辑预设"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            936
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "保存预设",
+            "保存预设"
+          ]
+        },
+        {
+          "name": "apply",
+          "url": "#/apply",
+          "viewport": [
+            1024,
+            900
+          ],
+          "pageWidth": 1024,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 796,
+            "height": 818,
+            "right": 1024,
+            "bottom": 900
+          },
+          "h1": [
+            "应用 前端开发"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            887
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "预览应用",
+            "预览应用"
+          ]
+        },
+        {
+          "name": "updates",
+          "url": "#/updates",
+          "viewport": [
+            1024,
+            900
+          ],
+          "pageWidth": 1024,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 796,
+            "height": 818,
+            "right": 1024,
+            "bottom": 900
+          },
+          "h1": [
+            "更新"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            900
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            " 立即运行"
+          ]
+        },
+        {
+          "name": "detail",
+          "url": "#/detail?id=react",
+          "viewport": [
+            1024,
+            900
+          ],
+          "pageWidth": 1024,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 228,
+            "height": 818,
+            "right": 228,
+            "bottom": 900
+          },
+          "main": {
+            "x": 228,
+            "y": 82,
+            "width": 796,
+            "height": 818,
+            "right": 1024,
+            "bottom": 900
+          },
+          "h1": [
+            "react-best-practices"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            858
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": []
+        }
+      ]
+    },
+    {
+      "width": 768,
+      "pages": [
+        {
+          "name": "library",
+          "url": "#/library?scope=project&project=skills-hub",
+          "viewport": [
+            768,
+            900
+          ],
+          "pageWidth": 768,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 64,
+            "height": 818,
+            "right": 64,
+            "bottom": 900
+          },
+          "main": {
+            "x": 64,
+            "y": 82,
+            "width": 704,
+            "height": 818,
+            "right": 768,
+            "bottom": 900
+          },
+          "h1": [
+            "我的 Skills"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            818
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "添加已有 Skills"
+          ]
+        },
+        {
+          "name": "presets",
+          "url": "#/presets?tab=presets",
+          "viewport": [
+            768,
+            900
+          ],
+          "pageWidth": 768,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 64,
+            "height": 818,
+            "right": 64,
+            "bottom": 900
+          },
+          "main": {
+            "x": 64,
+            "y": 82,
+            "width": 704,
+            "height": 818,
+            "right": 768,
+            "bottom": 900
+          },
+          "h1": [
+            "技能预设"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            818
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            " 新建预设",
+            "应用",
+            "应用"
+          ]
+        },
+        {
+          "name": "records",
+          "url": "#/presets?tab=records",
+          "viewport": [
+            768,
+            900
+          ],
+          "pageWidth": 768,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 64,
+            "height": 818,
+            "right": 64,
+            "bottom": 900
+          },
+          "main": {
+            "x": 64,
+            "y": 82,
+            "width": 704,
+            "height": 818,
+            "right": 768,
+            "bottom": 900
+          },
+          "h1": [
+            "技能预设"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            818
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            " 新建预设"
+          ]
+        },
+        {
+          "name": "presetDetail",
+          "url": "#/presetDetail?id=frontend",
+          "viewport": [
+            768,
+            900
+          ],
+          "pageWidth": 768,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 64,
+            "height": 818,
+            "right": 64,
+            "bottom": 900
+          },
+          "main": {
+            "x": 64,
+            "y": 82,
+            "width": 704,
+            "height": 818,
+            "right": 768,
+            "bottom": 900
+          },
+          "h1": [
+            "前端开发"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            888
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "应用预设"
+          ]
+        },
+        {
+          "name": "presetEdit",
+          "url": "#/presetEdit?id=frontend",
+          "viewport": [
+            768,
+            900
+          ],
+          "pageWidth": 768,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 64,
+            "height": 818,
+            "right": 64,
+            "bottom": 900
+          },
+          "main": {
+            "x": 64,
+            "y": 82,
+            "width": 704,
+            "height": 818,
+            "right": 768,
+            "bottom": 900
+          },
+          "h1": [
+            "编辑预设"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            965
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "保存预设",
+            "保存预设"
+          ]
+        },
+        {
+          "name": "apply",
+          "url": "#/apply",
+          "viewport": [
+            768,
+            900
+          ],
+          "pageWidth": 768,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 64,
+            "height": 818,
+            "right": 64,
+            "bottom": 900
+          },
+          "main": {
+            "x": 64,
+            "y": 82,
+            "width": 704,
+            "height": 818,
+            "right": 768,
+            "bottom": 900
+          },
+          "h1": [
+            "应用 前端开发"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            896
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "预览应用",
+            "预览应用"
+          ]
+        },
+        {
+          "name": "updates",
+          "url": "#/updates",
+          "viewport": [
+            768,
+            900
+          ],
+          "pageWidth": 768,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 64,
+            "height": 818,
+            "right": 64,
+            "bottom": 900
+          },
+          "main": {
+            "x": 64,
+            "y": 82,
+            "width": 704,
+            "height": 818,
+            "right": 768,
+            "bottom": 900
+          },
+          "h1": [
+            "更新"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            892
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            " 立即运行"
+          ]
+        },
+        {
+          "name": "detail",
+          "url": "#/detail?id=react",
+          "viewport": [
+            768,
+            900
+          ],
+          "pageWidth": 768,
+          "sidebar": {
+            "x": 0,
+            "y": 82,
+            "width": 64,
+            "height": 818,
+            "right": 64,
+            "bottom": 900
+          },
+          "main": {
+            "x": 64,
+            "y": 82,
+            "width": 704,
+            "height": 818,
+            "right": 768,
+            "bottom": 900
+          },
+          "h1": [
+            "react-best-practices"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            850
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": []
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "pages": [
+        {
+          "name": "library",
+          "url": "#/library?scope=project&project=skills-hub",
+          "viewport": [
+            390,
+            900
+          ],
+          "pageWidth": 390,
+          "sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "right": 0,
+            "bottom": 0
+          },
+          "main": {
+            "x": 0,
+            "y": 82,
+            "width": 390,
+            "height": 818,
+            "right": 390,
+            "bottom": 900
+          },
+          "h1": [
+            "我的 Skills"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            1095
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "添加已有 Skills"
+          ]
+        },
+        {
+          "name": "presets",
+          "url": "#/presets?tab=presets",
+          "viewport": [
+            390,
+            900
+          ],
+          "pageWidth": 390,
+          "sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "right": 0,
+            "bottom": 0
+          },
+          "main": {
+            "x": 0,
+            "y": 82,
+            "width": 390,
+            "height": 818,
+            "right": 390,
+            "bottom": 900
+          },
+          "h1": [
+            "技能预设"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            818
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            " 新建预设",
+            "应用",
+            "应用"
+          ]
+        },
+        {
+          "name": "records",
+          "url": "#/presets?tab=records",
+          "viewport": [
+            390,
+            900
+          ],
+          "pageWidth": 390,
+          "sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "right": 0,
+            "bottom": 0
+          },
+          "main": {
+            "x": 0,
+            "y": 82,
+            "width": 390,
+            "height": 818,
+            "right": 390,
+            "bottom": 900
+          },
+          "h1": [
+            "技能预设"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            818
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            " 新建预设"
+          ]
+        },
+        {
+          "name": "presetDetail",
+          "url": "#/presetDetail?id=frontend",
+          "viewport": [
+            390,
+            900
+          ],
+          "pageWidth": 390,
+          "sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "right": 0,
+            "bottom": 0
+          },
+          "main": {
+            "x": 0,
+            "y": 82,
+            "width": 390,
+            "height": 818,
+            "right": 390,
+            "bottom": 900
+          },
+          "h1": [
+            "前端开发"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            934
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "应用预设"
+          ]
+        },
+        {
+          "name": "presetEdit",
+          "url": "#/presetEdit?id=frontend",
+          "viewport": [
+            390,
+            900
+          ],
+          "pageWidth": 390,
+          "sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "right": 0,
+            "bottom": 0
+          },
+          "main": {
+            "x": 0,
+            "y": 82,
+            "width": 390,
+            "height": 818,
+            "right": 390,
+            "bottom": 900
+          },
+          "h1": [
+            "编辑预设"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            1073
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "保存预设",
+            "保存预设"
+          ]
+        },
+        {
+          "name": "apply",
+          "url": "#/apply",
+          "viewport": [
+            390,
+            900
+          ],
+          "pageWidth": 390,
+          "sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "right": 0,
+            "bottom": 0
+          },
+          "main": {
+            "x": 0,
+            "y": 82,
+            "width": 390,
+            "height": 818,
+            "right": 390,
+            "bottom": 900
+          },
+          "h1": [
+            "应用 前端开发"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            961
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            "预览应用",
+            "预览应用"
+          ]
+        },
+        {
+          "name": "updates",
+          "url": "#/updates",
+          "viewport": [
+            390,
+            900
+          ],
+          "pageWidth": 390,
+          "sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "right": 0,
+            "bottom": 0
+          },
+          "main": {
+            "x": 0,
+            "y": 82,
+            "width": 390,
+            "height": 818,
+            "right": 390,
+            "bottom": 900
+          },
+          "h1": [
+            "更新"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            1063
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": [
+            " 立即运行"
+          ]
+        },
+        {
+          "name": "detail",
+          "url": "#/detail?id=react",
+          "viewport": [
+            390,
+            900
+          ],
+          "pageWidth": 390,
+          "sidebar": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "right": 0,
+            "bottom": 0
+          },
+          "main": {
+            "x": 0,
+            "y": 82,
+            "width": 390,
+            "height": 818,
+            "right": 390,
+            "bottom": 900
+          },
+          "h1": [
+            "react-best-practices"
+          ],
+          "mainScroll": [
+            0,
+            818,
+            832
+          ],
+          "dialog": null,
+          "unlabeled": [],
+          "overflow": [],
+          "primary": []
+        }
+      ]
+    }
+  ]
+}
