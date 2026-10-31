@@ -61,8 +61,7 @@ fn excludes_managed_skill_targets() {
     fs::write(home.path().join(".cursor/skills/foo/SKILL.md"), b"cursor").unwrap();
 
     let mut exclude = std::collections::HashSet::new();
-    exclude.insert(super::managed_target_key(
-        "cursor",
+    exclude.insert(super::managed_path_key(
         &home.path().join(".cursor/skills/foo"),
     ));
 
@@ -435,10 +434,7 @@ fn excludes_already_imported_claude_plugin_skill_source() {
 
     let canonical_skill = fs::canonicalize(plugin_skill).unwrap();
     let mut exclude = std::collections::HashSet::new();
-    exclude.insert(super::managed_target_key(
-        super::CLAUDE_PLUGIN_TOOL_KEY,
-        &canonical_skill,
-    ));
+    exclude.insert(super::managed_path_key(&canonical_skill));
 
     let plan = build_onboarding_plan_in_home(home.path(), None, Some(&exclude)).unwrap();
     assert_eq!(plan.total_skills_found, 0);

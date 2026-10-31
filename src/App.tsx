@@ -101,6 +101,7 @@ import type {
   GithubProxyConfigDto,
   GithubTokenStatusDto,
   InstallResultDto,
+  DiscoveredSkillImportResultDto,
   LocalSkillCandidate,
   ManagedSkill,
   AgentAccessStatusDto,
@@ -2544,6 +2545,8 @@ function App() {
     try {
       const collectedErrors: { title: string; message: string }[] = []
       let successCount = 0
+      let managedSkipCount = 0
+      let sourceSkipCount = 0
       for (const group of plan.groups) {
         if (!selected[group.name]) continue
         const chosenPath = variantChoice[group.name] ?? group.variants[0]?.path
@@ -2552,20 +2555,18 @@ function App() {
         const chosenVariantTool = chosenVariant?.tool ?? null
         const chosenFingerprint = chosenVariant?.fingerprint ?? null
 
-        let installResult: {
-          skill_id: string
-          central_path: string
-        }
+        let installResult: DiscoveredSkillImportResultDto
 
         try {
           setActionMessage(t('actions.importExisting', { name: group.name }))
-          installResult = await invokeTauri<{
-            skill_id: string
-            central_path: string
-          }>('import_existing_skill', {
+          installResult = await invokeTauri<DiscoveredSkillImportResultDto>('import_existing_skill', {
             sourcePath: chosenPath,
             name: group.name,
           })
+          if (installResult === null) {
+            managedSkipCount += 1
+            continue
+          }
           successCount += 1
         } catch (err) {
           collectedErrors.push({
@@ -2611,6 +2612,10 @@ function App() {
             })
           } catch (err) {
             const raw = err instanceof Error ? err.message : String(err)
+            if (raw.startsWith('SKILL_TARGET_OVERLAPS_SOURCE|')) {
+              sourceSkipCount += 1
+              continue
+            }
             if (raw.startsWith('TARGET_EXISTS|')) {
               const targetPath = raw.split('|')[1] ?? ''
               collectedErrors.push({
@@ -2641,8 +2646,16 @@ function App() {
       await loadPlan()
       if (collectedErrors.length > 0) {
         showActionErrors(collectedErrors)
-      } else if (successCount > 0) {
-        setSuccessToastMessage(t('status.importCompleted'))
+      } else if (successCount > 0 || managedSkipCount > 0) {
+        setSuccessToastMessage(
+          managedSkipCount > 0 || sourceSkipCount > 0
+            ? t('status.importCompletedWithSkipped', {
+                imported: successCount,
+                managed: managedSkipCount,
+                sources: sourceSkipCount,
+              })
+            : t('status.importCompleted'),
+        )
       }
       setShowImportModal(false)
     } catch (err) {

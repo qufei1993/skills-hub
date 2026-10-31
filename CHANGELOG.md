@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Discovered Skill imports**: Exclude already managed source folders from scans and safely skip them in stale import selections. Skip sync targets that overlap protected source folders, continue syncing to other tools, and report skipped counts without changing existing content or deployments. ([#208](https://github.com/qufei1993/skills-hub/issues/208))
 - **Conflict and recovery handling**: Show the tool, path and reason for blocked applications, preserve selections when returning to adjust them, and avoid repeating completed work. Protect concurrent preset edits and stale plans, retain progress after partial undo or display-refresh failures, and preserve recoverable backups when recycling removed deployments fails.
 - **Git update reliability**: Stop helper processes on timeout or cancellation, isolate individual source-check failures, and keep internal cache metadata out of root-level Skills so stalled or broken sources do not block healthy checks.
 

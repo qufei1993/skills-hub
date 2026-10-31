@@ -317,6 +317,36 @@ impl SkillsHubService {
         Ok(plan)
     }
 
+    pub(crate) fn import_discovered_skill(
+        &self,
+        source: impl AsRef<Path>,
+        name: Option<String>,
+    ) -> Result<Option<InstallOutcome>, ServiceError> {
+        let plan = self.plan_adopt_direct_with_name(source, name)?;
+        if plan.candidates.is_empty() {
+            self.library_plans.remove(&plan.id);
+            if plan.excluded.len() == 1
+                && matches!(
+                    plan.excluded[0].reason.as_str(),
+                    "managed_source" | "managed_target"
+                )
+            {
+                return Ok(None);
+            }
+            return Err(ServiceError::new(
+                ErrorCode::InvalidSource,
+                "the selected source cannot be imported",
+                json!({ "excluded": plan.excluded }),
+            ));
+        }
+        let mut outcome = self.adopt(AdoptRequest::confirmed(plan.id))?;
+        outcome
+            .adopted
+            .pop()
+            .map(Some)
+            .ok_or_else(|| ServiceError::internal("failed to import the selected skill"))
+    }
+
     pub fn adopt(&self, request: AdoptRequest) -> Result<AdoptOutcome, ServiceError> {
         let snapshot = match self.library_plans.get(&request.plan_id)? {
             Some(LibraryPlanSnapshot::Adopt(snapshot)) => snapshot,
@@ -599,6 +629,17 @@ impl SkillsHubService {
             })?;
         if let Some(name) = name_override.as_deref() {
             super::install::validate_skill_name(name)?;
+        }
+        // A discovery result may have been adopted since the scan. Preserve the
+        // exclusion so the desktop can skip it without importing or deploying it.
+        let managed_direct_source = mode == AdoptMode::Direct
+            && scan.candidates.is_empty()
+            && scan.excluded.len() == 1
+            && matches!(
+                scan.excluded[0].reason.as_str(),
+                "managed_source" | "managed_target"
+            );
+        if let Some(name) = name_override.as_deref().filter(|_| !managed_direct_source) {
             if scan.candidates.len() != 1 {
                 return Err(invalid_argument(
                     "name",
@@ -626,7 +667,7 @@ impl SkillsHubService {
                 ));
             }
             scan.candidates[0].name = name.to_string();
-        } else {
+        } else if name_override.is_none() {
             let managed_names = skills
                 .iter()
                 .map(|skill| skill.name.to_lowercase())

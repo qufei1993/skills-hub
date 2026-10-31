@@ -72,6 +72,228 @@ fn write_skill(path: &Path, name: &str, body: &str) {
 }
 
 #[test]
+fn discovery_excludes_adopted_local_sources_but_keeps_unmanaged_skills() {
+    use crate::core::onboarding::build_onboarding_plan_for_runtime;
+    let fixture = Fixture::new();
+    let source = fixture._home.path().join(".codex/skills/demo");
+    write_skill(&source, "demo", "original");
+    let plan = fixture
+        .service
+        .plan_adopt_direct_with_name(&source, Some("demo".into()))
+        .unwrap();
+    fixture
+        .service
+        .adopt(AdoptRequest::confirmed(plan.id))
+        .unwrap();
+    write_skill(
+        &fixture._home.path().join(".codex/skills/new-skill"),
+        "new-skill",
+        "new content",
+    );
+
+    let plan = build_onboarding_plan_for_runtime(
+        &fixture.paths,
+        fixture.service.store(),
+        fixture._home.path(),
+    )
+    .unwrap();
+    assert_eq!(plan.total_skills_found, 1);
+    assert_eq!(plan.groups.len(), 1);
+    assert_eq!(plan.groups[0].name, "new-skill");
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn discovery_excludes_managed_source_aliases_across_tools() {
+    use crate::core::onboarding::build_onboarding_plan_for_runtime;
+    let fixture = Fixture::new();
+    let source = fixture._home.path().join(".codex/skills/demo");
+    write_skill(&source, "demo", "original");
+    fixture
+        .service
+        .import_discovered_skill(&source, Some("demo".into()))
+        .unwrap();
+    let alias = fixture._home.path().join(".cursor/skills/alias");
+    fs::create_dir_all(alias.parent().unwrap()).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&source, &alias).unwrap();
+    #[cfg(windows)]
+    junction::create(&source, &alias).unwrap();
+
+    let plan = build_onboarding_plan_for_runtime(
+        &fixture.paths,
+        fixture.service.store(),
+        fixture._home.path(),
+    )
+    .unwrap();
+    assert_eq!(plan.total_skills_found, 0);
+    assert!(plan.groups.is_empty());
+    assert!(source.join("SKILL.md").is_file());
+    assert!(alias.join("SKILL.md").is_file());
+}
+
+#[test]
+fn direct_adopt_of_a_managed_source_is_an_empty_plan_even_with_a_name() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("original/demo");
+    write_skill(&source, "demo", "original");
+    let plan = fixture
+        .service
+        .plan_adopt_direct_with_name(&source, Some("demo".into()))
+        .unwrap();
+    fixture
+        .service
+        .adopt(AdoptRequest::confirmed(plan.id))
+        .unwrap();
+
+    let plan = fixture
+        .service
+        .plan_adopt_direct_with_name(&source, Some("demo".into()))
+        .unwrap();
+    assert!(plan.candidates.is_empty());
+    assert_eq!(plan.excluded.len(), 1);
+    assert_eq!(plan.excluded[0].reason, "managed_source");
+}
+
+#[test]
+fn repeated_discovery_import_preserves_source_library_metadata_and_deployments() {
+    use crate::core::content_hash::hash_dir_strict;
+    use crate::services::deployment::DeploymentRequest;
+    let fixture = Fixture::new();
+    let source = fixture._home.path().join(".codex/skills/demo");
+    write_skill(&source, "demo", "original");
+    fs::create_dir_all(fixture._home.path().join(".claude")).unwrap();
+    let installed = fixture
+        .service
+        .import_discovered_skill(&source, Some("demo".into()))
+        .unwrap()
+        .unwrap();
+    fixture
+        .service
+        .store()
+        .set_skill_tag_names(&installed.id, &["saved tag".into()])
+        .unwrap();
+    fixture
+        .service
+        .deploy(DeploymentRequest::global("demo", ["claude_code"]))
+        .unwrap();
+    let before = fixture.service.show_skill("demo".into()).unwrap();
+    let records = fixture.service.store().list_skills().unwrap();
+    let source_before = hash_dir_strict(&source).unwrap();
+    let central_before = hash_dir_strict(Path::new(&installed.central_path)).unwrap();
+    let target_hashes = before
+        .targets
+        .iter()
+        .map(|target| hash_dir_strict(Path::new(&target.target_path)).unwrap())
+        .collect::<Vec<_>>();
+
+    for name in ["demo", "another-name"] {
+        assert!(fixture
+            .service
+            .import_discovered_skill(&source, Some(name.into()))
+            .unwrap()
+            .is_none());
+    }
+    assert_eq!(fixture.service.store().list_skills().unwrap(), records);
+    assert_eq!(fixture.service.show_skill("demo".into()).unwrap(), before);
+    assert_eq!(hash_dir_strict(&source).unwrap(), source_before);
+    assert_eq!(
+        hash_dir_strict(Path::new(&installed.central_path)).unwrap(),
+        central_before
+    );
+    for (target, hash) in before.targets.iter().zip(target_hashes) {
+        assert_eq!(
+            hash_dir_strict(Path::new(&target.target_path)).unwrap(),
+            hash
+        );
+        assert_eq!(
+            fs::read(Path::new(&target.target_path).join("SKILL.md")).unwrap(),
+            fs::read(source.join("SKILL.md")).unwrap()
+        );
+    }
+    assert!(fixture
+        .service
+        .store()
+        .list_recycle_bin_rows()
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn discovery_import_does_not_hide_invalid_sources_or_unmanaged_name_conflicts() {
+    let fixture = Fixture::new();
+    fixture.add_skill("existing", "demo", "saved");
+    let source = fixture.paths.app_data_dir.join("different/demo");
+    write_skill(&source, "demo", "different content");
+    let error = fixture
+        .service
+        .import_discovered_skill(&source, Some("demo".into()))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::TargetConflict);
+    fs::remove_file(source.join("SKILL.md")).unwrap();
+    let error = fixture
+        .service
+        .import_discovered_skill(&source, Some("renamed".into()))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidSource);
+    assert_eq!(fixture.service.store().list_skills().unwrap().len(), 1);
+}
+
+#[test]
+fn discovery_import_preserves_original_source_when_syncing_back_to_its_tool() {
+    use crate::core::content_hash::hash_dir_strict;
+    use crate::services::deployment::DeploymentRequest;
+    let fixture = Fixture::new();
+    let source = fixture._home.path().join(".codex/skills/demo");
+    write_skill(&source, "demo", "original");
+    fs::create_dir_all(fixture._home.path().join(".claude")).unwrap();
+    let installed = fixture
+        .service
+        .import_discovered_skill(&source, Some("demo".into()))
+        .unwrap()
+        .unwrap();
+    let records = fixture.service.store().list_skills().unwrap();
+    let before = hash_dir_strict(&source).unwrap();
+    let mut request = DeploymentRequest::global("demo", ["codex"]);
+    request.overwrite = true;
+    request.overwrite_if_same_content = true;
+    let error = fixture.service.deploy(request).unwrap_err();
+    assert_eq!(error.code, ErrorCode::TargetConflict);
+    assert_eq!(error.details["reason"], "overlaps_skill_source");
+    assert_eq!(hash_dir_strict(&source).unwrap(), before);
+    assert_eq!(
+        hash_dir_strict(Path::new(&installed.central_path)).unwrap(),
+        before
+    );
+    assert_eq!(fixture.service.store().list_skills().unwrap(), records);
+    assert!(fixture
+        .service
+        .show_skill("demo".into())
+        .unwrap()
+        .targets
+        .is_empty());
+    assert!(fixture
+        .service
+        .store()
+        .list_recycle_bin_rows()
+        .unwrap()
+        .is_empty());
+    fixture
+        .service
+        .deploy(DeploymentRequest::global("demo", ["claude_code"]))
+        .unwrap();
+    assert_eq!(
+        fixture
+            .service
+            .show_skill("demo".into())
+            .unwrap()
+            .targets
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn remove_requires_confirmation_without_touching_the_skill() {
     let fixture = Fixture::new();
     fixture.add_skill("demo-id", "demo", "saved");
