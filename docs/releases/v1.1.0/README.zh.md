@@ -8,10 +8,10 @@
 
 | 主题 | 用户可见变化 | 详情与拉取请求 |
 | --- | --- | --- |
-| 项目管理 | 按项目筛选和管理已安装 Skills，预设配置集中到“技能预设”，保留无关部署。 | [技能库与项目](implementation.zh.md#library-and-project-management)  · [PR #209](https://github.com/qufei1993/skills-hub/pull/209) |
-| 技能预设与历史 | 列表直接编辑和应用预设，在“更多操作”中创建副本，采用紧凑选择与结果视图；保留冲突检查、历史、重试与撤销。 | [技能预设](implementation.zh.md#skill-presets)  · [PR #209](https://github.com/qufei1993/skills-hub/pull/209) · [PR #212](https://github.com/qufei1993/skills-hub/pull/212) |
-| 更新与恢复 | 主动检查来源，更新全部或所选待更新项，按需查看差异，恢复更新前内容并修复来源或缺失部署。 | [更新与恢复](implementation.zh.md#updates-and-recovery)  · [PR #209](https://github.com/qufei1993/skills-hub/pull/209) |
-| 界面组织 | 当前更新问题只展示一份，运行记录采用紧凑摘要与日志复制，相关流程支持键盘操作及三语言文案。 | [当前行为](implementation.zh.md#library-and-project-management)  · [PR #212](https://github.com/qufei1993/skills-hub/pull/212) |
+| 项目管理 | 按项目筛选和管理已安装 Skills，预设配置集中到“技能预设”，保留无关部署。 | [技能库与项目](implementation.zh.md#library-and-project-management) · [PR #209](https://github.com/qufei1993/skills-hub/pull/209) |
+| 技能预设与历史 | 列表直接编辑和应用预设，在“更多操作”中创建副本，采用紧凑选择与结果视图；保留冲突检查、历史、重试与撤销。 | [技能预设](implementation.zh.md#skill-presets) · [PR #209](https://github.com/qufei1993/skills-hub/pull/209) · [PR #212](https://github.com/qufei1993/skills-hub/pull/212) |
+| 更新与恢复 | 主动检查来源，更新全部或所选待更新项，按需查看差异，恢复更新前内容并修复来源或缺失部署。 | [更新与恢复](implementation.zh.md#updates-and-recovery) · [PR #209](https://github.com/qufei1993/skills-hub/pull/209) |
+| 界面组织 | 当前更新问题只展示一份，运行记录采用紧凑摘要与日志复制，相关流程支持键盘操作及三语言文案。 | [当前行为](implementation.zh.md#library-and-project-management) · [PR #212](https://github.com/qufei1993/skills-hub/pull/212) |
 
 ## Bug 修复
 
