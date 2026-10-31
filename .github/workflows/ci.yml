@@ -225,6 +225,13 @@ jobs:
           key: debug
       - name: Prepare debug CLI
         run: node scripts/prepare-cli-sidecar.mjs --target x86_64-pc-windows-msvc --debug
+      - name: Verify discovery imports preserve managed sources and deployments on Windows
+        working-directory: src-tauri
+        run: cargo test --locked --features cli --lib services::tests::library
+      - name: Install frontend test dependencies
+        run: npm ci
+      - name: Verify discovery import UI outcomes on Windows
+        run: npm test -- --run src/components/skills/discoveryImport.integration.test.tsx
       - name: Verify auto-update recovery after terminating a worker
         working-directory: src-tauri
         run: cargo test --locked --features cli core::auto_update::tests
