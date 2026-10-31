@@ -26,6 +26,8 @@ export default function ContentReview({ preparedPlans, skills, restore, invokeTa
   const current = preview?.selection === selection && preview.invoke === invokeTauri ? preview : null
   const plans = current?.result.plans ?? []
   const failed = current?.result.failed ?? []
+  const changedCount = plans.filter(plan => plan.changes.length > 0).length
+  const fileCount = plans.reduce((count, plan) => count + plan.changes.length, 0)
   const busy = current?.key !== key || saving
   const w = (key: string) => t(`workspace110.${key}`)
   useEffect(() => {
@@ -87,15 +89,16 @@ export default function ContentReview({ preparedPlans, skills, restore, invokeTa
       </div> : null}
       <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => setAttempt(value => value + 1)}>{w('recheck')}</button>
     </div> : null}
-    {plans.map(plan => <section className="content-review-skill" key={plan.id}>
-      <header className="content-review-heading"><h3>{plan.name}</h3><span>{t('workspace110.contentFiles', { count: plan.changes.length })}</span></header>
+    {plans.length ? <div className="content-review-overview"><p>{t('workspace110.reviewSummary', { total: plans.length, changed: changedCount, files: fileCount })}</p>{!busy && !fileCount ? <span>{w('reviewNoChanges')}</span> : null}</div> : null}
+    <div className="content-review-list">{plans.map(plan => <section className="content-review-skill" key={plan.id}>
+      <header className="content-review-heading"><h3>{plan.name}</h3><span className={`content-review-state${plan.changes.length ? ' has-changes' : ''}`}>{plan.changes.length ? t('workspace110.contentFiles', { count: plan.changes.length }) : w('noFileChanges')}</span></header>
       <div className="content-review-impact">
         {plan.targets.length ? <details><summary>{t('workspace110.diff.affectedTargets', { count: plan.targets.length })}</summary><p>{w('contentImpact')}</p><ul className="workspace-overlay-paths">{plan.targets.map(path => <li key={path}><code>{path}</code></li>)}</ul></details> : <p>{w('centralContentOnly')}</p>}
       </div>
-      {plan.changes.length === 0 ? <p className="content-review-empty">{w('unchanged')}</p> : <div className="content-review-files">{plan.changes.map((change, index) => <details className="content-review-file" key={change.path} open={index === 0}>
+      {plan.changes.length > 0 ? <div className="content-review-files">{plan.changes.map((change, index) => <details className="content-review-file" key={change.path} open={plans.length === 1 && index === 0}>
         <summary><ChevronRight className="content-review-chevron" size={14} aria-hidden="true" /><FileText size={15} aria-hidden="true" /><code>{change.path}</code><span className={`content-change-kind content-change-${change.kind}`}>{w(`fileKinds.${change.kind}`)}</span></summary>
         <ContentFileDiff change={change} t={t} />
-      </details>)}</div>}
-    </section>)}
+      </details>)}</div> : null}
+    </section>)}</div>
   </div>} />
 }

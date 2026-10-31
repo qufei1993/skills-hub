@@ -48,8 +48,8 @@ function IssueContent({ skill, tools, t, compact, onRepairSource, onRepairTarget
   const targets = skill.targets.filter(target => target.status !== 'ok' && target.status !== 'disabled')
   const title = t(state === 'source-error' ? 'deviceSync.sourceNeedsAttention' : 'deviceSync.toolUpdatesPending', { count: targets.length })
   const content = <div className="skill-issue-content">
-      {state === 'source-error' && onRepairSource ? <button className="btn btn-secondary" onClick={onRepairSource}>{t('workspace110.repairSource')}</button> : null}
-      {targets.length > 0 && onRepairTargets ? <button className="btn btn-secondary" onClick={onRepairTargets}>{t('workspace110.repairTargets')}</button> : null}
+      {state === 'source-error' && onRepairSource ? <button className="btn btn-secondary" onClick={() => { if (compact) { setPosition(null); trigger.current?.focus() } onRepairSource() }}>{t('workspace110.repairSource')}</button> : null}
+      {targets.length > 0 && onRepairTargets ? <button className="btn btn-secondary" onClick={() => { if (compact) { setPosition(null); trigger.current?.focus() } onRepairTargets() }}>{t('workspace110.repairTargets')}</button> : null}
       {state === 'source-error' ? <p>{t(issueReasonKey(skill.source_error))}<br />{t('deviceSync.sourceIssueHelp')}</p> : null}
       {targets.map((target, index) => <p key={index}><strong>{tools.find(tool => tool.id === target.tool)?.label || target.tool}</strong><span>{t(issueReasonKey(target.last_error))}<br />{t('deviceSync.toolIssueHelp')}</span></p>)}
     </div>

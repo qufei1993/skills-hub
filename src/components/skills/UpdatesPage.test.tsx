@@ -2,6 +2,9 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import i18n from '../../i18n'
+import { toast } from 'sonner'
+
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 import UpdatesPage from './UpdatesPage'
 import type { AutoUpdateConfigDto, ManagedSkill } from './types'
 import type { UpdateCheckState } from './workspace/useUpdateCheck'
@@ -11,6 +14,7 @@ afterEach(() => {
   cleanup()
   vi.useRealTimers()
   vi.clearAllMocks()
+  vi.unstubAllGlobals()
 })
 
 const skill = (id: string, extra: Partial<ManagedSkill> = {}): ManagedSkill => ({
@@ -336,7 +340,9 @@ it('keeps update available before the first run without presenting zero-valued r
   expect(run).toHaveBeenCalledOnce()
 })
 
-it('retains completed-run statistics and readable failure details', () => {
+it('keeps completed-run statistics and exports diagnostic details without listing failures twice', async () => {
+  const writeText = vi.fn<(value: string) => Promise<void>>(async () => {})
+  vi.stubGlobal('navigator', { clipboard: { writeText } })
   const reason = 'TARGET_MODIFIED|/targets/Beta'
   render(<UpdatesPage {...baseProps} skills={[skill('Beta')]} autoUpdateConfig={config({
     last_status: 'partial', last_run_at: 1000, last_started_at: 1000, last_finished_at: 2000,
@@ -347,9 +353,16 @@ it('retains completed-run statistics and readable failure details', () => {
     expect(screen.getByText(baseProps.t(key))).toBeTruthy()
   }
   for (const count of ['11', '7', '3', '1']) expect(screen.getByText(count)).toBeTruthy()
-  expect(screen.getByText('Beta')).toBeTruthy()
-  expect(screen.getByText(baseProps.t('errors.targetModified', { path: '/targets/Beta' }))).toBeTruthy()
-  expect(screen.getByRole('button', { name: baseProps.t('copyDetails') })).toBeTruthy()
+  expect(screen.queryByText('Beta')).toBeNull()
+  expect(screen.queryByText(reason)).toBeNull()
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: baseProps.t('updatesLayout.copyRunLog') })))
+  const log = JSON.parse(writeText.mock.calls[0][0])
+  expect(log.checked).toBe(11)
+  expect(log.failed).toBe(1)
+  expect(log.startedAt).toBe(1000)
+  expect(log.finishedAt).toBe(2000)
+  expect(log.lastError).toBe(reason)
+  expect(log.progress.failed).toEqual([{ skill_id: 'Beta', name: 'Beta', reason }])
 })
 
 it('shows the saved schedule in a collapsed disclosure without changing settings when opened', () => {
@@ -364,4 +377,70 @@ it('shows the saved schedule in a collapsed disclosure without changing settings
   fireEvent.click(screen.getByText(baseProps.t('autoUpdateScheduleTitle')))
   expect(schedule.open).toBe(false)
   expect(change).not.toHaveBeenCalled()
+})
+
+it.each(['en', 'zh', 'ko'])('shows current issues once and keeps historical diagnostics in the copied log in %s', async language => {
+  const writeText = vi.fn<(value: string) => Promise<void>>(async () => {})
+  vi.stubGlobal('navigator', { clipboard: { writeText } })
+  const t = i18n.getFixedT(language)
+  const ids = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Extra']
+  const check = updateCheck({ eligibleCount: 5, checkedCount: 5, checkedAt: 3000,
+    failures: ids.map(id => ({ skillId: id, name: id, error: 'SOURCE_MISSING' })) })
+  const historical = config({ last_status: 'partial', last_run_at: 1000, last_started_at: 1000, last_finished_at: 2000,
+    last_checked: 11, last_unchanged: 4, last_updated: 3, last_failed: 4, last_error: null,
+    progress: { total: 11, succeeded: [{ skill_id: 'Pending', name: 'Pending', reason: 'TOOLS_PENDING|2' }],
+      failed: ids.slice(0, 4).map(id => ({ skill_id: id, name: id, reason: 'source path not found' })), running: null, pending: [] } })
+  render(<UpdatesPage {...baseProps} t={t} updateCheck={check} skills={ids.map(id => skill(id, { status: 'error' }))} autoUpdateConfig={historical} />)
+  const current = screen.getByRole('region', { name: t('updatesWorkflow.title') })
+  fireEvent.click(within(current).getByRole('button', { name: t('updatesWorkflow.retryFailed') }))
+  expect(check.retryFailures).toHaveBeenCalledOnce()
+  expect(within(current).getByText(t('updatesWorkflow.failures', { count: 5 }))).toBeTruthy()
+  const rail = screen.getByRole('heading', { name: t('autoUpdateRecentTitle') }).closest('section')!
+  expect(rail.classList.contains('error')).toBe(false)
+  expect(rail.querySelector('details')).toBeNull()
+  for (const id of ids) expect(screen.getAllByText(id)).toHaveLength(1)
+  expect(within(rail).queryByText('Pending')).toBeNull()
+  expect(within(rail).queryByText('source path not found')).toBeNull()
+  expect(within(rail).getByText(t('updatesLayout.historyHint'))).toBeTruthy()
+  await act(async () => fireEvent.click(within(rail).getByRole('button', { name: t('updatesLayout.copyRunLog') })))
+  const log = JSON.parse(writeText.mock.calls[0][0])
+  expect(log.failed).toBe(4)
+  expect(log.progress.failed.map((item: { skill_id: string }) => item.skill_id)).toEqual(ids.slice(0, 4))
+  expect(log.progress.succeeded[0].reason).toBe('TOOLS_PENDING|2')
+  expect(log.progress.failed.some((item: { skill_id: string }) => item.skill_id === 'Extra')).toBe(false)
+})
+
+it('keeps live progress without adding another failure list to the side rail', () => {
+  const running = config({ last_status: 'running', last_run_at: Date.now(), last_started_at: Date.now(),
+    progress: { total: 2, succeeded: [], failed: [{ skill_id: 'Alpha', name: 'Alpha', reason: 'source path not found' }], running: { skill_id: 'Beta', name: 'Beta' }, pending: [] } })
+  render(<UpdatesPage {...baseProps} autoUpdateConfig={running} />)
+  const rail = screen.getByRole('heading', { name: baseProps.t('updatesLayout.currentRun') }).closest('section')!
+  expect(within(rail).queryByText(baseProps.t('updatesLayout.historyHint'))).toBeNull()
+  expect(within(rail).queryByText('Alpha')).toBeNull()
+  expect(rail.querySelector('details')).toBeNull()
+  expect(screen.getByText('Beta')).toBeTruthy()
+  expect(within(rail).getByRole('button', { name: baseProps.t('updatesLayout.copyRunLog') })).toBeTruthy()
+})
+
+it('offers logs for successful runs but not before the first run', () => {
+  const page = render(<UpdatesPage {...baseProps} autoUpdateConfig={config()} />)
+  expect(screen.queryByRole('button', { name: baseProps.t('updatesLayout.copyRunLog') })).toBeNull()
+  page.rerender(<UpdatesPage {...baseProps} autoUpdateConfig={config({ last_status: 'ok', last_run_at: 1000, last_checked: 2, last_updated: 2 })} />)
+  expect(screen.getByRole('button', { name: baseProps.t('updatesLayout.copyRunLog') })).toBeTruthy()
+})
+
+it.each(['error', 'partial'])('uses scoped status styling for %s run summaries without coloring the whole card as an error', status => {
+  render(<UpdatesPage {...baseProps} autoUpdateConfig={config({ last_status: status, last_run_at: 1000, last_failed: 1 })} />)
+  const rail = screen.getByRole('heading', { name: baseProps.t('autoUpdateRecentTitle') }).closest('section')!
+  expect(rail.classList.contains('is-error')).toBe(true)
+  expect(rail.classList.contains('error')).toBe(false)
+  expect(rail.querySelector('details')).toBeNull()
+})
+
+it('reports clipboard failures without claiming that a run log was copied', async () => {
+  vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn(async () => { throw new Error('clipboard unavailable') }) } })
+  render(<UpdatesPage {...baseProps} autoUpdateConfig={config({ last_status: 'ok', last_run_at: 1000 })} />)
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: baseProps.t('updatesLayout.copyRunLog') })))
+  expect(toast.error).toHaveBeenCalledWith(baseProps.t('copyFailed'))
+  expect(toast.success).not.toHaveBeenCalled()
 })

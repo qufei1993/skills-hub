@@ -13,10 +13,28 @@ All notable changes to this project will be documented in this file.
 
 ### Improved
 
+- **Update result clarity**: Keep current issues and retry actions in the main content area. The automatic-update side rail shows only run statistics, times and a Copy run log action; remove the duplicate failure list while retaining failed and pending-tool diagnostics in the exported log. Reserve error colors for failure counts and status.
+
+- **Direct Skill updates**: Restore immediate single and bulk updates from the library without opening a difference confirmation dialog. Keep the existing progress, cancellation, partial-failure results and retry selections; differences remain available through the explicit review action.
+
+- **Undo review**: Summarize deployments by Skill and project/global scope using compact tool badges, without filesystem paths or repeated tool rows. Separate additions to remove from protected deployments with counts and retention reasons; omit empty retention counts.
+
+- **Batch update review**: Use a compact summary and Skill list, show unchanged items without repeated empty panels, and expand batch file comparisons on demand while retaining deployment paths and the existing confirmation flow.
+
+- **Preset and application record usability**: Remove the preset detail page: edit and apply from the list, save back to the list, create copies from each row’s More actions menu, and delete with a labeled icon. Default new members to all available tools while preserving saved assignments. Use a stacked preset editor with compact member rows and directly editable tool choices without duplicate badges or an extra disclosure and a select-all checkbox that shows partial selection, counts and a way to clear only the current results, and tighten typography and record layouts. Application results show details directly in aligned columns with a compact status header.
+
 - **Update checking**: Compare sources without building full previews, refresh each Git repository and branch once per check, and restore the last summary after restart without automatically checking on page entry. Rechecks retain the previous list and finish with persistent counts, timestamps and measured duration; full previews are prepared when needed for review or execution.
 - **Focused, accessible interfaces**: Separate library management, preset configuration and update scheduling; keep setup and discovery tips outside Skill results and independently dismissible, with discovery still available from Add Skills. Use compact member/tool summaries, expandable paths and history, responsive layouts, keyboard focus handling, and English, Simplified Chinese and Korean copy.
 
 ### Fixed
+
+- **Shared tool toggles**: Confirmed shared-directory actions now synchronize or unsynchronize every listed tool together in one deployment operation. Register each tool so indicators match the confirmation, preserve other scopes, and roll back the group if the operation fails.
+
+- **Library action routing**: Restore immediate tool-icon synchronization, retry and unsynchronization through the existing commands, without preset, confirmation or result dialogs for ordinary toggles. Preserve current project/global filtering and the existing shared-directory warning. Target management, project removal and failed-target repair stay in the library with contextual copy and scoped operations.
+
+- **Project removal confirmation**: Show the selected project, Skill and tools directly when removing a project deployment, instead of opening preset setup, while keeping the project library visible beneath the dialog. Keep removal within the current scope, run backend preview checks after confirmation, and retain blocked targets for review.
+
+- **Library bulk tools**: Restore the original tool-assignment dialog and direct sync/removal actions instead of opening Skill Presets. Preserve the current global or project filter and leave unrelated deployments unchanged.
 
 - **Discovered Skill imports**: Exclude already managed source folders from scans and safely skip them in stale import selections. Skip sync targets that overlap protected source folders, continue syncing to other tools, and report skipped counts without changing existing content or deployments. ([#208](https://github.com/qufei1993/skills-hub/issues/208))
 - **Conflict and recovery handling**: Show the tool, path and reason for blocked applications, preserve selections when returning to adjust them, and avoid repeating completed work. Protect concurrent preset edits and stale plans, retain progress after partial undo or display-refresh failures, and preserve recoverable backups when recycling removed deployments fails.

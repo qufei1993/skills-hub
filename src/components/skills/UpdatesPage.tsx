@@ -7,10 +7,11 @@ import {
   Info,
   RefreshCw,
   Download,
+  Copy,
 } from 'lucide-react'
 import type { TFunction } from 'i18next'
+import { toast } from 'sonner'
 import type { AutoUpdateConfigDto, ManagedSkill } from './types'
-import { historicalIssueState } from './skillIssueState'
 import './updates-content.css'
 import UpdateCandidates from './UpdateCandidates'
 import type { useUpdateCheck } from './workspace/useUpdateCheck'
@@ -19,8 +20,6 @@ import {
   getAutoUpdateTaskStatusKey,
   isAutoUpdatePossiblyStalled,
   parseAutoUpdateFailureItems,
-  parseToolSyncPathChangedError,
-  parseToolSyncTargetConflictError,
 } from './autoUpdateSettings'
 
 type AutoUpdateScheduleType = 'interval' | 'daily'
@@ -49,37 +48,6 @@ type UpdatesPageProps = {
   onRunAutoUpdateNow: () => void
   autoUpdateTriggering: boolean
   t: TFunction
-}
-
-function formatUpdateFailure(reason: string, t: TFunction): string {
-  if (reason.startsWith('TARGET_MODIFIED|')) {
-    return t('errors.targetModified', {
-      path: reason.slice('TARGET_MODIFIED|'.length),
-    })
-  }
-  if (reason.startsWith('UPDATE_IN_PROGRESS|')) {
-    return t('errors.updateInProgress')
-  }
-  if (reason.startsWith('CENTRAL_MODIFIED|')) {
-    return t('errors.centralModified', {
-      path: reason.slice('CENTRAL_MODIFIED|'.length),
-    })
-  }
-  if (reason.startsWith('ROLLBACK_CONFLICT|')) {
-    try {
-      const detail = JSON.parse(reason.slice('ROLLBACK_CONFLICT|'.length)) as {
-        target?: string
-        recovery?: string
-      }
-      return t('errors.rollbackConflict', {
-        target: detail.target ?? '',
-        recovery: detail.recovery ?? '',
-      })
-    } catch {
-      return t('errors.rollbackConflictUnknown')
-    }
-  }
-  return reason
 }
 
 const UpdatesPage = ({
@@ -161,6 +129,7 @@ const UpdatesPage = ({
     autoUpdateRunning ||
     Boolean(autoUpdateConfig?.last_started_at) ||
     Boolean(autoUpdateConfig?.last_finished_at)
+  const autoUpdateHasRun = Boolean(autoUpdateConfig?.last_status || autoUpdateConfig?.last_run_at || autoUpdateHasRuntime)
   const autoUpdateStatus = autoUpdateConfig?.last_status
     ? t(`autoUpdateStatus.${autoUpdateConfig.last_status}`)
     : t('autoUpdateStatus.none')
@@ -187,12 +156,12 @@ const UpdatesPage = ({
       }
   const autoUpdateStatusClass =
     autoUpdateConfig?.last_status === 'error' || autoUpdateConfig?.last_status === 'partial'
-      ? 'error'
+      ? 'is-error'
       : autoUpdateConfig?.last_status === 'ok'
-        ? 'success'
+        ? 'is-success'
         : autoUpdateRunning
-          ? 'running'
-          : 'idle'
+          ? 'is-running'
+          : 'is-idle'
   const autoUpdateScheduleHint =
     autoUpdateScheduleType === 'daily'
       ? t('autoUpdateDailyShort', { time: autoUpdateDailyTime })
@@ -212,9 +181,25 @@ const UpdatesPage = ({
         ? t('autoUpdateTaskNeedsAttentionHint')
         : ''
 
-  const handleCopyAutoUpdateError = async () => {
-    if (!autoUpdateConfig?.last_error) return
-    await navigator.clipboard.writeText(autoUpdateConfig.last_error)
+  const handleCopyRunLog = async () => {
+    if (!autoUpdateConfig || !autoUpdateHasRun) return
+    try {
+      await navigator.clipboard.writeText(JSON.stringify({
+        lastRunAt: autoUpdateConfig.last_run_at,
+        startedAt: autoUpdateConfig.last_started_at,
+        finishedAt: autoUpdateConfig.last_finished_at,
+        status: autoUpdateConfig.last_status,
+        checked: autoUpdateConfig.last_checked,
+        unchanged: autoUpdateConfig.last_unchanged,
+        updated: autoUpdateConfig.last_updated,
+        failed: autoUpdateConfig.last_failed,
+        progress: autoUpdateProgressForDisplay,
+        lastError: autoUpdateConfig.last_error,
+      }, null, 2))
+      toast.success(t('copied'))
+    } catch {
+      toast.error(t('copyFailed'))
+    }
   }
 
   return (
@@ -380,14 +365,14 @@ const UpdatesPage = ({
 
           <section className={`updates-summary-card ${autoUpdateStatusClass}`} aria-labelledby={resultHeadingId}>
             <div className="updates-summary-head">
-              <h2 id={resultHeadingId}><Clock3 size={18} aria-hidden="true" />{t('autoUpdateRecentTitle')}</h2>
+              <h2 id={resultHeadingId}><Clock3 size={18} aria-hidden="true" />{t(autoUpdateRunning ? 'updatesLayout.currentRun' : 'autoUpdateRecentTitle')}</h2>
               <strong>{autoUpdateStatus}</strong>
             </div>
-            {autoUpdateConfig?.last_status || autoUpdateConfig?.last_run_at ? <>
-              <div className="updates-summary-time">
+            {autoUpdateHasRun ? <>
+              {!autoUpdateHasRuntime ? <div className="updates-summary-time">
                 <span>{t('autoUpdateLastRunTitle')}</span>
                 <strong>{autoUpdateLastRun}</strong>
-              </div>
+              </div> : null}
               <div className="updates-stat-grid">
                 <div>
                   <span>{t('autoUpdateCheckedShort')}</span>
@@ -407,7 +392,7 @@ const UpdatesPage = ({
                 <div className={(autoUpdateConfig?.last_failed ?? 0) > 0 ? 'danger' : ''}>
                   <span>{t('autoUpdateFailedShort')}</span>
                   <strong>{autoUpdateConfig?.last_failed ?? 0}</strong>
-                  <small>{t('autoUpdateFailedDescription')}</small>
+                  <small>{t('updatesLayout.runFailedHint')}</small>
                 </div>
               </div>
               {autoUpdateHasRuntime ? (
@@ -426,57 +411,9 @@ const UpdatesPage = ({
                   </div>
                 </div>
               ) : null}
-              <p className="updates-history-note">{t('deviceSync.historicalRunNote')}</p>
+              {!autoUpdateRunning ? <p className="updates-history-note">{t('updatesLayout.historyHint')}</p> : null}
             </> : <p className="updates-result-empty">{t('updatesLayout.noRunHint')}</p>}
-            <div className="updates-followups">
-              {autoUpdateProgressForDisplay.succeeded.filter(item => item.reason?.startsWith('TOOLS_PENDING|')).map(item => <div className="updates-issue-item" key={`pending-${item.skill_id}`}><strong>{item.name || item.skill_id}</strong><p>{t('deviceSync.runToolsPending', { count: Number(item.reason?.split('|')[1]) || 0 })}</p></div>)}
-              {autoUpdateProgressForDisplay.failed.length > 0 ? (
-                <div className="updates-issue-block">
-                  <div className="updates-section-label">
-                    <AlertTriangle size={15} />
-                    {t('autoUpdateIssuesTitle')}
-                  </div>
-                  <div className="updates-issue-list">
-                    {autoUpdateProgressForDisplay.failed.map((item) => {
-                      const pathChanged = parseToolSyncPathChangedError(item.reason)
-                      const targetConflict = parseToolSyncTargetConflictError(item.reason)
-                      const reason = targetConflict
-                        ? t('autoUpdateFailureToolTargetConflict', {
-                          tool: targetConflict.tool,
-                          path: targetConflict.expectedPath,
-                        })
-                        : pathChanged
-                          ? t('autoUpdateFailureToolPathChanged', {
-                            tool: pathChanged.tool,
-                            path: pathChanged.expectedPath,
-                          })
-                          : item.reason
-                            ? formatUpdateFailure(item.reason, t)
-                            : null
-                      return (
-                        <div className="updates-issue-item" key={item.skill_id}>
-                          <strong>{item.name || item.skill_id}</strong>
-                          <span>{t(`deviceSync.issueHistory.${historicalIssueState(skills.find(skill => skill.id === item.skill_id), autoUpdateConfig?.last_finished_at ?? autoUpdateConfig?.last_run_at ?? 0)}`)}</span>
-                          {reason ? <code>{reason}</code> : null}
-                        </div>
-                      )
-                    })}
-                  </div>
-                  {autoUpdateConfig?.last_error ? (
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      type="button"
-                      onClick={() => {
-                        void handleCopyAutoUpdateError()
-                      }}
-                    >
-                      {t('copyDetails')}
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-
-            </div>
+            {autoUpdateHasRun ? <div className="updates-run-log"><button type="button" className="btn btn-secondary btn-sm" onClick={() => { void handleCopyRunLog() }}><Copy size={14} aria-hidden="true" />{t('updatesLayout.copyRunLog')}</button></div> : null}
           </section>
         </div>
 

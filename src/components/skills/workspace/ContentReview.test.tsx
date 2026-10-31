@@ -216,3 +216,39 @@ it('shows file permissions and directory entries without presenting them as miss
   expect(screen.getByText('Directory entry')).toBeTruthy()
   expect(screen.queryByText(i18n.t('workspace110.unchanged'))).toBeNull()
 })
+
+it('summarizes a batch and shows unchanged Skills as compact rows while preserving their plans', async () => {
+  const onConfirm = vi.fn(async () => {})
+  const preparedPlans = skills.map(skill => ({ ...plan(skill.id), targets: [`/test/codex/${skill.id}`, `/test/claude/${skill.id}`] }))
+  render(<ContentReview skills={skills} preparedPlans={preparedPlans} restore={false} invokeTauri={vi.fn()} onConfirm={onConfirm} onClose={vi.fn()} t={i18n.t} />)
+  await screen.findByRole('heading', { name: 'alpha' })
+  expect(screen.getByText('Skills: 2 · With file changes: 0 · Changed entries: 0')).toBeTruthy()
+  expect(screen.getAllByText('No file changes')).toHaveLength(2)
+  expect(screen.getByText('All previewed Skills have no file changes.')).toBeTruthy()
+  expect(document.querySelector('.content-review-empty')).toBeNull()
+  const targets = screen.getAllByText('Central content and 2 deployments affected', { selector: 'summary' })
+  expect(targets).toHaveLength(2)
+  expect(targets[0].closest('details')?.open).toBe(false)
+  fireEvent.click(targets[0])
+  expect(targets[0].closest('details')?.open).toBe(true)
+  expect(screen.getByText('/test/codex/alpha')).toBeTruthy()
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Confirm update' })) })
+  expect(onConfirm).toHaveBeenCalledWith({ alpha: 'alpha-update', beta: 'beta-update' })
+})
+
+it('keeps batch file comparisons collapsed until opened without hiding the changed Skill count', async () => {
+  const preparedPlans: ContentPlan[] = [
+    { ...plan('alpha'), changes: [{ path: 'SKILL.md', kind: 'modified', before: 'old', after: 'new' }] },
+    plan('beta'),
+  ]
+  render(<ContentReview skills={skills} preparedPlans={preparedPlans} restore={false} invokeTauri={vi.fn()} onConfirm={vi.fn(async () => {})} onClose={vi.fn()} t={i18n.t} />)
+  await screen.findByRole('heading', { name: 'alpha' })
+  expect(screen.getByText('Skills: 2 · With file changes: 1 · Changed entries: 1')).toBeTruthy()
+  expect(screen.getByText('No file changes')).toBeTruthy()
+  expect(screen.queryByText('All previewed Skills have no file changes.')).toBeNull()
+  const file = screen.getByText('SKILL.md', { selector: 'code' }).closest('details')!
+  expect(file.open).toBe(false)
+  fireEvent.click(file.querySelector('summary')!)
+  expect(file.open).toBe(true)
+  expect(screen.getByRole('region', { name: 'SKILL.md · Line-by-line changes' }).textContent).toContain('new')
+})

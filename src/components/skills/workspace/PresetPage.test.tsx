@@ -9,14 +9,12 @@ const skills: ManagedSkill[] = ['alpha', 'beta'].map(name => ({ id: name, name, 
 const preset: SkillPreset = { id: 'p1', revision: 1, name: 'Daily', description: '', members: [{ skillId: 'alpha', tools: ['codex'] }, { skillId: 'beta', tools: ['cursor'] }] }
 const invoke = vi.fn()
 const onBack = vi.fn()
-const props = { active: true, skills, tools: [{ id: 'codex', label: 'Codex' }, { id: 'cursor', label: 'Cursor' }], projects: ['/project'], invokeTauri: invoke, onChanged: async () => {}, onBack, onSkill: vi.fn(), onProject: vi.fn(), onDirtyChange: vi.fn() }
+const props = { active: true, skills, tools: [{ id: 'codex', label: 'Codex' }, { id: 'cursor', label: 'Cursor' }], projects: ['/project'], invokeTauri: invoke, onChanged: async () => {}, onBack, onProject: vi.fn(), onDirtyChange: vi.fn() }
 const expand = (name: string) => {
   const control = screen.getByText(name, { selector: 'summary' })
   if (!control.parentElement?.hasAttribute('open')) fireEvent.click(control)
 }
 const toolChoice = (group: string, tool: string) => {
-  const control = screen.queryByLabelText(`Adjust tools for ${group}`)
-  if (control && !control.parentElement?.hasAttribute('open')) fireEvent.click(control)
   return within(screen.getByRole('group', { name: group })).getByRole('checkbox', { name: tool }) as HTMLInputElement
 }
 const adjustApplication = () => expand('Adjust for this application')
@@ -97,40 +95,85 @@ it('keeps a failed preset read distinct from an empty directory', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Reload records' }))
   expect(await screen.findByText('No presets yet. Save a reusable set of Skills.')).toBeTruthy()
 })
-it('shows each preset card\'s own members and tools and opens the corresponding detail', async () => {
+it('shows each preset summary without a detail navigation and exposes explicit row actions', async () => {
   const daily = { ...preset, members: [{ skillId: 'alpha', tools: ['codex'] }] }
   const weekend = { ...preset, id: 'p2', name: 'Weekend', members: [{ skillId: 'beta', tools: ['cursor'] }] }
   invoke.mockImplementation(async command => command === 'workspace_presets' ? [daily, weekend] : [])
   render(<PresetPage {...props} t={i18n.t} />)
-
-  const dailyCard = await screen.findByRole('button', { name: 'Daily' })
-  const weekendCard = screen.getByRole('button', { name: 'Weekend' })
-  expect(dailyCard.tagName).toBe('BUTTON')
-  expect(weekendCard.tagName).toBe('BUTTON')
+  const dailyCard = (await screen.findByText('Daily')).closest('article')!
+  const weekendCard = screen.getByText('Weekend').closest('article')!
   expect(within(dailyCard).getByText('alpha')).toBeTruthy()
   expect(within(dailyCard).queryByText('beta')).toBeNull()
   expect(within(dailyCard).getByTitle('Codex')).toBeTruthy()
-  expect(within(dailyCard).queryByTitle('Cursor')).toBeNull()
   expect(within(weekendCard).getByText('beta')).toBeTruthy()
-  expect(within(weekendCard).queryByText('alpha')).toBeNull()
   expect(within(weekendCard).getByTitle('Cursor')).toBeTruthy()
-  expect(within(weekendCard).queryByTitle('Codex')).toBeNull()
-
-  fireEvent.click(dailyCard)
-  expect(screen.getByRole('heading', { level: 1, name: 'Daily' })).toBeTruthy()
-  expect(screen.getByRole('button', { name: 'alpha' })).toBeTruthy()
-  expect(screen.queryByRole('button', { name: 'beta' })).toBeNull()
-  expect(screen.getByText('Codex')).toBeTruthy()
-  expect(screen.queryByText('Cursor')).toBeNull()
-
+  for (const name of ['Daily', 'Weekend']) {
+    expect(screen.queryByRole('button', { name })).toBeNull()
+    expect(screen.getByRole('button', { name: `Edit preset ${name}` })).toBeTruthy()
+    expect(screen.getByRole('button', { name: `Apply ${name}` })).toBeTruthy()
+    expect(screen.getByRole('button', { name: `Delete preset ${name}` })).toBeTruthy()
+    expect(screen.getByRole('button', { name: `More actions for ${name}` })).toBeTruthy()
+    fireEvent.click(screen.getByText(name))
+    expect(screen.getByRole('heading', { level: 1, name: 'Skill presets' })).toBeTruthy()
+  }
+  expect(screen.queryByRole('button', { name: 'Create copy' })).toBeNull()
+  expect(invoke.mock.calls.some(([command]) => ['workspace_history', 'workspace_save_preset', 'workspace_preview', 'workspace_execute'].includes(command))).toBe(false)
+})
+it('opens the selected preset editor directly from the list and returns without a detail step', async () => {
+  const weekend = { ...preset, id: 'p2', name: 'Weekend', members: [preset.members[1]] }
+  invoke.mockImplementation(async command => command === 'workspace_presets' ? [preset, weekend] : [])
+  render(<PresetPage {...props} t={i18n.t} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit preset Weekend' }))
+  expect(screen.getByRole('heading', { level: 1, name: 'Edit preset' })).toBeTruthy()
+  expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Weekend')
+  expect(screen.queryByRole('checkbox', { name: 'alpha' })).toBeNull()
+  expect(toolChoice('beta', 'Cursor').checked).toBe(true)
+  expect(toolChoice('beta', 'Codex').checked).toBe(false)
+  expect(invoke.mock.calls.some(([command]) => command === 'workspace_history')).toBe(false)
   fireEvent.click(screen.getByRole('button', { name: 'Back' }))
-  fireEvent.click(screen.getByRole('button', { name: 'Weekend' }))
-  expect(screen.getByRole('heading', { level: 1, name: 'Weekend' })).toBeTruthy()
-  expect(screen.getByRole('button', { name: 'beta' })).toBeTruthy()
-  expect(screen.queryByRole('button', { name: 'alpha' })).toBeNull()
-  expect(screen.getByText('Cursor')).toBeTruthy()
-  expect(screen.queryByText('Codex')).toBeNull()
-  expect(invoke.mock.calls.some(([command]) => ['workspace_save_preset', 'workspace_preview', 'workspace_execute'].includes(command))).toBe(false)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(screen.getByRole('button', { name: 'Edit preset Weekend' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Apply Weekend' })).toBeTruthy()
+  expect(invoke.mock.calls.some(([command]) => command === 'workspace_save_preset')).toBe(false)
+})
+it('saves list edits and returns to the list with the updated preset', async () => {
+  const weekend = { ...preset, id: 'p2', name: 'Weekend', members: [preset.members[1]] }
+  let stored = [preset, weekend]
+  invoke.mockImplementation(async (command, args) => {
+    if (command === 'workspace_presets') return stored
+    if (command === 'workspace_save_preset') {
+      const saved = { ...args.preset, revision: 2 }
+      stored = stored.map(p => p.id === saved.id ? saved : p)
+      return saved
+    }
+    return []
+  })
+  render(<PresetPage {...props} t={i18n.t} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit preset Weekend' }))
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Weekend updated' } })
+  fireEvent.click(toolChoice('beta', 'Codex'))
+  fireEvent.click(screen.getByRole('button', { name: 'Save preset' }))
+  await screen.findByRole('button', { name: 'Edit preset Weekend updated' })
+  expect(screen.getByRole('button', { name: 'Apply Weekend updated' })).toBeTruthy()
+  expect(screen.getByRole('heading', { level: 1, name: 'Skill presets' })).toBeTruthy()
+  expect(invoke).toHaveBeenCalledWith('workspace_save_preset', { preset: { ...weekend, name: 'Weekend updated', members: [{ skillId: 'beta', tools: ['cursor', 'codex'] }] } })
+  expect(stored[0]).toEqual(preset)
+  expect(invoke.mock.calls.some(([command]) => ['workspace_history', 'workspace_preview', 'workspace_execute'].includes(command))).toBe(false)
+})
+it('opens application directly from the same list row and restores its trigger on cancel', async () => {
+  const weekend = { ...preset, id: 'p2', name: 'Weekend', members: [preset.members[1]] }
+  invoke.mockImplementation(async command => command === 'workspace_presets' ? [preset, weekend] : [])
+  render(<PresetPage {...props} t={i18n.t} />)
+  const trigger = await screen.findByRole('button', { name: 'Apply Weekend' })
+  fireEvent.click(trigger)
+  const dialog = screen.getByRole('dialog', { name: 'Apply preset' })
+  expect(within(dialog).getByText('Weekend')).toBeTruthy()
+  expect(screen.getByRole('heading', { level: 1, name: 'Skill presets', hidden: true })).toBeTruthy()
+  expect(invoke.mock.calls.some(([command]) => command === 'workspace_history')).toBe(false)
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(screen.getByRole('button', { name: 'Edit preset Weekend' })).toBeTruthy()
+  expect(document.activeElement).toBe(trigger)
 })
 it('summarizes actual history outcomes with their scopes and target count', async () => {
   const record: ApplicationRecord = {
@@ -193,8 +236,7 @@ it('saves exact per-member tools without any deployment', async () => {
 it('keeps each member selected and isolates its tool changes when saving an existing preset', async () => {
   invoke.mockImplementation(async (command, args) => command === 'workspace_save_preset' ? { ...args.preset, revision: 2 } : command === 'workspace_presets' ? [preset] : [])
   render(<PresetPage {...props} t={i18n.t} />)
-  fireEvent.click(await screen.findByText('Daily'))
-  fireEvent.click(screen.getByRole('button', { name: 'Edit preset' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit preset Daily' }))
 
   fireEvent.click(toolChoice('alpha', 'Cursor'))
   fireEvent.click(toolChoice('alpha', 'Codex'))
@@ -209,19 +251,73 @@ it('keeps each member selected and isolates its tool changes when saving an exis
   }
 
   fireEvent.click(screen.getByRole('button', { name: 'Save preset' }))
-  await screen.findByRole('heading', { level: 1, name: 'Daily' })
+  await screen.findByRole('heading', { level: 1, name: 'Skill presets' })
   expect(invoke).toHaveBeenCalledWith('workspace_save_preset', { preset: {
     ...preset,
     members: [{ skillId: 'alpha', tools: ['cursor'] }, { skillId: 'beta', tools: ['cursor', 'codex'] }],
   } })
   expect(invoke.mock.calls.some(([name]) => ['workspace_preview', 'workspace_execute', 'sync_skill_to_tool'].includes(name))).toBe(false)
 })
+it('defaults every available tool to selected and saves those tools for single and bulk member additions', async () => {
+  render(<PresetPage {...props} intent={{ mode: 'edit', members: [] }} t={i18n.t} />)
+  const defaults = 'Default tools for newly selected members'
+  expect(toolChoice(defaults, 'Codex').checked).toBe(true)
+  expect(toolChoice(defaults, 'Cursor').checked).toBe(true)
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Every tool' } })
+  fireEvent.click(screen.getByRole('checkbox', { name: 'alpha' }))
+  expect(toolChoice('alpha', 'Codex').checked).toBe(true)
+  expect(toolChoice('alpha', 'Cursor').checked).toBe(true)
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Select all current results' }))
+  expect(toolChoice('beta', 'Codex').checked).toBe(true)
+  expect(toolChoice('beta', 'Cursor').checked).toBe(true)
+  expect(screen.queryByText('Choose tools for this member.')).toBeNull()
+  invoke.mockImplementation(async (command, args) => command === 'workspace_save_preset' ? { ...args.preset, id: 'new', revision: 1 } : [])
+  fireEvent.click(screen.getByRole('button', { name: 'Save preset' }))
+  await screen.findByRole('heading', { name: 'Skill presets' })
+  expect(invoke).toHaveBeenCalledWith('workspace_save_preset', { preset: {
+    id: '', revision: 0, name: 'Every tool', description: '',
+    members: [{ skillId: 'alpha', tools: ['codex', 'cursor'] }, { skillId: 'beta', tools: ['codex', 'cursor'] }],
+  } })
+  expect(invoke.mock.calls.some(([command]) => ['workspace_execute', 'workspace_preview'].includes(command))).toBe(false)
+})
+it('selects asynchronously loaded tools but preserves an explicit empty default selection', () => {
+  const { rerender } = render(<PresetPage {...props} tools={[]} intent={{ mode: 'edit', members: [] }} t={i18n.t} />)
+  rerender(<PresetPage {...props} intent={{ mode: 'edit', members: [] }} t={i18n.t} />)
+  const defaults = 'Default tools for newly selected members'
+  expect(toolChoice(defaults, 'Codex').checked).toBe(true)
+  expect(toolChoice(defaults, 'Cursor').checked).toBe(true)
+  fireEvent.click(toolChoice(defaults, 'Codex'))
+  fireEvent.click(toolChoice(defaults, 'Cursor'))
+  rerender(<PresetPage {...props} tools={[...props.tools, { id: 'windsurf', label: 'Windsurf' }]} intent={{ mode: 'edit', members: [] }} t={i18n.t} />)
+  for (const tool of ['Codex', 'Cursor', 'Windsurf']) expect(toolChoice(defaults, tool).checked).toBe(false)
+  fireEvent.click(screen.getByRole('checkbox', { name: 'alpha' }))
+  expect(screen.getByText('Choose tools for this member.')).toBeTruthy()
+  expect((screen.getByRole('button', { name: 'Save preset' }) as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.click(toolChoice(defaults, 'Codex'))
+  expect(toolChoice('alpha', 'Codex').checked).toBe(false)
+  fireEvent.click(screen.getByRole('checkbox', { name: 'beta' }))
+  expect(toolChoice('beta', 'Codex').checked).toBe(true)
+  expect(toolChoice('beta', 'Cursor').checked).toBe(false)
+})
+it('restores all available default tools for each fresh editor session', async () => {
+  render(<PresetPage {...props} t={i18n.t} />)
+  await screen.findByRole('button', { name: 'New preset' })
+  fireEvent.click(screen.getByRole('button', { name: 'New preset' }))
+  const defaults = 'Default tools for newly selected members'
+  fireEvent.click(toolChoice(defaults, 'Cursor'))
+  expect(toolChoice(defaults, 'Cursor').checked).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+  expect(screen.queryByRole('dialog')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'New preset' }))
+  expect(toolChoice(defaults, 'Codex').checked).toBe(true)
+  expect(toolChoice(defaults, 'Cursor').checked).toBe(true)
+})
 it('uses default tools only for newly selected members and preserves existing mappings', async () => {
   invoke.mockImplementation(async (command, args) => command === 'workspace_save_preset' ? { ...args.preset, id: 'new', revision: 1 } : command === 'workspace_presets' ? [preset] : [])
   render(<PresetPage {...props} intent={{ mode: 'edit', members: [preset.members[0]] }} t={i18n.t} />)
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New mappings' } })
   const defaults = 'Default tools for newly selected members'
-  fireEvent.click(toolChoice(defaults, 'Cursor'))
+  fireEvent.click(toolChoice(defaults, 'Codex'))
   expect(toolChoice('alpha', 'Codex').checked).toBe(true)
   expect(toolChoice('alpha', 'Cursor').checked).toBe(false)
   expect(screen.queryByRole('group', { name: 'beta' })).toBeNull()
@@ -237,24 +333,102 @@ it('uses default tools only for newly selected members and preserves existing ma
   expect(toolChoice('beta', 'Cursor').checked).toBe(true)
 
   fireEvent.click(screen.getByRole('button', { name: 'Save preset' }))
-  await screen.findByRole('heading', { level: 1, name: 'New mappings' })
+  await screen.findByRole('heading', { level: 1, name: 'Skill presets' })
   expect(invoke).toHaveBeenCalledWith('workspace_save_preset', { preset: {
     id: '', revision: 0, name: 'New mappings', description: '', members: preset.members,
   } })
 })
+it('selects and clears current results while preserving hidden members and existing tool assignments', async () => {
+  const library: ManagedSkill[] = [
+    { ...skills[0], description: 'matching group' }, skills[1],
+    { ...skills[0], id: 'gamma', name: 'gamma', description: 'matching group' },
+  ]
+  invoke.mockImplementation(async (command, args) => command === 'workspace_presets' ? [preset] : command === 'workspace_save_preset' ? { ...args.preset, revision: 2 } : [])
+  render(<PresetPage {...props} skills={library} t={i18n.t} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit preset Daily' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Add Skills' }))
+  fireEvent.click(toolChoice('Default tools for newly selected members', 'Codex'))
+  fireEvent.change(screen.getByLabelText('Search Skills'), { target: { value: 'matching group' } })
+  const select = screen.getByRole('checkbox', { name: 'Select all current results' }) as HTMLInputElement
+  expect(select.indeterminate).toBe(true)
+  expect(select.getAttribute('aria-checked')).toBe('mixed')
+  expect(screen.getByText('1 of 2 results selected')).toBeTruthy()
+  fireEvent.click(select)
+  const clear = screen.getByRole('checkbox', { name: 'Clear selection for current results' }) as HTMLInputElement
+  expect(clear.checked).toBe(true)
+  expect(clear.indeterminate).toBe(false)
+  expect(clear.disabled).toBe(false)
+  expect(screen.getByText('2 of 2 results selected')).toBeTruthy()
+  expect(toolChoice('alpha', 'Codex').checked).toBe(true)
+  expect(toolChoice('alpha', 'Cursor').checked).toBe(false)
+  expect(toolChoice('gamma', 'Cursor').checked).toBe(true)
+  fireEvent.click(clear)
+  expect((screen.getByRole('checkbox', { name: 'alpha' }) as HTMLInputElement).checked).toBe(false)
+  expect((screen.getByRole('checkbox', { name: 'gamma' }) as HTMLInputElement).checked).toBe(false)
+  expect(screen.getByText('0 of 2 results selected')).toBeTruthy()
+  fireEvent.change(screen.getByLabelText('Search Skills'), { target: { value: '' } })
+  expect((screen.getByRole('checkbox', { name: 'beta' }) as HTMLInputElement).checked).toBe(true)
+  expect(toolChoice('beta', 'Cursor').checked).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Save preset' }))
+  await screen.findByRole('heading', { level: 1, name: 'Skill presets' })
+  expect(invoke).toHaveBeenCalledWith('workspace_save_preset', { preset: { ...preset, members: [preset.members[1]] } })
+  expect(invoke.mock.calls.some(([command]) => ['workspace_execute', 'workspace_preview'].includes(command))).toBe(false)
+})
+it('keeps batch cancellation available in selected-only mode and leaves hidden matches selected', async () => {
+  render(<PresetPage {...props} t={i18n.t} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit preset Daily' }))
+  fireEvent.change(screen.getByLabelText('Search Skills'), { target: { value: 'alpha' } })
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Clear selection for current results' }))
+  expect(screen.queryByRole('checkbox', { name: 'alpha' })).toBeNull()
+  expect(screen.getByText('0 of 0 results selected')).toBeTruthy()
+  fireEvent.change(screen.getByLabelText('Search Skills'), { target: { value: '' } })
+  expect((screen.getByRole('checkbox', { name: 'beta' }) as HTMLInputElement).checked).toBe(true)
+  expect(screen.getByText('1 of 1 results selected')).toBeTruthy()
+  expect((screen.getByRole('checkbox', { name: 'Clear selection for current results' }) as HTMLInputElement).disabled).toBe(false)
+})
+it('disables bulk selection only when no current result exists and restores it after changing search', async () => {
+  render(<PresetPage {...props} t={i18n.t} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit preset Daily' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Add Skills' }))
+  fireEvent.change(screen.getByLabelText('Search Skills'), { target: { value: 'no matches' } })
+  expect((screen.getByRole('checkbox', { name: 'Select all current results' }) as HTMLInputElement).disabled).toBe(true)
+  expect(screen.getByText('0 of 0 results selected')).toBeTruthy()
+  fireEvent.change(screen.getByLabelText('Search Skills'), { target: { value: '' } })
+  expect((screen.getByRole('checkbox', { name: 'Clear selection for current results' }) as HTMLInputElement).disabled).toBe(false)
+  expect(screen.getByText('2 of 2 results selected')).toBeTruthy()
+})
+it('applies only the remaining members after cancelling current results in application adjustments', async () => {
+  const plan = applicationPlan()
+  const result: ApplicationRecord = { ...plan, items: [plan.items[1]] }
+  invoke.mockImplementation(async command => command === 'workspace_presets' ? [preset] : command === 'workspace_preview' ? result : command === 'workspace_execute' ? { ...result, confirmed: true, items: result.items.map(item => ({ ...item, status: 'done' })) } : [])
+  render(<PresetPage {...props} t={i18n.t} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Apply Daily' }))
+  adjustApplication()
+  fireEvent.change(screen.getByLabelText('Search Skills'), { target: { value: 'alpha' } })
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Clear selection for current results' }))
+  fireEvent.click(screen.getByRole('radio', { name: 'Global' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Apply now' }))
+  await screen.findByRole('heading', { name: 'Application result' })
+  expect(invoke).toHaveBeenCalledWith('workspace_preview', { request: { presetId: preset.id, members: [preset.members[1]], scopes: [{ kind: 'global' }], remove: false } })
+})
 it('prefills the source project after saving its configuration and resets cancelled application choices', async () => {
-  invoke.mockImplementation(async (command, args) => command === 'workspace_save_preset' ? { ...args.preset, id: 'new', revision: 1 } : command === 'workspace_presets' ? [preset] : [])
+  let stored = [preset]
+  invoke.mockImplementation(async (command, args) => {
+    if (command === 'workspace_presets') return stored
+    if (command === 'workspace_save_preset') { const saved = { ...args.preset, id: 'new', revision: 1 }; stored = [...stored, saved]; return saved }
+    return []
+  })
   render(<PresetPage {...props} projects={['/project', '/other-project']} intent={{ mode: 'edit', members: preset.members, scope: { kind: 'project', path: '/project' } }} t={i18n.t} />)
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Project configuration' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save preset' }))
-  fireEvent.click(await screen.findByRole('button', { name: 'Apply to…' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Apply Project configuration' }))
   expect((screen.getByRole('radio', { name: 'Projects' }) as HTMLInputElement).checked).toBe(true)
   expect((screen.getByLabelText('/project') as HTMLInputElement).checked).toBe(true)
   fireEvent.click(screen.getByLabelText('/project'))
   fireEvent.click(screen.getByLabelText('/other-project'))
   fireEvent.click(screen.getByRole('radio', { name: 'Global' }))
   fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-  fireEvent.click(screen.getByRole('button', { name: 'Apply to…' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Apply Project configuration' }))
   expect((screen.getByRole('radio', { name: 'Projects' }) as HTMLInputElement).checked).toBe(true)
   expect((screen.getByLabelText('/project') as HTMLInputElement).checked).toBe(true)
   expect((screen.getByLabelText('/other-project') as HTMLInputElement).checked).toBe(false)
@@ -382,6 +556,8 @@ it.each(['Cancel', 'Close', 'Escape'])('discards an unexecuted preview before cl
   fireEvent.click(screen.getByRole('radio', { name: 'Global' }))
   fireEvent.click(screen.getByRole('button', { name: 'Apply now' }))
   const dialog = await screen.findByRole('dialog', { name: 'No Skills can be applied' })
+  // The preview renders before its async work releases the dialog's busy state.
+  await waitFor(() => expect(dialog.getAttribute('aria-busy')).toBe('false'))
   if (closeAction === 'Escape') fireEvent.keyDown(document, { key: 'Escape' })
   else fireEvent.click(within(dialog).getByRole('button', { name: closeAction }))
   await waitFor(() => expect(invoke).toHaveBeenCalledWith('workspace_discard', { id: reviewed.id }))
@@ -458,32 +634,31 @@ it('requires confirmation for removals even when the preview has no blocked item
   reviewed.items = reviewed.items.map(item => ({ ...item, action: 'remove' }))
   invoke.mockImplementation(async command => command === 'workspace_preview' ? reviewed : command === 'workspace_execute' ? { ...reviewed, confirmed: true } : [])
   render(<PresetPage {...props} intent={{ mode: 'select', members: preset.members, scope: { kind: 'global' }, remove: true }} t={i18n.t} />)
-  fireEvent.click(screen.getByRole('button', { name: 'Apply now' }))
-  const confirm = await screen.findByRole('button', { name: 'Remove selected targets' })
-  expect(invoke.mock.calls.some(([command]) => command === 'workspace_execute')).toBe(false)
-  fireEvent.click(confirm)
+  const dialog = screen.getByRole('dialog', { name: 'Remove selected targets' })
+  expect(within(dialog).queryByRole('radio')).toBeNull()
+  expect(invoke.mock.calls.some(([command]) => ['workspace_preview', 'workspace_execute'].includes(command))).toBe(false)
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Remove selected targets' }))
   await screen.findByRole('heading', { name: 'Application result' })
   expect(invoke).toHaveBeenCalledWith('workspace_execute', { id: reviewed.id })
 })
-it.each(['Edit preset', 'Duplicate'])('clears application overrides and filters before %s', async action => {
+it('clears application overrides and filters before editing a preset', async () => {
   render(<PresetPage {...props} t={i18n.t} />)
-  fireEvent.click(await screen.findByText('Daily'))
-  fireEvent.click(screen.getByRole('button', { name: 'Apply to…' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Apply Daily' }))
   adjustApplication()
   fireEvent.click(screen.getByLabelText('Use common tools for this application'))
   fireEvent.click(screen.getByLabelText('Codex'))
   fireEvent.change(screen.getByLabelText('Search Skills'), { target: { value: 'alpha' } })
   fireEvent.click(screen.getByRole('button', { name: 'Add Skills' }))
   fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-  fireEvent.click(screen.getByRole('button', { name: action }))
+  fireEvent.click(screen.getByRole('button', { name: 'Edit preset Daily' }))
 
-  expect(screen.getByRole('heading', { level: 1, name: action === 'Duplicate' ? 'New preset' : 'Edit preset' })).toBeTruthy()
+  expect(screen.getByRole('heading', { level: 1, name: 'Edit preset' })).toBeTruthy()
   expect((screen.getByLabelText('Search Skills') as HTMLInputElement).value).toBe('')
   expect(screen.getByRole('button', { name: 'Add Skills' })).toBeTruthy()
   expect(screen.queryByRole('group', { name: 'Default tools for newly selected members' })).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Add Skills' }))
-  expect(toolChoice('Default tools for newly selected members', 'Codex').checked).toBe(false)
-  expect(toolChoice('Default tools for newly selected members', 'Cursor').checked).toBe(false)
+  expect(toolChoice('Default tools for newly selected members', 'Codex').checked).toBe(true)
+  expect(toolChoice('Default tools for newly selected members', 'Cursor').checked).toBe(true)
   expect(toolChoice('alpha', 'Codex').checked).toBe(true)
   expect(toolChoice('alpha', 'Cursor').checked).toBe(false)
   expect(toolChoice('beta', 'Codex').checked).toBe(false)
@@ -491,25 +666,25 @@ it.each(['Edit preset', 'Duplicate'])('clears application overrides and filters 
 })
 it('clears temporary selection controls when creating a new preset', async () => {
   render(<PresetPage {...props} t={i18n.t} />)
-  fireEvent.click(await screen.findByText('Daily'))
-  fireEvent.click(screen.getByRole('button', { name: 'Apply to…' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Apply Daily' }))
   adjustApplication()
   fireEvent.click(screen.getByLabelText('Use common tools for this application'))
   fireEvent.click(screen.getByLabelText('Codex'))
   fireEvent.change(screen.getByLabelText('Search Skills'), { target: { value: 'alpha' } })
   fireEvent.click(screen.getByRole('button', { name: 'Add Skills' }))
   fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-  fireEvent.click(screen.getByRole('button', { name: 'Back' }))
   fireEvent.click(screen.getByRole('button', { name: 'New preset' }))
 
   const heading = screen.getByRole('heading', { level: 1, name: 'New preset' })
   expect(document.activeElement).toBe(heading)
   expect((screen.getByLabelText('Search Skills') as HTMLInputElement).value).toBe('')
   expect(screen.getByRole('button', { name: 'Done selecting' })).toBeTruthy()
-  expect((screen.getByLabelText('Codex') as HTMLInputElement).checked).toBe(false)
+  expect((screen.getByLabelText('Codex') as HTMLInputElement).checked).toBe(true)
   fireEvent.click(screen.getByRole('checkbox', { name: 'beta' }))
-  expect(screen.getByLabelText('Adjust tools for beta').parentElement?.hasAttribute('open')).toBe(false)
-  expect(screen.getByText('Choose tools for this member.')).toBeTruthy()
+  expect(within(screen.getByRole('group', { name: 'beta' })).getAllByRole('checkbox')).toHaveLength(2)
+  expect(screen.queryByText('Choose tools for this member.')).toBeNull()
+  expect(toolChoice('beta', 'Codex').checked).toBe(true)
+  expect(toolChoice('beta', 'Cursor').checked).toBe(true)
 })
 it.each(['Daily', 'Weekend'])('starts a fresh %s application from its saved mappings after cancelling temporary changes', async name => {
   const secondPreset: SkillPreset = { ...preset, id: 'p2', name: 'Weekend', members: [{ skillId: 'alpha', tools: ['cursor'] }] }
@@ -627,9 +802,38 @@ it('opens an application result at the top after scrolling through history', asy
   fireEvent.click(historyCard)
 
   expect(screen.getByRole('heading', { name: 'first-project' })).toBeTruthy()
-  for (const summary of screen.getAllByText('View details', { selector: 'summary' })) expect(summary.parentElement?.hasAttribute('open')).toBe(false)
+  expect(screen.queryByText('View details', { selector: 'summary' })).toBeNull()
+  expect(screen.getAllByRole('listitem')).toHaveLength(4)
+  for (const item of screen.getAllByRole('listitem')) expect(item.closest('details')).toBeNull()
   expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Application result' }))
   expect(body.scrollTop).toBe(0)
+})
+it('shows completed and failed results directly while keeping deployment paths optional', async () => {
+  const plan = applicationPlan()
+  const record: ApplicationRecord = { ...plan, confirmed: true, items: [
+    { ...plan.items[0], status: 'done', action: 'existing', targets: [{ agents: ['codex'], affected_agents: ['codex'], path: '/target/alpha', mode: 'symlink', exists: true }] },
+    { ...plan.items[1], status: 'failed', reason: 'TARGET_CONFLICT' },
+  ] }
+  invoke.mockImplementation(async command => command === 'workspace_presets' ? [preset] : command === 'workspace_history' ? [record] : [])
+  render(<PresetPage {...props} t={i18n.t} />)
+  fireEvent.click(screen.getByRole('button', { name: 'All application records' }))
+  fireEvent.click(await screen.findByRole('button', { name: /Daily/ }))
+  const header = screen.getByRole('heading', { name: 'Application result' }).closest('header')!
+  expect(within(header).getByText('Application finished with items to review')).toBeTruthy()
+  expect(within(header).getByText(/Daily/)).toBeTruthy()
+  expect(screen.queryByText('View details')).toBeNull()
+  const rows = screen.getAllByRole('listitem')
+  expect(rows).toHaveLength(2)
+  expect(within(rows[0]).getByText('alpha').closest('details')).toBeNull()
+  expect(within(rows[0]).getByText('Complete')).toBeTruthy()
+  expect(within(rows[1]).getByText('beta').closest('details')).toBeNull()
+  expect(within(rows[1]).getByText('Failed')).toBeTruthy()
+  expect(within(rows[1]).getByText('Target conflicts with existing content. Keep it and resolve the conflict before retrying.').closest('details')).toBeNull()
+  const pathToggle = within(rows[0]).getByText('Deployment locations', { selector: 'summary' })
+  expect(pathToggle.parentElement?.hasAttribute('open')).toBe(false)
+  fireEvent.click(pathToggle)
+  expect(pathToggle.parentElement?.hasAttribute('open')).toBe(true)
+  expect(within(rows[0]).getByText('/target/alpha')).toBeTruthy()
 })
 it('does not discard an edit without confirmation and returns to the source', async () => {
   render(<PresetPage {...props} intent={{ mode: 'edit', members: preset.members }} t={i18n.t} />)
@@ -643,16 +847,16 @@ it('does not discard an edit without confirmation and returns to the source', as
 })
 it.each(['discard', 'delete'])('returns focus to the %s confirmation trigger after Escape', async kind => {
   render(<PresetPage {...props} t={i18n.t} />)
-  fireEvent.click(await screen.findByText('Daily'))
+  await screen.findByText('Daily')
   if (kind === 'discard') {
-    fireEvent.click(screen.getByRole('button', { name: 'Edit preset' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit preset Daily' }))
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Unsaved change' } })
     screen.getByLabelText('Name').focus()
   } else {
     (document.activeElement as HTMLElement).blur()
     expect(document.activeElement).toBe(document.body)
   }
-  const trigger = screen.getByRole('button', { name: kind === 'discard' ? 'Back' : 'Delete preset' })
+  const trigger = screen.getByRole('button', { name: kind === 'discard' ? 'Back' : 'Delete preset Daily' })
   // Pointer clicks on macOS do not necessarily focus buttons before opening the dialog.
   expect(document.activeElement).not.toBe(trigger)
   fireEvent.click(trigger)
@@ -663,27 +867,48 @@ it.each(['discard', 'delete'])('returns focus to the %s confirmation trigger aft
   expect(onBack).not.toHaveBeenCalled()
   expect(invoke.mock.calls.some(([command]) => command === 'workspace_delete_preset')).toBe(false)
 })
-it('keeps secondary detail actions outside the header and returns focus after cancelling deletion', async () => {
+it('keeps deletion in the directory and restores focus after cancelling it', async () => {
   render(<PresetPage {...props} t={i18n.t} />)
-  fireEvent.click(await screen.findByText('Daily'))
-  const header = screen.getByRole('heading', { level: 1, name: 'Daily' }).closest('header')!
-  expect(within(header).getByRole('button', { name: 'Apply to…' })).toBeTruthy()
-  expect(within(header).getByRole('button', { name: 'Edit preset' })).toBeTruthy()
-  expect(within(header).queryByRole('button', { name: 'Duplicate' })).toBeNull()
-  expect(within(header).queryByRole('button', { name: 'Delete preset' })).toBeNull()
-  expect(screen.getByRole('button', { name: 'Duplicate' })).toBeTruthy()
-  const trigger = screen.getByRole('button', { name: 'Delete preset' })
-
+  const trigger = await screen.findByRole('button', { name: 'Delete preset Daily' })
   fireEvent.click(trigger)
   const dialog = screen.getByRole('dialog', { name: 'Delete preset' })
+  expect(within(dialog).getByText('Daily')).toBeTruthy()
   fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
-
   expect(screen.queryByRole('dialog')).toBeNull()
   expect(document.activeElement).toBe(trigger)
-  expect(screen.getByRole('heading', { level: 1, name: 'Daily' })).toBeTruthy()
-  expect(screen.getByRole('button', { name: 'alpha' })).toBeTruthy()
-  expect(screen.getByRole('button', { name: 'beta' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Edit preset Daily' })).toBeTruthy()
   expect(invoke.mock.calls.some(([command]) => command === 'workspace_delete_preset')).toBe(false)
+})
+it('deletes the selected directory row and preserves the other preset', async () => {
+  const other = { ...preset, id: 'p2', name: 'Other preset', revision: 3 }
+  let stored = [preset, other]
+  invoke.mockImplementation(async (command, args) => {
+    if (command === 'workspace_presets') return stored
+    if (command === 'workspace_delete_preset') stored = stored.filter(p => p.id !== args.id)
+    return []
+  })
+  render(<PresetPage {...props} t={i18n.t} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete preset Other preset' }))
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Confirm' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(invoke).toHaveBeenCalledWith('workspace_delete_preset', { id: 'p2', revision: 3 })
+  expect(screen.queryByRole('button', { name: 'Other preset' })).toBeNull()
+  expect(screen.getByRole('button', { name: 'Edit preset Daily' })).toBeTruthy()
+  expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Skill presets' }))
+})
+it('keeps deletion failures visible in the confirmation and allows retry', async () => {
+  invoke.mockImplementation(async command => {
+    if (command === 'workspace_presets') return [preset]
+    if (command === 'workspace_delete_preset') throw new Error('write failed')
+    return []
+  })
+  render(<PresetPage {...props} t={i18n.t} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete preset Daily' }))
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Confirm' }))
+  expect(await within(screen.getByRole('dialog')).findByRole('alert')).toBeTruthy()
+  expect((within(screen.getByRole('dialog')).getByRole('button', { name: 'Confirm' }) as HTMLButtonElement).disabled).toBe(false)
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+  expect(screen.getByRole('button', { name: 'Edit preset Daily' })).toBeTruthy()
 })
 it('shows an explicit empty search result without hiding the search controls', async () => {
   render(<PresetPage {...props} t={i18n.t} />)
@@ -712,8 +937,7 @@ it.each(['untouched', 'restored fields', 'restored members and tool order'])('le
   const onDirtyChange = vi.fn()
   invoke.mockImplementation(async command => command === 'workspace_presets' ? [existing] : [])
   render(<PresetPage {...props} onDirtyChange={onDirtyChange} t={i18n.t} />)
-  fireEvent.click(await screen.findByText('Daily'))
-  fireEvent.click(screen.getByRole('button', { name: 'Edit preset' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit preset Daily' }))
   expect(onDirtyChange).toHaveBeenLastCalledWith(false)
 
   if (state === 'restored fields') {
@@ -730,6 +954,8 @@ it.each(['untouched', 'restored fields', 'restored members and tool order'])('le
     fireEvent.click(screen.getByRole('checkbox', { name: 'alpha' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add Skills' }))
     fireEvent.click(screen.getByRole('checkbox', { name: 'alpha' }))
+    fireEvent.click(toolChoice('alpha', 'Codex'))
+    fireEvent.click(toolChoice('alpha', 'Cursor'))
     fireEvent.click(toolChoice('alpha', 'Cursor'))
     fireEvent.click(toolChoice('alpha', 'Codex'))
   }
@@ -737,30 +963,129 @@ it.each(['untouched', 'restored fields', 'restored members and tool order'])('le
   expect(onDirtyChange).toHaveBeenLastCalledWith(false)
   fireEvent.click(screen.getByRole('button', { name: 'Back' }))
   expect(screen.queryByRole('dialog')).toBeNull()
-  expect(screen.getByRole('heading', { level: 1, name: 'Daily' })).toBeTruthy()
+  expect(screen.getByRole('heading', { level: 1, name: 'Skill presets' })).toBeTruthy()
   expect(invoke.mock.calls.some(([command]) => command === 'workspace_save_preset')).toBe(false)
 })
 
-it('protects an unsaved duplicate even before its fields are changed', async () => {
-  const onDirtyChange = vi.fn()
-  render(<PresetPage {...props} onDirtyChange={onDirtyChange} t={i18n.t} />)
-  fireEvent.click(await screen.findByText('Daily'))
-  fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }))
-
-  expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+it('creates a uniquely named copy from its row menu and keeps both presets in the list', async () => {
+  let stored = [preset, { ...preset, id: 'copy1', name: 'Daily copy' }]
+  invoke.mockImplementation(async (command, args) => {
+    if (command === 'workspace_presets') return stored
+    if (command === 'workspace_save_preset') {
+      const saved = { ...args.preset, id: 'copy2', revision: 1 }
+      stored = [...stored, saved]
+      return saved
+    }
+    return []
+  })
+  render(<PresetPage {...props} t={i18n.t} />)
+  const trigger = await screen.findByRole('button', { name: 'More actions for Daily' })
+  fireEvent.click(trigger)
+  const menu = screen.getByRole('menu', { name: 'More actions for Daily' })
+  const copy = within(menu).getByRole('menuitem', { name: 'Create copy' })
+  expect(document.activeElement).toBe(copy)
+  fireEvent.click(copy)
+  await screen.findByRole('button', { name: 'Edit preset Daily copy 2' })
+  expect(invoke).toHaveBeenCalledWith('workspace_save_preset', { preset: { ...preset, id: '', name: 'Daily copy 2', revision: 0 } })
+  expect(screen.getByRole('heading', { name: 'Skill presets' })).toBeTruthy()
+  expect(screen.queryByRole('menu')).toBeNull()
+  expect(screen.queryByLabelText('Name')).toBeNull()
+  expect(stored[0]).toEqual(preset)
+  await waitFor(() => expect(document.activeElement).toBe(trigger))
+  expect(invoke.mock.calls.some(([command]) => ['workspace_preview', 'workspace_execute', 'workspace_history'].includes(command))).toBe(false)
+})
+it('copies the chosen row mappings rather than the last edited preset', async () => {
+  const weekend = { ...preset, id: 'p2', name: 'Weekend', members: [preset.members[1]] }
+  let stored = [preset, weekend]
+  invoke.mockImplementation(async (command, args) => {
+    if (command === 'workspace_presets') return stored
+    if (command === 'workspace_save_preset') { const saved = { ...args.preset, id: 'copied', revision: 1 }; stored = [...stored, saved]; return saved }
+    return []
+  })
+  render(<PresetPage {...props} t={i18n.t} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit preset Daily' }))
   fireEvent.click(screen.getByRole('button', { name: 'Back' }))
-  expect(screen.getByRole('dialog')).toBeTruthy()
-  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-  expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Daily copy')
-  expect(toolChoice('alpha', 'Codex').checked).toBe(true)
-  expect(toolChoice('beta', 'Cursor').checked).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'More actions for Weekend' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Create copy' }))
+  await screen.findByRole('button', { name: 'Edit preset Weekend copy' })
+  expect(invoke).toHaveBeenCalledWith('workspace_save_preset', { preset: { ...weekend, id: '', revision: 0, name: 'Weekend copy' } })
+  expect(stored.find(value => value.id === 'p2')).toEqual(weekend)
+})
+it('supports keyboard opening and Escape dismissal of a row menu without creating a copy', async () => {
+  render(<PresetPage {...props} t={i18n.t} />)
+  const trigger = await screen.findByRole('button', { name: 'More actions for Daily' })
+  trigger.focus()
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' })
+  const menu = screen.getByRole('menu')
+  const action = within(menu).getByRole('menuitem', { name: 'Create copy' })
+  expect(menu.closest('.workspace-page')).toBeNull()
+  expect(document.activeElement).toBe(action)
+  fireEvent.keyDown(action, { key: 'ArrowUp' })
+  expect(document.activeElement).toBe(action)
+  fireEvent.keyDown(action, { key: 'Escape' })
+  expect(screen.queryByRole('menu')).toBeNull()
+  expect(document.activeElement).toBe(trigger)
+  expect(invoke.mock.calls.some(([command]) => command === 'workspace_save_preset')).toBe(false)
+})
+it('dismisses row menus on outside focus, scrolling, or leaving the page', async () => {
+  const { rerender } = render(<PresetPage {...props} t={i18n.t} />)
+  const trigger = await screen.findByRole('button', { name: 'More actions for Daily' })
+  fireEvent.click(trigger)
+  const search = screen.getByLabelText('Search presets, members or records')
+  act(() => { search.focus() })
+  expect(screen.queryByRole('menu')).toBeNull()
+  expect(document.activeElement).toBe(search)
+  fireEvent.click(trigger)
+  fireEvent.scroll(window)
+  expect(screen.queryByRole('menu')).toBeNull()
+  expect(document.activeElement).toBe(trigger)
+  fireEvent.click(trigger)
+  rerender(<PresetPage {...props} active={false} t={i18n.t} />)
+  expect(screen.queryByRole('menu')).toBeNull()
+  expect(invoke.mock.calls.some(([command]) => command === 'workspace_save_preset')).toBe(false)
+})
+it('prevents duplicate copy submissions and changing flows until saving completes', async () => {
+  let finishSave!: (value: SkillPreset) => void
+  invoke.mockImplementation(command => {
+    if (command === 'workspace_presets') return Promise.resolve([preset])
+    if (command === 'workspace_save_preset') return new Promise<SkillPreset>(resolve => { finishSave = resolve })
+    return Promise.resolve([])
+  })
+  render(<PresetPage {...props} t={i18n.t} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'More actions for Daily' }))
+  const copy = screen.getByRole('menuitem', { name: 'Create copy' })
+  fireEvent.click(copy)
+  await waitFor(() => expect(invoke.mock.calls.some(([command]) => command === 'workspace_save_preset')).toBe(true))
+  fireEvent.click(copy)
+  expect(invoke.mock.calls.filter(([command]) => command === 'workspace_save_preset')).toHaveLength(1)
+  for (const name of ['More actions for Daily', 'Edit preset Daily', 'Apply Daily', 'Delete preset Daily', 'New preset', 'All application records']) {
+    expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true)
+  }
+  await act(async () => { finishSave({ ...preset, id: 'copy1', name: 'Daily copy' }) })
+  expect(screen.getByRole('heading', { name: 'Skill presets' })).toBeTruthy()
+  expect((screen.getByRole('button', { name: 'Edit preset Daily' }) as HTMLButtonElement).disabled).toBe(false)
+})
+it('keeps a failed copy visible in the list and allows retry from the same row menu', async () => {
+  invoke.mockImplementation(async command => {
+    if (command === 'workspace_presets') return [preset]
+    if (command === 'workspace_save_preset') throw new Error('write failed')
+    return []
+  })
+  render(<PresetPage {...props} t={i18n.t} />)
+  const trigger = await screen.findByRole('button', { name: 'More actions for Daily' })
+  fireEvent.click(trigger)
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Create copy' }))
+  expect(await screen.findByRole('alert')).toBeTruthy()
+  await waitFor(() => expect(document.activeElement).toBe(trigger))
+  expect(screen.getByRole('heading', { name: 'Skill presets' })).toBeTruthy()
+  fireEvent.click(trigger)
+  expect((screen.getByRole('menuitem', { name: 'Create copy' }) as HTMLButtonElement).disabled).toBe(false)
 })
 
 it('focuses application on the saved members in a library of 24 Skills and can choose other Skills', async () => {
   const library: ManagedSkill[] = [...skills, ...Array.from({ length: 22 }, (_, index) => ({ ...skills[0], id: `extra-${index}`, name: `GitHub workflow ${index + 1}`, source_type: 'git' as const, description: `Representative GitHub Skill ${index + 1}` }))]
   render(<PresetPage {...props} skills={library} t={i18n.t} />)
-  fireEvent.click(await screen.findByText('Daily'))
-  fireEvent.click(screen.getByRole('button', { name: 'Apply to…' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Apply Daily' }))
   expect(screen.getByText('Adjust for this application', { selector: 'summary' }).parentElement?.hasAttribute('open')).toBe(false)
   expect(screen.queryByRole('checkbox', { name: 'GitHub workflow 22' })).toBeNull()
   adjustApplication()
@@ -776,7 +1101,7 @@ it('focuses application on the saved members in a library of 24 Skills and can c
   expect(screen.getByRole('checkbox', { name: 'GitHub workflow 22' })).toBeTruthy()
   expect(screen.queryByRole('checkbox', { name: 'alpha' })).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-  expect(screen.getByRole('heading', { level: 1, name: 'Daily' })).toBeTruthy()
+  expect(screen.getByRole('heading', { level: 1, name: 'Skill presets' })).toBeTruthy()
   expect(invoke.mock.calls.some(([command]) => ['workspace_save_preset', 'workspace_preview', 'workspace_execute'].includes(command))).toBe(false)
 })
 
@@ -786,8 +1111,7 @@ it('focuses editing on the three saved members at the end of a 24-Skill library 
   const existing: SkillPreset = { ...preset, members: [...preset.members, { skillId: 'extra-21', tools: ['codex', 'cursor'] }] }
   invoke.mockImplementation(async (command, args) => command === 'workspace_save_preset' ? { ...args.preset, revision: 2 } : command === 'workspace_presets' ? [existing] : [])
   render(<PresetPage {...props} skills={library} t={i18n.t} />)
-  fireEvent.click(await screen.findByText('Daily'))
-  fireEvent.click(screen.getByRole('button', { name: 'Edit preset' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit preset Daily' }))
 
   expect(screen.getByRole('button', { name: 'Add Skills' })).toBeTruthy()
   expect(screen.queryByRole('group', { name: 'Default tools for newly selected members' })).toBeNull()
@@ -801,8 +1125,8 @@ it('focuses editing on the three saved members at the end of a 24-Skill library 
 
   expect(screen.getByRole('button', { name: 'Done selecting' })).toBeTruthy()
   expect((screen.getByLabelText('Search Skills') as HTMLInputElement).value).toBe('')
-  expect(toolChoice('Default tools for newly selected members', 'Codex').checked).toBe(false)
-  expect(toolChoice('Default tools for newly selected members', 'Cursor').checked).toBe(false)
+  expect(toolChoice('Default tools for newly selected members', 'Codex').checked).toBe(true)
+  expect(toolChoice('Default tools for newly selected members', 'Cursor').checked).toBe(true)
   for (const skill of library) expect(screen.getByRole('checkbox', { name: skill.name })).toBeTruthy()
   expect(toolChoice('alpha', 'Codex').checked).toBe(true)
   expect(toolChoice('alpha', 'Cursor').checked).toBe(false)
@@ -811,7 +1135,7 @@ it('focuses editing on the three saved members at the end of a 24-Skill library 
   expect(toolChoice('GitHub workflow 22', 'Codex').checked).toBe(true)
   expect(toolChoice('GitHub workflow 22', 'Cursor').checked).toBe(true)
   fireEvent.click(screen.getByRole('checkbox', { name: 'GitHub workflow 6' }))
-  fireEvent.click(toolChoice('GitHub workflow 6', 'Cursor'))
+  fireEvent.click(toolChoice('GitHub workflow 6', 'Codex'))
   fireEvent.click(screen.getByRole('button', { name: 'Done selecting' }))
   expect(screen.queryByRole('checkbox', { name: 'GitHub workflow 1' })).toBeNull()
   expect(screen.getByRole('checkbox', { name: 'GitHub workflow 6' })).toBeTruthy()
@@ -819,7 +1143,7 @@ it('focuses editing on the three saved members at the end of a 24-Skill library 
   expect(toolChoice('alpha', 'Codex').checked).toBe(true)
   fireEvent.click(screen.getByRole('button', { name: 'Save preset' }))
 
-  await screen.findByRole('heading', { level: 1, name: 'Daily' })
+  await screen.findByRole('heading', { level: 1, name: 'Skill presets' })
   expect(invoke).toHaveBeenCalledWith('workspace_save_preset', { preset: { ...existing, members: [...existing.members, { skillId: 'extra-5', tools: ['cursor'] }] } })
   expect(invoke.mock.calls.some(([command]) => ['workspace_preview', 'workspace_execute'].includes(command))).toBe(false)
 })
@@ -861,8 +1185,7 @@ it('saves a conflicting draft as a separate preset without overwriting the lates
     return saved
   })
   render(<PresetPage {...props} onDirtyChange={onDirtyChange} t={i18n.t} />)
-  fireEvent.click(await screen.findByText('Daily'))
-  fireEvent.click(screen.getByRole('button', { name: 'Edit preset' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit preset Daily' }))
   fireEvent.change(screen.getByLabelText('Purpose (optional)'), { target: { value: 'My unsaved purpose' } })
   fireEvent.click(toolChoice('alpha', 'Cursor'))
   fireEvent.click(screen.getByRole('button', { name: 'Save preset' }))
@@ -882,7 +1205,7 @@ it('saves a conflicting draft as a separate preset without overwriting the lates
   expect(savedCopy.members).toEqual([{ skillId: 'alpha', tools: ['codex', 'cursor'] }, preset.members[1]])
   expect(stored.find(item => item.id === preset.id)).toEqual(latest)
   expect(invoke.mock.calls.filter(([command]) => command === 'workspace_save_preset').map(([, args]) => ({ id: args.preset.id, revision: args.preset.revision }))).toEqual([{ id: 'p1', revision: 1 }, { id: '', revision: 0 }])
-  expect(await screen.findByRole('heading', { level: 1, name: savedCopy.name })).toBeTruthy()
+  expect(await screen.findByRole('button', { name: `Edit preset ${savedCopy.name}` })).toBeTruthy()
   expect(screen.queryByRole('alert')).toBeNull()
   expect(onDirtyChange).toHaveBeenLastCalledWith(false)
 })
@@ -900,8 +1223,7 @@ it('loads the latest preset only after confirmation and resets the dirty baselin
     return []
   })
   render(<PresetPage {...props} onDirtyChange={onDirtyChange} t={i18n.t} />)
-  fireEvent.click(await screen.findByText('Daily'))
-  fireEvent.click(screen.getByRole('button', { name: 'Edit preset' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit preset Daily' }))
   fireEvent.change(screen.getByLabelText('Purpose (optional)'), { target: { value: 'My draft purpose' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save preset' }))
   const loadLatest = await screen.findByRole('button', { name: 'Load latest preset' })
@@ -930,7 +1252,7 @@ it('loads the latest preset only after confirmation and resets the dirty baselin
   expect(screen.queryByRole('alert')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Back' }))
   expect(screen.queryByRole('dialog')).toBeNull()
-  expect(screen.getByRole('heading', { level: 1, name: latest.name })).toBeTruthy()
+  expect(screen.getByRole('heading', { level: 1, name: 'Skill presets' })).toBeTruthy()
   expect(invoke.mock.calls.filter(([command]) => command === 'workspace_save_preset')).toHaveLength(1)
 })
 
@@ -947,7 +1269,6 @@ it('distinguishes manual removals from manual applications in history', async ()
   const removal = screen.getByRole('button', { name: /Manual removal/ })
   expect(removal.textContent).not.toContain('Manual application')
   fireEvent.click(removal)
-  expand('View details')
   expect(screen.getByText('Remove')).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Undo additions' })).toBeNull()
 })
@@ -992,9 +1313,8 @@ it.each(['newTarget', 'laterUse'])('keeps partially undone repair receipts revie
   const alreadyUndone = within(dialog).getByText('1 deployments already undone', { selector: 'summary' })
   expect(alreadyUndone.parentElement?.hasAttribute('open')).toBe(false)
   fireEvent.click(alreadyUndone)
-  expect(within(dialog).getByText('/project/codex')).toBeTruthy()
-  for (const details of within(dialog).getAllByText('Deployment locations', { selector: 'summary' })) fireEvent.click(details)
-  expect(within(dialog).getByText('/project/cursor')).toBeTruthy()
+  expect(within(alreadyUndone.parentElement as HTMLElement).getByText('Codex')).toBeTruthy()
+  expect(within(dialog).getByText('Cursor')).toBeTruthy()
   if (reason === 'newTarget') expect(within(dialog).getByTitle('Cursor')).toBeTruthy()
   else expect(within(dialog).getByRole('heading', { name: 'Kept for your protection' })).toBeTruthy()
   expect((screen.getByRole('button', { name: 'Confirm undo' }) as HTMLButtonElement).disabled).toBe(reason !== 'newTarget')
@@ -1052,8 +1372,7 @@ it('binds undo availability and explicit inspection to the selected history reco
   fireEvent.click(undo)
   await screen.findByRole('heading', { name: 'Undo additions' })
   expect(invoke.mock.calls.filter(([command]) => command === 'workspace_preview_undo')).toEqual([['workspace_preview_undo', { id: second.id }]])
-  fireEvent.click(within(screen.getByRole('dialog', { name: 'Undo additions' })).getByText('Deployment locations', { selector: 'summary' }))
-  expect(screen.getByText('/project/cursor')).toBeTruthy()
+  expect(within(screen.getByRole('dialog', { name: 'Undo additions' })).getByText('Cursor')).toBeTruthy()
 })
 
 it('removes the undo action after confirming all owned additions while preserving existing deployments', async () => {
@@ -1237,12 +1556,11 @@ it('accepts a fully completed journal recovered after an execution transport err
   expect(invoke.mock.calls.some(([command]) => command === 'workspace_discard')).toBe(false)
 })
 
-it.each(['directory', 'detail'])('returns focus to the %s application trigger after inert blurs it and Escape closes the dialog', async origin => {
+it('returns focus to the list application trigger after inert blurs it and Escape closes the dialog', async () => {
   const blurred = simulateInertBlur()
   render(<PresetPage {...props} t={i18n.t} />)
   await screen.findByRole('button', { name: 'Apply Daily' })
-  if (origin === 'detail') fireEvent.click(screen.getByRole('button', { name: 'Daily' }))
-  const trigger = screen.getByRole('button', { name: origin === 'directory' ? 'Apply Daily' : 'Apply to…' })
+  const trigger = screen.getByRole('button', { name: 'Apply Daily' })
   expect(document.activeElement).not.toBe(trigger)
   fireEvent.click(trigger)
   const dialog = screen.getByRole('dialog', { name: 'Apply preset' })
@@ -1377,4 +1695,140 @@ it.each(['Undo additions', 'Preview unfinished items again'])('restores the %s r
   expect(screen.queryByRole('dialog')).toBeNull()
   expect(document.activeElement).toBe(trigger)
   expect(invoke.mock.calls.some(([command]) => ['workspace_execute', 'workspace_undo'].includes(command))).toBe(false)
+})
+
+it('edits each member tool directly without an extra disclosure or duplicate tool badges', async () => {
+  const tools = [
+    { id: 'claude_code', label: 'Claude Code' }, { id: 'codex', label: 'Codex' },
+    { id: 'deepseek_harness', label: 'DeepSeek Harness' }, { id: 'antigravity', label: 'Antigravity' },
+  ]
+  const value = { ...preset, members: [{ skillId: 'alpha', tools: tools.map(tool => tool.id) }] }
+  invoke.mockImplementation(async command => command === 'workspace_presets' ? [value] : command === 'workspace_save_preset' ? value : [])
+  render(<PresetPage {...props} tools={tools} t={i18n.t} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit preset Daily' }))
+  const assignments = screen.getByRole('group', { name: 'alpha' })
+  // Each choice must already be accessible, without expanding a second representation.
+  expect(within(assignments).getAllByRole('checkbox')).toHaveLength(4)
+  expect(assignments.closest('.workspace-member')?.querySelector('details')).toBeNull()
+  expect(assignments.closest('.workspace-member')?.querySelector('.workspace-tool-badge')).toBeNull()
+  for (const tool of tools) expect((within(assignments).getByRole('checkbox', { name: tool.label }) as HTMLInputElement).checked).toBe(true)
+  for (const tool of tools) fireEvent.click(within(assignments).getByRole('checkbox', { name: tool.label }))
+  expect(screen.getByText('Choose tools for this member.')).toBeTruthy()
+  expect((screen.getByRole('button', { name: 'Save preset' }) as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.click(within(assignments).getByRole('checkbox', { name: 'Codex' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save preset' }))
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('workspace_save_preset', expect.objectContaining({ preset: expect.objectContaining({ members: [{ skillId: 'alpha', tools: ['codex'] }] }) })))
+  expect(invoke).not.toHaveBeenCalledWith('workspace_execute', expect.anything())
+})
+
+it('summarizes undo by Skill and location with tool badges without exposing filesystem paths', async () => {
+  const record = undoRecord('grouped', 'Grouped undo')
+  record.items = [{ ...record.items[0], name: 'Historical alpha' }, { ...record.items[0], skillId: 'beta', name: 'Historical beta' }]
+  const receipts: WorkspaceUndoItem[] = [
+    { ...undoReceipt('codex', 'newTarget'), path: '/test/shared/alpha' },
+    { ...undoReceipt('cursor', 'newTarget'), path: '/test/shared/alpha' },
+    { ...undoReceipt('beta-global', 'newTarget'), skillId: 'beta', tool: 'codex', scope: { kind: 'global' }, path: '/test/global/beta' },
+    { ...undoReceipt('beta-project', 'newTarget'), skillId: 'beta', tool: 'cursor', path: '/project/beta' },
+    { ...undoReceipt('protected-alpha', 'contentChanged'), path: '/test/protected/alpha' },
+    { ...undoReceipt('protected-beta', 'laterUse'), skillId: 'beta', path: '/test/protected/beta' },
+    undoReceipt('old', 'alreadyUndone'),
+  ]
+  invoke.mockImplementation(async command => command === 'workspace_history' ? [record] : command === 'workspace_preview_undo' ? receipts : [])
+  render(<PresetPage {...props} t={i18n.t} />)
+  fireEvent.click(screen.getByRole('button', { name: 'All application records' }))
+  fireEvent.click(await screen.findByRole('button', { name: /Grouped undo/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Undo additions' }))
+  const dialog = await screen.findByRole('dialog', { name: 'Undo additions' })
+  expect(dialog.querySelector('.workspace-undo-overview')?.textContent).toBe('Skills: 2 · Deployments to remove: 4 · To keep: 2')
+  const removable = within(dialog).getByRole('region', { name: 'Deployments to remove' })
+  expect(within(removable).getAllByRole('heading', { name: 'Historical alpha' })).toHaveLength(1)
+  expect(within(removable).getAllByRole('heading', { name: 'Historical beta' })).toHaveLength(1)
+  expect(within(removable).getAllByRole('listitem')).toHaveLength(3)
+  const alpha = within(removable).getByRole('region', { name: 'Historical alpha' })
+  expect(within(alpha).getByText('Codex')).toBeTruthy()
+  expect(within(alpha).getByText('Cursor')).toBeTruthy()
+  expect(within(alpha).getByText(`${i18n.t('scope.project')} · project`)).toBeTruthy()
+  expect(within(alpha).getByText('Deployments: 2')).toBeTruthy()
+  for (const receipt of receipts) {
+    expect(dialog.innerHTML).not.toContain(receipt.path)
+    if (receipt.scope.kind === 'project') expect(dialog.innerHTML).not.toContain(receipt.scope.path)
+  }
+  expect(within(removable).getByText('Global')).toBeTruthy()
+  expect(removable.querySelector('details')).toBeNull()
+  const retained = within(dialog).getByRole('region', { name: 'Kept for your protection' })
+  expect(within(retained).getByRole('heading', { name: 'Historical alpha' })).toBeTruthy()
+  expect(within(retained).getByText('Retained: content was modified')).toBeTruthy()
+  expect(within(retained).getByText('Retained: later operation uses it')).toBeTruthy()
+  expect((within(dialog).getByRole('button', { name: 'Confirm undo' }) as HTMLButtonElement).disabled).toBe(false)
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+  expect(invoke.mock.calls.some(([command]) => command === 'workspace_undo')).toBe(false)
+})
+
+it.each(['empty', 'blocked', 'partial'] as const)('keeps %s removal previews for review without executing them', async state => {
+  const reviewed = applicationPlan({ preset: null, remove: true })
+  reviewed.items = state === 'empty' ? [] : reviewed.items.map((item, index) => ({ ...item, action: state === 'partial' && index ? 'remove' : 'blocked', status: state === 'partial' && index ? 'pending' : 'blocked' }))
+  invoke.mockImplementation(async command => command === 'workspace_preview' ? reviewed : [])
+  render(<PresetPage {...props} overlayOnly intent={{ mode: 'select', members: preset.members, scope: { kind: 'global' }, remove: true }} t={i18n.t} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Remove selected targets' }))
+  const dialog = await screen.findByRole('dialog', { name: state === 'partial' ? 'Remove selected targets' : 'No deployments can be removed' })
+  expect(invoke.mock.calls.some(([command]) => command === 'workspace_execute')).toBe(false)
+  expect(within(dialog).queryByRole('radio')).toBeNull()
+  expect(within(dialog).queryByRole('button', { name: 'Back to selection' })).toBeNull()
+  expect(Boolean(within(dialog).queryByRole('button', { name: 'Remove selected targets' }))).toBe(state === 'partial')
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+  await waitFor(() => expect(onBack).toHaveBeenCalledOnce())
+  expect(invoke).toHaveBeenCalledWith('workspace_discard', { id: reviewed.id })
+})
+
+it('keeps an uncertain scoped removal in its result dialog and rechecks the same record', async () => {
+  const reviewed = applicationPlan({ preset: null, remove: true })
+  reviewed.items = reviewed.items.map(item => ({ ...item, action: 'remove' }))
+  const uncertain = { ...reviewed, confirmed: true, items: reviewed.items.map(item => ({ ...item, status: 'interrupted' })) }
+  invoke.mockImplementation(async command => {
+    if (command === 'workspace_preview' || command === 'workspace_recheck') return reviewed
+    if (command === 'workspace_execute') throw new Error('lost response')
+    if (command === 'workspace_history') return [uncertain]
+    return []
+  })
+  render(<PresetPage {...props} overlayOnly intent={{ mode: 'select', members: preset.members, scope: { kind: 'global' }, remove: true }} t={i18n.t} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Remove selected targets' }))
+  await screen.findByRole('dialog', { name: 'Removal result' })
+  expect(screen.getByRole('alert').textContent).toContain(i18n.t('workspace110.executionUnknown'))
+  fireEvent.click(screen.getByRole('button', { name: 'Preview unfinished items again' }))
+  const review = await screen.findByRole('dialog', { name: 'Remove selected targets' })
+  expect(within(review).queryByRole('radio')).toBeNull()
+  expect(invoke).toHaveBeenCalledWith('workspace_recheck', { id: reviewed.id })
+  expect(invoke.mock.calls.filter(([command]) => command === 'workspace_execute')).toHaveLength(1)
+  fireEvent.click(within(review).getByRole('button', { name: 'Back to result' }))
+  expect(screen.getByRole('dialog', { name: 'Removal result' })).toBeTruthy()
+  expect(onBack).not.toHaveBeenCalled()
+  expect(invoke.mock.calls.some(([command]) => command === 'workspace_presets')).toBe(false)
+})
+
+it('repairs only failed tools in one explicitly selected location and blocks healthy locations', async () => {
+  const alpha = '/test/project-alpha', beta = '/test/project-beta'
+  const broken: ManagedSkill = { ...skills[0], targets: [
+    { tool: 'codex', scope: 'global', target_path: '/test/global/alpha', mode: 'copy', status: 'ok' },
+    { tool: 'codex', scope: 'project', project_path: alpha, target_path: `${alpha}/alpha`, mode: 'copy', status: 'error' },
+    { tool: 'cursor', scope: 'project', project_path: beta, target_path: `${beta}/alpha`, mode: 'copy', status: 'error' },
+  ] }
+  invoke.mockImplementation(async (command, args) => command === 'workspace_preview' ? { ...applicationPlan(), items: [{ ...applicationPlan().items[0], tools: args.request.members[0].tools, scope: args.request.scopes[0] }] } : command === 'workspace_execute' ? { ...applicationPlan(), confirmed: true, items: [] } : [])
+  render(<PresetPage {...props} overlayOnly skills={[broken]} projects={[alpha, beta]} intent={{ mode: 'select', operation: 'repair', members: [{ skillId: broken.id, tools: ['codex', 'cursor'] }] }} t={i18n.t} />)
+  const dialog = screen.getByRole('dialog', { name: i18n.t('workspace110.repairTargets') })
+  fireEvent.click(within(dialog).getByRole('radio', { name: 'Global' }))
+  expect(within(dialog).getByText('No failed deployments need repair in this location.')).toBeTruthy()
+  expect((within(dialog).getByRole('button', { name: 'Check and repair' }) as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.click(within(dialog).getByRole('radio', { name: 'Projects' }))
+  fireEvent.click(within(dialog).getByRole('checkbox', { name: alpha }))
+  expect(within(dialog).getByText('Codex')).toBeTruthy()
+  expect(within(dialog).queryByText('Cursor')).toBeNull()
+  fireEvent.click(within(dialog).getByRole('checkbox', { name: beta }))
+  expect((within(dialog).getByRole('checkbox', { name: alpha }) as HTMLInputElement).checked).toBe(false)
+  expect(within(dialog).getByText('Cursor')).toBeTruthy()
+  expect(within(dialog).queryByText('Codex')).toBeNull()
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Check and repair' }))
+  await screen.findByRole('dialog', { name: 'Application result' })
+  expect(invoke).toHaveBeenCalledWith('workspace_preview', { request: {
+    presetId: null, members: [{ skillId: broken.id, tools: ['cursor'] }], scopes: [{ kind: 'project', path: beta }], remove: false,
+  } })
 })

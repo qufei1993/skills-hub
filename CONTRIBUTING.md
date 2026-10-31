@@ -42,7 +42,7 @@ cargo test
 
 - Ensure `npm run check` passes on the final changes
 - Keep changes small and focused (do not commit local configs/caches/build artifacts)
-- For UI changes, include screenshots or a short recording
+- For UI changes, describe the verified behavior and checks in the PR. Keep generated verification artifacts local and publish them only when explicitly requested by the user, following the [project artifact policy](AGENTS.md#development-and-delivery).
 - Include applicable changelog and documentation updates following [Change records and releases](#change-records-and-releases)
 
 For AI-assisted work, follow [the project rules](AGENTS.md) and [AI engineering workflow](docs/AI-ENGINEERING.md). The repository includes [project Skills and desktop import instructions](skills/README.md); choose your own AI tools and deployment scope. AI assistance is optional and does not change the contribution requirements.
