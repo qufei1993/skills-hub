@@ -1,0 +1,70 @@
+name: Issue 208 Windows reproduction
+
+on:
+  push:
+    branches: [codex/issue208-windows-repro]
+    paths:
+      - .github/workflows/issue208-repro.yml
+      - scripts/issue208-repro/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue208-repro-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reproduce:
+    name: Windows NTFS / ${{ matrix.version }}
+    runs-on: windows-2022
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: v1.0.1
+            commit: 784448fb0d8e32158b4aa9c809885d88c258843d
+            fixed: 'false'
+          - version: main
+            commit: 637101d8ae1bf559d5d0ff54c26fc2b648c52444
+            fixed: 'true'
+    env:
+      CARGO_BUILD_TARGET: x86_64-pc-windows-msvc
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.commit }}
+          path: specimen
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: specimen/src-tauri
+          shared-key: native-x86_64-pc-windows-msvc
+          key: debug
+      - name: Reproduce with isolated synthetic data and real Windows junctions
+        run: >-
+          python harness/scripts/issue208-repro/run.py
+          --checkout specimen
+          --output evidence/${{ matrix.version }}
+          --commit ${{ matrix.commit }}
+          --fixed ${{ matrix.fixed }}
+      - name: Upload snapshots, NTSTATUS probes and logs even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue208-windows-${{ matrix.version }}
+          path: evidence/${{ matrix.version }}
+          if-no-files-found: error
+          retention-days: 14
