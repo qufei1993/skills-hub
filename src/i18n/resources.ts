@@ -1665,6 +1665,7 @@ export const resources = {
       },
       status: {
         importCompleted: 'Import completed.',
+        importCompletedWithSkipped: 'Imported {{imported}} Skills. Skipped {{managed}} already managed Skills and {{sources}} sync targets to preserve source folders.',
         localSkillCreated: 'Local skill created.',
         gitSkillCreated: 'Git skill created.',
         selectedSkillsInstalled: 'Selected skills installed.',
@@ -3419,6 +3420,7 @@ export const resources = {
       },
       status: {
         importCompleted: '导入完成。',
+        importCompletedWithSkipped: '已导入 {{imported}} 个 Skills，跳过 {{managed}} 个已管理项，并为保护来源目录跳过 {{sources}} 个同步目标。',
         localSkillCreated: '本地技能创建完成。',
         gitSkillCreated: 'Git 技能创建完成。',
         selectedSkillsInstalled: '选中技能安装完成。',

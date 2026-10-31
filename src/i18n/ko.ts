@@ -1636,6 +1636,7 @@ export const ko = {
     },
     "status": {
       "importCompleted": "가져오기가 완료되었습니다.",
+      "importCompletedWithSkipped": "스킬 {{imported}}개를 가져왔습니다. 이미 관리 중인 스킬 {{managed}}개와 소스 폴더 보호를 위한 동기화 대상 {{sources}}개를 건너뛰었습니다.",
       "localSkillCreated": "로컬 스킬이 생성되었습니다.",
       "gitSkillCreated": "Git 스킬이 생성되었습니다.",
       "selectedSkillsInstalled": "선택한 스킬을 설치했습니다.",

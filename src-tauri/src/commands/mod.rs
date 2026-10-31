@@ -77,7 +77,7 @@ use crate::core::tool_adapters::{
 use crate::services::install::{
     GitInstallCandidate, InstallAction, InstallOutcome, InstallRequest,
 };
-use crate::services::library::{AdoptRequest, RemoveRequest, TagAction, TagSelector};
+use crate::services::library::{RemoveRequest, TagAction, TagSelector};
 use crate::services::operation_lock::{OperationKind, OperationLock};
 use crate::services::skills_hub::SkillsHubService;
 use crate::services::types::{Agent as ServiceAgent, Skill as ServiceSkill};
@@ -1979,15 +1979,12 @@ pub async fn import_existing_skill(
     service: State<'_, SkillsHubService>,
     sourcePath: String,
     name: Option<String>,
-) -> Result<InstallResultDto, String> {
+) -> Result<Option<InstallResultDto>, String> {
     let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let plan = service.plan_adopt_direct_with_name(&sourcePath, name)?;
-        let mut outcome = service.adopt(AdoptRequest::confirmed(plan.id))?;
-        let adopted = outcome.adopted.pop().ok_or_else(|| {
-            crate::services::error::ServiceError::internal("failed to import the selected skill")
-        })?;
-        Ok::<_, crate::services::error::ServiceError>(to_service_install_dto(adopted))
+        service
+            .import_discovered_skill(&sourcePath, name)
+            .map(|outcome| outcome.map(to_service_install_dto))
     })
     .await
     .map_err(|err| err.to_string())?

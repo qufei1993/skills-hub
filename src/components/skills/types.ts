@@ -130,6 +130,9 @@ export type InstallResultDto = {
   content_hash?: string | null
 }
 
+// Discovery imports return null when the selected source is already managed.
+export type DiscoveredSkillImportResultDto = InstallResultDto | null
+
 export type ToolInfoDto = {
   key: string
   label: string

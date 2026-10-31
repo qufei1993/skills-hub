@@ -243,17 +243,17 @@ pub(crate) fn build_onboarding_plan_for_runtime(
     home: &Path,
 ) -> Result<OnboardingPlan> {
     let central = resolve_central_repo_path(paths, store)?;
-    let mut managed_targets = store
+    let mut managed_paths = store
         .list_all_skill_target_paths()?
         .into_iter()
-        .map(|(tool, path)| managed_target_key(&tool, Path::new(&path)))
+        .map(|(_, path)| managed_path_key(Path::new(&path)))
         .collect::<std::collections::HashSet<_>>();
     for skill in store.list_skills()? {
-        if let Some(source_ref) = skill.source_ref {
-            managed_targets.insert(managed_target_key(
-                CLAUDE_PLUGIN_TOOL_KEY,
-                Path::new(&source_ref),
-            ));
+        managed_paths.insert(managed_path_key(Path::new(&skill.central_path)));
+        if skill.source_type == "local" {
+            if let Some(source) = skill.source_ref.filter(|source| !source.trim().is_empty()) {
+                managed_paths.insert(managed_path_key(Path::new(&source)));
+            }
         }
     }
     let claude_config_dir = resolve_claude_config_dir(home);
@@ -265,7 +265,7 @@ pub(crate) fn build_onboarding_plan_for_runtime(
         home,
         &claude_config_dir,
         Some(&central),
-        Some(&managed_targets),
+        Some(&managed_paths),
         &disabled_source_keys,
     )
 }
@@ -379,13 +379,13 @@ fn is_valid_scan_source_key(key: &str) -> bool {
 fn build_onboarding_plan_in_home(
     home: &Path,
     exclude_root: Option<&Path>,
-    exclude_managed_targets: Option<&std::collections::HashSet<String>>,
+    exclude_managed_paths: Option<&HashSet<PathBuf>>,
 ) -> Result<OnboardingPlan> {
     build_onboarding_plan_with_claude_dir(
         home,
         &home.join(".claude"),
         exclude_root,
-        exclude_managed_targets,
+        exclude_managed_paths,
         &HashSet::new(),
     )
 }
@@ -394,7 +394,7 @@ fn build_onboarding_plan_with_claude_dir(
     home: &Path,
     claude_config_dir: &Path,
     exclude_root: Option<&Path>,
-    exclude_managed_targets: Option<&std::collections::HashSet<String>>,
+    exclude_managed_paths: Option<&HashSet<PathBuf>>,
     disabled_source_keys: &HashSet<String>,
 ) -> Result<OnboardingPlan> {
     let adapters = default_tool_adapters();
@@ -422,7 +422,7 @@ fn build_onboarding_plan_with_claude_dir(
         all_detected.extend(filter_detected(
             detected,
             exclude_root,
-            exclude_managed_targets,
+            exclude_managed_paths,
         ));
     }
 
@@ -464,8 +464,8 @@ fn build_onboarding_plan_with_claude_dir(
                 return false;
             }
         }
-        if let Some(exclude) = exclude_managed_targets {
-            if exclude.contains(&managed_target_key(&variant.tool, &variant.path)) {
+        if let Some(exclude) = exclude_managed_paths {
+            if is_managed_path(&variant.path, exclude) {
                 return false;
             }
         }
@@ -694,9 +694,9 @@ fn add_skill_dir_candidate(path: &Path, plugin_root: &Path, out: &mut Vec<PathBu
 fn filter_detected(
     detected: Vec<DetectedSkill>,
     exclude_root: Option<&Path>,
-    exclude_managed_targets: Option<&std::collections::HashSet<String>>,
+    exclude_managed_paths: Option<&HashSet<PathBuf>>,
 ) -> Vec<DetectedSkill> {
-    if exclude_root.is_none() && exclude_managed_targets.is_none() {
+    if exclude_root.is_none() && exclude_managed_paths.is_none() {
         return detected;
     }
     detected
@@ -712,8 +712,8 @@ fn filter_detected(
                     }
                 }
             }
-            if let Some(exclude) = exclude_managed_targets {
-                if exclude.contains(&managed_target_key(skill.tool.as_key(), &skill.path)) {
+            if let Some(exclude) = exclude_managed_paths {
+                if is_managed_path(&skill.path, exclude) {
                     return false;
                 }
             }
@@ -723,14 +723,19 @@ fn filter_detected(
 }
 
 fn is_under(path: &Path, base: &Path) -> bool {
-    path.starts_with(base)
+    managed_path_key(path).starts_with(managed_path_key(base))
 }
 
-fn managed_target_key(tool: &str, path: &Path) -> String {
-    let tool = tool.to_ascii_lowercase();
+fn managed_path_key(path: &Path) -> PathBuf {
     let resolved = path_for_comparison(path).unwrap_or_else(|_| path.to_path_buf());
-    let normalized = normalize_path_for_key(&resolved);
-    format!("{tool}\n{normalized}")
+    PathBuf::from(normalize_path_for_key(&resolved))
+}
+
+fn is_managed_path(path: &Path, managed_paths: &HashSet<PathBuf>) -> bool {
+    let physical = managed_path_key(path);
+    managed_paths
+        .iter()
+        .any(|managed| paths_overlap_physical(&physical, managed))
 }
 
 fn normalize_path_for_key(path: &Path) -> String {
