@@ -4,7 +4,7 @@ import ctypes
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import platform
 import shutil
 import subprocess
@@ -48,6 +48,18 @@ ConvertTo-Json -InputObject $items -Depth 4 -Compress
     if result.returncode:
         raise RuntimeError("Cannot inspect Windows recycle bin: " + result.stderr)
     return {"available": True, "entries": json.loads(result.stdout.lstrip("\ufeff"))}
+
+
+def verify_recycle_control(root, entries):
+    control = PureWindowsPath(str(root)) / "fixtures" / "system-recycle-control"
+    assert entries, "the system-recycle positive control was not observed"
+    assert any(PureWindowsPath(item["deleted_from"]) == control.parent
+               and item["name"] == control.name for item in entries), entries
+    for item in entries:
+        parent = PureWindowsPath(item["deleted_from"])
+        is_control_root = parent == control.parent and item["name"] == control.name
+        assert is_control_root or parent.is_relative_to(control), item
+    return {"verified": True, "positive_control_entries": len(entries), "business_scenario_entries": 0}
 
 
 def nt_open_directory(path):
@@ -157,8 +169,7 @@ def main():
         recycled = recycle_snapshot(root)
         save(output / "system-recycle-after.json", recycled)
         if os.name == "nt":
-            entries = recycled["entries"]
-            assert len(entries) == 1 and entries[0]["name"] == "system-recycle-control", entries
+            save(output / "system-recycle-verification.json", verify_recycle_control(root, recycled["entries"]))
         succeeded = True
     finally:
         if (root/"reports").exists():
