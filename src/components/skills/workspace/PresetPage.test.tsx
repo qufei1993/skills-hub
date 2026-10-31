@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { StrictMode } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import i18n from '../../../i18n'
@@ -1764,12 +1765,50 @@ it('summarizes undo by Skill and location with tool badges without exposing file
   expect(invoke.mock.calls.some(([command]) => command === 'workspace_undo')).toBe(false)
 })
 
+it('removes the selected project directly without confirmation or success dialogs', async () => {
+  const reviewed = applicationPlan({ preset: null, remove: true })
+  reviewed.items = reviewed.items.map(item => ({ ...item, scope: { kind: 'project', path: '/project' }, action: 'remove' }))
+  let finish!: (record: ApplicationRecord) => void
+  const pending = new Promise<ApplicationRecord>(resolve => { finish = resolve })
+  invoke.mockImplementation(async command => command === 'workspace_preview' ? reviewed : command === 'workspace_execute' ? pending : [])
+  render(<StrictMode><PresetPage {...props} overlayOnly intent={{ mode: 'select', members: preset.members, scope: { kind: 'project', path: '/project' }, remove: true }} t={i18n.t} /></StrictMode>)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('workspace_execute', { id: reviewed.id }))
+  expect(invoke).toHaveBeenCalledWith('workspace_preview', { request: { presetId: null, members: preset.members, scopes: [{ kind: 'project', path: '/project' }], remove: true } })
+  expect(screen.queryByRole('dialog')).toBeNull()
+  await act(async () => finish({ ...reviewed, confirmed: true, items: reviewed.items.map(item => ({ ...item, status: 'done' })) }))
+  expect(onBack).toHaveBeenCalledOnce()
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(invoke.mock.calls.filter(([command]) => command === 'workspace_execute')).toHaveLength(1)
+})
+
+it('preserves a completed removal when refreshing the library fails', async () => {
+  const reviewed = applicationPlan({ preset: null, remove: true })
+  reviewed.items = reviewed.items.map(item => ({ ...item, action: 'remove' }))
+  invoke.mockImplementation(async command => command === 'workspace_preview' ? reviewed : command === 'workspace_execute' ? { ...reviewed, confirmed: true, items: reviewed.items.map(item => ({ ...item, status: 'done' })) } : [])
+  render(<PresetPage {...props} onChanged={async () => { throw new Error('refresh unavailable') }} overlayOnly intent={{ mode: 'select', members: preset.members, scope: { kind: 'project', path: '/project' }, remove: true }} t={i18n.t} />)
+  const dialog = await screen.findByRole('dialog', { name: 'Removal result' })
+  expect(within(dialog).getByRole('alert')).toBeTruthy()
+  expect(within(dialog).queryByRole('button', { name: 'Remove selected targets' })).toBeNull()
+  expect(within(dialog).queryByRole('button', { name: 'Preview unfinished items again' })).toBeNull()
+  expect(invoke.mock.calls.filter(([command]) => command === 'workspace_execute')).toHaveLength(1)
+  expect(onBack).not.toHaveBeenCalled()
+})
+
+it('does not execute a scoped removal when its preview fails', async () => {
+  invoke.mockImplementation(async command => { if (command === 'workspace_preview') throw new Error('preview unavailable'); return [] })
+  render(<PresetPage {...props} overlayOnly intent={{ mode: 'select', members: preset.members, scope: { kind: 'project', path: '/project' }, remove: true }} t={i18n.t} />)
+  const dialog = await screen.findByRole('dialog', { name: 'Remove from this project' })
+  expect(within(dialog).getByRole('alert')).toBeTruthy()
+  expect(invoke.mock.calls.some(([command]) => command === 'workspace_execute')).toBe(false)
+  expect(onBack).not.toHaveBeenCalled()
+})
+
 it.each(['empty', 'blocked', 'partial'] as const)('keeps %s removal previews for review without executing them', async state => {
   const reviewed = applicationPlan({ preset: null, remove: true })
   reviewed.items = state === 'empty' ? [] : reviewed.items.map((item, index) => ({ ...item, action: state === 'partial' && index ? 'remove' : 'blocked', status: state === 'partial' && index ? 'pending' : 'blocked' }))
   invoke.mockImplementation(async command => command === 'workspace_preview' ? reviewed : [])
   render(<PresetPage {...props} overlayOnly intent={{ mode: 'select', members: preset.members, scope: { kind: 'global' }, remove: true }} t={i18n.t} />)
-  fireEvent.click(screen.getByRole('button', { name: 'Remove selected targets' }))
   const dialog = await screen.findByRole('dialog', { name: state === 'partial' ? 'Remove selected targets' : 'No deployments can be removed' })
   expect(invoke.mock.calls.some(([command]) => command === 'workspace_execute')).toBe(false)
   expect(within(dialog).queryByRole('radio')).toBeNull()
@@ -1791,7 +1830,6 @@ it('keeps an uncertain scoped removal in its result dialog and rechecks the same
     return []
   })
   render(<PresetPage {...props} overlayOnly intent={{ mode: 'select', members: preset.members, scope: { kind: 'global' }, remove: true }} t={i18n.t} />)
-  fireEvent.click(screen.getByRole('button', { name: 'Remove selected targets' }))
   await screen.findByRole('dialog', { name: 'Removal result' })
   expect(screen.getByRole('alert').textContent).toContain(i18n.t('workspace110.executionUnknown'))
   fireEvent.click(screen.getByRole('button', { name: 'Preview unfinished items again' }))

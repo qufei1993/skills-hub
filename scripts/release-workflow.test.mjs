@@ -11,13 +11,25 @@ const { load } = require('js-yaml')
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const workflow = load(readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8'))
 const expectedTargets = {
-  'aarch64-apple-darwin': 'macos-14',
+  'aarch64-apple-darwin': 'macos-15',
   'x86_64-apple-darwin': 'macos-15-intel',
   'x86_64-pc-windows-msvc': 'windows-2022',
   'x86_64-unknown-linux-gnu': 'ubuntu-24.04',
   'aarch64-unknown-linux-gnu': 'ubuntu-24.04-arm',
 }
 const needs = job => typeof job.needs === 'string' ? [job.needs] : job.needs ?? []
+
+it('uses supported native macOS images throughout CI and release packaging', () => {
+  const ci = load(readFileSync(path.join(root, '.github/workflows/ci.yml'), 'utf8'))
+  for (const job of [ci.jobs['cli-native'], ...['verify', 'cli-build', 'desktop-build'].map(name => workflow.jobs[name])]) {
+    const macOS = job.strategy.matrix.include.filter(row => row.target.endsWith('apple-darwin'))
+    assert.deepEqual(Object.fromEntries(macOS.map(row => [row.target, row.os])), {
+      'aarch64-apple-darwin': 'macos-15',
+      'x86_64-apple-darwin': 'macos-15-intel',
+    })
+  }
+  assert.equal(workflow.jobs['assemble-updater-json']['runs-on'], 'macos-15')
+})
 
 it('tag release independently verifies every native target before build or publication', () => {
   const verify = workflow.jobs.verify

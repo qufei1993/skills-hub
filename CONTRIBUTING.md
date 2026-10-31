@@ -6,7 +6,7 @@ See [Development and builds](docs/development.en.md) for OAuth configuration, lo
 
 ## Development Requirements
 
-- Node.js 18+ (recommended: 20+)
+- Node.js 20.19+ (20.x), 22.12+ (22.x), or 24+; release CI uses Node.js 22
 - Rust (stable)
 - Tauri system dependencies (install per the official Tauri docs for macOS/Windows/Linux)
 

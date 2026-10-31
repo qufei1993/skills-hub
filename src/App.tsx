@@ -3769,7 +3769,7 @@ function App() {
       />
       <WindowResizeHandles enabled={isTauri} />
 
-      {libraryActionIntent ? <PresetPage overlayOnly returnFocusRef={libraryActionReturnFocus} onDirtyChange={() => {}} active intent={libraryActionIntent} skills={managedSkills} tools={installedTools} projects={workspaceProjects} invokeTauri={invokeTauri} onChanged={loadManagedSkills} onBack={() => setLibraryActionIntent(null)} onProject={scope => { setScopeFilter(scope.kind); setProjectFilter(scope.kind === 'project' ? scope.path : ''); setLibraryActionIntent(null); setActiveView('myskills') }} t={t} /> : null}
+      {libraryActionIntent ? <PresetPage overlayOnly returnFocusRef={libraryActionReturnFocus} onDirtyChange={() => {}} active intent={libraryActionIntent} skills={managedSkills} tools={installedTools} projects={workspaceProjects} invokeTauri={invokeTauri} onChanged={loadManagedSkills} onRemoved={() => setSuccessToastMessage(t('workspace110.removeComplete'))} onBack={() => setLibraryActionIntent(null)} onProject={scope => { setScopeFilter(scope.kind); setProjectFilter(scope.kind === 'project' ? scope.path : ''); setLibraryActionIntent(null); setActiveView('myskills') }} t={t} /> : null}
       <main className="skills-main" inert={Boolean(libraryActionIntent)}>
         <PresetPage onDirtyChange={dirty => { workspaceDirty.current = dirty }} key={workspaceKey} active={activeView === 'presets'} intent={workspaceIntent} skills={managedSkills} tools={installedTools} projects={workspaceProjects} invokeTauri={invokeTauri} onChanged={loadManagedSkills} onBack={() => setActiveView('myskills')} onProject={scope => { setWorkspaceReturn(true); setScopeFilter(scope.kind); setProjectFilter(scope.kind === 'project' ? scope.path : ''); setActiveView('myskills') }} t={t} />
 
