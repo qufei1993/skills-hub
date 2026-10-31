@@ -6,7 +6,7 @@ User documentation is maintained on the [Skills Hub website](https://aiskillshub
 
 ## Prerequisites
 
-- Node.js 18+ (recommended: 20+)
+- Node.js 20.19+ (20.x), 22.12+ (22.x), or 24+; release CI uses Node.js 22
 - Rust (stable)
 - Tauri system dependencies (follow Tauri official docs for your OS)
 

@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.1.0]
+
 ### Added
 
 - **Project management**: Filter My Skills by a specific project and manage its deployment targets while preserving global and unrelated project deployments. The project picker supports search, readable names and complete paths; preset editing and saving are centralized in Skill Presets.
@@ -32,7 +34,7 @@ All notable changes to this project will be documented in this file.
 
 - **Library action routing**: Restore immediate tool-icon synchronization, retry and unsynchronization through the existing commands, without preset, confirmation or result dialogs for ordinary toggles. Preserve current project/global filtering and the existing shared-directory warning. Target management, project removal and failed-target repair stay in the library with contextual copy and scoped operations.
 
-- **Project removal confirmation**: Show the selected project, Skill and tools directly when removing a project deployment, instead of opening preset setup, while keeping the project library visible beneath the dialog. Keep removal within the current scope, run backend preview checks after confirmation, and retain blocked targets for review.
+- **Project deployment removal**: Remove from the selected project directly after backend validation, without extra confirmation or success dialogs. Preserve the library Skill and other locations; retain blocked, partial or uncertain outcomes for review and recovery.
 
 - **Library bulk tools**: Restore the original tool-assignment dialog and direct sync/removal actions instead of opening Skill Presets. Preserve the current global or project filter and leave unrelated deployments unchanged.
 
