@@ -80,10 +80,12 @@
 .updates-schedule-panel > summary svg { flex-shrink: 0; }
 .updates-schedule-panel[open] > summary svg { transform: rotate(180deg); }
 
-.updates-summary-head strong { flex: none; white-space: nowrap; padding: 3px 7px; border-radius: var(--radius-sm); color: var(--text-secondary); background: var(--bg-element); font-size: 11px; font-weight: 500; line-height: 1.5; }
-.updates-summary-card.success .updates-summary-head strong { color: var(--status-success); background: var(--success-soft-bg); }
-.updates-summary-card.error .updates-summary-head strong { color: var(--status-error); background: var(--danger-soft-bg); }
-.updates-summary-card.running .updates-summary-head strong { color: var(--accent-primary); background: var(--accent-soft-bg); }
+.updates-summary-head { flex-wrap: wrap; align-items: flex-start; row-gap: 8px; }
+.updates-summary-head h2 { flex: none; max-width: 100%; }
+.updates-summary-head strong { flex: none; max-width: 100%; white-space: normal; padding: 3px 7px; border-radius: var(--radius-sm); color: var(--text-secondary); background: var(--bg-element); font-size: 11px; font-weight: 500; line-height: 1.5; }
+.updates-summary-card.is-success .updates-summary-head strong { color: var(--status-success); background: var(--success-soft-bg); }
+.updates-summary-card.is-error .updates-summary-head strong { color: var(--status-error); background: var(--danger-soft-bg); }
+.updates-summary-card.is-running .updates-summary-head strong { color: var(--accent-primary); background: var(--accent-soft-bg); }
 .updates-result-empty { margin: 12px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.7; }
 .updates-summary-time { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; margin-top: 14px; font-size: 12px; line-height: 1.5; }
 .updates-summary-time span { color: var(--text-secondary); }
@@ -99,22 +101,11 @@
 .updates-runtime-grid span { color: var(--text-secondary); }
 .updates-runtime-grid strong { font-weight: 500; overflow-wrap: anywhere; }
 .updates-history-note { margin: 14px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.6; }
-.updates-followups { display: grid; gap: 12px; margin-top: 16px; }
-.updates-followups:empty { display: none; }
+.updates-run-log { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-subtle); }
 .updates-notice, .updates-current-item { display: flex; align-items: flex-start; gap: 8px; padding: 12px 14px; margin-bottom: 16px; border: 1px solid var(--warning-soft-border); border-radius: var(--radius-md); color: var(--status-warning); background: var(--warning-soft-bg); font-size: 12px; line-height: 1.6; }
 .updates-current-item { color: var(--accent-primary); background: var(--accent-soft-bg); border-color: var(--accent-soft-border); flex-wrap: wrap; }
 .updates-notice svg, .updates-current-item svg { flex-shrink: 0; margin-top: 2px; }
 .updates-current-item strong { overflow-wrap: anywhere; }
-.updates-issue-block { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid var(--border-subtle); }
-.updates-issue-block > .updates-section-label { color: var(--status-error); }
-.updates-issue-block > button { justify-self: start; }
-.updates-issue-list { display: grid; gap: 10px; }
-.updates-issue-item { min-width: 0; padding: 10px; border-radius: var(--radius-sm); background: var(--bg-app); border: 1px solid var(--border-subtle); font-size: 12px; line-height: 1.6; }
-.updates-issue-item strong, .updates-issue-item code, .updates-issue-item span { display: block; overflow-wrap: anywhere; }
-.updates-issue-item strong { font-weight: 600; }
-.updates-issue-item span { color: var(--text-secondary); font-size: 11px; }
-.updates-issue-item p { margin: 4px 0 0; }
-.updates-issue-item code { margin-top: 6px; color: var(--status-error); font-family: var(--font-mono); font-size: 11px; line-height: 1.6; white-space: pre-wrap; }
 .updates-permission-note { margin-top: 14px; color: var(--text-secondary); font-size: 12px; line-height: 1.65; }
 .updates-permission-note summary { display: flex; align-items: center; gap: 6px; width: fit-content; cursor: pointer; list-style: none; }
 .updates-permission-note summary::-webkit-details-marker { display: none; }

@@ -29,17 +29,26 @@
 .content-review-conflicts li { display: grid; gap: 3px; }
 .content-review-conflicts strong { color: var(--text-primary); font-weight: 500; }
 
-.content-review { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
-.content-review-skill { min-width: 0; }
-.content-review-skill + .content-review-skill { padding-top: 22px; border-top: 1px solid var(--border-subtle); }
-.content-review-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-.content-review-heading h3 { min-width: 0; margin: 0; color: var(--text-primary); font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
-.content-review-heading > span { flex: none; color: var(--text-secondary); font-size: 13px; font-variant-numeric: tabular-nums; }
-.content-review-impact { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
-.content-review-empty { padding: 12px 14px; border-radius: var(--radius-sm); background: var(--bg-element); color: var(--text-secondary); font-size: 13px; }
+.modal.modal-collection-install.workspace-content-modal { width: min(900px, calc(100vw - 48px)); font-family: var(--font-ui); }
+.modal.workspace-content-modal .delete-title > svg { display: none; }
+.modal.workspace-content-modal .modal-body { padding-top: 20px; }
+.modal.workspace-content-modal .delete-desc { margin-top: 14px; }
+.content-review { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.content-review-overview { display: flex; flex-direction: column; gap: 5px; color: var(--text-primary); font-size: 13px; line-height: 1.6; }
+.content-review-overview > span { color: var(--text-secondary); font-size: 12px; }
+.content-review-list { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); overflow: hidden; }
+.content-review-list:empty { display: none; }
+.content-review-skill { min-width: 0; padding: 12px 14px; }
+.content-review-skill + .content-review-skill { border-top: 1px solid var(--border-subtle); }
+.content-review-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+.content-review-heading h3 { min-width: 0; margin: 0; color: var(--text-primary); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.content-review-state { flex: none; color: var(--text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.content-review-state.has-changes { padding: 2px 7px; border-radius: var(--radius-sm); color: var(--accent-primary); background: var(--accent-soft-bg); }
+.content-review-impact { display: flex; flex-direction: column; gap: 6px; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+.content-review-impact + .content-review-files { margin-top: 10px; }
 .content-review-files { display: flex; flex-direction: column; gap: 8px; }
 .content-review-file { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); overflow: hidden; }
-.content-review-file > summary { display: flex; align-items: center; gap: 8px; padding: 12px 14px; cursor: pointer; list-style: none; color: var(--text-secondary); }
+.content-review-file > summary { display: flex; align-items: center; gap: 8px; padding: 9px 12px; cursor: pointer; list-style: none; color: var(--text-secondary); }
 .content-review-file > summary::-webkit-details-marker { display: none; }
 .content-review-file > summary:hover { background: var(--bg-element); }
 .content-review-file > summary:focus-visible { outline-offset: -3px; }
@@ -50,7 +59,8 @@
 .content-change-added { color: var(--status-success); background: var(--success-soft-bg); }
 .content-change-removed { color: var(--status-error); background: var(--danger-soft-bg); }
 /* One aligned row owns both sides, so wrapped lines cannot drift apart. */
-.content-review-impact details > summary { cursor: pointer; color: var(--text-secondary); }
+.content-review-impact details > summary { cursor: pointer; color: var(--text-secondary); width: fit-content; }
+.content-review-impact details > summary:hover { color: var(--accent-primary); }
 .content-review-impact details[open] > summary { margin-bottom: 10px; }
 .content-review-impact details > p { padding-bottom: 8px; }
 .content-file-diff { border-top: 1px solid var(--border-subtle); }

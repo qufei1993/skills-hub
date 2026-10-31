@@ -482,4 +482,4 @@ export type ApplicationItem = {
 }
 export type ApplicationRecord = { id: string; preset: SkillPreset | null; createdAt: number; confirmed: boolean; remove: boolean; items: ApplicationItem[]; undoTargetCount: number }
 export type WorkspaceUndoItem = { targetId: string; skillId: string; path: string; tool: string; scope: WorkspaceScope; canRemove: boolean; reason: string }
-export type WorkspaceIntent = { mode: 'edit' | 'select'; members: PresetMember[]; scope?: WorkspaceScope; remove?: boolean }
+export type WorkspaceIntent = { mode: 'edit' | 'select'; operation?: 'tool' | 'targets' | 'repair'; members: PresetMember[]; scope?: WorkspaceScope; remove?: boolean }

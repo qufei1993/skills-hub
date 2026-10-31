@@ -1597,6 +1597,7 @@ pub async fn sync_skill_to_tool(
     sourcePath: String,
     skillId: String,
     tool: String,
+    sharedTools: Option<Vec<String>>,
     name: String,
     overwrite: Option<bool>,
     overwriteIfSameContent: Option<bool>,
@@ -1611,7 +1612,8 @@ pub async fn sync_skill_to_tool(
         if skill.central_path != sourcePath || skill.name != name {
             return Err("PLAN_STALE|skill source or name changed".to_string());
         }
-        let mut request = desktop_deployment_request(skillId, tool, scope, projectPath)?;
+        let mut request =
+            desktop_deployment_request(skillId, tool, sharedTools, scope, projectPath)?;
         request.overwrite = overwrite.unwrap_or(false);
         request.overwrite_if_same_content = overwriteIfSameContent.unwrap_or(false);
         let outcome = service.deploy(request).map_err(format_deployment_error)?;
@@ -1631,12 +1633,20 @@ pub async fn sync_skill_to_tool(
 fn desktop_deployment_request(
     skill_id: String,
     tool: String,
+    shared_tools: Option<Vec<String>>,
     scope: Option<String>,
     project_path: Option<String>,
 ) -> Result<crate::services::deployment::DeploymentRequest, String> {
+    // The desktop explicitly confirms this group; other callers retain single-tool semantics.
+    let mut agents = vec![tool];
+    for agent in shared_tools.unwrap_or_default() {
+        if !agents.contains(&agent) {
+            agents.push(agent);
+        }
+    }
     let mut request = crate::services::deployment::DeploymentRequest::global(
         crate::services::types::SkillSelector::Id(skill_id),
-        [tool],
+        agents,
     );
     if normalize_scope(scope.as_deref()).map_err(format_anyhow_error)? == "project" {
         request.scope = crate::services::deployment::DeploymentScope::Project(
@@ -1722,12 +1732,13 @@ pub async fn unsync_skill_from_tool(
     service: State<'_, SkillsHubService>,
     skillId: String,
     tool: String,
+    sharedTools: Option<Vec<String>>,
     scope: Option<String>,
     projectPath: Option<String>,
 ) -> Result<(), String> {
     let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let request = desktop_deployment_request(skillId, tool, scope, projectPath)?;
+        let request = desktop_deployment_request(skillId, tool, sharedTools, scope, projectPath)?;
         service
             .undeploy(request)
             .map(|_| ())

@@ -10,6 +10,7 @@ type GithubInfo = {
 
 type SkillsListProps = {
   onRepairSource?: (skill: ManagedSkill) => void
+  onRepairTargets?: (skill: ManagedSkill) => void
   projectContext?: boolean
   onRemoveProject?: (skill: ManagedSkill) => void
   hasManagedSkills: boolean
@@ -39,6 +40,7 @@ type SkillsListProps = {
 
 const SkillsList = ({
   onRepairSource,
+  onRepairTargets,
   projectContext = false,
   onRemoveProject,
   hasManagedSkills,
@@ -95,6 +97,7 @@ const SkillsList = ({
           {visibleSkills.map((skill) => (
             <SkillCard
               onRepairSource={onRepairSource}
+              onRepairTargets={onRepairTargets}
               projectContext={projectContext}
               onRemoveProject={onRemoveProject}
               key={skill.id}

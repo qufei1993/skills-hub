@@ -13,6 +13,7 @@ type GithubInfo = { label: string; href: string }
 
 type SkillCardProps = {
   onRepairSource?: (skill: ManagedSkill) => void
+  onRepairTargets?: (skill: ManagedSkill) => void
   projectContext?: boolean
   onRemoveProject?: (skill: ManagedSkill) => void
   skill: ManagedSkill
@@ -39,6 +40,7 @@ type SkillCardProps = {
 const SkillCard = ({
   skill,
   onRepairSource,
+  onRepairTargets,
   projectContext = false,
   onRemoveProject,
   installedTools,
@@ -131,7 +133,7 @@ const SkillCard = ({
               >
                 <Copy size={12} />
               </button>
-              <SkillIssueNotice onRepairSource={() => onRepairSource?.(skill)} onRepairTargets={() => onOpenScope(skill)} compact skill={skill} tools={installedTools} t={t} />
+              <SkillIssueNotice onRepairSource={() => onRepairSource?.(skill)} onRepairTargets={() => onRepairTargets ? onRepairTargets(skill) : onOpenScope(skill)} compact skill={skill} tools={installedTools} t={t} />
             </div>
             <div className={`skill-description${skill.description?.trim() ? '' : ' empty'}`} title={description}>
               {description}
@@ -140,7 +142,7 @@ const SkillCard = ({
           </div>
         </div>
 
-        {projectContext ? <button className="btn btn-secondary skill-manage-targets" onClick={() => onOpenScope(skill)}>{t('workspace110.manageTargets')}</button> : <button
+        {projectContext ? <button className="btn btn-secondary skill-manage-targets" onClick={event => { event.currentTarget.focus(); onOpenScope(skill) }}>{t('workspace110.manageTargets')}</button> : <button
           className={`skill-switch${enabled ? ' enabled' : ''}`}
           type="button"
           onClick={() => onToggleEnabled(skill)}
@@ -158,7 +160,7 @@ const SkillCard = ({
           )) : <span className="table-empty">{t('untagged')}</span>}
         </div>
 
-        <button className={`scope-badge ${scope}`} type="button" onClick={() => onOpenScope(skill)}>
+        <button className={`scope-badge ${scope}`} type="button" onClick={event => { event.currentTarget.focus(); onOpenScope(skill) }}>
           {skill.targets.some(target => target.scope === 'global') && projectCount > 0 ? t('workspace110.mixedScope', { count: projectCount }) : scope === 'project' ? t('scope.projectCount', { count: projectCount }) : t('scope.globalBadge')}
         </button>
 
@@ -194,7 +196,7 @@ const SkillCard = ({
                     title={enabled ? undefined : toolLabel}
                     aria-label={toolLabel}
                     aria-pressed={synced}
-                    onClick={() => enabled && onToggleTool(skill, tool.id)}
+                    onClick={event => { if (enabled) { event.currentTarget.focus(); onToggleTool(skill, tool.id) } }}
                     onMouseEnter={(event) => showToolHint(event.currentTarget, tool.id)}
                     onFocus={(event) => showToolHint(event.currentTarget, tool.id)}
                     onMouseLeave={() => setToolHint(null)}
@@ -224,7 +226,7 @@ const SkillCard = ({
         <div className="skill-actions-col">
           <button type="button" onClick={() => onEditTags(skill)} disabled={loading} aria-label={t('editTags')}><Tag size={16} /></button>
           <button type="button" onClick={() => onUpdate(skill)} disabled={loading || !enabled || unboundSource} title={unboundSource ? t('deviceSync.unboundSourceHelp') : t('update')} aria-label={t('update')}><RefreshCw size={16} /></button>
-          <button type="button" onClick={() => projectContext ? onRemoveProject?.(skill) : onDelete(skill.id)} disabled={loading} aria-label={t(projectContext ? 'workspace110.removeTargets' : 'remove')}><Trash2 size={16} /></button>
+          <button type="button" onClick={event => { if (projectContext) { event.currentTarget.focus(); onRemoveProject?.(skill) } else onDelete(skill.id) }} disabled={loading} aria-label={t(projectContext ? 'workspace110.removeTargets' : 'remove')}><Trash2 size={16} /></button>
         </div>
       </div>
     </div>

@@ -55,9 +55,8 @@ beforeEach(async () => {
   invoke.mockReset()
   invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
     if (command === 'get_managed_skills') return structuredClone(skills)
-    if (command === 'workspace_content_preview') return { id: `preview-${args?.skillId}`, skillId: args?.skillId, name: String(args?.skillId), changes: [], targets: [], restore: false }
-    if (command === 'workspace_content_execute') {
-      const skill = skills.find(skill => `preview-${skill.id}` === args?.id)
+    if (command === 'update_managed_skill') {
+      const skill = skills.find(skill => skill.id === args?.skillId)
       if (!skill) throw new Error('Unknown Skill')
       return update(skill)
     }
@@ -92,10 +91,7 @@ afterEach(() => {
 async function clickButton(name: string, bulk = false) {
   const query = bulk ? within(document.querySelector('.bulk-action-bar') as HTMLElement) : screen
   await act(async () => { fireEvent.click(query.getByRole('button', { name })); await vi.advanceTimersByTimeAsync(0) })
-  if (name === i18n.t('bulk.update')) {
-    expect(invoke.mock.calls.filter(([command]) => command === 'workspace_content_preview').length).toBeGreaterThan(0)
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: i18n.t('workspace110.confirmUpdate') })); await vi.advanceTimersByTimeAsync(0) })
-  }
+
 }
 
 async function openBulk(selectAll = true) {
@@ -105,10 +101,10 @@ async function openBulk(selectAll = true) {
   if (selectAll) await clickButton(i18n.t('bulk.selectVisible'), true)
 }
 
-const updatedIds = () => invoke.mock.calls.filter(([command]) => command === 'workspace_content_execute').map(([, args]) => String(args.id).replace('preview-', ''))
+const updatedIds = () => invoke.mock.calls.filter(([command]) => command === 'update_managed_skill').map(([, args]) => args.skillId)
 const report = () => within(screen.getByRole('region', { name: i18n.t('bulk.updateResultTitle') }))
 
-it('requires a fresh target after clearing a concrete project filter', async () => {
+it('keeps bulk tools in the library after clearing a concrete project filter', async () => {
   render(<App />)
   await act(async () => { await vi.advanceTimersByTimeAsync(0) })
   const scopes = document.querySelector('.skills-scope-tabs') as HTMLElement
@@ -125,10 +121,40 @@ it('requires a fresh target after clearing a concrete project filter', async () 
   await clickButton(i18n.t('bulk.selectVisible'), true)
   expect(screen.queryByRole('button', { name: '保存为预设' })).toBeNull()
   await clickButton(i18n.t('bulk.sync'), true)
-  expect((screen.getByRole('radio', { name: i18n.t('workspace110.global') }) as HTMLInputElement).checked).toBe(false)
-  expect((screen.getByRole('radio', { name: i18n.t('workspace110.project') }) as HTMLInputElement).checked).toBe(false)
-  expect((screen.getByRole('button', { name: i18n.t('workspace110.applyNow') }) as HTMLButtonElement).disabled).toBe(true)
-  expect(invoke.mock.calls.some(([command]) => command === 'workspace_execute')).toBe(false)
+  const dialog = screen.getByRole('dialog')
+  expect(within(dialog).getByText(i18n.t('bulk.syncTitle'))).toBeTruthy()
+  expect(within(dialog).getByText(i18n.t('bulk.noInstalledTools'))).toBeTruthy()
+  expect((within(dialog).getByRole('button', { name: i18n.t('bulk.syncConfirm') }) as HTMLButtonElement).disabled).toBe(true)
+  expect(within(dialog).queryByRole('radio')).toBeNull()
+  expect(invoke.mock.calls.some(([command]) => ['workspace_presets', 'workspace_preview', 'workspace_execute'].includes(command))).toBe(false)
+})
+
+it.each(['list', 'cards'] as const)('updates a single Skill directly from %s view without review or result dialogs', async view => {
+  render(<App />)
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  await clickButton(i18n.t(`viewMode.${view}`))
+  const card = screen.getByRole('button', { name: 'one' }).closest('.skill-card') as HTMLElement
+  expect(card).toBeTruthy()
+  await act(async () => { fireEvent.click(within(card).getByRole('button', { name: i18n.t('update') })); await vi.advanceTimersByTimeAsync(0) })
+  expect(updatedIds()).toEqual(['one'])
+  expect(screen.getByText('Updated one')).toBeTruthy()
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(toast.success).toHaveBeenCalledWith(i18n.t('status.updated', { name: 'one' }), { duration: 1800 })
+  expect(invoke.mock.calls.some(([command]) => ['workspace_content_preview', 'workspace_content_execute', 'workspace_presets'].includes(command))).toBe(false)
+})
+
+it('retains a single update failure and allows another direct attempt', async () => {
+  skills = [fixture('one')]
+  update = async () => { throw new Error('CENTRAL_MODIFIED|/test/central/one') }
+  render(<App />)
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  await clickButton(i18n.t('update'))
+  expect(updatedIds()).toEqual(['one'])
+  expect(toast.error).toHaveBeenCalled()
+  expect(screen.queryByRole('dialog')).toBeNull()
+  update = async skill => result(skill)
+  await clickButton(i18n.t('update'))
+  expect(updatedIds()).toEqual(['one', 'one'])
 })
 
 it.each(['zh', 'en', 'ko'] as const)('updates only selected Skills and refreshes results in %s without changing deployment choices', async language => {
@@ -145,6 +171,8 @@ it.each(['zh', 'en', 'ko'] as const)('updates only selected Skills and refreshes
   await act(async () => { fireEvent.click(boxes[0]); fireEvent.click(boxes[1]) })
   await clickButton(i18n.t('bulk.update'), true)
   expect(updatedIds()).toEqual(['one', 'two'])
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(invoke.mock.calls.some(([command]) => ['workspace_content_preview', 'workspace_content_execute'].includes(command))).toBe(false)
   expect(screen.getByText('Updated one')).toBeTruthy()
   expect(screen.getByText('Updated two')).toBeTruthy()
   expect(skills[2].description).toBeUndefined()

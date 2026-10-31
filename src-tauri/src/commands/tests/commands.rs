@@ -1996,6 +1996,7 @@ fn desktop_deployment_request_keeps_an_explicit_agent_and_project_scope() {
     let request = desktop_deployment_request(
         "id".into(),
         "cursor".into(),
+        None,
         Some("project".into()),
         Some("/project".into()),
     )
@@ -2009,10 +2010,14 @@ fn desktop_deployment_request_keeps_an_explicit_agent_and_project_scope() {
         request.scope,
         crate::services::deployment::DeploymentScope::Project("/project".into())
     );
-    assert!(
-        desktop_deployment_request("id".into(), "cursor".into(), Some("project".into()), None)
-            .is_err()
-    );
+    assert!(desktop_deployment_request(
+        "id".into(),
+        "cursor".into(),
+        None,
+        Some("project".into()),
+        None
+    )
+    .is_err());
 }
 
 #[cfg(unix)]
@@ -2072,4 +2077,121 @@ fn ai_management_preflight_rejects_no_tools_before_preparing_cli() {
     assert_eq!(result.unwrap_err(), "AGENT_NOT_FOUND");
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert!(service.list_skills().unwrap().is_empty());
+}
+
+#[test]
+fn desktop_shared_tool_request_keeps_single_tool_defaults_and_explicit_scope() {
+    let single =
+        desktop_deployment_request("demo".into(), "codex".into(), None, None, None).unwrap();
+    assert_eq!(single.agents, ["codex"]);
+    assert_eq!(
+        single.scope,
+        crate::services::deployment::DeploymentScope::Global
+    );
+    let shared = desktop_deployment_request(
+        "demo".into(),
+        "codex".into(),
+        Some(vec![
+            "antigravity".into(),
+            "codex".into(),
+            "antigravity".into(),
+        ]),
+        Some("project".into()),
+        Some("/test/project".into()),
+    )
+    .unwrap();
+    assert_eq!(shared.agents, ["codex", "antigravity"]);
+    assert_eq!(
+        shared.scope,
+        crate::services::deployment::DeploymentScope::Project("/test/project".into())
+    );
+    assert!(desktop_deployment_request(
+        "demo".into(),
+        "codex".into(),
+        Some(vec!["antigravity".into()]),
+        Some("project".into()),
+        None
+    )
+    .is_err());
+}
+
+#[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn desktop_confirmed_shared_project_tools_sync_and_unsync_together() {
+    use crate::services::deployment::{DeploymentRequest, DeploymentScope};
+    use crate::services::install::InstallRequest;
+    let (home, data, _paths, service) = make_install_service();
+    let source = data.path().join("source");
+    write_install_test_skill(&source, "demo");
+    service.install(InstallRequest::local(source)).unwrap();
+    std::fs::create_dir_all(home.path().join(".codex")).unwrap();
+    service
+        .deploy(DeploymentRequest::global("demo", ["codex"]))
+        .unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let mut other_request = DeploymentRequest::global("demo", ["codex"]);
+    other_request.scope = DeploymentScope::Project(other.path().to_path_buf());
+    service.deploy(other_request).unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let skill_id = service.show_skill("demo".into()).unwrap().id;
+    let request = desktop_deployment_request(
+        skill_id.clone(),
+        "codex".into(),
+        Some(vec!["codex".into(), "antigravity".into()]),
+        Some("project".into()),
+        Some(project.path().to_string_lossy().into_owned()),
+    )
+    .unwrap();
+    let outcome = service.deploy(request.clone()).unwrap();
+    assert_eq!(outcome.targets.len(), 1);
+    assert_eq!(outcome.targets[0].agents, ["antigravity", "codex"]);
+    let rows = service.show_skill(skill_id.clone().into()).unwrap().targets;
+    assert_eq!(rows.len(), 4);
+    for tool in ["codex", "antigravity"] {
+        assert!(rows.iter().any(|row| row.tool == tool
+            && row.status == "ok"
+            && row.project_path.as_deref()
+                == std::fs::canonicalize(project.path()).unwrap().to_str()));
+    }
+    assert!(project.path().join(".agents/skills/demo/SKILL.md").exists());
+    service.undeploy(request).unwrap();
+    let rows = service.show_skill(skill_id.into()).unwrap().targets;
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().any(|row| row.scope == "global"));
+    assert!(rows
+        .iter()
+        .any(|row| row.project_path.as_deref()
+            == std::fs::canonicalize(other.path()).unwrap().to_str()));
+    assert!(!project.path().join(".agents/skills/demo").exists());
+    assert!(other.path().join(".agents/skills/demo/SKILL.md").exists());
+}
+
+#[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn desktop_confirmed_shared_tool_failure_rolls_back_all_tool_records() {
+    use crate::services::install::InstallRequest;
+    let (_home, data, paths, service) = make_install_service();
+    let source = data.path().join("source");
+    write_install_test_skill(&source, "demo");
+    service.install(InstallRequest::local(source)).unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let skill_id = service.show_skill("demo".into()).unwrap().id;
+    Connection::open(&paths.database_path).unwrap().execute_batch(
+        "CREATE TRIGGER reject_shared_sync BEFORE INSERT ON skill_targets WHEN NEW.tool='antigravity' BEGIN SELECT RAISE(FAIL, 'injected failure'); END;"
+    ).unwrap();
+    let request = desktop_deployment_request(
+        skill_id.clone(),
+        "codex".into(),
+        Some(vec!["antigravity".into()]),
+        Some("project".into()),
+        Some(project.path().to_string_lossy().into_owned()),
+    )
+    .unwrap();
+    assert!(service.deploy(request).is_err());
+    assert!(service
+        .show_skill(skill_id.into())
+        .unwrap()
+        .targets
+        .is_empty());
+    assert!(!project.path().join(".agents/skills/demo").exists());
 }
