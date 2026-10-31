@@ -39,8 +39,14 @@ fn payload(path: &Path, name: &str, index: usize) {
 fn paths(root: &Path) -> RuntimePaths {
     assert!(root.is_absolute());
     fs::create_dir_all(root.join("home")).unwrap();
-    let mut paths =
-        RuntimePaths::from_roots(RuntimeProfile::Test, root.join("home"), root.join("data"));
+    // Keep SQLite's database path short while varying source/central path length.
+    let temporary_root = PathBuf::from(std::env::var_os("ISSUE208_REPRO_ROOT").unwrap());
+    let database_key = hex::encode(Sha256::digest(root.to_string_lossy().as_bytes()));
+    let mut paths = RuntimePaths::from_roots(
+        RuntimeProfile::Test,
+        root.join("home"),
+        temporary_root.join("databases").join(&database_key[..16]),
+    );
     paths.default_central_repo = root.join("home/.skillshub");
     paths
 }
@@ -189,22 +195,23 @@ fn inventory(root: &Path, boundary: &Path) -> Value {
 }
 
 fn snapshot(service: &SkillsHubService, root: &Path) -> Value {
+    let boundary = PathBuf::from(std::env::var_os("ISSUE208_REPRO_ROOT").unwrap());
     let home = root.join("home");
     let mut trees = BTreeMap::new();
     trees.insert(
         "codex".to_string(),
-        inventory(&home.join(".codex/skills"), root),
+        inventory(&home.join(".codex/skills"), &boundary),
     );
     trees.insert(
         "central".to_string(),
-        inventory(&service.paths().default_central_repo, root),
+        inventory(&service.paths().default_central_repo, &boundary),
     );
     trees.insert(
         "recycle_bin".to_string(),
-        inventory(&service.paths().recycle_bin_dir, root),
+        inventory(&service.paths().recycle_bin_dir, &boundary),
     );
     for (key, dir) in TOOLS {
-        trees.insert(key.to_string(), inventory(&home.join(dir), root));
+        trees.insert(key.to_string(), inventory(&home.join(dir), &boundary));
     }
     json!({"trees":trees,"database":db_snapshot(service)})
 }

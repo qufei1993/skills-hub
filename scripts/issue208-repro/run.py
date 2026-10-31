@@ -124,6 +124,7 @@ def main():
         "entry_points":["commands::import_existing_skill","commands::sync_skill_to_tool","core::onboarding::build_onboarding_plan_for_runtime"],
         "runtime":"Tauri MockRuntime; real command bodies, database and Windows filesystem; no desktop webview",
         "deployment_setup":"Real sync_skill_to_tool commands deploy to seven built-in tools; privileged-runner symlinks are normalized to actual junctions using product APIs before the baseline. The official Skill and deletion controls use synthetic seed records.",
+        "database_path_policy":"Short isolated temporary database paths; unicode-long varies source and central paths only. The first attempt retained evidence of startup failure with a 310-character database path.",
         "recycler":"Production trash::delete body enabled in test runtime; test-only permanent-deletion substitute removed"})
     target = checkout / "src-tauri/src/services/tests/library.rs"
     target.write_text(target.read_text(encoding="utf-8") + '\n#[path = "issue208_repro.rs"]\nmod issue208_repro;\n', encoding="utf-8")

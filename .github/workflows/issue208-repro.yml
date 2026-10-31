@@ -53,6 +53,7 @@ jobs:
           workspaces: specimen/src-tauri
           shared-key: native-x86_64-pc-windows-msvc
           key: debug
+          cache-on-failure: true
       - name: Reproduce with isolated synthetic data and real Windows junctions
         run: >-
           python harness/scripts/issue208-repro/run.py
