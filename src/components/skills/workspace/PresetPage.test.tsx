@@ -895,7 +895,8 @@ it('deletes the selected directory row and preserves the other preset', async ()
   expect(invoke).toHaveBeenCalledWith('workspace_delete_preset', { id: 'p2', revision: 3 })
   expect(screen.queryByRole('button', { name: 'Other preset' })).toBeNull()
   expect(screen.getByRole('button', { name: 'Edit preset Daily' })).toBeTruthy()
-  expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Skill presets' }))
+  // The dialog DOM can disappear before the passive effect restores focus.
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Skill presets' })))
 })
 it('keeps deletion failures visible in the confirmation and allows retry', async () => {
   invoke.mockImplementation(async command => {
