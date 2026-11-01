@@ -518,7 +518,7 @@ describe('Library bulk tool assignment', () => {
   })
 })
 
-it.each(['list', 'cards'] as const)('confirms removal from the selected project without opening preset setup in %s view', async view => {
+it.each(['list', 'cards'] as const)('removes from the selected project directly without dialogs in %s view', async view => {
   const alpha = '/test/project-alpha', beta = '/test/project-beta'
   const skill = makeSkill('project-skill', 'global', [])
   skill.targets.push(
@@ -551,22 +551,12 @@ it.each(['list', 'cards'] as const)('confirms removal from the selected project 
   fireEvent.click(screen.getByRole('option', { name: new RegExp(alpha) }))
   const removeButton = screen.getByRole('button', { name: i18n.t('workspace110.removeTargets') })
   fireEvent.click(removeButton)
-  let dialog = await screen.findByRole('dialog', { name: i18n.t('workspace110.removeTargets') })
+  expect(screen.queryByRole('dialog')).toBeNull()
   expect(document.querySelector('.skills-library')).toBeTruthy()
   expect(document.querySelector('.workspace-preset-grid')).toBeNull()
-  expect(within(dialog).queryByRole('radio')).toBeNull()
-  expect(within(dialog).queryByText(i18n.t('workspace110.applyDialog'))).toBeNull()
-  expect(within(dialog).queryByText(i18n.t('workspace110.adjustApplication'))).toBeNull()
-  expect(within(dialog).getByText(skill.name)).toBeTruthy()
-  expect(within(dialog).getByText('project-alpha')).toBeTruthy()
-  expect(invoke.mock.calls.some(([command]) => ['workspace_preview', 'workspace_execute', 'delete_managed_skill'].includes(command))).toBe(false)
-  fireEvent.click(within(dialog).getByRole('button', { name: i18n.t('workspace110.cancel') }))
-  expect(skill.targets).toEqual(originalTargets)
-  await waitFor(() => expect(document.activeElement).toBe(removeButton))
-  fireEvent.click(screen.getByRole('button', { name: i18n.t('workspace110.removeTargets') }))
-  dialog = await screen.findByRole('dialog', { name: i18n.t('workspace110.removeTargets') })
-  fireEvent.click(within(dialog).getByRole('button', { name: i18n.t('workspace110.confirmRemove') }))
-  await screen.findByRole('heading', { name: i18n.t('workspace110.removeResult') })
+  await waitFor(() => expect(skill.targets).toEqual(originalTargets.filter(target => target.project_path !== alpha)))
+  await waitFor(() => expect(document.querySelector('main')?.hasAttribute('inert')).toBe(false))
+  expect(screen.queryByRole('dialog')).toBeNull()
   expect(invoke.mock.calls.filter(([command]) => command === 'workspace_preview').map(([, args]) => args)).toEqual([{ request: {
     presetId: null, members: [{ skillId: skill.id, tools: ['codex', 'cursor'] }], scopes: [{ kind: 'project', path: alpha }], remove: true,
   } }])

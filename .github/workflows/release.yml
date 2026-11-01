@@ -25,7 +25,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
           - os: macos-15-intel
             target: x86_64-apple-darwin
@@ -119,7 +119,7 @@ jobs:
             arch: x86_64
             platform: darwin-x64
           # macOS Apple Silicon (arm64)
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
             arch: aarch64
             platform: darwin-arm64
@@ -387,7 +387,7 @@ jobs:
             arch: x86_64
             platform: darwin-x64
           # macOS Apple Silicon (arm64)
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
             arch: aarch64
             platform: darwin-arm64
@@ -815,7 +815,7 @@ jobs:
 
   assemble-updater-json:
     name: Assemble updater.json
-    runs-on: macos-14
+    runs-on: macos-15
     needs: [verify, desktop-build, cli-publish]
     if: startsWith(github.ref, 'refs/tags/v')
     environment: release

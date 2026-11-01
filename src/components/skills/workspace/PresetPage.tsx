@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useEffectEvent, useRef, useState, type RefObject } from 'react'
 import type { TFunction } from 'i18next'
 import { open } from '@tauri-apps/plugin-dialog'
+import { toast } from 'sonner'
 import { ArrowLeft, ArrowRight, CheckCircle2, ChevronRight, CircleAlert, Clock3, Folder, Layers2, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import type { ApplicationRecord, ManagedSkill, PresetMember, SkillPreset, ToolOption, WorkspaceIntent, WorkspaceScope, WorkspaceUndoItem } from '../types'
 import ToolIcon from '../ToolIcon'
@@ -15,17 +16,19 @@ type Props = {
   active: boolean; skills: ManagedSkill[]; tools: ToolOption[]; projects: string[]; intent?: WorkspaceIntent
   invokeTauri: <T>(command: string, args?: Record<string, unknown>) => Promise<T>
   onChanged: () => Promise<void>; onBack: () => void
+  onRemoved?: () => void
   onProject: (scope: WorkspaceScope) => void; t: TFunction
 }
-type View = 'list' | 'edit' | 'select' | 'preview' | 'result' | 'undo'
+type View = 'list' | 'edit' | 'select' | 'preview' | 'result' | 'undo' | 'removing'
 const emptyPreset = (): SkillPreset => ({ id: '', name: '', description: '', members: [], revision: 0 })
 const presetContent = (value: SkillPreset) => JSON.stringify({
   name: value.name, description: value.description,
   members: value.members.map(member => ({ skillId: member.skillId, tools: [...member.tools].sort() })).sort((a, b) => a.skillId.localeCompare(b.skillId)),
 })
 
-export default function PresetPage({ overlayOnly = false, returnFocusRef, onDirtyChange, active, skills, tools, projects, intent, invokeTauri, onChanged, onBack, onProject, t }: Props) {
-  const [view, setView] = useState<View>(intent?.mode ?? 'list')
+export default function PresetPage({ overlayOnly = false, returnFocusRef, onDirtyChange, active, skills, tools, projects, intent, invokeTauri, onChanged, onBack, onRemoved, onProject, t }: Props) {
+  const immediateRemoval = Boolean(overlayOnly && intent?.remove && intent.scope)
+  const [view, setView] = useState<View>(immediateRemoval ? 'removing' : intent?.mode ?? 'list')
   const [returnToSource, setReturnToSource] = useState(Boolean(intent))
   const [presets, setPresets] = useState<SkillPreset[]>([])
   const [history, setHistory] = useState<ApplicationRecord[]>([])
@@ -57,6 +60,7 @@ export default function PresetPage({ overlayOnly = false, returnFocusRef, onDirt
   const [busy, setBusy] = useState(false)
   const [copying, setCopying] = useState(false)
   const busyRef = useRef(false)
+  const removalStarted = useRef(false)
   const [error, setError] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<SkillPreset | null>(null)
   const [confirm, setConfirm] = useState<null | 'discard' | 'delete' | 'latest'>(null)
@@ -84,6 +88,19 @@ export default function PresetPage({ overlayOnly = false, returnFocusRef, onDirt
     busyRef.current = true; setBusy(true); setError('')
     try { await work() } catch (e) { fail(e) } finally { busyRef.current = false; setBusy(false) }
   }
+  const startRemoval = useEffectEvent(async () => {
+    const notification = toast.loading(w('working'))
+    try { await preview() }
+    catch (e) { fail(e); setView(current => current === 'removing' ? 'select' : current) }
+    finally { toast.dismiss(notification) }
+  })
+  useEffect(() => {
+    if (!active || !immediateRemoval || removalStarted.current) return
+    // The library click authorizes this scoped operation. Strict Mode must not
+    // create a second removal journal or repeat a write.
+    removalStarted.current = true
+    void startRemoval()
+  }, [active, immediateRemoval])
   const reload = async () => {
     if (overlayOnly) return
     setLoadError(false)
@@ -210,6 +227,17 @@ export default function PresetPage({ overlayOnly = false, returnFocusRef, onDirt
     setView('select')
   }
   const execute = async (plan: ApplicationRecord) => {
+    const finish = async (result: ApplicationRecord) => {
+      setRecord(result)
+      if (immediateRemoval && result.confirmed && result.items.every(i => ['done', 'undone'].includes(i.status))) {
+        try { await onChanged(); await reload() }
+        catch (e) { setView('result'); throw e }
+        onRemoved?.(); onBack()
+      } else {
+        setView('result')
+        await onChanged(); await reload()
+      }
+    }
     // The backend revalidates the preview before touching any deployment.
     let result: ApplicationRecord
     try { result = await invokeTauri<ApplicationRecord>('workspace_execute', { id: plan.id }) }
@@ -218,13 +246,11 @@ export default function PresetPage({ overlayOnly = false, returnFocusRef, onDirt
       // this journal instead of creating a new application that claims them again.
       let latest = plan
       try { latest = (await invokeTauri<ApplicationRecord[]>('workspace_history')).find(r => r.id === plan.id) ?? plan } catch { /* Keep the known journal ID for explicit recovery. */ }
-      setRecord(latest); setView('result')
-      if (latest.confirmed && latest.items.every(i => ['done', 'undone'].includes(i.status))) { await onChanged(); await reload() }
-      else setError(w('executionUnknown'))
+      if (latest.confirmed && latest.items.every(i => ['done', 'undone'].includes(i.status))) await finish(latest)
+      else { setRecord(latest); setView('result'); setError(w('executionUnknown')) }
       return
     }
-    setRecord(result); setView('result')
-    await onChanged(); await reload()
+    await finish(result)
   }
   const preview = async () => {
     const chosen = repairing ? repairMembers : overrideTools ? members.map(m => ({ ...m, tools: commonTools })) : members

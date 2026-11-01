@@ -14,6 +14,8 @@ If macOS says the app is damaged or the developer cannot be verified, see the [i
 
 [What's new in v1.0.1](https://github.com/qufei1993/skills-hub/releases/tag/v1.0.1)
 
+Preparing **v1.1.0**: project management, Skill presets, and content recovery. See the [release index](docs/releases/v1.1.0/README.md); this version is not published yet.
+
 ## What you can do
 
 - **Find and install Skills**: Browse task-focused collections in the app or on the website, search individual Skills, or import from Git and local folders.
