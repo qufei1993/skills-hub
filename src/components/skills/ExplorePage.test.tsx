@@ -14,6 +14,8 @@ it('shows website collections by default, opens details and reuses the collectio
   const install = vi.fn()
   const calls: string[] = []
   let indexRequests = 0
+  let finishValidation!: () => void
+  const validation = new Promise<void>(resolve => { finishValidation = resolve })
   render(<ExplorePage invoke={async <T,>(command: string, args?: Record<string, unknown>) => {
     calls.push(command)
     if (command === 'get_website_collections') {
@@ -23,6 +25,7 @@ it('shows website collections by default, opens details and reuses the collectio
     if (command === 'cache_website_collections') return undefined as T
     expect(command).toBe('validate_collection_manifest')
     expect(args?.link).toBeUndefined()
+    await validation
     return args?.manifest as T
   }} onInstallCollection={install} exploreFilter="" searchResults={[]} searchLoading={false} managedSkills={[]} loading={false} onExploreFilterChange={() => {}} onInstallSkill={() => {}} onOpenManualAdd={() => {}} t={i18n.t} />)
   await screen.findByText('Skills for Real Engineers')
@@ -31,12 +34,16 @@ it('shows website collections by default, opens details and reuses the collectio
   await screen.findByText('包含的 Skills')
   expect(document.activeElement).toBe(screen.getByRole('button', { name: '返回探索' }))
   fireEvent.click(screen.getByRole('button', { name: '选择安装 · 31 个 Skills' }))
-  await waitFor(() => expect(install).toHaveBeenCalledOnce())
+  await waitFor(() => expect(calls).toContain('validate_collection_manifest'))
+  // Wait for the validation response and its React updates before navigating.
+  // Observing the install callback alone can precede the final render.
+  await act(async () => { finishValidation() })
+  expect(install).toHaveBeenCalledOnce()
   expect(install.mock.calls[0][0].skills).toHaveLength(31)
   expect(calls).not.toContain('get_featured_skills')
   expect(screen.queryByRole('button', { name: 'Skills 搜索' })).toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: '返回探索' }))
-  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: '查看 Skills for Real Engineers' })))
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '返回探索' })) })
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '查看 Skills for Real Engineers' }))
   expect(indexRequests).toBe(1)
 })
 it('validates website data and rejects unpublished collections before generating an install plan', () => {
