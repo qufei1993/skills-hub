@@ -1669,6 +1669,8 @@ export const resources = {
       claudePluginSourceWithVersion:
         'Claude Code plugin · {{plugin}} · v{{version}} · User',
       errors: {
+        centralSkillManaged: 'Installation stopped because this central directory is already managed by Skills Hub: {{path}}. Existing content was kept. Open My Skills to inspect and manage the existing Skill.',
+        centralSkillUnmanaged: 'Installation stopped because this central directory contains unregistered content: {{path}}. Existing content was kept. Back it up and move it outside the central library, then add it from Local Directory.',
         notTauri: 'Current environment is not Tauri. Please run `npm run tauri dev`.',
         skillExistsInHub:
           'The central storage folder is managed by Skills Hub and cannot be used for manual placement. Move this Skill elsewhere, then add it again from Local Directory.',
@@ -3497,6 +3499,8 @@ export const resources = {
       claudePluginSourceWithVersion:
         'Claude Code 插件 · {{plugin}} · v{{version}} · 用户级',
       errors: {
+        centralSkillManaged: '安装已停止：该中心目录已由 Skills Hub 托管（{{path}}），原有内容未被修改。请到“我的 Skills”查看并管理已有的 Skill。',
+        centralSkillUnmanaged: '安装已停止：该中心目录存在未登记的内容（{{path}}），原有内容未被修改。请先备份并移到中心库以外，再通过“本地目录”添加。',
         notTauri: '当前环境不是 Tauri，请用 `npm run tauri dev` 启动应用。',
         skillExistsInHub:
           '中心存储目录由 Skills Hub 自动管理，不能直接放入新的 Skill；请先将该 Skill 移到其他目录，再通过“本地目录”重新添加。',

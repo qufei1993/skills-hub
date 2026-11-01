@@ -1565,7 +1565,7 @@ fn workspace_content_preview_reports_a_modified_target_through_the_desktop_proto
 }
 
 #[test]
-fn duplicate_local_install_reaches_the_desktop_target_exists_protocol() {
+fn duplicate_local_install_reaches_the_desktop_managed_central_protocol() {
     let (_home, _data, paths, service) = make_install_service();
     let source = paths.app_data_dir.join("private-local-source");
     write_install_test_skill(&source, "duplicate-local");
@@ -1577,7 +1577,7 @@ fn duplicate_local_install_reaches_the_desktop_target_exists_protocol() {
     assert_eq!(
         formatted,
         format!(
-            "TARGET_EXISTS|{}",
+            "CENTRAL_SKILL_MANAGED|{}",
             paths.default_central_repo.join("duplicate-local").display()
         )
     );
@@ -2228,4 +2228,71 @@ fn deletion_conflicts_use_delete_copy_without_changing_other_operation_errors() 
         serde_json::json!({"reason":"unmanaged_target","path":"/tools/unsafe"}),
     );
     assert_eq!(format_delete_error(conflict), "TARGET_EXISTS|/tools/unsafe");
+}
+
+#[test]
+fn issue_121_central_collisions_retain_ownership_and_preserve_existing_content() {
+    for managed in [false, true] {
+        for selection in [false, true] {
+            let (_home, _data, paths, service) = make_install_service();
+            let source = paths.app_data_dir.join("private-source");
+            write_install_test_skill(&source, "central-collision");
+            let central = paths.default_central_repo.join("central-collision");
+            if managed {
+                let installed = service.install(InstallRequest::local(&source)).unwrap();
+                // Stored paths can use a lexical alias of the same physical directory.
+                let mut record = service
+                    .store()
+                    .get_skill_by_id(&installed.id)
+                    .unwrap()
+                    .unwrap();
+                record.central_path = paths
+                    .default_central_repo
+                    .join(".")
+                    .join("central-collision")
+                    .to_string_lossy()
+                    .into_owned();
+                service.store().upsert_skill(&record).unwrap();
+            } else {
+                write_install_test_skill(&central, "central-collision");
+            }
+            std::fs::write(source.join("extra.txt"), "incoming user edits").unwrap();
+            let records = service.store().list_skills().unwrap();
+            let before = crate::core::content_hash::hash_dir_strict(&central).unwrap();
+            let request = if selection {
+                InstallRequest::local(&source).with_subpath(".")
+            } else {
+                InstallRequest::local(&source)
+            };
+            let error = service.install(request).unwrap_err();
+            assert_eq!(
+                error.code,
+                crate::services::error::ErrorCode::TargetConflict
+            );
+            let reason = if managed {
+                "central_managed"
+            } else {
+                "central_unmanaged"
+            };
+            assert_eq!(error.details["reason"], reason);
+            let prefix = if managed {
+                "CENTRAL_SKILL_MANAGED"
+            } else {
+                "CENTRAL_SKILL_UNMANAGED"
+            };
+            assert_eq!(
+                format_service_error(error),
+                format!("{prefix}|{}", central.display())
+            );
+            assert_eq!(service.store().list_skills().unwrap(), records);
+            assert_eq!(
+                crate::core::content_hash::hash_dir_strict(&central).unwrap(),
+                before
+            );
+            assert_eq!(
+                std::fs::read_to_string(source.join("extra.txt")).unwrap(),
+                "incoming user edits"
+            );
+        }
+    }
 }

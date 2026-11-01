@@ -92,7 +92,7 @@ it('skips already managed Skills from a stale scan without deploying or deleting
   await importDiscovered()
   expect(invoke.mock.calls.some(([command]) => command === 'sync_skill_to_tool')).toBe(false)
   expect(invoke.mock.calls.some(([command]) => command === 'delete_managed_skill')).toBe(false)
-  expect(toast.success).toHaveBeenCalledWith(i18n.t('status.importCompletedWithSkipped', { imported: 0, managed: 1, sources: 0 }), expect.anything())
+  await waitFor(() => expect(toast.success).toHaveBeenCalledWith(i18n.t('status.importCompletedWithSkipped', { imported: 0, managed: 1, sources: 0 }), expect.anything()))
   expect(toast.error).not.toHaveBeenCalled()
 })
 
@@ -100,7 +100,7 @@ it('skips protected source targets and continues deploying to other tools', asyn
   sourceSyncError = 'SKILL_TARGET_OVERLAPS_SOURCE|/test/codex/skills/fresh|sync target overlaps original local source'
   await importDiscovered()
   expect(invoke.mock.calls.filter(([command]) => command === 'sync_skill_to_tool').map(([, args]) => args.tool)).toEqual(['codex', 'claude_code'])
-  expect(toast.success).toHaveBeenCalledWith(i18n.t('status.importCompletedWithSkipped', { imported: 1, managed: 0, sources: 1 }), expect.anything())
+  await waitFor(() => expect(toast.success).toHaveBeenCalledWith(i18n.t('status.importCompletedWithSkipped', { imported: 1, managed: 0, sources: 1 }), expect.anything()))
   expect(toast.error).not.toHaveBeenCalled()
 })
 
@@ -109,7 +109,7 @@ it('imports and syncs to the source tool as well as the other selected tools', a
   const deployments = invoke.mock.calls.filter(([command]) => command === 'sync_skill_to_tool')
   expect(deployments.map(([, args]) => args.tool)).toEqual(['codex', 'claude_code'])
   expect(deployments[0][1]).toMatchObject({ overwrite: true, overwriteIfSameContent: true })
-  expect(toast.success).toHaveBeenCalledWith(i18n.t('status.importCompleted'), expect.anything())
+  await waitFor(() => expect(toast.success).toHaveBeenCalledWith(i18n.t('status.importCompleted'), expect.anything()))
   expect(toast.error).not.toHaveBeenCalled()
 })
 

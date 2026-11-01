@@ -460,6 +460,8 @@ fn format_service_error(error: crate::services::error::ServiceError) -> String {
                 (Some("shared_directory_scope_expansion"), _) => {
                     "SHARED_DIRECTORY_SCOPE_EXPANSION".into()
                 }
+                (Some("central_managed"), Some(path)) => format!("CENTRAL_SKILL_MANAGED|{path}"),
+                (Some("central_unmanaged"), Some(path)) => format!("CENTRAL_SKILL_UNMANAGED|{path}"),
                 (Some("target_modified" | "modified_target"), Some(path)) => format!("TARGET_MODIFIED|{path}"),
                 (_, Some(path)) => format!("TARGET_EXISTS|{path}"),
                 _ => format_anyhow_error(anyhow::anyhow!(error.message)),

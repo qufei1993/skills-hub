@@ -255,15 +255,31 @@ pub(crate) fn import_existing_local_skills_batch(
 #[derive(Debug)]
 pub(crate) struct SkillAlreadyExistsError {
     central_path: PathBuf,
+    managed: bool,
 }
 
 impl SkillAlreadyExistsError {
-    fn new(central_path: PathBuf) -> Self {
-        Self { central_path }
+    fn new(store: &SkillStore, central_path: PathBuf) -> Result<Self> {
+        let target = super::sync_engine::path_for_comparison(&central_path)?;
+        let mut managed = false;
+        for skill in store.list_skills()? {
+            if super::sync_engine::path_for_comparison(Path::new(&skill.central_path))? == target {
+                managed = true;
+                break;
+            }
+        }
+        Ok(Self {
+            central_path,
+            managed,
+        })
     }
 
     pub(crate) fn central_path(&self) -> &Path {
         &self.central_path
+    }
+
+    pub(crate) fn is_managed(&self) -> bool {
+        self.managed
     }
 }
 
@@ -348,7 +364,7 @@ fn install_local_skill_with_existing_policy(
                 }
             }
         }
-        return Err(SkillAlreadyExistsError::new(central_path).into());
+        return Err(SkillAlreadyExistsError::new(store, central_path)?.into());
     }
 
     copy_dir_recursive(source_path, &central_path)
@@ -416,7 +432,7 @@ pub fn install_git_skill(
     let mut central_path = central_dir.join(&name);
 
     if central_path.exists() {
-        return Err(SkillAlreadyExistsError::new(central_path).into());
+        return Err(SkillAlreadyExistsError::new(store, central_path)?.into());
     }
 
     // Fast path: for subpath installs, prefer sparse git checkout.
@@ -2279,7 +2295,7 @@ pub fn install_git_skill_from_selection_at_revision(
     ensure_central_repo(&central_dir)?;
     let mut central_path = central_dir.join(&display_name);
     if central_path.exists() {
-        return Err(SkillAlreadyExistsError::new(central_path).into());
+        return Err(SkillAlreadyExistsError::new(store, central_path)?.into());
     }
 
     let (repo_dir, revision) = clone_to_cache_for_subpath(

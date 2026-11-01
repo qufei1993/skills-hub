@@ -2751,3 +2751,40 @@ fn update_check_perf_baseline() {
         }
     }
 }
+
+#[test]
+fn issue_121_identical_import_reuses_the_record_and_changed_import_reports_managed() {
+    let (dir, store) = make_store();
+    let paths = RuntimePaths::from_roots(
+        crate::core::runtime_paths::RuntimeProfile::Test,
+        dir.path().join("home"),
+        dir.path().join("data"),
+    );
+    let source = dir.path().join("import-source");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(
+        source.join("SKILL.md"),
+        "---\nname: import-demo\n---\nOriginal\n",
+    )
+    .unwrap();
+    let first =
+        super::install_local_skill(&paths, &store, &source, Some("import-demo".into())).unwrap();
+    let before = store.list_skills().unwrap();
+    let reused =
+        super::import_existing_local_skill(&paths, &store, &source, Some("import-demo".into()))
+            .unwrap();
+    assert_eq!(reused.skill_id, first.skill_id);
+    assert_eq!(store.list_skills().unwrap(), before);
+    fs::write(source.join("extra.txt"), "changed content").unwrap();
+    let error =
+        super::import_existing_local_skill(&paths, &store, &source, Some("import-demo".into()))
+            .err()
+            .expect("changed import must be rejected");
+    let conflict = error
+        .downcast_ref::<super::SkillAlreadyExistsError>()
+        .unwrap();
+    assert!(conflict.is_managed());
+    assert_eq!(conflict.central_path(), first.central_path);
+    assert!(!first.central_path.join("extra.txt").exists());
+    assert_eq!(store.list_skills().unwrap(), before);
+}
