@@ -16,5 +16,6 @@ mod skills_hub_read;
 mod workspace;
 
 mod content_check;
+mod source_conflict;
 
 mod live_github_content_check;

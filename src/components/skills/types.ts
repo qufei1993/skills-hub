@@ -75,6 +75,13 @@ export type TagWithCountDto = TagDto & {
   updated_at: number
 }
 
+export type ContentEntryMetadata = { kind: 'file' | 'directory' | 'symlink'; mode?: number; readonly?: boolean }
+export type ContentFileChange = { path: string; kind: string; before: string | null; after: string | null; beforeMetadata?: ContentEntryMetadata | null; afterMetadata?: ContentEntryMetadata | null }
+export type SourceConflictChoice = 'central' | 'tool'
+export type SourceConflictOption = { targets: string[]; blocked: { code: string; path: string | null } | null }
+export type SourceConflictPreview = { id: string; skillId: string; name: string; centralPath: string; sourcePath: string; changes: ContentFileChange[]; central: SourceConflictOption; tool: SourceConflictOption }
+export type SourceConflictOutcome = { id: string; skillId: string; name: string; choice: SourceConflictChoice; targets: string[] }
+
 export type ManagedSkill = {
   source_error?: string | null
   source_checked_at?: number | null

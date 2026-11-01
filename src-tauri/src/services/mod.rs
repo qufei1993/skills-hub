@@ -14,3 +14,4 @@ mod tests;
 pub mod workspace;
 
 pub mod content_check;
+pub mod source_conflict;

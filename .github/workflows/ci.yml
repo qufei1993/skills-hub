@@ -228,6 +228,9 @@ jobs:
       - name: Verify discovery imports preserve managed sources and deployments on Windows
         working-directory: src-tauri
         run: cargo test --locked --features cli --lib services::tests::library
+      - name: Verify adopted source conflict resolution on Windows
+        working-directory: src-tauri
+        run: cargo test --locked --features cli --lib services::tests::source_conflict
       - name: Install frontend test dependencies
         run: npm ci
       - name: Verify discovery import UI outcomes on Windows
