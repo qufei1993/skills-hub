@@ -17,7 +17,7 @@
 
 | 问题 | Issue | PR | 说明 |
 | --- | --- | --- | --- |
-| 中心内容缺失可能被误判为远端删除、显示为正常，或导致管理记录无法删除。 | — | — | 阻止设备同步并标明异常，允许用户明确删除记录并保留工具副本和来源，删除冲突使用对应场景提示。见[完整性规则](implementation.zh.md#data-integrity-and-compatibility)；关联报告 [#157](https://github.com/qufei1993/skills-hub/pull/157)、[#158](https://github.com/qufei1993/skills-hub/pull/158)。 |
+| 中心内容缺失可能被误判为远端删除、显示为正常，或导致管理记录无法删除。 | — | [#215](https://github.com/qufei1993/skills-hub/pull/215) | 阻止设备同步并标明异常，允许用户明确删除记录并保留工具副本和来源，删除冲突使用对应场景提示。见[完整性规则](implementation.zh.md#data-integrity-and-compatibility)；关联报告 [#157](https://github.com/qufei1993/skills-hub/pull/157)、[#158](https://github.com/qufei1993/skills-hub/pull/158)。 |
 | 冲突、重试和部分失败时，受影响目标或已完成进度不够明确。 | — | [#209](https://github.com/qufei1993/skills-hub/pull/209) | 保留选择和执行结果，显示可处理的冲突位置，并保护撤销及可恢复备份，见[完整性规则](implementation.zh.md#data-integrity-and-compatibility)。 |
 | 技能库操作误入预设或增加确认，共享工具提示后只登记一个工具。 | — | [#212](https://github.com/qufei1993/skills-hub/pull/212) | 恢复工具切换与更新的直接操作，项目管理限定范围，已确认的共享工具一起处理，见[技能库行为](implementation.zh.md#library-and-project-management)。 |
 | Git 检查可能因辅助进程卡住，或由单个故障来源阻塞其他结果。 | — | [#209](https://github.com/qufei1993/skills-hub/pull/209) | 超时或取消时终止辅助进程，隔离失败并排除内部缓存元数据，见[更新检查](implementation.zh.md#updates-and-recovery)。 |
