@@ -417,6 +417,28 @@ pub(crate) fn deployment_fingerprint(path: &Path) -> Result<Option<String>> {
 }
 
 impl PreparedDeployment {
+    pub(crate) fn prepare_snapshot(
+        source: &Path,
+        target: &Path,
+        expected: Option<String>,
+    ) -> Result<Self> {
+        let parents = DeploymentParentSnapshot::capture(target, None)?;
+        let mut replacement = Self::prepare_in(None, target, SyncMode::Copy, expected, parents)?;
+        let staging = target
+            .parent()
+            .context("snapshot target has no parent")?
+            .join(format!(".skills-hub-deploy-{}", Uuid::new_v4()));
+        replacement.staging = Some(staging.clone());
+        replacement.parent_snapshot.validate()?;
+        #[cfg(test)]
+        run_deployment_race_hook(DeploymentRacePoint::StagingWrite);
+        replacement.parent_snapshot.validate()?;
+        super::source_conflict::copy_snapshot(source, &staging)?;
+        replacement.parent_snapshot.validate()?;
+        replacement.prepared = deployment_fingerprint(&staging)?;
+        Ok(replacement)
+    }
+
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn prepare(
         source: Option<&Path>,

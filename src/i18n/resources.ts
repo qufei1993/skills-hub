@@ -3,6 +3,37 @@ import { ko } from './ko'
 export const resources = {
   en: {
     translation: {
+      sourceConflict: {
+  "unknown": "The result could not be confirmed. Check the saved operation result before continuing.",
+  "verifyResult": "Check operation result",
+  "title": "Resolve conflict",
+  "completed": "Conflict resolved",
+  "done": "Done",
+  "resolve": "Apply selected version",
+  "loading": "Comparing the central library and tool folder…",
+  "intro": "Review the differences and choose the version to keep.",
+  "choose": "Version to keep",
+  "keepCentral": "Keep central library version",
+  "keepTool": "Keep tool version",
+  "centralHelp": "Replace the original tool folder with a managed target. Other deployments keep their current content.",
+  "toolHelp": "Update the central library and all active deployments with the tool version, then take over the original folder.",
+  "affected": "Deployment folders affected: {{count}}",
+  "locations": "Show folder locations",
+  "central": "Central library",
+  "tool": "Tool folder",
+  "fileCount": "Changed entries: {{count}}",
+  "identical": "The two folders now match. Either choice will bring the original folder under Skills Hub management.",
+  "blocked": "This choice is unavailable. Check this deployment’s local changes, availability and permissions before retrying.",
+  "failed": "The operation did not complete. Recoverable content was retained; recheck before retrying.",
+  "stale": "Files or deployment settings changed. Review the differences again before applying.",
+  "busy": "Another operation is running. Try again when it finishes.",
+  "recheck": "Review again",
+  "recoveryRequired": "Concurrent changes prevented a full rollback. Check the retained recovery folders before continuing.",
+  "success": "{{name}} is now managed from the central library.",
+  "refreshFailed": "The conflict was resolved, but the library view could not be refreshed. Refresh the view; do not apply the resolution again.",
+  "refresh": "Refresh library",
+  "symlink": "Symbolic link"
+},
       workspace110: {
   "undoComplete": "Additions undone",
   "executionUnknown": "Application could not be confirmed. This run was saved; recheck it before continuing.",
@@ -1649,6 +1680,8 @@ export const resources = {
           'Cannot sync to {{tool}}: permission denied on {{path}}. Please check directory permissions or run as administrator.',
         targetOverlapsSource:
           'This sync target overlaps the original local source: {{path}}. Choose a different tool directory to keep the source safe.',
+        sourceTargetDiffers:
+          'The tool folder differs from the central library: {{path}}. Choose “Resolve conflict” to compare both versions and decide which one to keep.',
         targetModified:
           'Update stopped because the synced copy was modified ({{path}}). Review it before choosing whether to overwrite.',
         updateInProgress: 'Another update is already running. Please try again shortly.',
@@ -1814,6 +1847,37 @@ export const resources = {
   },
   zh: {
     translation: {
+      sourceConflict: {
+  "unknown": "暂时无法确认处理结果。请先核对已保存的操作结果，再继续。",
+  "verifyResult": "核对处理结果",
+  "title": "处理冲突",
+  "completed": "冲突已处理",
+  "done": "完成",
+  "resolve": "应用所选版本",
+  "loading": "正在比较中心库与工具目录…",
+  "intro": "查看差异，并选择要保留的版本。",
+  "choose": "选择保留哪个版本",
+  "keepCentral": "保留中心库版本",
+  "keepTool": "保留工具版本",
+  "centralHelp": "将原工具目录替换为受管理目标，其他部署继续使用当前内容。",
+  "toolHelp": "用工具版本更新中心库和所有已启用的部署，再接管原工具目录。",
+  "affected": "将影响 {{count}} 个部署目录",
+  "locations": "查看目录位置",
+  "central": "中心库",
+  "tool": "工具目录",
+  "fileCount": "有差异的条目：{{count}}",
+  "identical": "两份目录现已一致。选择任一版本，都可将原工具目录纳入统一管理。",
+  "blocked": "此版本暂不可应用。请先检查该部署的本地修改、可用状态和目录权限。",
+  "failed": "处理未完成，已保留可恢复内容。请重新检查后重试。",
+  "stale": "文件或部署设置已变化，请重新查看差异后再确认。",
+  "busy": "另一项操作正在进行，请结束后重试。",
+  "recheck": "重新查看差异",
+  "recoveryRequired": "执行期间出现了新改动，无法完整回滚。请检查保留的恢复目录后再继续。",
+  "success": "{{name}} 已由中心库统一管理。",
+  "refreshFailed": "冲突已处理成功，但列表刷新失败。请刷新列表，无需再次执行接管。",
+  "refresh": "刷新列表",
+  "symlink": "符号链接"
+},
       workspace110: {
   "undoComplete": "本次新增已撤销",
   "executionUnknown": "未能确认本次应用结果，已保留操作记录。请重新检查后继续。",
@@ -3438,6 +3502,8 @@ export const resources = {
           '无法同步到 {{tool}}：目录 {{path}} 权限不足。请检查目录权限或以管理员身份运行。',
         targetOverlapsSource:
           '同步目标与本地原始源目录重叠：{{path}}。为保护源文件，请为该工具选择其他目录。',
+        sourceTargetDiffers:
+          '工具目录与中心库内容不同：{{path}}。请选择“处理冲突”查看差异，并决定保留哪个版本。',
         targetModified:
           '更新已停止：同步副本可能被修改（{{path}}）。请检查内容后再决定是否覆盖。',
         updateInProgress: '另一个更新任务正在进行，请稍后再试。',

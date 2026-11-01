@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::core::content_hash::{hash_dir_for_sync_conflict, hash_dir_strict};
-use crate::core::skill_store::SkillTargetRecord;
+use crate::core::content_hash::{hash_dir, hash_dir_for_sync_conflict, hash_dir_strict};
+use crate::core::skill_store::{SkillRecord, SkillTargetRecord};
 use crate::core::sync_engine::{
     deployment_fingerprint, path_for_comparison, DeploymentParentSnapshot, PreparedDeployment,
     SyncMode,
@@ -80,6 +80,8 @@ pub struct DeploymentPlan {
     fingerprints: Vec<Option<String>>,
     #[serde(skip)]
     parent_snapshots: Vec<DeploymentParentSnapshot>,
+    #[serde(skip)]
+    source_takeover: Option<SkillRecord>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -91,6 +93,89 @@ pub struct DeploymentOutcome {
 }
 
 impl DeploymentPlan {
+    pub(super) fn target_upserts(
+        &mut self,
+        prepared: &[PreparedDeployment],
+    ) -> anyhow::Result<Vec<(SkillTargetRecord, String)>> {
+        let mut upserts = Vec::new();
+        let scope = if matches!(self.scope, DeploymentScope::Global) {
+            "global"
+        } else {
+            "project"
+        };
+        let project_path = match &self.scope {
+            DeploymentScope::Global => None,
+            DeploymentScope::Project(path) => Some(path.to_string_lossy().into_owned()),
+        };
+        if !self.undeploy {
+            for (target, replacement) in self.targets.iter_mut().zip(prepared) {
+                #[cfg(test)]
+                crate::core::sync_engine::run_deployment_race_hook(
+                    crate::core::sync_engine::DeploymentRacePoint::BeforeBaselineRead,
+                );
+                let hash = replacement.content_baseline()?;
+                #[cfg(test)]
+                crate::core::sync_engine::run_deployment_race_hook(
+                    crate::core::sync_engine::DeploymentRacePoint::AfterBaselineRead,
+                );
+                target.mode = replacement.mode;
+                for agent in &target.agents {
+                    let id = self
+                        .rows
+                        .iter()
+                        .find(|row| {
+                            row.tool == *agent
+                                && row.scope == scope
+                                && same_project(
+                                    row.project_path.as_deref(),
+                                    project_path.as_deref(),
+                                )
+                        })
+                        .map(|row| row.id.clone())
+                        .unwrap_or_else(|| Uuid::new_v4().to_string());
+                    upserts.push((
+                        SkillTargetRecord {
+                            id,
+                            skill_id: self.skill_id.clone(),
+                            tool: agent.clone(),
+                            scope: scope.into(),
+                            project_path: project_path.clone(),
+                            target_path: target.path.to_string_lossy().into_owned(),
+                            mode: mode_name(target.mode).into(),
+                            status: "ok".into(),
+                            last_error: None,
+                            synced_at: Some(
+                                std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_millis() as i64,
+                            ),
+                        },
+                        hash.clone(),
+                    ));
+                }
+            }
+        }
+        Ok(upserts)
+    }
+
+    pub(super) fn prepare_targets(&self) -> anyhow::Result<Vec<PreparedDeployment>> {
+        self.targets
+            .iter()
+            .zip(&self.fingerprints)
+            .zip(&self.parent_snapshots)
+            .map(|((target, expected), parents)| {
+                PreparedDeployment::prepare_in(
+                    (!self.undeploy).then_some(self.source.as_path()),
+                    &target.path,
+                    target.mode,
+                    expected.clone(),
+                    parents.clone(),
+                )
+            })
+            .collect()
+    }
+
     pub(crate) fn workspace_fingerprint(&self) -> String {
         use sha2::{Digest, Sha256};
         // Unrelated deployments must not invalidate another item in the batch.
@@ -197,6 +282,26 @@ impl SkillsHubService {
         undeploy: bool,
         skill: Skill,
         content_source: Option<&Path>,
+    ) -> Result<DeploymentPlan, ServiceError> {
+        self.plan_deployment_with_resolution(request, undeploy, skill, content_source, false)
+    }
+
+    pub(super) fn plan_source_conflict_deployment(
+        &self,
+        request: DeploymentRequest,
+        skill: Skill,
+        content_source: &Path,
+    ) -> Result<DeploymentPlan, ServiceError> {
+        self.plan_deployment_with_resolution(request, false, skill, Some(content_source), true)
+    }
+
+    fn plan_deployment_with_resolution(
+        &self,
+        request: DeploymentRequest,
+        undeploy: bool,
+        skill: Skill,
+        content_source: Option<&Path>,
+        resolving_source_conflict: bool,
     ) -> Result<DeploymentPlan, ServiceError> {
         self.ensure_database_compatible()?;
         if request.agents.is_empty() || request.agents.iter().any(|agent| agent.trim().is_empty()) {
@@ -341,6 +446,7 @@ impl SkillsHubService {
         let mut fingerprints = Vec::new();
         let mut rows = Vec::new();
         let mut baseline_snapshot = Vec::new();
+        let mut source_takeover = None;
         for (path, mut group) in groups {
             group.sort_by(|a, b| a.key.cmp(&b.key));
             let group_key = group[0].key.clone();
@@ -361,9 +467,13 @@ impl SkillsHubService {
                     return Err(conflict(key, &path, "overlapping_targets"));
                 }
             }
+            let fingerprint = deployment_fingerprint(&path)
+                .map_err(|_| conflict(key, &path, "invalid_target"))?;
+            let mut taking_over_source = false;
             for protected in &all_skills {
-                for protected_path in std::iter::once(protected.central_path.as_str())
-                    .chain(protected.external_local_source())
+                for (protected_path, local_source) in
+                    std::iter::once((protected.central_path.as_str(), false))
+                        .chain(protected.external_local_source().map(|path| (path, true)))
                 {
                     let protected_path = path_for_comparison(Path::new(protected_path))
                         .map_err(|_| conflict(key, &path, "path_resolution"))?;
@@ -371,6 +481,24 @@ impl SkillsHubService {
                         || physical.starts_with(&protected_path)
                         || protected_path.starts_with(&physical)
                     {
+                        // Only the exact, unchanged source of this Skill may become
+                        // a managed target. Other Skills and parent/child overlaps
+                        // remain protected, even with explicit overwrite enabled.
+                        if !undeploy
+                            && local_source
+                            && protected.id == skill.id
+                            && physical == protected_path
+                        {
+                            if !resolving_source_conflict
+                                && fingerprint.as_deref()
+                                    != Some(format!("dir:{source_hash}").as_str())
+                            {
+                                return Err(conflict(key, &path, "source_content_differs"));
+                            }
+                            source_takeover = Some(protected.clone());
+                            taking_over_source = true;
+                            continue;
+                        }
                         return Err(conflict(key, &path, "overlaps_skill_source"));
                     }
                 }
@@ -389,8 +517,6 @@ impl SkillsHubService {
                 }
             }
             check_parent_writable(&path).map_err(|_| conflict(key, &path, "not_writable"))?;
-            let fingerprint = deployment_fingerprint(&path)
-                .map_err(|_| conflict(key, &path, "invalid_target"))?;
             let matching: Vec<_> = records
                 .iter()
                 .filter(|record| {
@@ -445,7 +571,8 @@ impl SkillsHubService {
                         })
                 });
                 let same_content = actual.as_ref() == Some(&conflict_hash);
-                let trusted = managed && (linked || baseline_matches || same_content);
+                let trusted =
+                    taking_over_source || (managed && (linked || baseline_matches || same_content));
                 let explicit_overwrite = !undeploy
                     && (request.overwrite || (request.overwrite_if_same_content && same_content));
                 if !trusted && !explicit_overwrite {
@@ -551,6 +678,7 @@ impl SkillsHubService {
             rows,
             fingerprints,
             parent_snapshots,
+            source_takeover,
         })
     }
 
@@ -615,66 +743,8 @@ impl SkillsHubService {
             for replacement in &mut prepared {
                 replacement.activate()?;
             }
-            let mut upserts = Vec::new();
-            let scope = if matches!(plan.scope, DeploymentScope::Global) {
-                "global"
-            } else {
-                "project"
-            };
-            let project_path = match &plan.scope {
-                DeploymentScope::Global => None,
-                DeploymentScope::Project(path) => Some(path.to_string_lossy().into_owned()),
-            };
             stage = "read_baseline";
-            if !plan.undeploy {
-                for (target, replacement) in plan.targets.iter_mut().zip(&prepared) {
-                    #[cfg(test)]
-                    crate::core::sync_engine::run_deployment_race_hook(
-                        crate::core::sync_engine::DeploymentRacePoint::BeforeBaselineRead,
-                    );
-                    let hash = replacement.content_baseline()?;
-                    #[cfg(test)]
-                    crate::core::sync_engine::run_deployment_race_hook(
-                        crate::core::sync_engine::DeploymentRacePoint::AfterBaselineRead,
-                    );
-                    target.mode = replacement.mode;
-                    for agent in &target.agents {
-                        let id = plan
-                            .rows
-                            .iter()
-                            .find(|row| {
-                                row.tool == *agent
-                                    && row.scope == scope
-                                    && same_project(
-                                        row.project_path.as_deref(),
-                                        project_path.as_deref(),
-                                    )
-                            })
-                            .map(|row| row.id.clone())
-                            .unwrap_or_else(|| Uuid::new_v4().to_string());
-                        upserts.push((
-                            SkillTargetRecord {
-                                id,
-                                skill_id: plan.skill_id.clone(),
-                                tool: agent.clone(),
-                                scope: scope.into(),
-                                project_path: project_path.clone(),
-                                target_path: target.path.to_string_lossy().into_owned(),
-                                mode: mode_name(target.mode).into(),
-                                status: "ok".into(),
-                                last_error: None,
-                                synced_at: Some(
-                                    std::time::SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap_or_default()
-                                        .as_millis() as i64,
-                                ),
-                            },
-                            hash.clone(),
-                        ));
-                    }
-                }
-            }
+            let upserts = plan.target_upserts(&prepared)?;
             stage = "verify_source";
             anyhow::ensure!(
                 Some(hash_dir_strict(&plan.source)?.as_str())
@@ -686,9 +756,15 @@ impl SkillsHubService {
                 replacement.verify_unchanged()?;
             }
             stage = "commit_records";
+            let takeover_hash = plan
+                .source_takeover
+                .as_ref()
+                .map(|_| hash_dir(&plan.source))
+                .transpose()?;
             self.store().commit_deployment_targets(
                 &upserts,
                 if plan.undeploy { &plan.rows } else { &[] },
+                plan.source_takeover.as_ref().zip(takeover_hash.as_deref()),
                 || {
                     for replacement in &prepared {
                         replacement.verify_unchanged()?;
@@ -746,7 +822,7 @@ impl SkillsHubService {
     }
 }
 
-fn agent_root(agent: &Agent, project: Option<&Path>) -> Result<PathBuf, ServiceError> {
+pub(super) fn agent_root(agent: &Agent, project: Option<&Path>) -> Result<PathBuf, ServiceError> {
     if let Some(project) = project {
         let relative = Path::new(&agent.project_skills_dir);
         if relative.as_os_str().is_empty()
@@ -776,7 +852,7 @@ fn same_project(first: Option<&str>, second: Option<&str>) -> bool {
     }
 }
 
-fn target_location(path: &Path) -> anyhow::Result<PathBuf> {
+pub(super) fn target_location(path: &Path) -> anyhow::Result<PathBuf> {
     Ok(path_for_comparison(
         path.parent()
             .ok_or_else(|| anyhow::anyhow!("target has no parent"))?,

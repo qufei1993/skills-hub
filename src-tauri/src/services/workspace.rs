@@ -627,7 +627,7 @@ impl SkillsHubService {
                 .any(|other| other.id != row.id && other.target_path == row.target_path)
             {
                 self.store()
-                    .commit_deployment_targets(&[], std::slice::from_ref(row), || Ok(()))
+                    .commit_deployment_targets(&[], std::slice::from_ref(row), None, || Ok(()))
                     .map_err(storage)?;
             } else {
                 let request = DeploymentRequest {
