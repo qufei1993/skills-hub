@@ -1830,6 +1830,50 @@ fn issue_129_discovers_and_installs_skills_across_categories() {
 }
 
 #[test]
+fn sync_git_source_identity_normalizes_urls_and_keeps_distinct_skill_paths() {
+    for (reference, subpath) in [
+        ("owner/repo", Some("skills/a")),
+        ("https://github.com/owner/repo.git/", Some("skills/a")),
+        ("git@github.com:owner/repo.git", Some("skills/a")),
+        ("ssh://git@github.com/owner/repo.git", Some("skills/a")),
+        (
+            "https://github.com/owner/repo/blob/main/skills/a/SKILL.md",
+            None,
+        ),
+        (
+            "https://github.com/owner/repo/tree/main/skills",
+            Some("skills/a"),
+        ),
+    ] {
+        assert!(super::same_sync_skill_source(
+            "https://github.com/Owner/Repo/tree/main/skills/a",
+            None,
+            reference,
+            subpath,
+        ));
+        assert!(super::same_sync_skill_source(
+            reference,
+            subpath,
+            "https://github.com/Owner/Repo/tree/main/skills/a",
+            None,
+        ));
+    }
+    for (reference, subpath) in [
+        ("owner/other", Some("skills/a")),
+        ("owner/repo", Some("skills/b")),
+        ("owner/repo", None),
+        ("owner/repo/tree/dev/skills/a", None),
+    ] {
+        assert!(!super::same_sync_skill_source(
+            "owner/repo/tree/main/skills/a",
+            None,
+            reference,
+            subpath,
+        ));
+    }
+}
+
+#[test]
 fn git_source_identity_normalizes_equivalent_urls_but_preserves_branch_and_path() {
     for reference in [
         "owner/repo",

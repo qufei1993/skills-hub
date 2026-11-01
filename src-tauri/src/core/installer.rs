@@ -714,6 +714,30 @@ pub(crate) fn same_collection_skill_source(
     same_git_source(source, source_subpath, reference, subpath, false)
 }
 
+pub(crate) fn same_sync_skill_source(
+    source: &str,
+    source_subpath: Option<&str>,
+    reference: &str,
+    reference_subpath: Option<&str>,
+) -> bool {
+    let stored = parse_github_url(source);
+    let requested = parse_github_url(reference);
+    // An omitted branch follows the repository default; it is not a separate Skill.
+    // Preserve explicitly different branches, which may be intentional variants.
+    let compatible_branch =
+        stored.branch.is_none() || requested.branch.is_none() || stored.branch == requested.branch;
+    compatible_branch
+        && same_git_source(
+            source,
+            source_subpath,
+            reference,
+            reference_subpath
+                .or(requested.subpath.as_deref())
+                .unwrap_or("."),
+            false,
+        )
+}
+
 fn same_git_source(
     source: &str,
     source_subpath: Option<&str>,

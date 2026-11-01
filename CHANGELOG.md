@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Device-sync duplicate Skills**: Recognize equivalent Git repository links and selected Skill paths across devices before merging. Keeping the local version or using the repository version retains one Skill and its existing deployments instead of importing a same-name duplicate.
+
 ## [1.1.0]
 
 ### Added

@@ -1338,9 +1338,20 @@ fn same_portable_identity(
     remote: &manifest::PortableSkill,
 ) -> bool {
     let same_source = local.source_type == remote.source_type
-        && local.source_ref.is_some()
-        && local.source_ref == remote.source_ref
-        && local.source_subpath == remote.source_subpath;
+        && match (local.source_ref.as_deref(), remote.source_ref.as_deref()) {
+            (Some(local_ref), Some(remote_ref)) if local.source_type == "git" => {
+                crate::core::installer::same_sync_skill_source(
+                    local_ref,
+                    local.source_subpath.as_deref(),
+                    remote_ref,
+                    remote.source_subpath.as_deref(),
+                )
+            }
+            (Some(local_ref), Some(remote_ref)) => {
+                local_ref == remote_ref && local.source_subpath == remote.source_subpath
+            }
+            _ => false,
+        };
     same_source || manifest::aggregate_hash(&local.files) == manifest::aggregate_hash(&remote.files)
 }
 
@@ -3075,6 +3086,181 @@ mod tests {
             still_local.status, "error",
             "a genuinely missing local source must stay visible"
         );
+    }
+
+    #[test]
+    fn equivalent_git_sources_resolve_to_one_skill_on_both_devices() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        for resolution in [ConflictResolution::KeepLocal, ConflictResolution::UseRemote] {
+            let root = tempfile::tempdir().unwrap();
+            let (_bare, config) = seed_remote(root.path());
+            let credentials = MemoryCredentialStore::default();
+            let a = make_store(root.path(), "source-a", &config);
+            let b = make_store(root.path(), "source-b", &config);
+            let ca = root.path().join("central-a");
+            let cb = root.path().join("central-b");
+            for (store, central, id, reference, content, tag) in [
+                (
+                    &a,
+                    &ca,
+                    "remote-id",
+                    "https://github.com/Leonxlnx/taste-skill/tree/main/skills",
+                    "# Repository version",
+                    "UI",
+                ),
+                (
+                    &b,
+                    &cb,
+                    "local-id",
+                    "https://github.com/leonxlnx/taste-skill",
+                    "# Local version",
+                    "Taste",
+                ),
+            ] {
+                add_skill_in_directory(store, central, id, "design-taste-frontend", content);
+                let mut record = store.get_skill_by_id(id).unwrap().unwrap();
+                record.source_ref = Some(reference.into());
+                record.source_subpath = Some("skills/taste-skill".into());
+                record.source_revision = Some("12af471f627f866411b4bd785b19646d3672784c".into());
+                store.upsert_skill(&record).unwrap();
+                store.set_skill_tag_names(id, &[tag.into()]).unwrap();
+            }
+            let target_path = root
+                .path()
+                .join("project/.agents/skills/design-taste-frontend");
+            b.upsert_skill_target(&SkillTargetRecord {
+                id: "project-target".into(),
+                skill_id: "local-id".into(),
+                tool: "codex".into(),
+                scope: "project".into(),
+                project_path: Some(root.path().join("project").to_string_lossy().into()),
+                target_path: target_path.to_string_lossy().into(),
+                mode: "symlink".into(),
+                status: "ok".into(),
+                last_error: None,
+                synced_at: Some(1),
+            })
+            .unwrap();
+            let sa = DeviceSyncService::new(&a, &credentials, root.path().join("wa"), ca.clone());
+            let sb = DeviceSyncService::new(&b, &credentials, root.path().join("wb"), cb.clone());
+            sa.sync().unwrap();
+
+            let preview = sb.check().unwrap();
+            assert_eq!(
+                preview.conflicted, 1,
+                "equivalent sources must conflict instead of adding another Skill"
+            );
+            assert_eq!(preview.added, 0);
+            assert!(
+                b.get_skill_by_id("local-id").unwrap().is_some(),
+                "a preview must not change library identity"
+            );
+            assert_eq!(sb.sync().unwrap().status, "conflicts");
+            let conflict = b.list_device_sync_conflicts().unwrap().remove(0);
+            assert_eq!(conflict.skill_id, "remote-id");
+            sb.resolve_conflict(&conflict.id, resolution).unwrap();
+
+            let (expected_content, expected_tag) = match resolution {
+                ConflictResolution::KeepLocal => ("# Local version", "Taste"),
+                ConflictResolution::UseRemote => ("# Repository version", "UI"),
+                ConflictResolution::KeepBoth => unreachable!(),
+            };
+            assert_eq!(b.list_skills().unwrap().len(), 1);
+            assert!(b.get_skill_by_id("local-id").unwrap().is_none());
+            assert_eq!(
+                b.get_skill_by_id("remote-id")
+                    .unwrap()
+                    .unwrap()
+                    .central_path,
+                cb.join("design-taste-frontend").to_string_lossy()
+            );
+            assert_eq!(
+                b.list_skill_targets("remote-id").unwrap()[0].target_path,
+                target_path.to_string_lossy()
+            );
+            assert_eq!(
+                fs::read_to_string(cb.join("design-taste-frontend/SKILL.md")).unwrap(),
+                expected_content
+            );
+            assert_eq!(b.get_skill_tags("remote-id").unwrap()[0].name, expected_tag);
+
+            // Include a restart and a round trip so a resolved conflict cannot resurrect the old ID.
+            let restarted =
+                DeviceSyncService::new(&b, &credentials, root.path().join("wb"), cb.clone());
+            restarted.sync().unwrap();
+            sa.sync().unwrap();
+            restarted.sync().unwrap();
+            for (store, central) in [(&a, &ca), (&b, &cb)] {
+                assert_eq!(store.list_skills().unwrap().len(), 1);
+                assert_eq!(
+                    fs::read_to_string(central.join("design-taste-frontend/SKILL.md")).unwrap(),
+                    expected_content
+                );
+                assert_eq!(
+                    store.get_skill_tags("remote-id").unwrap()[0].name,
+                    expected_tag
+                );
+            }
+            let repository = SyncManifest::read(&root.path().join("wb/repository")).unwrap();
+            assert_eq!(
+                repository.skills.keys().cloned().collect::<Vec<_>>(),
+                ["remote-id"]
+            );
+        }
+    }
+
+    #[test]
+    fn resolving_another_conflict_does_not_download_a_duplicate_git_skill() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        for resolution in [ConflictResolution::KeepLocal, ConflictResolution::UseRemote] {
+            let root = tempfile::tempdir().unwrap();
+            let (_, config) = seed_remote(root.path());
+            let credentials = MemoryCredentialStore::default();
+            let a = make_store(root.path(), "a", &config);
+            let b = make_store(root.path(), "b", &config);
+            let ca = root.path().join("ca");
+            let cb = root.path().join("cb");
+            for (store, central, id, reference, content) in [
+                (
+                    &a,
+                    &ca,
+                    "remote-id",
+                    "owner/repo/tree/main/skills/a",
+                    "# Remote",
+                ),
+                (&b, &cb, "local-id", "owner/repo.git", "# Local"),
+            ] {
+                add_skill_in_directory(store, central, id, "example", content);
+                let mut skill = store.get_skill_by_id(id).unwrap().unwrap();
+                skill.source_ref = Some(reference.into());
+                skill.source_subpath = Some("skills/a".into());
+                store.upsert_skill(&skill).unwrap();
+                add_skill(store, central, "other-conflict", content);
+            }
+            let sa = DeviceSyncService::new(&a, &credentials, root.path().join("wa"), ca);
+            let sb = DeviceSyncService::new(&b, &credentials, root.path().join("wb"), cb.clone());
+            sa.sync().unwrap();
+            assert_eq!(sb.sync().unwrap().status, "conflicts");
+            // Before the fix only the unrelated Skill conflicted. Applying either choice
+            // then allowed the unrecognized same-source Skill to be downloaded as an addition.
+            for conflict in b.list_device_sync_conflicts().unwrap() {
+                sb.resolve_conflict(&conflict.id, resolution).unwrap();
+            }
+            sb.sync().unwrap();
+            assert_eq!(
+                b.list_skills().unwrap().len(),
+                2,
+                "resolving conflicts must not add a duplicate Skill"
+            );
+            assert_eq!(fs::read_dir(&cb).unwrap().count(), 2);
+            assert!(b.get_skill_by_id("local-id").unwrap().is_none());
+            sa.sync().unwrap();
+            assert_eq!(a.list_skills().unwrap().len(), 2);
+        }
     }
 
     #[test]
