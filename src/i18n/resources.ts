@@ -1,8 +1,11 @@
+import trayMenu from './trayMenu.json'
 import { ko } from './ko'
 
 export const resources = {
   en: {
     translation: {
+      trayMenu: trayMenu.en,
+
       sourceConflict: {
   "unknown": "The result could not be confirmed. Check the saved operation result before continuing.",
   "verifyResult": "Check operation result",
@@ -1855,6 +1858,8 @@ export const resources = {
   },
   zh: {
     translation: {
+      trayMenu: trayMenu.zh,
+
       sourceConflict: {
   "unknown": "暂时无法确认处理结果。请先核对已保存的操作结果，再继续。",
   "verifyResult": "核对处理结果",

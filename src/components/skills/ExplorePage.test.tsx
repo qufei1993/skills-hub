@@ -43,7 +43,8 @@ it('shows website collections by default, opens details and reuses the collectio
   expect(calls).not.toContain('get_featured_skills')
   expect(screen.queryByRole('button', { name: 'Skills 搜索' })).toBeNull()
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: '返回探索' })) })
-  expect(document.activeElement).toBe(screen.getByRole('button', { name: '查看 Skills for Real Engineers' }))
+  // Wait for the return-focus effect after navigating back to the collection list.
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: '查看 Skills for Real Engineers' })))
   expect(indexRequests).toBe(1)
 })
 it('validates website data and rejects unpublished collections before generating an install plan', () => {

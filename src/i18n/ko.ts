@@ -1,5 +1,7 @@
+import trayMenu from './trayMenu.json'
 export const ko = {
   "translation": {
+    trayMenu: trayMenu.ko,
     sourceConflict: {
   "unknown": "처리 결과를 확인하지 못했습니다. 계속하기 전에 저장된 작업 결과를 확인하세요.",
   "verifyResult": "처리 결과 확인",

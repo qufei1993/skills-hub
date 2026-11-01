@@ -2,6 +2,7 @@ pub mod cli;
 mod commands;
 pub mod core;
 pub mod services;
+mod window_lifecycle;
 
 const _: () = assert!(
     cfg!(debug_assertions) == (env!("SKILLS_HUB_EXPECT_DEBUG_ASSERTIONS").as_bytes()[0] == b'1'),
@@ -87,10 +88,8 @@ pub fn run() {
         builder
     } else {
         builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
+            if let Err(error) = window_lifecycle::show_main_window(app) {
+                log::warn!("second launch could not restore window: {error:#}");
             }
         }))
     };
@@ -159,6 +158,9 @@ pub fn run() {
                 return Ok(());
             }
 
+            if core::window_behavior::uses_desktop_lifecycle(is_background_update) {
+                window_lifecycle::setup(app.handle(), &store);
+            }
             app.manage(Arc::new(CancelToken::new()));
             app.manage(commands::content_check::ContentCheckRegistry::default());
 
@@ -395,11 +397,22 @@ pub fn run() {
             commands::resolve_device_sync_conflict,
             commands::restore_device_sync_trash,
             commands::disconnect_device_sync,
-            commands::cancel_current_operation
+            commands::cancel_current_operation,
+            commands::tray::set_tray_language
         ])
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                window.app_handle().exit(0);
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    let app = window.app_handle();
+                    let hide = app
+                        .try_state::<window_lifecycle::WindowLifecycle>()
+                        .is_some_and(|state| state.should_hide(app));
+                    if hide && window.hide().is_ok() {
+                        api.prevent_close();
+                    } else {
+                        app.exit(0);
+                    }
+                }
             }
         })
         .build(runtime_context(is_background_update))
@@ -413,7 +426,18 @@ pub fn run() {
         }
         app
     };
-    app.run(|_app, _event| {
+    app.run(move |_app, _event| {
+        if matches!(_event, tauri::RunEvent::Exit) {
+            if let Some(state) = _app.try_state::<window_lifecycle::WindowLifecycle>() {
+                state.stop();
+            }
+        }
+        #[cfg(target_os = "macos")]
+        if matches!(_event, tauri::RunEvent::Reopen { .. }) && !is_background_update {
+            if let Err(error) = window_lifecycle::show_main_window(_app) {
+                log::warn!("Dock reopen could not restore window: {error:#}");
+            }
+        }
         #[cfg(target_os = "macos")]
         if let tauri::RunEvent::Opened { urls } = _event {
             let links: Vec<String> = urls.iter().map(ToString::to_string).collect();

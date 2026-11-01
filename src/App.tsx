@@ -416,6 +416,10 @@ function App() {
     setSourceConflictDialogPath(path)
   }, [])
 
+  useEffect(() => {
+    if (isTauri) void invokeTauri('set_tray_language', { language }).catch(error => console.warn('Tray language could not be updated', error))
+  }, [invokeTauri, isTauri, language])
+
   const formatErrorMessage = useCallback(
     (raw: string) => {
       if (raw.includes('CANCELLED|')) {

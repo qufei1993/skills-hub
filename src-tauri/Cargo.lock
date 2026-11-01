@@ -155,6 +155,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "dbus",
  "dirs 5.0.1",
  "dotenvy",
  "fs2",

@@ -1,6 +1,7 @@
 pub mod collection_link;
 pub mod content_check;
 pub mod source_conflict;
+pub mod tray;
 pub mod workspace;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};

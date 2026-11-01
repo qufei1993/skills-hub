@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Close to tray**: Keep Skills Hub running in the tray when its main window is closed, without requiring a preference. Provide localized tray Open/Quit actions, Dock and repeated-launch window recovery, and an exit fallback when no usable tray is available. Restore hidden Linux windows if the tray host disappears; background update workers remain independent. ([#156](https://github.com/qufei1993/skills-hub/pull/156))
+
 ### Fixed
 
 - **Central-folder collision guidance**: Distinguish already managed Skills from unregistered central content during installation, preserve existing files, and keep recovery guidance visible in the local installation dialog. Support Windows paths and English, Simplified Chinese and Korean messages. ([#121](https://github.com/qufei1993/skills-hub/pull/121))
