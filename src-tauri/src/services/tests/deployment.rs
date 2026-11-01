@@ -978,10 +978,13 @@ fn database_validation_failure_keeps_target_rows_and_baselines() {
     let baseline_key = format!("device_sync.target_baseline.{}", rows[0].id);
     let baseline = f.service.store().get_setting(&baseline_key).unwrap();
     let mut validated = false;
-    let result = f.service.store().commit_deployment_targets(&[], &rows, || {
-        validated = true;
-        anyhow::bail!("PLAN_STALE")
-    });
+    let result = f
+        .service
+        .store()
+        .commit_deployment_targets(&[], &rows, None, || {
+            validated = true;
+            anyhow::bail!("PLAN_STALE")
+        });
     assert!(validated);
     assert!(result.unwrap_err().to_string().contains("PLAN_STALE"));
     assert_eq!(

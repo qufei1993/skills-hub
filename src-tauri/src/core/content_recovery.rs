@@ -421,22 +421,32 @@ struct ContentEntry {
     bytes: Option<Vec<u8>>,
 }
 
-fn files(root: &Path) -> Result<BTreeMap<String, ContentEntry>> {
+fn files(root: &Path, complete: bool) -> Result<BTreeMap<String, ContentEntry>> {
     let mut result = BTreeMap::new();
     for entry in walkdir::WalkDir::new(root)
         .follow_links(false)
         .into_iter()
-        .filter_entry(|entry| entry.file_name() != ".git")
+        .filter_entry(|entry| complete || entry.file_name() != ".git")
     {
         let entry = entry?;
-        if entry.depth() == 0 || !(entry.file_type().is_file() || entry.file_type().is_dir()) {
+        let link = complete && entry.file_type().is_symlink();
+        if entry.depth() == 0
+            || !(entry.file_type().is_file() || entry.file_type().is_dir() || link)
+        {
             continue;
         }
         let is_file = entry.file_type().is_file();
         // Match the entry kinds and file attributes used by hash_dir: these can
         // trigger an actual update even when every file's bytes are unchanged.
         let mut metadata = ContentEntryMetadata {
-            kind: if is_file { "file" } else { "directory" }.into(),
+            kind: if link {
+                "symlink"
+            } else if is_file {
+                "file"
+            } else {
+                "directory"
+            }
+            .into(),
             mode: None,
             readonly: None,
         };
@@ -452,15 +462,27 @@ fn files(root: &Path) -> Result<BTreeMap<String, ContentEntry>> {
                 metadata.readonly = Some(permissions.readonly());
             }
         }
+        let relative = entry.path().strip_prefix(root)?;
+        let display_path = if complete {
+            relative
+                .to_str()
+                .context("cannot display a non-Unicode entry path")?
+                .to_owned()
+        } else {
+            relative.to_string_lossy().into_owned()
+        };
         result.insert(
-            entry
-                .path()
-                .strip_prefix(root)?
-                .to_string_lossy()
-                .into_owned(),
+            display_path,
             ContentEntry {
                 metadata,
-                bytes: if is_file {
+                bytes: if link {
+                    Some(
+                        std::fs::read_link(entry.path())?
+                            .to_string_lossy()
+                            .as_bytes()
+                            .to_vec(),
+                    )
+                } else if is_file {
                     Some(std::fs::read(entry.path())?)
                 } else {
                     None
@@ -483,8 +505,16 @@ fn text(entry: Option<&ContentEntry>) -> Option<String> {
     })
 }
 fn changes(before: &Path, after: &Path) -> Result<Vec<FileChange>> {
-    let a = files(before)?;
-    let b = files(after)?;
+    compare_directories(before, after, false)
+}
+
+pub(crate) fn compare_directories(
+    before: &Path,
+    after: &Path,
+    complete: bool,
+) -> Result<Vec<FileChange>> {
+    let a = files(before, complete)?;
+    let b = files(after, complete)?;
     let paths = a
         .keys()
         .chain(b.keys())

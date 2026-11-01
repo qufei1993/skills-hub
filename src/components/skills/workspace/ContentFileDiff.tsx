@@ -4,7 +4,7 @@ import type { ContentPlan } from './ContentReview'
 import { buildContentDiff, buildInlineDiff, type ContentDiffRow } from './contentDiff'
 
 type Change = ContentPlan['changes'][number]
-type Props = { change: Change; t: TFunction }
+type Props = { change: Change; t: TFunction; labels?: { before: string; after: string } }
 const sides = ['before', 'after'] as const
 
 function isAbsent(change: Change, side: typeof sides[number]) {
@@ -49,7 +49,7 @@ function groupRows(rows: ContentDiffRow[]) {
   return groups
 }
 
-export default function ContentFileDiff({ change, t }: Props) {
+export default function ContentFileDiff({ change, t, labels }: Props) {
   const textAvailable = sides.every(side => typeof change[side] === 'string' || isAbsent(change, side))
     && sides.every(side => change[`${side}Metadata`]?.kind !== 'directory')
   const diff = useMemo(() => textAvailable ? buildContentDiff(change.before ?? '', change.after ?? '') : null, [change.before, change.after, textAvailable])
@@ -68,9 +68,10 @@ export default function ContentFileDiff({ change, t }: Props) {
       {sides.map(side => {
         const metadata = change[`${side}Metadata`]
         return <div key={side}>
-          <strong>{w(side)}</strong>
+          <strong>{labels?.[side] ?? w(side)}</strong>
           {metadata ? <span className={metadataChanged ? `content-diff-metadata content-diff-metadata-${side}` : 'content-diff-metadata'}>
             {metadata.kind === 'directory' ? w('directoryEntry') : null}
+            {metadata.kind === 'symlink' ? t('sourceConflict.symlink') : null}
             {metadata.mode != null ? <span>{t('workspace110.permissions', { mode: (metadata.mode & 0o7777).toString(8).padStart(4, '0') })}</span> : metadata.readonly != null ? <span>{w(metadata.readonly ? 'readOnlyEntry' : 'writableEntry')}</span> : null}
           </span> : null}
         </div>
@@ -83,7 +84,7 @@ export default function ContentFileDiff({ change, t }: Props) {
       </details> : group.rows.map((row, index) => <DiffRow row={row} key={group.start + index} t={t} />))}
       {diff.rows.length === 0 ? <p className="content-diff-empty">{w('diff.emptyFile')}</p> : null}
     </div> : <div className="content-diff-fallback">
-      {sides.map(side => <div key={side}><span className="content-diff-mobile-label">{w(side)}</span>{change[`${side}Metadata`]?.kind === 'directory' ? null : typeof change[side] === 'string' ? <pre>{change[side] || w('diff.emptyFile')}</pre> : <p>{w(isAbsent(change, side) ? 'diff.absentFile' : 'diff.unavailable')}</p>}</div>)}
+      {sides.map(side => <div key={side}><span className="content-diff-mobile-label">{labels?.[side] ?? w(side)}</span>{change[`${side}Metadata`]?.kind === 'directory' ? null : typeof change[side] === 'string' ? <pre>{change[side] || w('diff.emptyFile')}</pre> : <p>{w(isAbsent(change, side) ? 'diff.absentFile' : 'diff.unavailable')}</p>}</div>)}
     </div>}
   </div>
 }

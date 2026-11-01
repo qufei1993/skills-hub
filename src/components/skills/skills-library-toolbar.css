@@ -19,6 +19,8 @@
 .skills-library-notices:empty { display: none; }
 .skills-library .library-notice { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto 32px; align-items: center; gap: 10px; min-height: 48px; margin: 0; padding: 8px 12px; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .skills-library .library-notice + .library-notice { border-top: 1px solid var(--border-subtle); }
+.skills-library .source-takeover-conflict .library-notice-copy { overflow-wrap: anywhere; }
+.skills-library .source-takeover-conflict .library-notice-icon { color: var(--status-warning); }
 .skills-library .library-notice-icon { display: grid; place-items: center; width: 20px; height: 24px; border-radius: 0; background: transparent; color: var(--text-secondary); }
 .skills-library .library-notice-icon svg { width: 18px; height: 18px; }
 .skills-library .library-notice-copy { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; min-width: 0; }

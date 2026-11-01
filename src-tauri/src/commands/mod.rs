@@ -1,5 +1,6 @@
 pub mod collection_link;
 pub mod content_check;
+pub mod source_conflict;
 pub mod workspace;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -1674,6 +1675,9 @@ fn format_deployment_error(error: crate::services::error::ServiceError) -> Strin
         ErrorCode::TargetConflict if error.details["reason"] == "overlaps_skill_source" => format!(
             "SKILL_TARGET_OVERLAPS_SOURCE|{path}|sync target overlaps original local source"
         ),
+        ErrorCode::TargetConflict if error.details["reason"] == "source_content_differs" => {
+            format!("SKILL_SOURCE_TARGET_DIFFERS|{path}")
+        }
         ErrorCode::PlanStale => "PLAN_STALE|deployment state changed".to_string(),
         _ => format_service_error(error),
     }

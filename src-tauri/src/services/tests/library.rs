@@ -60,6 +60,23 @@ impl Fixture {
     fn central_skill_exists(&self, name: &str) -> bool {
         self.paths.default_central_repo.join(name).exists()
     }
+
+    fn adopt_codex_skill(&self) -> (PathBuf, SkillRecord) {
+        let source = self._home.path().join(".codex/skills/demo");
+        write_skill(&source, "demo", "original");
+        let installed = self
+            .service
+            .import_discovered_skill(&source, Some("demo".into()))
+            .unwrap()
+            .unwrap();
+        let record = self
+            .service
+            .store()
+            .get_skill_by_id(&installed.id)
+            .unwrap()
+            .unwrap();
+        (source, record)
+    }
 }
 
 fn write_skill(path: &Path, name: &str, body: &str) {
@@ -240,8 +257,7 @@ fn discovery_import_does_not_hide_invalid_sources_or_unmanaged_name_conflicts() 
 }
 
 #[test]
-fn discovery_import_preserves_original_source_when_syncing_back_to_its_tool() {
-    use crate::core::content_hash::hash_dir_strict;
+fn discovery_import_takes_over_identical_source_when_syncing_back_to_its_tool() {
     use crate::services::deployment::DeploymentRequest;
     let fixture = Fixture::new();
     let source = fixture._home.path().join(".codex/skills/demo");
@@ -252,32 +268,46 @@ fn discovery_import_preserves_original_source_when_syncing_back_to_its_tool() {
         .import_discovered_skill(&source, Some("demo".into()))
         .unwrap()
         .unwrap();
-    let records = fixture.service.store().list_skills().unwrap();
-    let before = hash_dir_strict(&source).unwrap();
-    let mut request = DeploymentRequest::global("demo", ["codex"]);
-    request.overwrite = true;
-    request.overwrite_if_same_content = true;
-    let error = fixture.service.deploy(request).unwrap_err();
-    assert_eq!(error.code, ErrorCode::TargetConflict);
-    assert_eq!(error.details["reason"], "overlaps_skill_source");
-    assert_eq!(hash_dir_strict(&source).unwrap(), before);
-    assert_eq!(
-        hash_dir_strict(Path::new(&installed.central_path)).unwrap(),
-        before
-    );
-    assert_eq!(fixture.service.store().list_skills().unwrap(), records);
-    assert!(fixture
-        .service
-        .show_skill("demo".into())
+    let request = DeploymentRequest::global("demo", ["codex"]);
+    let before = fixture.service.store().list_skills().unwrap();
+    let preview = fixture.service.plan_deploy(request.clone()).unwrap();
+    assert_eq!(fixture.service.store().list_skills().unwrap(), before);
+    assert!(!fs::symlink_metadata(&source)
         .unwrap()
-        .targets
-        .is_empty());
-    assert!(fixture
+        .file_type()
+        .is_symlink());
+    fixture.service.apply_deployment_plan(preview).unwrap();
+    let record = fixture
         .service
         .store()
-        .list_recycle_bin_rows()
+        .get_skill_by_id(&installed.id)
         .unwrap()
-        .is_empty());
+        .unwrap();
+    assert_eq!(
+        record.source_ref.as_deref(),
+        Some(installed.central_path.as_str())
+    );
+    assert!(record.external_local_source().is_none());
+    let outcome = fixture.service.deploy(request.clone()).unwrap();
+    if outcome.targets[0].mode != crate::core::sync_engine::SyncMode::Copy {
+        assert_eq!(
+            fs::canonicalize(&source).unwrap(),
+            fs::canonicalize(&installed.central_path).unwrap()
+        );
+        fs::write(
+            Path::new(&installed.central_path).join("SKILL.md"),
+            "updated centrally",
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(source.join("SKILL.md")).unwrap(),
+            "updated centrally"
+        );
+    }
+    fixture.service.undeploy(request.clone()).unwrap();
+    assert!(!source.exists());
+    assert!(Path::new(&installed.central_path).join("SKILL.md").exists());
+    fixture.service.deploy(request).unwrap();
     fixture
         .service
         .deploy(DeploymentRequest::global("demo", ["claude_code"]))
@@ -289,8 +319,263 @@ fn discovery_import_preserves_original_source_when_syncing_back_to_its_tool() {
             .unwrap()
             .targets
             .len(),
-        1
+        2
     );
+}
+
+#[test]
+fn source_takeover_preserves_different_content_even_with_explicit_overwrite() {
+    use crate::core::content_hash::hash_dir_strict;
+    use crate::services::deployment::DeploymentRequest;
+    for relative in ["SKILL.md", ".git/config", "__pycache__/demo.pyc"] {
+        let fixture = Fixture::new();
+        let (source, record) = fixture.adopt_codex_skill();
+        let changed = source.join(relative);
+        fs::create_dir_all(changed.parent().unwrap()).unwrap();
+        fs::write(changed, "user edits that must survive").unwrap();
+        let before = hash_dir_strict(&source).unwrap();
+        let mut request = DeploymentRequest::global("demo", ["codex"]);
+        request.overwrite = true;
+        request.overwrite_if_same_content = true;
+        let error = fixture.service.deploy(request).unwrap_err();
+        assert_eq!(error.code, ErrorCode::TargetConflict);
+        assert_eq!(error.details["reason"], "source_content_differs");
+        assert_eq!(hash_dir_strict(&source).unwrap(), before);
+        assert!(!fs::symlink_metadata(&source)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fixture.service.store().get_skill_by_id(&record.id).unwrap(),
+            Some(record.clone())
+        );
+        assert!(fixture
+            .service
+            .store()
+            .list_skill_targets(&record.id)
+            .unwrap()
+            .is_empty());
+    }
+}
+
+#[test]
+fn source_takeover_never_bypasses_other_protected_paths() {
+    use crate::services::deployment::DeploymentRequest;
+    for overlap in ["parent", "child", "another_skill", "central"] {
+        let fixture = Fixture::new();
+        let (source, mut record) = fixture.adopt_codex_skill();
+        match overlap {
+            "parent" => {
+                record.source_ref = Some(source.parent().unwrap().to_string_lossy().into_owned())
+            }
+            "child" => {
+                record.source_ref = Some(source.join("nested").to_string_lossy().into_owned())
+            }
+            "another_skill" => {
+                let mut other = fixture.add_skill("other", "other", "original");
+                other.source_type = "local".into();
+                other.source_ref = Some(source.to_string_lossy().into_owned());
+                fixture.service.store().upsert_skill(&other).unwrap();
+            }
+            "central" => record.central_path = source.to_string_lossy().into_owned(),
+            _ => unreachable!(),
+        }
+        fixture.service.store().upsert_skill(&record).unwrap();
+        let mut request = DeploymentRequest::global("demo", ["codex"]);
+        request.overwrite = true;
+        let error = fixture.service.deploy(request).unwrap_err();
+        assert_eq!(error.code, ErrorCode::TargetConflict);
+        assert_eq!(
+            error.details["reason"], "overlaps_skill_source",
+            "{overlap}"
+        );
+        assert!(!fs::symlink_metadata(&source)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fixture.service.store().get_skill_by_id(&record.id).unwrap(),
+            Some(record)
+        );
+    }
+}
+
+#[test]
+fn source_takeover_rolls_back_files_targets_and_source_binding_on_commit_failure() {
+    use crate::core::content_hash::{hash_dir, hash_dir_strict};
+    use crate::services::deployment::DeploymentRequest;
+    let fixture = Fixture::new();
+    let (source, record) = fixture.adopt_codex_skill();
+    fs::create_dir_all(fixture._home.path().join(".claude")).unwrap();
+    fixture
+        .service
+        .store()
+        .record_source_check_success(&record, hash_dir(&source).unwrap())
+        .unwrap();
+    let record = fixture
+        .service
+        .store()
+        .get_skill_by_id(&record.id)
+        .unwrap()
+        .unwrap();
+    let baseline = fixture.service.store().source_baseline(&record.id).unwrap();
+    let checks = fixture.service.store().source_checks().unwrap();
+    let before = hash_dir_strict(&source).unwrap();
+    rusqlite::Connection::open(&fixture.paths.database_path).unwrap().execute_batch(
+        "CREATE TRIGGER reject_takeover BEFORE UPDATE OF source_ref ON skills BEGIN SELECT RAISE(FAIL, 'injected takeover failure'); END;"
+    ).unwrap();
+    let error = fixture
+        .service
+        .deploy(DeploymentRequest::global("demo", ["codex", "claude_code"]))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InternalError);
+    assert_eq!(error.details["stage"], "commit_records");
+    assert_eq!(error.details["recovery"], serde_json::json!([]));
+    assert!(!fs::symlink_metadata(&source)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(hash_dir_strict(&source).unwrap(), before);
+    assert_eq!(
+        hash_dir_strict(Path::new(&record.central_path)).unwrap(),
+        before
+    );
+    assert!(!fixture._home.path().join(".claude/skills/demo").exists());
+    assert!(fixture
+        .service
+        .store()
+        .list_skill_targets(&record.id)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        fixture.service.store().get_skill_by_id(&record.id).unwrap(),
+        Some(record.clone())
+    );
+    assert_eq!(
+        serde_json::to_value(fixture.service.store().source_baseline(&record.id).unwrap()).unwrap(),
+        serde_json::to_value(baseline).unwrap()
+    );
+    assert_eq!(fixture.service.store().source_checks().unwrap(), checks);
+}
+
+#[test]
+fn source_takeover_rejects_edits_after_preview_without_changing_the_binding() {
+    use crate::services::deployment::DeploymentRequest;
+    let fixture = Fixture::new();
+    let (source, record) = fixture.adopt_codex_skill();
+    let plan = fixture
+        .service
+        .plan_deploy(DeploymentRequest::global("demo", ["codex"]))
+        .unwrap();
+    fs::write(source.join("SKILL.md"), "edited after preview").unwrap();
+    assert_eq!(
+        fixture
+            .service
+            .apply_deployment_plan(plan)
+            .unwrap_err()
+            .code,
+        ErrorCode::PlanStale
+    );
+    assert_eq!(
+        fs::read_to_string(source.join("SKILL.md")).unwrap(),
+        "edited after preview"
+    );
+    assert_eq!(
+        fixture.service.store().get_skill_by_id(&record.id).unwrap(),
+        Some(record)
+    );
+}
+
+#[test]
+fn source_takeover_preserves_writes_to_the_original_during_activation() {
+    use crate::core::sync_engine::{set_deployment_race_hook, DeploymentRacePoint};
+    use crate::services::deployment::DeploymentRequest;
+    let fixture = Fixture::new();
+    let (source, record) = fixture.adopt_codex_skill();
+    let parent = source.parent().unwrap().to_path_buf();
+    set_deployment_race_hook(DeploymentRacePoint::BeforeBaselineRead, move || {
+        let backup = fs::read_dir(parent)
+            .unwrap()
+            .map(|item| item.unwrap().path())
+            .find(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with(".skills-hub-backup-")
+            })
+            .unwrap();
+        fs::write(backup.join("SKILL.md"), "concurrent source edit").unwrap();
+    });
+    assert_eq!(
+        fixture
+            .service
+            .deploy(DeploymentRequest::global("demo", ["codex"]))
+            .unwrap_err()
+            .code,
+        ErrorCode::PlanStale
+    );
+    assert!(!fs::symlink_metadata(&source)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(
+        fs::read_to_string(source.join("SKILL.md")).unwrap(),
+        "concurrent source edit"
+    );
+    assert_eq!(
+        fixture.service.store().get_skill_by_id(&record.id).unwrap(),
+        Some(record.clone())
+    );
+    assert!(fixture
+        .service
+        .store()
+        .list_skill_targets(&record.id)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn source_takeover_honors_explicit_copy_mode_without_retaining_an_external_source() {
+    use crate::core::sync_engine::SyncMode;
+    use crate::core::tool_adapters::{save_tool_config, CustomToolConfig, ToolConfig};
+    use crate::services::deployment::DeploymentRequest;
+    let fixture = Fixture::new();
+    let (source, record) = fixture.adopt_codex_skill();
+    save_tool_config(
+        fixture.service.store(),
+        ToolConfig {
+            disabled_builtin_tools: vec![],
+            custom_tools: vec![CustomToolConfig {
+                key: "custom_copy".into(),
+                label: "Copy source".into(),
+                avatar: None,
+                skills_dir: source.parent().unwrap().to_string_lossy().into_owned(),
+                project_skills_dir: None,
+                sync_mode: SyncMode::Copy,
+                enabled: true,
+            }],
+        },
+    )
+    .unwrap();
+    let request = DeploymentRequest::global("demo", ["custom_copy"]);
+    assert_eq!(
+        fixture.service.deploy(request.clone()).unwrap().targets[0].mode,
+        SyncMode::Copy
+    );
+    let current = fixture
+        .service
+        .store()
+        .get_skill_by_id(&record.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        current.source_ref.as_deref(),
+        Some(current.central_path.as_str())
+    );
+    fixture.service.undeploy(request.clone()).unwrap();
+    assert!(!source.exists());
+    fixture.service.deploy(request).unwrap();
+    assert!(source.join("SKILL.md").is_file());
 }
 
 #[test]

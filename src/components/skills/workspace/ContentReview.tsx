@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertCircle, ChevronRight, FileText, LoaderCircle } from 'lucide-react'
 import type { TFunction } from 'i18next'
-import type { ManagedSkill } from '../types'
+import type { ContentFileChange, ManagedSkill } from '../types'
 import ConfirmActionModal from '../modals/ConfirmActionModal'
 import ContentFileDiff from './ContentFileDiff'
 import './workspace-overlays.css'
 
-type EntryMetadata = { kind: 'file' | 'directory'; mode?: number; readonly?: boolean }
-export type ContentPlan = { id: string; skillId: string; name: string; changes: { path: string; kind: string; before: string | null; after: string | null; beforeMetadata?: EntryMetadata | null; afterMetadata?: EntryMetadata | null }[]; targets: string[]; restore: boolean }
+export type ContentPlan = { id: string; skillId: string; name: string; changes: ContentFileChange[]; targets: string[]; restore: boolean }
 type Props = { preparedPlans?: ContentPlan[]; skills: ManagedSkill[]; restore: boolean; invokeTauri: <T>(command: string, args?: Record<string, unknown>) => Promise<T>; onConfirm: (plans: Record<string, string>) => Promise<void>; onClose: () => void; t: TFunction }
 type PreviewFailure = Pick<ManagedSkill, 'id' | 'name'> & { conflictPath?: string }
 type PreviewResult = { plans: ContentPlan[]; failed: PreviewFailure[] }
