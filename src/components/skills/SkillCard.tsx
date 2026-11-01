@@ -14,8 +14,6 @@ type GithubInfo = { label: string; href: string }
 type SkillCardProps = {
   onRepairSource?: (skill: ManagedSkill) => void
   onRepairTargets?: (skill: ManagedSkill) => void
-  projectContext?: boolean
-  onRemoveProject?: (skill: ManagedSkill) => void
   skill: ManagedSkill
   installedTools: ToolOption[]
   loading: boolean
@@ -41,8 +39,6 @@ const SkillCard = ({
   skill,
   onRepairSource,
   onRepairTargets,
-  projectContext = false,
-  onRemoveProject,
   installedTools,
   loading,
   bulkMode,
@@ -87,7 +83,7 @@ const SkillCard = ({
   const scope = getSkillScope(skill)
   const projectCount = getSkillProjects(skill).length
   const enabled = skill.enabled !== false
-  // The list already narrows targets for a selected scope or project.
+  // Filters select Skills without changing their deployment data.
   const syncedToolCount = getFullySyncedTools(skill, installedTools, 'all').length
   const handleCopySource = async () => {
     if (!copyValue) return
@@ -142,13 +138,13 @@ const SkillCard = ({
           </div>
         </div>
 
-        {projectContext ? <button className="btn btn-secondary skill-manage-targets" onClick={event => { event.currentTarget.focus(); onOpenScope(skill) }}>{t('workspace110.manageTargets')}</button> : <button
+        <button
           className={`skill-switch${enabled ? ' enabled' : ''}`}
           type="button"
           onClick={() => onToggleEnabled(skill)}
           disabled={loading}
           aria-label={enabled ? t('disableSkill') : t('enableSkill')}
-        ><span /></button>}
+        ><span /></button>
       </div>
 
       <div className="skill-card-meta">
@@ -226,7 +222,7 @@ const SkillCard = ({
         <div className="skill-actions-col">
           <button type="button" onClick={() => onEditTags(skill)} disabled={loading} aria-label={t('editTags')}><Tag size={16} /></button>
           <button type="button" onClick={() => onUpdate(skill)} disabled={loading || !enabled || unboundSource} title={unboundSource ? t('deviceSync.unboundSourceHelp') : t('update')} aria-label={t('update')}><RefreshCw size={16} /></button>
-          <button type="button" onClick={event => { if (projectContext) { event.currentTarget.focus(); onRemoveProject?.(skill) } else onDelete(skill.id) }} disabled={loading} aria-label={t(projectContext ? 'workspace110.removeTargets' : 'remove')}><Trash2 size={16} /></button>
+          <button type="button" onClick={() => onDelete(skill.id)} disabled={loading} aria-label={t('remove')}><Trash2 size={16} /></button>
         </div>
       </div>
     </div>

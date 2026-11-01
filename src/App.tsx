@@ -5,7 +5,7 @@ import SourceRepair from './components/skills/workspace/SourceRepair'
 import SourceConflictDialog from './components/skills/workspace/SourceConflictDialog'
 import { open as openDirectoryDialog } from '@tauri-apps/plugin-dialog'
 import PresetPage from './components/skills/workspace/PresetPage'
-import type { WorkspaceIntent, WorkspaceScope, PresetMember } from './components/skills/types'
+import type { WorkspaceIntent, WorkspaceScope } from './components/skills/types'
 import CollectionInstallModal from './components/skills/modals/CollectionInstallModal'
 import { useCollectionInstallLink } from './components/skills/useCollectionInstallLink'
 import { hasUnboundLocalSource } from './components/skills/skillSourceState'
@@ -281,11 +281,6 @@ function App() {
     }
     setWorkspaceIntent(intent); setWorkspaceKey(k => k + 1); setActiveView('presets')
   }, [])
-  const membersForSkills = (skills: ManagedSkill[]): PresetMember[] => skills.map(skill => ({
-    skillId: skill.id,
-    tools: [...new Set(skill.targets.filter(target => scopeFilter === 'all' || target.scope === scopeFilter).filter(target => !projectFilter || target.project_path === projectFilter).map(target => target.tool))],
-  }))
-  const currentWorkspaceScope: WorkspaceScope | undefined = scopeFilter === 'global' ? { kind: 'global' } : scopeFilter === 'project' && projectFilter ? { kind: 'project', path: projectFilter } : undefined
 
   const handleRepairTargets = (skill: ManagedSkill) => {
     const targets = skill.targets.filter(target => target.status !== 'ok' && target.status !== 'disabled')
@@ -1954,10 +1949,9 @@ function App() {
     const installedToolSet = new Set(installedToolIds)
     const selectedToolSet = new Set<string>()
     for (const skill of bulkSelectedSkills) {
-      const skillScope = scopeFilter === 'all' ? getSkillScope(skill) : scopeFilter
+      const skillScope = getSkillScope(skill)
       for (const target of skill.targets) {
         if ((target.scope ?? 'global') !== skillScope) continue
-        if (projectFilter && target.project_path !== projectFilter) continue
         if (!installedToolSet.has(target.tool)) continue
         selectedToolSet.add(target.tool)
       }
@@ -1971,8 +1965,6 @@ function App() {
   }, [
     bulkSelectedSkills,
     getSkillScope,
-    scopeFilter,
-    projectFilter,
     installedToolIds,
     installedTools,
     t,
@@ -2239,8 +2231,8 @@ function App() {
       const selectedBaseToolSet = new Set(bulkSyncToolIds)
       const total = Math.max(1, bulkSelectedSkills.length * installedToolIds.length)
       for (const skill of bulkSelectedSkills) {
-        const skillScope = scopeFilter === 'all' ? getSkillScope(skill) : scopeFilter
-        const projects = projectFilter ? [projectFilter] : getSkillProjects(skill)
+        const skillScope = getSkillScope(skill)
+        const projects = getSkillProjects(skill)
         const sharedByToolId =
           skillScope === 'project'
             ? sharedProjectToolIdsByToolId
@@ -2257,7 +2249,6 @@ function App() {
         const targetsToRemove = skill.targets.filter(
           (target) =>
             (target.scope ?? 'global') === skillScope &&
-            (!projectFilter || target.project_path === projectFilter) &&
             activeInstalledToolIds.includes(target.tool) &&
             !selectedToolSet.has(target.tool),
         )
@@ -2375,8 +2366,6 @@ function App() {
     bulkSyncToolIds,
     getSkillProjects,
     getSkillScope,
-    scopeFilter,
-    projectFilter,
     installedProjectToolIds,
     installedToolIds,
     invokeTauri,
@@ -3930,7 +3919,7 @@ function App() {
               hasManagedSkills={managedSkills.length > 0}
               hasFilters={hasListFilters}
               onClearFilters={handleClearListFilters}
-              visibleSkills={scopeFilter === 'all' ? visibleSkills : visibleSkills.map(skill => ({ ...skill, targets: skill.targets.filter(target => target.scope === scopeFilter && (!projectFilter || target.project_path === projectFilter)) }))}
+              visibleSkills={visibleSkills}
               installedTools={installedTools}
               loading={loading}
               bulkMode={bulkMode}
@@ -3943,11 +3932,18 @@ function App() {
               onDeleteSkill={handleDeletePrompt}
               onToggleSkillEnabled={handleToggleSkillEnabled}
               onToggleTool={handleToggleToolForSkill}
-              onOpenScope={skill => enterWorkspace({ mode: 'select', operation: 'targets', members: membersForSkills([skill]), scope: currentWorkspaceScope })}
+              onOpenScope={skill => {
+                const scope = getSkillScope(skill)
+                const projects = getSkillProjects(skill)
+                enterWorkspace({
+                  mode: 'select', operation: 'targets',
+                  members: [{ skillId: skill.id, tools: [...new Set(skill.targets.filter(target => (target.scope ?? 'global') === scope).map(target => target.tool))] }],
+                  scope: scope === 'global' ? { kind: 'global' } : projects[0] ? { kind: 'project', path: projects[0] } : undefined,
+                  projects,
+                })
+              }}
               onRepairTargets={handleRepairTargets}
               onRepairSource={setRepairSourceSkill}
-              projectContext={Boolean(projectFilter && scopeFilter === 'project')}
-              onRemoveProject={skill => enterWorkspace({ mode: 'select', members: membersForSkills([skill]), scope: currentWorkspaceScope, remove: true })}
               onOpenDetail={skill => handleOpenDetail(managedSkills.find(s => s.id === skill.id) ?? skill)}
               onEditTags={handleOpenEditTags}
               onToggleBulkSelection={handleToggleBulkSelection}

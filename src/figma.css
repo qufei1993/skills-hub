@@ -631,7 +631,6 @@
 .skill-switch span { display: block; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .18); transition: transform .15s; }
 .skill-switch.enabled { background: #18a957; }
 .skill-switch.enabled span { transform: translateX(16px); }
-.skill-manage-targets { flex: 0 0 auto; width: max-content; min-width: 80px; justify-content: center; padding: 0 10px; font-size: 12px; white-space: nowrap; }
 .skill-actions-col { flex: 0 0 auto; display: flex; justify-content: flex-end; align-items: center; gap: 2px; }
 .skill-actions-col button { width: 30px; height: 30px; flex: 0 0 30px; border: 0; border-radius: 6px; background: transparent; color: var(--text-secondary); display: grid; place-items: center; cursor: pointer; }
 .skill-actions-col button:hover { background: var(--bg-element-hover); color: var(--text-primary); }
@@ -649,7 +648,6 @@
   border-radius: 10px;
 }
 .list-view .skill-card.bulk-mode { padding-left: 44px; }
-.list-view .skill-card:has(.skill-manage-targets) { grid-template-columns: minmax(180px, 1.35fr) minmax(120px, .8fr) minmax(155px, 1fr) max-content 94px; }
 .list-view .skill-card-head,
 .list-view .skill-card-footer { display: contents; }
 .list-view .skill-identity { grid-area: identity; }
@@ -664,7 +662,6 @@
 }
 .list-view .skill-tools-block > span { font-size: 10px; }
 .list-view .skill-switch { grid-area: toggle; justify-self: center; }
-.list-view .skill-manage-targets { grid-area: toggle; justify-self: center; }
 .list-view .skill-actions-col { grid-area: actions; }
 .list-view .skill-card-footer { min-height: 0; margin: 0; padding: 0; border: 0; }
 .list-view .bulk-skill-check { top: 50%; left: 12px; transform: translateY(-50%); }
@@ -1388,7 +1385,6 @@
     grid-template-columns: minmax(170px, 1.25fr) minmax(105px, .7fr) minmax(140px, .9fr) 38px 90px;
     gap: 6px;
   }
-  .list-view .skill-card:has(.skill-manage-targets) { grid-template-columns: minmax(150px, 1.25fr) minmax(88px, .7fr) minmax(95px, .9fr) max-content 90px; }
   .list-view .skill-updated { flex-basis: 100%; }
   .list-view .skill-tools-block { padding-left: 8px; }
   .list-view .skill-tools-block > span { display: none; }

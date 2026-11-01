@@ -246,7 +246,9 @@ export const resources = {
   "syncToolTitle": "Sync Skill to tool",
   "noRepairTargets": "No failed deployments need repair in this location.",
   "repairScopeHint": "Choose one location to repair. Only failed tool deployments there will be checked; other deployments are kept.",
-  "targetManagementHint": "Sync to the selected locations while keeping other deployments. To remove a deployment, use its tool icon or the project removal button.",
+  "targetManagementHint": "Apply the checked projects and tools in this scope. Unchecked deployments will be removed; the library Skill and deployments in the other scope are kept.",
+  "confirmTargetChanges": "Confirm target changes",
+  "targetChangesHint": "Review the deployments to remove before applying. New deployments must succeed before old ones are removed.",
   "syncToolConfirm": "Sync tool",
   "syncToolHint": "Only the shown Skill and tools in this location will be synchronized or repaired. Other deployments are kept.",
   "repairToolConfirm": "Check and repair",
@@ -273,6 +275,7 @@ export const resources = {
     "undone": "Undone"
   },
   "reasons": {
+    "TARGET_SELECTION_INCOMPLETE": "New or retained deployments need attention. Old deployments have been kept; resolve the listed issues and check again.",
     "INVALID_ARGUMENT": "Check the unique name, members, tools and target selection. Disabled members must be enabled explicitly.",
     "PLAN_STALE": "State changed after preview. Go back and review the plan again.",
     "INTERNAL_ERROR": "The operation could not finish. Your choices are retained; reload the records and retry.",
@@ -2100,7 +2103,9 @@ export const resources = {
   "syncToolTitle": "同步到工具",
   "noRepairTargets": "此位置没有需要修复的失败部署。",
   "repairScopeHint": "每次选择一个位置进行修复，仅检查该位置失败的工具部署，其他部署保持不变。",
-  "targetManagementHint": "同步到所选位置，已有的其他部署会保留。移除部署请使用工具图标或项目内的移除按钮。",
+  "targetManagementHint": "按当前范围内勾选的项目和工具应用设置，取消勾选的部署会被移除；技能库中的 Skill 和另一范围的部署会保留。",
+  "confirmTargetChanges": "确认目标变更",
+  "targetChangesHint": "请先确认待移除的部署。新增部署成功后，才会移除旧部署。",
   "syncToolConfirm": "确认同步",
   "syncToolHint": "仅同步或修复当前范围内列出的 Skill 和工具，其他位置的部署保持不变。",
   "repairToolConfirm": "检查并修复",
@@ -2127,6 +2132,7 @@ export const resources = {
     "undone": "已撤销"
   },
   "reasons": {
+    "TARGET_SELECTION_INCOMPLETE": "新增或保留的部署需要处理。旧部署已保留，请解决列表中的问题后重新检查。",
     "INVALID_ARGUMENT": "请检查名称是否重复以及成员、工具和目标选择；停用成员需先明确启用。",
     "PLAN_STALE": "预览后状态发生变化，请返回重新检查计划。",
     "INTERNAL_ERROR": "操作未完成。已保留选择，请重新加载记录后重试。",

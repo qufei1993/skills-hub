@@ -188,3 +188,29 @@ it.each([
   expect(notices).toContain('/test/new/one')
   expect(notices).not.toContain('TOOL_PATH_CHANGED|')
 })
+
+
+it('restores all saved project deployments when enabling a project-filtered Skill', async () => {
+  const alpha = '/test/project-alpha', beta = '/test/project-beta'
+  const skill = fixture('one', 'project')
+  skill.enabled = false
+  const saved = skill.targets
+  skill.targets = [alpha, beta].flatMap(project_path => saved.map(target => ({
+    ...target, project_path, target_path: `${project_path}/.${target.tool}/skills/one`, status: 'disabled',
+  })))
+  skills = [skill]
+  render(<App />)
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  await clickButton(`${i18n.t('scope.project')} 1`)
+  await clickButton(i18n.t('workspace110.project'))
+  await act(async () => {
+    fireEvent.click(screen.getByRole('option', { name: new RegExp(alpha) }))
+    await vi.advanceTimersByTimeAsync(0)
+  })
+  await clickButton(i18n.t('enableSkill'))
+  expect(invoke.mock.calls.filter(([command]) => command === 'set_skill_enabled').map(([, args]) => args))
+    .toEqual([{ skillId: skill.id, enabled: true }])
+  const restored = invoke.mock.calls.filter(([command]) => command === 'sync_skill_to_tool').map(([, args]) => [args?.projectPath, args?.tool])
+  expect(restored).toEqual([alpha, beta].flatMap(path => ['codex', 'claude_code', 'not_installed'].map(tool => [path, tool])))
+  expect(screen.getByRole('button', { name: i18n.t('scope.projectCount', { count: 2 }) })).toBeTruthy()
+})

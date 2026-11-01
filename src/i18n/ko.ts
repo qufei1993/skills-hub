@@ -242,7 +242,9 @@ export const ko = {
   "syncToolTitle": "도구에 스킬 동기화",
   "noRepairTargets": "이 위치에는 복구할 실패 배포가 없습니다.",
   "repairScopeHint": "복구할 위치를 하나 선택하세요. 해당 위치에서 실패한 도구 배포만 확인하며 다른 배포는 유지됩니다.",
-  "targetManagementHint": "선택한 위치에 동기화하고 다른 배포는 유지합니다. 제거하려면 도구 아이콘 또는 프로젝트 제거 버튼을 사용하세요.",
+  "targetManagementHint": "현재 범위에서 선택한 프로젝트와 도구를 적용합니다. 선택을 해제한 배포는 제거되며 라이브러리의 스킬과 다른 범위의 배포는 유지됩니다.",
+  "confirmTargetChanges": "대상 변경 확인",
+  "targetChangesHint": "제거할 배포를 먼저 확인하세요. 새 배포에 성공한 후에만 기존 배포를 제거합니다.",
   "syncToolConfirm": "도구 동기화",
   "syncToolHint": "이 위치에 표시된 스킬과 도구만 동기화하거나 복구합니다. 다른 배포는 유지됩니다.",
   "repairToolConfirm": "확인 후 복구",
@@ -269,6 +271,7 @@ export const ko = {
     "undone": "취소됨"
   },
   "reasons": {
+    "TARGET_SELECTION_INCOMPLETE": "새 배포 또는 유지할 배포를 확인해야 합니다. 기존 배포는 유지되었습니다. 문제를 해결한 후 다시 확인하세요.",
     "INVALID_ARGUMENT": "이름 중복, 멤버, 도구 및 대상을 확인하세요. 비활성 멤버는 먼저 활성화하세요。",
     "PLAN_STALE": "미리보기 후 상태가 변경되었습니다. 돌아가서 계획을 다시 검토하세요。",
     "INTERNAL_ERROR": "작업을 완료하지 못했습니다. 선택을 유지했습니다. 기록을 다시 불러온 뒤 재시도하세요。",

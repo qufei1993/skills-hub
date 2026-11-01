@@ -4,21 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Added
-
-- **Close to tray**: Keep Skills Hub running in the tray when its main window is closed, without requiring a preference. Provide localized tray Open/Quit actions, Dock and repeated-launch window recovery, and an exit fallback when no usable tray is available. Restore hidden Linux windows if the tray host disappears; background update workers remain independent. ([#156](https://github.com/qufei1993/skills-hub/pull/156))
-
-### Fixed
-
-- **Central-folder collision guidance**: Distinguish already managed Skills from unregistered central content during installation, preserve existing files, and keep recovery guidance visible in the local installation dialog. Support Windows paths and English, Simplified Chinese and Korean messages. ([#121](https://github.com/qufei1993/skills-hub/pull/121))
-
-- **Adopted Skill source takeover**: Deploy identical adopted copies back to their source tools. Open the conflict dialog directly when sync detects differing copies, retaining a reopening action after closing. Resolve them with a labeled file comparison and an explicit choice of the central or tool version, then apply the selected version and take over the source folder. Keeping the tool version updates active global and project deployments together; modified copies, stale previews and protected overlaps remain guarded, and failed operations roll back files and records. Keep committed results available for safe confirmation retries. ([#206](https://github.com/qufei1993/skills-hub/issues/206))
-
 ## [1.1.0]
 
 ### Added
 
-- **Project management**: Filter My Skills by a specific project and manage its deployment targets while preserving global and unrelated project deployments. The project picker supports search, readable names and complete paths; preset editing and saving are centralized in Skill Presets.
+- **Close to tray**: Keep Skills Hub running in the tray when its main window is closed, without requiring a preference. Provide localized tray Open/Quit actions, Dock and repeated-launch window recovery, and an exit fallback when no usable tray is available. Restore hidden Linux windows if the tray host disappears; background update workers remain independent. ([#156](https://github.com/qufei1993/skills-hub/pull/156))
+
+- **Project management**: Filter My Skills by project while retaining complete deployment counts and standard Skill actions; manage deployment selections separately. The project picker supports search, readable names and complete paths; preset editing and saving are centralized in Skill Presets.
 - **Skill presets**: Save reusable combinations with per-Skill tool assignments, then apply them to global or project locations from one dialog. Saved assignments are reused by default, with optional adjustments and automatic conflict checks. Editing or deleting a preset does not change existing deployments.
 - **Application history and undo**: Record actual outcomes, retry unfinished items and undo eligible additions while preserving modified or subsequently reused targets. Keep the 100 most recent finished records plus in-progress and interrupted runs; discard cancelled, unexecuted previews. Removing old records does not remove installed Skills, but ends undo access through those records.
 - **Updates, recovery and repair**: List confirmed source changes, update all or selected Skills, and optionally review highlighted file differences and affected deployments. Each Skill keeps its latest pre-update recovery snapshot. Source rebinding and missing-target repair preserve central identity and unrelated deployments; recovery also works for disabled Skills without re-enabling them.
@@ -40,17 +32,23 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Target selection changes**: Remove unchecked projects and tools when applying target settings, preview removals before confirmation, and retain old deployments if replacements fail. Presets keep their additive behavior.
+
+- **Project filtering**: Keep complete Skill deployment counts, target selections and standard card actions when filtering by project; remove the duplicate Manage targets button.
+
+- **Central-folder collision guidance**: Distinguish already managed Skills from unregistered central content during installation, preserve existing files, and keep recovery guidance visible in the local installation dialog. Support Windows paths and English, Simplified Chinese and Korean messages. ([#121](https://github.com/qufei1993/skills-hub/pull/121))
+
+- **Adopted Skill source takeover**: Deploy identical adopted copies back to their source tools. Open the conflict dialog directly when sync detects differing copies, retaining a reopening action after closing. Resolve them with a labeled file comparison and an explicit choice of the central or tool version, then apply the selected version and take over the source folder. Keeping the tool version updates active global and project deployments together; modified copies, stale previews and protected overlaps remain guarded, and failed operations roll back files and records. Keep committed results available for safe confirmation retries. ([#206](https://github.com/qufei1993/skills-hub/issues/206))
+
 - **Deletion conflict wording**: Explain modified tool-copy conflicts with deletion-specific English, Simplified Chinese and Korean messages for both single and bulk deletion, including what was preserved and how to retry.
 
 - **Missing central content**: Mark affected Skills as errors and stop device-sync checks and runs before remote changes or baseline advancement. Content is never restored automatically. Explicit deletion can remove a missing-content record while preserving tool paths and original sources, without an empty recycle-bin entry. Addresses #157 and #158.
 
 - **Shared tool toggles**: Confirmed shared-directory actions now synchronize or unsynchronize every listed tool together in one deployment operation. Register each tool so indicators match the confirmation, preserve other scopes, and roll back the group if the operation fails.
 
-- **Library action routing**: Restore immediate tool-icon synchronization, retry and unsynchronization through the existing commands, without preset, confirmation or result dialogs for ordinary toggles. Preserve current project/global filtering and the existing shared-directory warning. Target management, project removal and failed-target repair stay in the library with contextual copy and scoped operations.
+- **Library action routing**: Restore immediate tool-icon synchronization, retry and unsynchronization through the existing commands, without preset, confirmation or result dialogs for ordinary toggles. Filters only select visible Skills; retain the existing shared-directory warning. Target management and failed-target repair stay in contextual library dialogs.
 
-- **Project deployment removal**: Remove from the selected project directly after backend validation, without extra confirmation or success dialogs. Preserve the library Skill and other locations; retain blocked, partial or uncertain outcomes for review and recovery.
-
-- **Library bulk tools**: Restore the original tool-assignment dialog and direct sync/removal actions instead of opening Skill Presets. Preserve the current global or project filter and leave unrelated deployments unchanged.
+- **Library bulk tools**: Restore the original tool-assignment dialog and direct sync/removal actions instead of opening Skill Presets. Use each selected Skill’s saved scope and projects, independently of library filters.
 
 - **Discovered Skill imports**: Exclude already managed source folders from scans and safely skip them in stale import selections. Skip sync targets that overlap protected source folders, continue syncing to other tools, and report skipped counts without changing existing content or deployments. ([#208](https://github.com/qufei1993/skills-hub/issues/208))
 - **Conflict and recovery handling**: Show the tool, path and reason for blocked applications, preserve selections when returning to adjust them, and avoid repeating completed work. Protect concurrent preset edits and stale plans, retain progress after partial undo or display-refresh failures, and preserve recoverable backups when recycling removed deployments fails.

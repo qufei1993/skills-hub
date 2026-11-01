@@ -2,13 +2,14 @@
 
 [Chinese](README.zh.md)
 
-Unreleased. The target and package versions are 1.1.0. Publication awaits explicit approval. Current behavior, compatibility rules and verification evidence are maintained in the [implementation guide](implementation.md). The fixed design remains a historical baseline.
+Unreleased. The target and package versions are 1.1.0. Release preparation was authorized on November 1, 2026; installer builds and publication are pending. Current behavior, compatibility rules and verification evidence are maintained in the [implementation guide](implementation.md). The fixed design remains a historical baseline.
 
 ## Features and improvements
 
 | Topic | User-visible changes | Details and pull requests |
 | --- | --- | --- |
-| Project management | Filter and manage installed Skills by project while keeping preset configuration in Skill Presets and preserving unrelated deployments. | [Library and projects](implementation.md#library-and-project-management) · [PR #209](https://github.com/qufei1993/skills-hub/pull/209) |
+| Close to tray | Keep the app running after closing its main window, with localized tray actions and window recovery. | [PR #156](https://github.com/qufei1993/skills-hub/pull/156) |
+| Project management | Filter installed Skills by project while retaining complete deployment counts and standard actions; edit deployment selections separately. | [Library and projects](implementation.md#library-and-project-management) · [PR #209](https://github.com/qufei1993/skills-hub/pull/209) |
 | Skill presets and history | Edit and apply presets from the list, create copies from More actions, and use compact selection and result views; preserve conflict checks, history, retries and undo. | [Skill presets](implementation.md#skill-presets) · [PR #209](https://github.com/qufei1993/skills-hub/pull/209) · [PR #212](https://github.com/qufei1993/skills-hub/pull/212) |
 | Updates and recovery | Check sources explicitly, update all or selected pending Skills, review differences when needed, restore pre-update content and repair sources or missing deployments. | [Updates and recovery](implementation.md#updates-and-recovery) · [PR #209](https://github.com/qufei1993/skills-hub/pull/209) |
 | Interface organization | Keep current update issues in one list, use a compact run summary with log export, and support keyboard actions and three-language copy throughout the affected flows. | [Current behavior](implementation.md#library-and-project-management) · [PR #212](https://github.com/qufei1993/skills-hub/pull/212) |
@@ -17,9 +18,12 @@ Unreleased. The target and package versions are 1.1.0. Publication awaits explic
 
 | Problem | Issue | Pull request | Details |
 | --- | --- | --- | --- |
+| Project filters changed actions or hid deployments, and unchecked target settings did not remove deployments. | — | — | Restore pure filtering, complete project selections and confirmed removal with replacement-failure protection; see [library behavior](implementation.md#library-and-project-management). |
+| Central-folder collisions did not explain whether content was already managed. | — | [#217](https://github.com/qufei1993/skills-hub/pull/217) · [#121](https://github.com/qufei1993/skills-hub/pull/121) | Keep existing content and show persistent recovery guidance in three languages. |
+| Adopted sources could conflict with deployment back to the original tool directory. | [#206](https://github.com/qufei1993/skills-hub/issues/206) | [#214](https://github.com/qufei1993/skills-hub/pull/214) | Reuse identical content and resolve differing copies with explicit version selection while preserving modified deployments. |
 | Missing central content could be treated as a remote deletion, shown as healthy, or leave undeletable records. | — | [#215](https://github.com/qufei1993/skills-hub/pull/215) | Block device sync and report affected Skills; allow explicit record removal while preserving tool copies and sources, with deletion-specific conflict messages. See [integrity rules](implementation.md#data-integrity-and-compatibility); related reports [#157](https://github.com/qufei1993/skills-hub/pull/157) and [#158](https://github.com/qufei1993/skills-hub/pull/158). |
 | Conflicts, retries and partial failures could obscure the affected target or completed progress. | — | [#209](https://github.com/qufei1993/skills-hub/pull/209) | Preserve selections and outcomes, show actionable conflict locations, and retain guarded undo and recoverable backups; see [integrity rules](implementation.md#data-integrity-and-compatibility). |
-| Library actions opened preset setup or extra confirmations; shared-tool prompts only registered one tool. | — | [#212](https://github.com/qufei1993/skills-hub/pull/212) | Restore direct tool toggles and updates, keep project management scoped, and apply explicitly confirmed shared tools together; see [library behavior](implementation.md#library-and-project-management). |
+| Library actions opened preset setup or extra confirmations; shared-tool prompts only registered one tool. | — | [#212](https://github.com/qufei1993/skills-hub/pull/212) | Restore direct tool toggles and updates, keep filters independent of operations, and apply explicitly confirmed shared tools together; see [library behavior](implementation.md#library-and-project-management). |
 | Git checks could stall on helper processes or let one broken source block healthy results. | — | [#209](https://github.com/qufei1993/skills-hub/pull/209) | Terminate helper processes on cancellation or timeout, isolate failures and exclude internal cache metadata; see [update checks](implementation.md#updates-and-recovery). |
 | Managed source folders could be rediscovered or overwritten by overlapping sync targets. | [#208](https://github.com/qufei1993/skills-hub/issues/208) | [#211](https://github.com/qufei1993/skills-hub/pull/211) | Skip managed imports and protected source targets while continuing other eligible tool syncs. |
 

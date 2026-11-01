@@ -18,6 +18,22 @@ use super::types::SkillSelector;
 
 type Result<T> = std::result::Result<T, ServiceError>;
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TargetScope {
+    Global,
+    Project,
+}
+
+impl TargetScope {
+    fn contains(self, scope: &DeploymentScope) -> bool {
+        matches!(
+            (self, scope),
+            (Self::Global, DeploymentScope::Global) | (Self::Project, DeploymentScope::Project(_))
+        )
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApplicationRequest {
@@ -26,6 +42,8 @@ pub struct ApplicationRequest {
     pub scopes: Vec<DeploymentScope>,
     #[serde(default)]
     pub remove: bool,
+    #[serde(default)]
+    pub reconcile_scope: Option<TargetScope>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -80,9 +98,17 @@ struct Journal {
     record: ApplicationRecord,
     expected: Vec<Option<String>>,
     receipts: Vec<Vec<Receipt>>,
+    // Older journals have one direction for the whole record. New selections can
+    // add and remove in one server-owned preview without changing the DB schema.
+    #[serde(default)]
+    remove_items: Vec<bool>,
 }
 
 impl Journal {
+    fn removes(&self, index: usize) -> bool {
+        self.record.remove || self.remove_items.get(index).copied().unwrap_or(false)
+    }
+
     fn into_record(mut self) -> ApplicationRecord {
         self.record.undo_target_count = Some(if self.record.remove {
             0
@@ -134,7 +160,7 @@ impl SkillsHubService {
         if existing.map(|p| p.revision).unwrap_or(0) != preset.revision {
             return Err(stale());
         }
-        self.validate_members(&preset.members)?;
+        self.validate_members(&preset.members, false)?;
         if preset.id.is_empty() {
             preset.id = Uuid::new_v4().to_string();
         }
@@ -158,13 +184,13 @@ impl SkillsHubService {
         self.store().workspace_delete("preset", id).map_err(storage)
     }
 
-    fn validate_members(&self, members: &[PresetMember]) -> Result<()> {
+    fn validate_members(&self, members: &[PresetMember], allow_empty_tools: bool) -> Result<()> {
         let agents = self.list_agents()?.agents;
         let mut ids = HashSet::new();
         for member in members {
             if member.skill_id.is_empty()
                 || !ids.insert(&member.skill_id)
-                || member.tools.is_empty()
+                || (!allow_empty_tools && member.tools.is_empty())
                 || member.tools.iter().collect::<HashSet<_>>().len() != member.tools.len()
                 || member
                     .tools
@@ -182,16 +208,31 @@ impl SkillsHubService {
     pub fn preview_application(&self, request: ApplicationRequest) -> Result<ApplicationRecord> {
         let _lock = self.begin_write(OperationKind::Deploy)?;
         if request.members.is_empty()
-            || request.scopes.is_empty()
-            || request
+            || (request.scopes.is_empty() && request.reconcile_scope.is_none())
+            || (request
                 .scopes
                 .iter()
                 .any(|s| matches!(s, DeploymentScope::Global))
-                && request.scopes.len() > 1
+                && request.scopes.len() > 1)
         {
             return Err(invalid("choose global scope or one or more projects"));
         }
-        self.validate_members(&request.members)?;
+        if let Some(scope) = request.reconcile_scope {
+            if request.remove
+                || request.preset_id.is_some()
+                || request.members.len() != 1
+                || request
+                    .scopes
+                    .iter()
+                    .any(|selected| !scope.contains(selected))
+            {
+                return Err(invalid(
+                    "target selection requires one Skill and one scope kind",
+                ));
+            }
+            self.show_skill(SkillSelector::Id(request.members[0].skill_id.clone()))?;
+        }
+        self.validate_members(&request.members, request.reconcile_scope.is_some())?;
         let preset = request
             .preset_id
             .as_ref()
@@ -214,54 +255,157 @@ impl SkillsHubService {
             },
             expected: vec![],
             receipts: vec![],
+            remove_items: vec![],
         };
         let mut seen = HashSet::new();
-        for scope in &request.scopes {
-            for member in &request.members {
-                let name = self
-                    .show_skill(SkillSelector::Id(member.skill_id.clone()))
-                    .map(|s| s.name)
-                    .unwrap_or_else(|_| member.skill_id.clone());
-                let mut item = ApplicationItem {
-                    skill_id: member.skill_id.clone(),
-                    name,
-                    tools: member.tools.clone(),
-                    scope: scope.clone(),
-                    targets: vec![],
-                    action: "blocked".into(),
-                    status: "pending".into(),
-                    reason: None,
-                    conflict: None,
-                };
-                let fingerprint = match self.application_plan(&item, request.remove) {
-                    Ok(plan) => {
-                        item.scope = plan.scope.clone();
-                        let identity = format!(
-                            "{}:{}",
-                            member.skill_id,
-                            serde_json::to_string(&plan.scope).map_err(|_| stale())?
-                        );
-                        if !seen.insert(identity) {
-                            continue;
-                        }
-                        item.action = self.application_action(&plan)?;
-                        item.targets = plan.targets.clone();
-                        Some(plan.workspace_fingerprint())
+        if let Some(scope_kind) = request.reconcile_scope {
+            let member = &request.members[0];
+            let rows = self
+                .store()
+                .list_skill_targets(&member.skill_id)
+                .map_err(storage)?;
+            let current_scope = |row: &SkillTargetRecord| match row.scope.as_str() {
+                "global" => Some(DeploymentScope::Global),
+                "project" => row
+                    .project_path
+                    .as_ref()
+                    .map(|path| DeploymentScope::Project(path.into())),
+                _ => None,
+            };
+            let scope_rows: Vec<_> = rows
+                .iter()
+                .filter_map(|row| {
+                    current_scope(row)
+                        .filter(|scope| scope_kind.contains(scope))
+                        .map(|scope| (row, scope))
+                })
+                .collect();
+            let existing_tools: HashSet<_> = scope_rows
+                .iter()
+                .map(|(row, _)| row.tool.as_str())
+                .collect();
+            let selected: Vec<_> = request
+                .scopes
+                .iter()
+                .map(|scope| self.resolve_deployment_scope(scope))
+                .collect::<Result<_>>()?;
+            for scope in &selected {
+                let deployed: Vec<_> = scope_rows
+                    .iter()
+                    .filter(|(_, current)| current == scope)
+                    .map(|(row, _)| row.tool.clone())
+                    .collect();
+                let tools: Vec<_> = member
+                    .tools
+                    .iter()
+                    .filter(|tool| {
+                        deployed.is_empty()
+                            || deployed.contains(tool)
+                            || !existing_tools.contains(tool.as_str())
+                    })
+                    .cloned()
+                    .collect();
+                if !tools.is_empty() {
+                    self.push_application_item(
+                        &mut journal,
+                        &PresetMember {
+                            skill_id: member.skill_id.clone(),
+                            tools,
+                        },
+                        scope,
+                        false,
+                        &mut seen,
+                    )?;
+                }
+            }
+            let mut removals: Vec<(DeploymentScope, Vec<String>)> = vec![];
+            for (row, scope) in scope_rows {
+                if selected.contains(&scope) && member.tools.contains(&row.tool) {
+                    continue;
+                }
+                if let Some((_, tools)) = removals.iter_mut().find(|(current, _)| *current == scope)
+                {
+                    if !tools.contains(&row.tool) {
+                        tools.push(row.tool.clone());
                     }
-                    Err(error) => {
-                        item.status = "blocked".into();
-                        item.reason = Some(error.code.as_str().into());
-                        item.conflict = application_conflict(&error);
-                        None
-                    }
-                };
-                journal.record.items.push(item);
-                journal.expected.push(fingerprint);
-                journal.receipts.push(vec![]);
+                } else {
+                    removals.push((scope, vec![row.tool.clone()]));
+                }
+            }
+            for (scope, tools) in removals {
+                self.push_application_item(
+                    &mut journal,
+                    &PresetMember {
+                        skill_id: member.skill_id.clone(),
+                        tools,
+                    },
+                    &scope,
+                    true,
+                    &mut seen,
+                )?;
+            }
+        } else {
+            for scope in &request.scopes {
+                for member in &request.members {
+                    self.push_application_item(
+                        &mut journal,
+                        member,
+                        scope,
+                        request.remove,
+                        &mut seen,
+                    )?;
+                }
             }
         }
         self.save_journal(&journal)?;
         Ok(journal.into_record())
+    }
+
+    fn push_application_item(
+        &self,
+        journal: &mut Journal,
+        member: &PresetMember,
+        scope: &DeploymentScope,
+        remove: bool,
+        seen: &mut HashSet<String>,
+    ) -> Result<()> {
+        let name = self
+            .show_skill(SkillSelector::Id(member.skill_id.clone()))
+            .map(|s| s.name)
+            .unwrap_or_else(|_| member.skill_id.clone());
+        let mut item = ApplicationItem {
+            skill_id: member.skill_id.clone(),
+            name,
+            tools: member.tools.clone(),
+            scope: scope.clone(),
+            targets: vec![],
+            action: "blocked".into(),
+            status: "pending".into(),
+            reason: None,
+            conflict: None,
+        };
+        let fingerprint = match self.application_plan(&item, remove) {
+            Ok(plan) => {
+                item.scope = plan.scope.clone();
+                if !seen.insert(application_identity(&member.skill_id, &plan.scope, remove)?) {
+                    return Ok(());
+                }
+                item.action = self.application_action(&plan)?;
+                item.targets = plan.targets.clone();
+                Some(plan.workspace_fingerprint())
+            }
+            Err(error) => {
+                item.status = "blocked".into();
+                item.reason = Some(error.code.as_str().into());
+                item.conflict = application_conflict(&error);
+                None
+            }
+        };
+        journal.record.items.push(item);
+        journal.expected.push(fingerprint);
+        journal.receipts.push(vec![]);
+        journal.remove_items.push(remove);
+        Ok(())
     }
 
     fn application_plan(&self, item: &ApplicationItem, remove: bool) -> Result<DeploymentPlan> {
@@ -386,7 +530,7 @@ impl SkillsHubService {
             if matches!(journal.record.items[i].status.as_str(), "done" | "undone") {
                 continue;
             }
-            match self.application_plan(&journal.record.items[i], journal.record.remove) {
+            match self.application_plan(&journal.record.items[i], journal.removes(i)) {
                 Ok(plan) => {
                     journal.record.items[i].scope = plan.scope.clone();
                     journal.expected[i] = Some(plan.workspace_fingerprint());
@@ -428,7 +572,7 @@ impl SkillsHubService {
                 continue;
             }
             let plan = self
-                .application_plan(item, journal.record.remove)
+                .application_plan(item, journal.removes(i))
                 .map_err(|_| stale())?;
             if Some(plan.workspace_fingerprint()) != journal.expected[i] {
                 return Err(stale());
@@ -448,6 +592,22 @@ impl SkillsHubService {
             let Some(plan) = plan else {
                 continue;
             };
+            if journal.removes(i)
+                && !journal.record.remove
+                && journal
+                    .record
+                    .items
+                    .iter()
+                    .enumerate()
+                    .any(|(index, item)| {
+                        !journal.removes(index)
+                            && !matches!(item.status.as_str(), "done" | "undone")
+                    })
+            {
+                journal.record.items[i].reason = Some("TARGET_SELECTION_INCOMPLETE".into());
+                self.save_journal(&journal)?;
+                continue;
+            }
             let before = self
                 .store()
                 .list_skill_targets(&plan.skill_id)
@@ -465,7 +625,7 @@ impl SkillsHubService {
             match result {
                 Ok(()) => {
                     let item = &journal.record.items[i];
-                    if !journal.record.remove {
+                    if !journal.removes(i) {
                         let skill = self.show_skill(SkillSelector::Id(item.skill_id.clone()))?;
                         let hash =
                             hash_dir_strict(Path::new(&skill.central_path)).map_err(storage)?;
@@ -801,4 +961,13 @@ impl SkillsHubService {
         crate::core::content_recovery::apply_source_repair(self.paths(), self.store(), id)
             .map_err(content_error)
     }
+}
+
+fn application_identity(skill_id: &str, scope: &DeploymentScope, remove: bool) -> Result<String> {
+    Ok(format!(
+        "{}:{}:{}",
+        skill_id,
+        serde_json::to_string(scope).map_err(|_| stale())?,
+        remove
+    ))
 }

@@ -195,6 +195,41 @@ impl DeploymentPlan {
 }
 
 impl SkillsHubService {
+    pub(super) fn resolve_deployment_scope(
+        &self,
+        scope: &DeploymentScope,
+    ) -> Result<DeploymentScope, ServiceError> {
+        let project = match scope {
+            DeploymentScope::Global => None,
+            DeploymentScope::Project(path) => {
+                let home = self
+                    .paths()
+                    .default_central_repo
+                    .parent()
+                    .ok_or_else(|| ServiceError::internal("runtime home unavailable"))?;
+                let path = if path == Path::new("~") {
+                    home.to_path_buf()
+                } else if let Ok(rest) = path.strip_prefix("~") {
+                    home.join(rest)
+                } else {
+                    path.clone()
+                };
+                if !path.is_dir() {
+                    return Err(ServiceError::new(
+                        ErrorCode::InvalidArgument,
+                        "project must be an existing directory",
+                        json!({"argument":"project"}),
+                    ));
+                }
+                Some(
+                    std::fs::canonicalize(path)
+                        .map_err(|_| ServiceError::internal("failed to resolve project"))?,
+                )
+            }
+        };
+        Ok(project.map(DeploymentScope::Project).unwrap_or_default())
+    }
+
     pub(super) fn execute_bundled_deployment(
         &self,
         previous: DeploymentPlan,
@@ -330,33 +365,9 @@ impl SkillsHubService {
         let conflict_hash = hash_dir_for_sync_conflict(inspection_source)
             .map_err(|_| ServiceError::internal("failed to inspect the central skill"))?;
         let agents = self.list_agents()?.agents;
-        let project = match &request.scope {
+        let project = match self.resolve_deployment_scope(&request.scope)? {
             DeploymentScope::Global => None,
-            DeploymentScope::Project(path) => {
-                let home = self
-                    .paths()
-                    .default_central_repo
-                    .parent()
-                    .ok_or_else(|| ServiceError::internal("runtime home unavailable"))?;
-                let path = if path == Path::new("~") {
-                    home.to_path_buf()
-                } else if let Ok(rest) = path.strip_prefix("~") {
-                    home.join(rest)
-                } else {
-                    path.clone()
-                };
-                if !path.is_dir() {
-                    return Err(ServiceError::new(
-                        ErrorCode::InvalidArgument,
-                        "project must be an existing directory",
-                        json!({"argument":"project"}),
-                    ));
-                }
-                Some(
-                    std::fs::canonicalize(path)
-                        .map_err(|_| ServiceError::internal("failed to resolve project"))?,
-                )
-            }
+            DeploymentScope::Project(path) => Some(path),
         };
         let scope_name = if project.is_some() {
             "project"

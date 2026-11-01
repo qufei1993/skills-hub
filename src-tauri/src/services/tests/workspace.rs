@@ -54,6 +54,7 @@ impl Fixture {
             members: self.members(),
             scopes,
             remove: false,
+            reconcile_scope: None,
         }
     }
     fn install_member(&self, name: &str) -> (String, String) {
@@ -529,6 +530,7 @@ fn large_preset_preserves_per_member_tools_across_projects_and_later_reuse() {
             .map(DeploymentScope::Project)
             .collect(),
         remove: false,
+        reconcile_scope: None,
     };
     let first = f.service.preview_application(request()).unwrap();
     assert_eq!(first.items.len(), 60);
@@ -634,6 +636,7 @@ fn deleted_preset_member_is_blocked_without_preventing_other_members_or_retrying
             members: preset.members.clone(),
             scopes: vec![DeploymentScope::Global],
             remove: false,
+            reconcile_scope: None,
         })
         .unwrap();
     assert_eq!(plan.items[0].status, "blocked");
@@ -1545,6 +1548,7 @@ fn full_history_keeps_immutable_snapshots_and_undo_after_preset_deletion() {
                 members: members.clone(),
                 scopes: vec![DeploymentScope::Project(project)],
                 remove: false,
+                reconcile_scope: None,
             })
             .unwrap();
         if index == 0 {
@@ -1805,4 +1809,282 @@ fn stale_undo_confirmation_does_not_replace_the_reviewed_preview() {
     assert!(f.service.undo_application(&a.id).is_err());
     assert!(f.service.undo_application(&a.id).is_err());
     assert!(f.home.path().join(".codex/skills/demo").exists());
+}
+
+fn selection_projects(f: &Fixture) -> Vec<DeploymentScope> {
+    ["selection-a", "selection-b"]
+        .into_iter()
+        .map(|name| {
+            let path = f.data.path().join(name);
+            fs::create_dir(&path).unwrap();
+            DeploymentScope::Project(fs::canonicalize(path).unwrap())
+        })
+        .collect()
+}
+
+fn apply_fixture(f: &Fixture, scopes: Vec<DeploymentScope>) {
+    let plan = f.service.preview_application(f.request(scopes)).unwrap();
+    let result = f.service.execute_application(&plan.id).unwrap();
+    assert!(result.items.iter().all(|item| item.status == "done"));
+}
+
+#[test]
+fn target_selection_removes_unchecked_project_and_preserves_library_and_global() {
+    use crate::services::workspace::TargetScope;
+    let f = Fixture::new();
+    let scopes = selection_projects(&f);
+    apply_fixture(&f, scopes.clone());
+    apply_fixture(&f, vec![DeploymentScope::Global]);
+    let before = f.service.store().list_skill_targets(&f.id).unwrap();
+    let removed = before
+        .iter()
+        .find(|row| {
+            row.project_path.as_deref()
+                == match &scopes[1] {
+                    DeploymentScope::Project(path) => path.to_str(),
+                    _ => None,
+                }
+        })
+        .unwrap();
+    let mut request = f.request(vec![scopes[0].clone()]);
+    request.reconcile_scope = Some(TargetScope::Project);
+    let plan = f.service.preview_application(request).unwrap();
+    assert!(plan
+        .items
+        .iter()
+        .any(|item| item.action == "remove" && item.scope == scopes[1]));
+    assert!(std::path::Path::new(&removed.target_path).exists());
+    let result = f.service.execute_application(&plan.id).unwrap();
+    assert!(result.items.iter().all(|item| item.status == "done"));
+    assert!(!std::path::Path::new(&removed.target_path).exists());
+    let after = f.service.store().list_skill_targets(&f.id).unwrap();
+    assert_eq!(after.len(), 2);
+    for row in after {
+        assert!(before.iter().any(|old| old.id == row.id));
+        assert!(std::path::Path::new(&row.target_path).exists());
+    }
+    assert_eq!(f.service.list_skills().unwrap().len(), 1);
+    f.service.execute_application(&plan.id).unwrap();
+    assert_eq!(
+        f.service.store().list_skill_targets(&f.id).unwrap().len(),
+        2
+    );
+}
+
+#[test]
+fn target_selection_allows_clearing_projects_or_tools_without_removing_other_scope() {
+    use crate::services::workspace::TargetScope;
+    for clear_projects in [true, false] {
+        let f = Fixture::new();
+        let scopes = selection_projects(&f);
+        apply_fixture(&f, scopes.clone());
+        apply_fixture(&f, vec![DeploymentScope::Global]);
+        let mut request = f.request(if clear_projects { vec![] } else { scopes });
+        request.reconcile_scope = Some(TargetScope::Project);
+        if !clear_projects {
+            request.members[0].tools.clear();
+        }
+        let plan = f.service.preview_application(request).unwrap();
+        assert_eq!(plan.items.len(), 2);
+        assert!(plan.items.iter().all(|item| item.action == "remove"));
+        let result = f.service.execute_application(&plan.id).unwrap();
+        assert!(result.items.iter().all(|item| item.status == "done"));
+        let rows = f.service.store().list_skill_targets(&f.id).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].scope, "global");
+    }
+}
+
+#[test]
+fn target_selection_does_not_add_other_projects_tools_to_retained_projects() {
+    use crate::services::workspace::TargetScope;
+    let f = Fixture::new();
+    let scopes = selection_projects(&f);
+    apply_fixture(&f, vec![scopes[0].clone()]);
+    let mut other = f.request(vec![scopes[1].clone()]);
+    other.members[0].tools = vec!["cursor".into()];
+    let plan = f.service.preview_application(other).unwrap();
+    f.service.execute_application(&plan.id).unwrap();
+    let mut request = f.request(vec![scopes[0].clone()]);
+    request.members[0].tools.push("cursor".into());
+    request.reconcile_scope = Some(TargetScope::Project);
+    let plan = f.service.preview_application(request).unwrap();
+    assert_eq!(plan.items[0].tools, vec!["codex"]);
+    f.service.execute_application(&plan.id).unwrap();
+    let rows = f.service.store().list_skill_targets(&f.id).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].tool, "codex");
+}
+
+#[test]
+fn target_selection_retains_old_project_until_replacement_conflict_is_resolved() {
+    use crate::services::deployment::DeploymentRequest;
+    use crate::services::types::SkillSelector;
+    use crate::services::workspace::TargetScope;
+    let f = Fixture::new();
+    let scopes = selection_projects(&f);
+    apply_fixture(&f, vec![scopes[1].clone()]);
+    let new_plan = f
+        .service
+        .plan_deploy(DeploymentRequest {
+            skill: SkillSelector::Id(f.id.clone()),
+            agents: vec!["codex".into()],
+            scope: scopes[0].clone(),
+            overwrite: false,
+            overwrite_if_same_content: false,
+        })
+        .unwrap();
+    let conflict = &new_plan.targets[0].path;
+    fs::create_dir_all(conflict).unwrap();
+    fs::write(conflict.join("SKILL.md"), "unmanaged content").unwrap();
+    let mut request = f.request(vec![scopes[0].clone()]);
+    request.reconcile_scope = Some(TargetScope::Project);
+    let plan = f.service.preview_application(request).unwrap();
+    assert_eq!(plan.items[0].status, "blocked");
+    let result = f.service.execute_application(&plan.id).unwrap();
+    let removal = result
+        .items
+        .iter()
+        .find(|item| item.action == "remove")
+        .unwrap();
+    assert_eq!(removal.status, "pending");
+    assert_eq!(
+        removal.reason.as_deref(),
+        Some("TARGET_SELECTION_INCOMPLETE")
+    );
+    assert_eq!(
+        f.service.store().list_skill_targets(&f.id).unwrap().len(),
+        1
+    );
+    fs::remove_dir_all(conflict).unwrap();
+    f.service.recheck_application(&plan.id).unwrap();
+    let result = f.service.execute_application(&plan.id).unwrap();
+    assert!(result.items.iter().all(|item| item.status == "done"));
+    let rows = f.service.store().list_skill_targets(&f.id).unwrap();
+    assert_eq!(rows.len(), 1);
+    let DeploymentScope::Project(expected) = &scopes[0] else {
+        unreachable!()
+    };
+    assert_eq!(rows[0].project_path.as_deref(), expected.to_str());
+}
+
+#[test]
+fn target_selection_rejects_stale_removal_and_legacy_direction_before_any_write() {
+    use crate::services::workspace::TargetScope;
+    let f = Fixture::new();
+    let scopes = selection_projects(&f);
+    apply_fixture(&f, scopes.clone());
+    let mut request = f.request(vec![scopes[0].clone()]);
+    request.reconcile_scope = Some(TargetScope::Project);
+    let plan = f.service.preview_application(request).unwrap();
+    let before = f.service.store().list_skill_targets(&f.id).unwrap();
+    let mut journal: serde_json::Value = f
+        .service
+        .store()
+        .workspace_get("application", &plan.id)
+        .unwrap()
+        .unwrap();
+    // Models a reader with the previous stable journal's single-direction fields.
+    let removed_directions = journal
+        .as_object_mut()
+        .unwrap()
+        .remove("remove_items")
+        .unwrap();
+    f.service
+        .store()
+        .workspace_save("application", &plan.id, &journal)
+        .unwrap();
+    assert_eq!(
+        f.service.execute_application(&plan.id).unwrap_err().code,
+        crate::services::error::ErrorCode::PlanStale
+    );
+    journal["remove_items"] = removed_directions;
+    f.service
+        .store()
+        .workspace_save("application", &plan.id, &journal)
+        .unwrap();
+    let removed = before
+        .iter()
+        .find(|row| {
+            !plan.items[0]
+                .targets
+                .iter()
+                .any(|target| target.path.to_string_lossy() == row.target_path)
+        })
+        .unwrap();
+    fs::write(
+        std::path::Path::new(&removed.target_path).join("SKILL.md"),
+        "local changes",
+    )
+    .unwrap();
+    assert_eq!(
+        f.service.execute_application(&plan.id).unwrap_err().code,
+        crate::services::error::ErrorCode::PlanStale
+    );
+    assert_eq!(
+        f.service.store().list_skill_targets(&f.id).unwrap().len(),
+        before.len()
+    );
+    assert_eq!(
+        fs::read_to_string(std::path::Path::new(&removed.target_path).join("SKILL.md")).unwrap(),
+        "local changes"
+    );
+}
+
+#[test]
+fn target_selection_unchecked_shared_tool_keeps_the_selected_reference() {
+    use crate::services::workspace::TargetScope;
+    let f = Fixture::new();
+    let scopes = selection_projects(&f);
+    let mut initial = f.request(vec![scopes[0].clone()]);
+    initial.members[0].tools.push("cursor".into());
+    let plan = f.service.preview_application(initial).unwrap();
+    f.service.execute_application(&plan.id).unwrap();
+    let mut request = f.request(vec![scopes[0].clone()]);
+    request.members[0].tools = vec!["cursor".into()];
+    request.reconcile_scope = Some(TargetScope::Project);
+    let plan = f.service.preview_application(request).unwrap();
+    assert_eq!(
+        plan.items
+            .iter()
+            .find(|item| item.action == "remove")
+            .unwrap()
+            .tools,
+        vec!["codex"]
+    );
+    let result = f.service.execute_application(&plan.id).unwrap();
+    assert!(result.items.iter().all(|item| item.status == "done"));
+    let rows = f.service.store().list_skill_targets(&f.id).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].tool, "cursor");
+    assert!(std::path::Path::new(&rows[0].target_path)
+        .join("SKILL.md")
+        .exists());
+}
+
+#[test]
+fn target_selection_reads_previous_single_direction_journals_without_migration() {
+    let f = Fixture::new();
+    for remove in [false, true] {
+        let mut request = f.request(vec![DeploymentScope::Global]);
+        request.remove = remove;
+        let plan = f.service.preview_application(request).unwrap();
+        let mut journal: serde_json::Value = f
+            .service
+            .store()
+            .workspace_get("application", &plan.id)
+            .unwrap()
+            .unwrap();
+        journal.as_object_mut().unwrap().remove("remove_items");
+        f.service
+            .store()
+            .workspace_save("application", &plan.id, &journal)
+            .unwrap();
+        let result = f.service.execute_application(&plan.id).unwrap();
+        assert_eq!(result.items[0].status, "done");
+        assert_eq!(
+            f.service.store().list_skill_targets(&f.id).unwrap().len(),
+            usize::from(!remove)
+        );
+    }
 }

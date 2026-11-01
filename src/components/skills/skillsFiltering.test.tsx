@@ -161,7 +161,7 @@ describe('My Skills filter integration', () => {
     expect((screen.getByPlaceholderText('Search skills...') as HTMLInputElement).value).toBe('')
   })
 
-  it('keeps library scopes focused on management and carries the selected project into single-Skill targets', async () => {
+  it('keeps library scopes focused on filtering and opens each Skill’s own targets', async () => {
     const deployed = [makeSkill('global-writing', 'global', []), makeSkill('alpha-only', 'project', []), makeSkill('beta-only', 'project', [])]
     deployed[1].targets[0].project_path = '/test/project-alpha'
     deployed[2].targets[0].project_path = '/test/project-beta'
@@ -457,7 +457,7 @@ describe('Library bulk tool assignment', () => {
     expectNoPresetCommands()
   })
 
-  it.each(['global', 'project'] as const)('limits tool changes to the current %s filter', async filter => {
+  it.each(['all', 'global', 'project'] as const)('keeps bulk tool assignments independent of the %s filter', async filter => {
     const value = makeSkill('global-writing', 'global', [])
     value.targets.push(
       { ...value.targets[0], scope: 'project', project_path: '/test/project-alpha', target_path: '/test/project-alpha/skills/global-writing' },
@@ -466,7 +466,7 @@ describe('Library bulk tool assignment', () => {
     prepareTools([value])
     render(<App />)
     await screen.findByText('global-writing')
-    fireEvent.click(screen.getByRole('button', { name: filter === 'global' ? 'Global 1' : 'Project 1' }))
+    if (filter !== 'all') fireEvent.click(screen.getByRole('button', { name: filter === 'global' ? 'Global 1' : 'Project 1' }))
     if (filter === 'project') {
       fireEvent.click(screen.getByRole('button', { name: i18n.t('workspace110.project') }))
       fireEvent.click(screen.getByRole('option', { name: /\/test\/project-alpha/ }))
@@ -477,8 +477,8 @@ describe('Library bulk tool assignment', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: i18n.t('bulk.syncConfirm') }))
     await vi.waitFor(() => expect(document.querySelector('.bulk-action-bar')).toBeNull())
     expect(toolWrites()).toEqual([
-      ['unsync_skill_from_tool', { skillId: value.id, tool: 'codex', scope: filter, projectPath: filter === 'project' ? '/test/project-alpha' : undefined }],
-      ['sync_skill_to_tool', { sourcePath: value.central_path, skillId: value.id, tool: 'cursor', name: value.name, overwriteIfSameContent: true, scope: filter, ...(filter === 'project' ? { projectPath: '/test/project-alpha' } : {}) }],
+      ...['/test/project-alpha', '/test/project-beta'].map(projectPath => ['unsync_skill_from_tool', { skillId: value.id, tool: 'codex', scope: 'project', projectPath }]),
+      ...['/test/project-alpha', '/test/project-beta'].map(projectPath => ['sync_skill_to_tool', { sourcePath: value.central_path, skillId: value.id, tool: 'cursor', name: value.name, overwriteIfSameContent: true, scope: 'project', projectPath }]),
     ])
     expectNoPresetCommands()
   })
@@ -518,29 +518,16 @@ describe('Library bulk tool assignment', () => {
   })
 })
 
-it.each(['list', 'cards'] as const)('removes from the selected project directly without dialogs in %s view', async view => {
+it.each(['list', 'cards'] as const)('keeps standard actions and complete deployment data after project filtering in %s view', async view => {
   const alpha = '/test/project-alpha', beta = '/test/project-beta'
-  const skill = makeSkill('project-skill', 'global', [])
-  skill.targets.push(
-    { ...skill.targets[0], scope: 'project', project_path: alpha, target_path: `${alpha}/codex/project-skill` },
-    { ...skill.targets[0], tool: 'cursor', scope: 'project', project_path: alpha, target_path: `${alpha}/cursor/project-skill` },
-    { ...skill.targets[0], tool: 'claude_code', scope: 'project', project_path: beta, target_path: `${beta}/claude/project-skill` },
-  )
+  const skill = makeSkill('project-skill', 'project', [])
+  skill.targets = [alpha, beta].map(project_path => ({ ...skill.targets[0], project_path, target_path: `${project_path}/codex/project-skill` }))
   const originalTargets = structuredClone(skill.targets)
-  const plan: ApplicationRecord = { id: 'remove-alpha', preset: null, createdAt: 1, confirmed: false, remove: true, undoTargetCount: 0,
-    items: [{ skillId: skill.id, name: skill.name, tools: ['codex', 'cursor'], scope: { kind: 'project', path: alpha }, targets: [], action: 'remove', status: 'pending', reason: null }],
-  }
   const original = invoke.getMockImplementation()!
   invoke.mockImplementation(async (command: string) => {
     if (command === 'get_managed_skills') return structuredClone([skill])
     if (command === 'get_tool_status') return { tools: [], installed: [], newly_installed: [] }
     if (command === 'get_tool_config') return { disabled_builtin_tools: [], custom_tools: [] }
-    if (command === 'workspace_presets' || command === 'workspace_history') return []
-    if (command === 'workspace_preview') return plan
-    if (command === 'workspace_execute') {
-      skill.targets = skill.targets.filter(target => target.project_path !== alpha)
-      return { ...plan, confirmed: true, items: plan.items.map(item => ({ ...item, status: 'done' })) }
-    }
     return original(command)
   })
   render(<App />)
@@ -549,21 +536,23 @@ it.each(['list', 'cards'] as const)('removes from the selected project directly 
   fireEvent.click(screen.getByRole('button', { name: 'Project 1' }))
   fireEvent.click(screen.getByRole('button', { name: i18n.t('workspace110.project') }))
   fireEvent.click(screen.getByRole('option', { name: new RegExp(alpha) }))
-  const removeButton = screen.getByRole('button', { name: i18n.t('workspace110.removeTargets') })
-  fireEvent.click(removeButton)
-  expect(screen.queryByRole('dialog')).toBeNull()
-  expect(document.querySelector('.skills-library')).toBeTruthy()
-  expect(document.querySelector('.workspace-preset-grid')).toBeNull()
-  await waitFor(() => expect(skill.targets).toEqual(originalTargets.filter(target => target.project_path !== alpha)))
-  await waitFor(() => expect(document.querySelector('main')?.hasAttribute('inert')).toBe(false))
-  expect(screen.queryByRole('dialog')).toBeNull()
-  expect(invoke.mock.calls.filter(([command]) => command === 'workspace_preview').map(([, args]) => args)).toEqual([{ request: {
-    presetId: null, members: [{ skillId: skill.id, tools: ['codex', 'cursor'] }], scopes: [{ kind: 'project', path: alpha }], remove: true,
-  } }])
-  expect(invoke.mock.calls.filter(([command]) => command === 'workspace_execute').map(([, args]) => args)).toEqual([{ id: plan.id }])
-  expect(invoke.mock.calls.some(([command]) => ['delete_managed_skill', 'workspace_save_preset', 'workspace_presets'].includes(command))).toBe(false)
-  expect(skill.targets).toEqual(originalTargets.filter(target => target.project_path !== alpha))
-  expect(skill.targets.map(target => target.project_path ?? 'global')).toEqual(['global', beta])
+  expect(screen.queryByRole('button', { name: i18n.t('workspace110.manageTargets') })).toBeNull()
+  expect(screen.getByRole('button', { name: i18n.t('disableSkill') })).toBeTruthy()
+  const badge = screen.getByRole('button', { name: i18n.t('scope.projectCount', { count: 2 }) })
+  fireEvent.click(badge)
+  const dialog = await screen.findByRole('dialog', { name: i18n.t('workspace110.manageTargets') })
+  for (const path of [alpha, beta]) {
+    expect((within(dialog).getByRole('checkbox', { name: path }) as HTMLInputElement).checked).toBe(true)
+  }
+  fireEvent.click(within(dialog).getByRole('button', { name: i18n.t('workspace110.cancel') }))
+  await waitFor(() => expect(document.activeElement).toBe(badge))
+  expect(screen.getByRole('button', { name: i18n.t('workspace110.project') }).textContent).toContain('project-alpha')
+  fireEvent.click(screen.getByRole('button', { name: i18n.t('remove') }))
+  const deletion = await screen.findByRole('dialog', { name: i18n.t('deleteTitle') })
+  expect(within(deletion).getByText(i18n.t('delete.warningRemoveFromTools'))).toBeTruthy()
+  fireEvent.click(within(deletion).getByRole('button', { name: i18n.t('cancel') }))
+  expect(skill.targets).toEqual(originalTargets)
+  expect(invoke.mock.calls.some(([command]) => ['workspace_preview', 'workspace_execute', 'delete_managed_skill', 'sync_skill_to_tool', 'unsync_skill_from_tool'].includes(command))).toBe(false)
 })
 
 describe('Library contextual tool actions', () => {
@@ -576,7 +565,8 @@ describe('Library contextual tool actions', () => {
     skill.targets = [
       targetFor('cursor', 'global'),
       targetFor('cursor', 'project', alpha),
-      targetFor('codex', 'project', beta),
+      targetFor('cursor', 'project', beta),
+      ...(state === 'missing' ? [] : [targetFor('codex', 'project', beta)]),
       ...(state === 'missing' ? [] : [
         targetFor('codex', 'global', undefined, state === 'failed' ? 'error' : 'ok'),
         targetFor('codex', 'project', alpha, state === 'failed' ? 'error' : 'ok'),
@@ -614,16 +604,20 @@ describe('Library contextual tool actions', () => {
     const toolButton = () => within(document.querySelector('.skill-tool-avatars') as HTMLElement).getByRole('button', { name: /Codex/ })
     fireEvent.click(toolButton())
     await waitFor(() => expect(skill.targets.some(t => t.tool === 'codex' && t.project_path === alpha)).toBe(false))
-    await waitFor(() => expect(toolButton().getAttribute('aria-pressed')).toBe('false'))
+    await waitFor(() => expect(skill.targets.some(t => t.tool === 'codex' && t.project_path === beta)).toBe(false))
+    expect(toolButton().getAttribute('aria-pressed')).toBe('true')
+    await waitFor(() => expect((screen.getByRole('button', { name: i18n.t('disableSkill') }) as HTMLButtonElement).disabled).toBe(false))
     expect(screen.queryByRole('dialog')).toBeNull()
     fireEvent.click(toolButton())
-    await waitFor(() => expect(toolButton().getAttribute('aria-pressed')).toBe('true'))
+    await waitFor(() => expect(skill.targets.some(t => t.tool === 'codex' && t.project_path === beta)).toBe(true))
     expect(skill.targets.some(t => t.tool === 'codex' && t.scope === 'global')).toBe(true)
     expect(skill.targets.some(t => t.tool === 'codex' && t.project_path === beta)).toBe(true)
     expect(skill.targets.some(t => t.tool === 'cursor' && t.project_path === alpha)).toBe(true)
     expect(invoke.mock.calls.filter(([c]) => ['sync_skill_to_tool', 'unsync_skill_from_tool'].includes(c)).map(([c, args]) => [c, args])).toEqual([
+      ['unsync_skill_from_tool', { skillId: skill.id, tool: 'codex', scope: 'project', projectPath: beta }],
       ['unsync_skill_from_tool', { skillId: skill.id, tool: 'codex', scope: 'project', projectPath: alpha }],
       ['sync_skill_to_tool', { skillId: skill.id, sourcePath: skill.central_path, name: skill.name, tool: 'codex', scope: 'project', projectPath: alpha, overwriteIfSameContent: true }],
+      ['sync_skill_to_tool', { skillId: skill.id, sourcePath: skill.central_path, name: skill.name, tool: 'codex', scope: 'project', projectPath: beta, overwriteIfSameContent: true }],
     ])
     expect(invoke.mock.calls.some(([c]) => ['workspace_preview', 'workspace_execute', 'workspace_presets', 'workspace_save_preset'].includes(c))).toBe(false)
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -638,10 +632,10 @@ describe('Library contextual tool actions', () => {
     else if (context === 'global') fireEvent.click(screen.getByRole('button', { name: 'Global 1' }))
     fireEvent.click(within(document.querySelector('.skill-tool-avatars') as HTMLElement).getByRole('button', { name: /Codex/ }))
     const command = state === 'synced' ? 'unsync_skill_from_tool' : 'sync_skill_to_tool'
-    const paths = context === 'all' ? [alpha, beta] : context === 'project' ? [alpha] : [undefined]
+    const paths = state === 'synced' ? [beta, alpha] : [alpha, beta]
     await waitFor(() => expect(invoke.mock.calls.filter(([c]) => c === command)).toHaveLength(paths.length))
     expect(invoke.mock.calls.filter(([c]) => c === command).map(([,args]) => args)).toEqual(paths.map(projectPath => ({
-      skillId: skill.id, tool: 'codex', scope: context === 'global' ? 'global' : 'project',
+      skillId: skill.id, tool: 'codex', scope: 'project',
       ...(projectPath ? { projectPath } : {}),
       ...(state !== 'synced' ? { sourcePath: skill.central_path, name: skill.name, overwriteIfSameContent: true } : {}),
     })))
@@ -693,20 +687,12 @@ describe('Library contextual tool actions', () => {
     dialog = await screen.findByRole('dialog')
     fireEvent.click(within(dialog).getByRole('button', { name: i18n.t('confirm') }))
     const command = state === 'synced' ? 'unsync_skill_from_tool' : 'sync_skill_to_tool'
-    if (state === 'synced') {
-      // Removing the last tools also removes this Skill from the current scope's list.
-      await waitFor(() => expect(screen.queryByRole('button', { name: skill.name })).toBeNull())
-    } else {
-      await waitFor(() => expect(toolButton('Codex').getAttribute('aria-pressed')).toBe('true'))
-      await waitFor(() => expect(toolButton('Cursor').getAttribute('aria-pressed')).toBe('true'))
-    }
-    expect(invoke.mock.calls.filter(([c]) => c === command).map(([,args]) => args)).toEqual([{
-      skillId: skill.id, tool: 'codex', sharedTools: ['codex', 'cursor'], scope: context,
-      ...(context === 'project' ? { projectPath: alpha } : {}),
+    await waitFor(() => expect(invoke.mock.calls.filter(([c]) => c === command)).toHaveLength(2))
+    expect(invoke.mock.calls.filter(([c]) => c === command).map(([,args]) => args)).toEqual((state === 'synced' ? [beta, alpha] : [alpha, beta]).map(projectPath => ({
+      skillId: skill.id, tool: 'codex', sharedTools: ['codex', 'cursor'], scope: 'project', projectPath,
       ...(state !== 'synced' ? { sourcePath: skill.central_path, name: skill.name, overwriteIfSameContent: true } : {}),
-    }])
-    expect(skill.targets.filter(t => context === 'global' ? t.scope !== 'global' : t.project_path !== alpha))
-      .toEqual(before.filter(t => context === 'global' ? t.scope !== 'global' : t.project_path !== alpha))
+    })))
+    expect(skill.targets.filter(t => t.scope === 'global')).toEqual(before.filter(t => t.scope === 'global'))
     expect(screen.queryByRole('dialog')).toBeNull()
   })
   it('keeps both shared tool states unchanged when group synchronization fails', async () => {
@@ -723,7 +709,7 @@ describe('Library contextual tool actions', () => {
     expect(invoke.mock.calls.filter(([c]) => c === 'sync_skill_to_tool')).toHaveLength(1)
     expect(invoke.mock.calls.find(([c]) => c === 'sync_skill_to_tool')?.[1].sharedTools).toEqual(['codex', 'cursor'])
   })
-  it('routes the card issue repair to failed tools in the selected project and restores its trigger on cancel', async () => {
+  it('keeps all failed locations available for repair after filtering and restores focus on cancel', async () => {
     prepare('failed')
     render(<App />)
     await screen.findByText('tool-action')
@@ -732,21 +718,21 @@ describe('Library contextual tool actions', () => {
     fireEvent.click(trigger)
     fireEvent.click(screen.getByRole('button', { name: i18n.t('workspace110.repairTargets') }))
     const dialog = await screen.findByRole('dialog', { name: i18n.t('workspace110.repairTargets') })
-    expect(within(dialog).getByText('project-alpha')).toBeTruthy()
-    expect(within(dialog).getByText('Codex')).toBeTruthy()
-    expect(within(dialog).queryByText('Cursor')).toBeNull()
-    expect(within(dialog).queryByRole('radio')).toBeNull()
+    expect(within(dialog).getByRole('radio', { name: i18n.t('workspace110.global') })).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('radio', { name: i18n.t('workspace110.project') }))
+    expect(within(dialog).getByRole('checkbox', { name: alpha })).toBeTruthy()
+    expect(within(dialog).getByRole('checkbox', { name: beta })).toBeTruthy()
     expect(document.querySelector('.skill-issue-popover')).toBeNull()
     fireEvent.click(within(dialog).getByRole('button', { name: i18n.t('workspace110.cancel') }))
     await waitFor(() => expect(document.activeElement).toBe(trigger))
     expect(invoke.mock.calls.some(([command]) => ['workspace_preview', 'workspace_execute', 'workspace_presets'].includes(command))).toBe(false)
   })
-  it('opens target management over the current project without adding unrelated Skills', async () => {
+  it('opens complete targets from the badge without adding unrelated Skills', async () => {
     prepare('synced')
     render(<App />)
     await screen.findByText('tool-action')
     await selectProject()
-    fireEvent.click(screen.getByRole('button', { name: i18n.t('workspace110.manageTargets') }))
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('workspace110.mixedScope', { count: 2 }) }))
     const dialog = await screen.findByRole('dialog', { name: i18n.t('workspace110.manageTargets') })
     expect(document.querySelector('.skills-library')).toBeTruthy()
     expect(within(dialog).getByRole('radio', { name: i18n.t('workspace110.project') }).getAttribute('checked')).not.toBeNull()
@@ -756,4 +742,53 @@ describe('Library contextual tool actions', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: i18n.t('workspace110.cancel') }))
     expect(invoke.mock.calls.some(([command]) => ['workspace_preview', 'workspace_execute', 'workspace_presets'].includes(command))).toBe(false)
   })
+})
+
+it.each(['remove-one', 'clear-all'] as const)('applies unchecked project targets through a confirmed plan: %s', async mode => {
+  const alpha = '/test/project-alpha', beta = '/test/project-beta'
+  const skill = makeSkill('selected-projects', 'project', [])
+  skill.source_type = 'git'; skill.source_ref = 'https://example.test/skills.git'
+  skill.targets = [alpha, beta].map(project_path => ({ ...skill.targets[0], project_path, target_path: `${project_path}/codex/selected-projects` }))
+  const original = invoke.getMockImplementation()!
+  const removed = mode === 'clear-all' ? [alpha, beta] : [beta]
+  const plan: ApplicationRecord = { id: 'selection-plan', preset: null, createdAt: 1, confirmed: false, remove: false, undoTargetCount: 0,
+    items: removed.map(path => ({ skillId: skill.id, name: skill.name, tools: ['codex'], scope: { kind: 'project', path }, targets: [], action: 'remove', status: 'pending', reason: null })),
+  }
+  invoke.mockImplementation(async (command: string) => {
+    if (command === 'get_managed_skills') return structuredClone([skill])
+    if (command === 'get_recent_projects') return [alpha, beta]
+    if (command === 'get_tool_status') return { tools: [{ key: 'codex', label: 'Codex', enabled: true, installed: true, skills_dir: '/test/codex', project_skills_dir: '.agents/skills', supports_project_scope: true, sync_mode: 'copy', is_custom: false }], installed: ['codex'], newly_installed: [] }
+    if (command === 'get_tool_config') return { disabled_builtin_tools: [], custom_tools: [] }
+    if (command === 'workspace_preview') return plan
+    if (command === 'workspace_execute') {
+      skill.targets = skill.targets.filter(target => !removed.includes(target.project_path ?? ''))
+      return { ...plan, confirmed: true, items: plan.items.map(item => ({ ...item, status: 'done' })) }
+    }
+    return original(command)
+  })
+  render(<App />)
+  await screen.findByText(skill.name)
+  fireEvent.click(screen.getByRole('button', { name: i18n.t('scope.projectCount', { count: 2 }) }))
+  let dialog = await screen.findByRole('dialog', { name: i18n.t('workspace110.manageTargets') })
+  for (const path of removed) fireEvent.click(within(dialog).getByRole('checkbox', { name: path }))
+  fireEvent.click(within(dialog).getByRole('button', { name: i18n.t('workspace110.confirmTargets') }))
+  dialog = await screen.findByRole('dialog', { name: i18n.t('workspace110.confirmTargetChanges') })
+  expect(invoke.mock.calls.find(([command]) => command === 'workspace_preview')?.[1]).toEqual({ request: {
+    presetId: null, members: [{ skillId: skill.id, tools: ['codex'] }], scopes: mode === 'clear-all' ? [] : [{ kind: 'project', path: alpha }], remove: false, reconcileScope: 'project',
+  } })
+  expect(invoke.mock.calls.some(([command]) => command === 'workspace_execute')).toBe(false)
+  expect(skill.targets).toHaveLength(2)
+  for (const path of removed) expect(within(dialog).getByText(`${skill.name} · ${path.split('/').at(-1)}`)).toBeTruthy()
+  fireEvent.click(within(dialog).getByRole('button', { name: i18n.t('workspace110.confirmTargetChanges') }))
+  const result = await screen.findByRole('dialog', { name: i18n.t('workspace110.result') })
+  expect(within(result).getByText(i18n.t('workspace110.completed'))).toBeTruthy()
+  fireEvent.click(within(result).getByRole('button', { name: i18n.t('workspace110.done') }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(skill.targets).toHaveLength(mode === 'clear-all' ? 0 : 1)
+  if (mode === 'remove-one') {
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('scope.projectCount', { count: 1 }) }))
+    const reopened = await screen.findByRole('dialog', { name: i18n.t('workspace110.manageTargets') })
+    expect((within(reopened).getByRole('checkbox', { name: alpha }) as HTMLInputElement).checked).toBe(true)
+    expect((within(reopened).getByRole('checkbox', { name: beta }) as HTMLInputElement).checked).toBe(false)
+  }
 })
