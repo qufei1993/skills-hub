@@ -109,6 +109,7 @@ const DeviceSyncPage = ({
   const syncHelpOpen = helpOpen === 'sync'
   const helpTriggerRef = useRef<HTMLButtonElement | null>(null)
   const [conflicts, setConflicts] = useState<DeviceSyncConflict[]>([])
+  const [centralContentFailure, setCentralContentFailure] = useState<{ runAt?: number | null } | null>(null)
   const [preview, setPreview] = useState<DeviceSyncChangeSummary | null>(null)
   const [form, setForm] = useState(buildDeviceSyncForm)
   const [busy, setBusy] = useState<string | null>(null)
@@ -400,6 +401,7 @@ const DeviceSyncPage = ({
     setBusy(name)
     try {
       await action()
+      if (['sync', 'check', 'initial-sync', 'disconnect'].includes(name)) setCentralContentFailure(null)
       if (['sync', 'check', 'initial-sync', 'disconnect'].includes(name) || (name === 'save' && (form.token.trim() || form.oauthCredentialKey))) {
         setCredentialFailure(null)
         setResolvedCredentialFailureId(history[0]?.id ?? null)
@@ -407,7 +409,9 @@ const DeviceSyncPage = ({
     } catch (error) {
       const message = String(error)
       const kind = message.includes('DEVICE_SYNC_READ_CREDENTIAL_REQUIRED') ? 'credentialMissing' : getSyncFailureKind(message)
-      if (['sync', 'check'].includes(name)) {
+      if (['sync', 'check', 'initial-sync'].includes(name)) {
+        setCentralContentFailure(kind === 'centralMissing' ? { runAt: status?.last_run_at } : null)
+        setPreview(null)
         setCredentialFailure(['credentialMissing', 'credential', 'auth'].includes(kind) ? { kind, runAt: status?.last_run_at } : null)
         setResolvedCredentialFailureId(null)
       }
@@ -416,9 +420,8 @@ const DeviceSyncPage = ({
         : message.includes('DEVICE_SYNC_PUBLIC_UPLOAD_CONFIRMATION') ? 'publicUploadWarning'
           : message.includes('DEVICE_SYNC_READ_CREDENTIAL_REQUIRED') ? 'readCredentialRequired'
           : message.includes('DEVICE_SYNC_PUBLIC_READ_FAILED') ? 'publicReadFailed' : null
-      toast.error(key ? t(`deviceSync.${key}`) : ['sync', 'check'].includes(name) ? t(`deviceSync.failureReasons.${getSyncFailureKind(message)}`) : message)
-      if (name === 'sync') {
-        setPreview(null)
+      toast.error(key ? t(`deviceSync.${key}`) : ['sync', 'check', 'initial-sync'].includes(name) ? t(`deviceSync.failureReasons.${getSyncFailureKind(message)}`) : message)
+      if (['sync', 'initial-sync'].includes(name)) {
         await refreshSyncActivity().catch(() => undefined)
       }
     } finally {
@@ -637,6 +640,7 @@ const DeviceSyncPage = ({
   const oauthAvailable = oauthAvailability.find((item) => item.provider === form.provider)?.available ?? false
   const authorized = Boolean(form.oauthCredentialKey || (config?.has_credential && config.provider === form.provider))
   const canLoadRepositories = authorized || Boolean(form.token.trim())
+  const centralContentBlocked = centralContentFailure !== null && !(status?.last_run_at !== centralContentFailure.runAt && ['success', 'unchanged'].includes(status?.last_run_status ?? ''))
   const experience = getDeviceSyncExperience({
     configured: config !== null,
     authorized,
@@ -644,7 +648,7 @@ const DeviceSyncPage = ({
     conflictCount: conflicts.length,
     busyAction: busy,
     isRunning: status?.is_running,
-    lastRunStatus: status?.last_run_status,
+    lastRunStatus: centralContentBlocked ? 'failed' : status?.last_run_status,
     pendingChanges: preview
       ? preview.added + preview.updated + preview.deleted + preview.conflicted
       : status?.pending_local_changes,
@@ -789,7 +793,7 @@ const DeviceSyncPage = ({
                   </span>
                 </span>
                 <small>{t(status?.last_run_status === 'unchanged' ? 'deviceSync.lastConfirmedValue' : 'deviceSync.lastSyncValue', { value: status?.last_run_at ? new Date(status.last_run_at).toLocaleString() : t('deviceSync.never') })}</small>
-                {experience.syncState === 'failed' ? <p className="device-sync-failure-reason" role="status">{t(`deviceSync.failureReasons.${getSyncFailureKind(history[0]?.status === 'failed' && history[0]?.finished_at === status?.last_run_at ? history[0].error : null)}`)}</p> : null}
+                {experience.syncState === 'failed' && !centralContentBlocked ? <p className="device-sync-failure-reason" role="status">{t(`deviceSync.failureReasons.${getSyncFailureKind(history[0]?.status === 'failed' && history[0]?.finished_at === status?.last_run_at ? history[0].error : null)}`)}</p> : null}
               </span>
             </div>
             <div className="device-sync-map">
@@ -822,6 +826,7 @@ const DeviceSyncPage = ({
                 ) : null}
               </span>
             </div>
+            {centralContentBlocked ? <p className="device-sync-failure-reason" role="alert">{t('deviceSync.failureReasons.centralMissing')}</p> : null}
             {recoveryFailure ? <div role="alert">{!latestFailure ? <p>{t(`deviceSync.failureReasons.${recoveryFailure}`)}</p> : null}<button className="btn btn-secondary" type="button" disabled={working} onClick={recoverCredentials}>{t('deviceSync.configureCredentials')}</button></div> : null}
             <div className="device-sync-status-actions"><button className="btn btn-secondary" type="button" disabled={!controls.canCheck} onClick={check}>{busy === 'check' ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}{t('deviceSync.check')}</button><button className="btn btn-primary" type="button" disabled={!controls.canSync || conflicts.length > 0} onClick={sync}>{synchronizationInProgress ? <LoaderCircle className="spin" size={15} /> : <Cloud size={15} />}{conflicts.length ? t('deviceSync.waitingForConflicts') : t(synchronizationInProgress ? 'deviceSync.exchangingContent' : 'deviceSync.syncLocalRepository')}</button></div>
             <ToolSyncNotice issues={status?.tool_issues ?? []} toolLabels={toolLabels} onOpen={onOpenToolIssues} t={t} />

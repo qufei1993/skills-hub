@@ -2222,6 +2222,20 @@ pub fn get_untagged_skill_ids(store: State<'_, SkillStore>) -> Result<Vec<String
     store.list_untagged_skill_ids().map_err(format_anyhow_error)
 }
 
+fn format_delete_error(error: crate::services::error::ServiceError) -> String {
+    if error.code == crate::services::error::ErrorCode::TargetConflict
+        && matches!(
+            error.details["reason"].as_str(),
+            Some("target_modified" | "modified_target")
+        )
+    {
+        if let Some(path) = error.details["path"].as_str() {
+            return format!("DELETE_TARGET_MODIFIED|{path}");
+        }
+    }
+    format_service_error(error)
+}
+
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn delete_managed_skill(
@@ -2242,7 +2256,7 @@ pub async fn delete_managed_skill(
     })
     .await
     .map_err(|err| err.to_string())?
-    .map_err(format_service_error)
+    .map_err(format_delete_error)
 }
 
 #[cfg(test)]

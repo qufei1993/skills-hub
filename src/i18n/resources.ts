@@ -863,8 +863,10 @@ export const resources = {
         toolUpdatesPending: 'Tool updates needing attention: {{count}}',
         toolUpdatesSummary: 'Central library and cloud sync are not affected.',
         currentIssuesFilter: 'Current issues only',
-        issueReason: { sourceMissing: 'The local source directory is missing.', repoPathMissing: 'The Skill path does not exist in the source repository.', modified: 'Independent changes were detected; automatic replacement was stopped.', unsafeTarget: 'The target path overlaps protected content or is shared unsafely.', disk: 'There is not enough disk space.', permission: 'The destination is not writable.', auth: 'Source authentication failed.', network: 'The source could not be reached.', recheck: 'A previous source failure has no verified recovery. Please check the source again.', unknown: 'The operation could not complete safely; review the source or tool configuration.' },
+        issueReason: { centralMissing: "The central Skill directory is missing or is not a directory.", sourceMissing: 'The local source directory is missing.', repoPathMissing: 'The Skill path does not exist in the source repository.', modified: 'Independent changes were detected; automatic replacement was stopped.', unsafeTarget: 'The target path overlaps protected content or is shared unsafely.', disk: 'There is not enough disk space.', permission: 'The destination is not writable.', auth: 'Source authentication failed.', network: 'The source could not be reached.', recheck: 'A previous source failure has no verified recovery. Please check the source again.', unknown: 'The operation could not complete safely; review the source or tool configuration.' },
         issueHistory: { pending: 'Still needs attention', recovered: 'Verified after this run', unverified: 'Recovery not yet verified', disabled: 'Disabled', removed: 'No longer managed' },
+        centralMissingTitle: "Central content is missing",
+        centralMissingHelp: "Device sync is blocked. Restore the central directory yourself and refresh My Skills, or explicitly delete this record if it is no longer needed. Content will not be restored automatically.",
         sourceNeedsAttention: 'Skill update needs attention',
         viewIssueReason: 'View reason',
         sourceIssueHelp: 'The last source update failed. Check that the source is accessible, then retry updating this Skill.',
@@ -1024,6 +1026,7 @@ export const resources = {
         noHistory: 'No sync history yet.',
         failureDetails: 'View failure reason',
         failureReasons: {
+  "centralMissing": "Device sync stopped because central Skill content is missing. Open My Skills to inspect the affected Skills and paths. Restore the directories yourself or explicitly delete the unwanted records, then retry. No automatic recovery was performed.",
   "targetModified": "A local Skill or tool copy has changed. Sync stopped to protect your edits. Compare and back up the changes before retrying.",
   "network": "Cannot reach the sync repository. Check your network or proxy, then retry.",
   "tls": "A secure connection could not be established. Check your system clock, certificates or proxy.",
@@ -1156,6 +1159,7 @@ export const resources = {
         deleteBody: 'Selected Skills will be moved to the Skills Hub recycle bin.',
         deleteConfirm: 'Delete',
         deleteProgress: '{{current}}/{{total}} Removing {{name}} ...',
+        deleteRecordsSuccess: "Deleted {{count}} Skills. Missing-content items were removed from management only.",
         deleteSuccess: 'Moved {{count}} skills to the recycle bin.',
         moreSelected: '+{{count}} more',
       },
@@ -1680,6 +1684,7 @@ export const resources = {
           'Cannot sync to {{tool}}: permission denied on {{path}}. Please check directory permissions or run as administrator.',
         targetOverlapsSource:
           'This sync target overlaps the original local source: {{path}}. Choose a different tool directory to keep the source safe.',
+        deleteTargetModified: "Deletion stopped because the tool copy contains independent changes ({{path}}). The Skill and tool copy were kept. Back up any changes you need, reconcile the tool copy with the central content, then retry deleting.",
         sourceTargetDiffers:
           'The tool folder differs from the central library: {{path}}. Choose “Resolve conflict” to compare both versions and decide which one to keep.',
         targetModified:
@@ -1753,6 +1758,7 @@ export const resources = {
         confirmSuffix: '?',
         warningRemoveFromTools: 'Remove from synced tools',
         warningDeleteFromHub: 'Remove the managed copy from Skills Hub',
+        warningMissingContent: "If central content is missing, only the management record is deleted. Tool paths and original sources are preserved for manual recovery; no recycle-bin backup can be created. The next device sync will propagate your explicit deletion.",
         warningRecycle: 'Deleted Skills go to the local Skills Hub recycle bin, where files and local settings can be restored for 30 days',
         warningKeepSource: 'Original local source folders are preserved',
         confirmButton: 'Delete',
@@ -2704,8 +2710,10 @@ export const resources = {
         toolUpdatesPending: '{{count}} 项工具更新待处理',
         toolUpdatesSummary: '不影响中央库与云端同步',
         currentIssuesFilter: '仅显示当前异常',
-        issueReason: { sourceMissing: '本地源目录不存在。', repoPathMissing: '源仓库中找不到此 Skill 的目录。', modified: '检测到独立改动，已停止自动覆盖。', unsafeTarget: '目标路径与受保护内容重叠，或被其他 Skill 共用。', disk: '磁盘空间不足。', permission: '没有目标目录的写入权限。', auth: '访问来源时认证失败。', network: '无法连接来源，请检查网络。', recheck: '历史来源更新失败，尚无恢复确认，请重新检查来源。', unknown: '未能安全完成操作，请检查来源或工具配置。' },
+        issueReason: { centralMissing: "Skill 的中心目录缺失或已不是目录。", sourceMissing: '本地源目录不存在。', repoPathMissing: '源仓库中找不到此 Skill 的目录。', modified: '检测到独立改动，已停止自动覆盖。', unsafeTarget: '目标路径与受保护内容重叠，或被其他 Skill 共用。', disk: '磁盘空间不足。', permission: '没有目标目录的写入权限。', auth: '访问来源时认证失败。', network: '无法连接来源，请检查网络。', recheck: '历史来源更新失败，尚无恢复确认，请重新检查来源。', unknown: '未能安全完成操作，请检查来源或工具配置。' },
         issueHistory: { pending: '当前仍待处理', recovered: '此后已确认恢复', unverified: '尚未确认恢复', disabled: '已停用', removed: '已不再托管' },
+        centralMissingTitle: "中心内容缺失",
+        centralMissingHelp: "设备同步已阻止。请自行恢复中心目录后刷新“我的 Skills”；如果不再需要，也可明确删除这条记录。应用不会自动恢复内容。",
         sourceNeedsAttention: 'Skill 更新异常',
         viewIssueReason: '查看原因',
         sourceIssueHelp: '上次从来源更新失败。请确认源目录或仓库可访问，再重试更新此 Skill。',
@@ -2865,6 +2873,7 @@ export const resources = {
         noHistory: '还没有同步记录。',
         failureDetails: '查看失败原因',
         failureReasons: {
+  "centralMissing": "中心内容缺失，已停止设备同步。请在“我的 Skills”查看异常 Skill 及其路径，自行恢复目录或明确删除不需要的记录后重试。应用未执行自动恢复。",
   "network": "无法连接同步仓库。请检查网络或代理后重试。",
   "tls": "无法建立安全连接。请检查系统时间、证书或代理设置。",
   "auth": "仓库身份验证失败。请检查账号权限，或在同步设置中重新授权。",
@@ -2997,6 +3006,7 @@ export const resources = {
         deleteBody: 'Skill 将移入 Skills Hub 回收站，文件和本机配置可在 30 天内恢复。',
         deleteConfirm: '删除',
         deleteProgress: '{{current}}/{{total}} 正在移除「{{name}}」...',
+        deleteRecordsSuccess: "已删除 {{count}} 个 Skills；内容缺失项仅清理了管理记录。",
         deleteSuccess: '已将 {{count}} 个 Skills 移入回收站。',
         moreSelected: '另有 {{count}} 个',
       },
@@ -3502,6 +3512,7 @@ export const resources = {
           '无法同步到 {{tool}}：目录 {{path}} 权限不足。请检查目录权限或以管理员身份运行。',
         targetOverlapsSource:
           '同步目标与本地原始源目录重叠：{{path}}。为保护源文件，请为该工具选择其他目录。',
+        deleteTargetModified: "删除已停止：工具副本存在独立改动（{{path}}）。Skill 和工具副本均已保留。请先备份需要保留的改动，确认工具副本与中心内容一致后，再重试删除。",
         sourceTargetDiffers:
           '工具目录与中心库内容不同：{{path}}。请选择“处理冲突”查看差异，并决定保留哪个版本。',
         targetModified:
@@ -3571,6 +3582,7 @@ export const resources = {
         confirmSuffix: '？',
         warningRemoveFromTools: '将从已同步的工具中移除',
         warningDeleteFromHub: '从 Skills Hub 移除托管副本',
+        warningMissingContent: "中心内容缺失时，只删除管理记录，保留工具路径和原始来源供手动恢复，无法生成回收站备份。下次设备同步会传播这次明确删除。",
         warningRecycle: '删除后会移入 Skills Hub 本机回收站，文件和本机配置保留 30 天，期间可以恢复',
         warningKeepSource: '本地原始源目录会保留',
         confirmButton: '删除',

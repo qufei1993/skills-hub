@@ -130,14 +130,28 @@ impl SyncManifest {
     }
 }
 
+pub(super) fn ensure_library_content(store: &SkillStore) -> Result<()> {
+    for skill in store.list_skills()? {
+        ensure_skill_content(&skill)?;
+    }
+    Ok(())
+}
+
+fn ensure_skill_content(skill: &SkillRecord) -> Result<()> {
+    if let Some(code) =
+        crate::core::skill_issues::central_content_issue(Path::new(&skill.central_path))
+    {
+        bail!("DEVICE_SYNC_FAILURE_{code}");
+    }
+    Ok(())
+}
+
 pub fn export_library(store: &SkillStore, destination: &Path) -> Result<SyncManifest> {
+    ensure_library_content(store)?;
     fs::create_dir_all(destination)?;
     let mut manifest = SyncManifest::empty();
     for skill in store.list_skills()? {
-        let source = Path::new(&skill.central_path);
-        if !source.is_dir() {
-            continue;
-        }
+        ensure_skill_content(&skill)?;
         let target = skill_dir(destination, &skill.id);
         let portable = export_skill(store, skill, &target)?;
         manifest.skills.insert(portable.id.clone(), portable);

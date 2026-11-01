@@ -45,12 +45,13 @@ function IssueContent({ skill, tools, t, compact, onRepairSource, onRepairTarget
     }
   }, [position])
   if (!['source-error', 'partial', 'failed'].includes(state)) return null
+  const centralMissing = skill.source_error === 'SKILL_ISSUE|centralMissing'
   const targets = skill.targets.filter(target => target.status !== 'ok' && target.status !== 'disabled')
-  const title = t(state === 'source-error' ? 'deviceSync.sourceNeedsAttention' : 'deviceSync.toolUpdatesPending', { count: targets.length })
+  const title = t(centralMissing ? 'deviceSync.centralMissingTitle' : state === 'source-error' ? 'deviceSync.sourceNeedsAttention' : 'deviceSync.toolUpdatesPending', { count: targets.length })
   const content = <div className="skill-issue-content">
-      {state === 'source-error' && onRepairSource ? <button className="btn btn-secondary" onClick={() => { if (compact) { setPosition(null); trigger.current?.focus() } onRepairSource() }}>{t('workspace110.repairSource')}</button> : null}
-      {targets.length > 0 && onRepairTargets ? <button className="btn btn-secondary" onClick={() => { if (compact) { setPosition(null); trigger.current?.focus() } onRepairTargets() }}>{t('workspace110.repairTargets')}</button> : null}
-      {state === 'source-error' ? <p>{t(issueReasonKey(skill.source_error))}<br />{t('deviceSync.sourceIssueHelp')}</p> : null}
+      {state === 'source-error' && !centralMissing && onRepairSource ? <button className="btn btn-secondary" onClick={() => { if (compact) { setPosition(null); trigger.current?.focus() } onRepairSource() }}>{t('workspace110.repairSource')}</button> : null}
+      {!centralMissing && targets.length > 0 && onRepairTargets ? <button className="btn btn-secondary" onClick={() => { if (compact) { setPosition(null); trigger.current?.focus() } onRepairTargets() }}>{t('workspace110.repairTargets')}</button> : null}
+      {state === 'source-error' ? <p>{t(issueReasonKey(skill.source_error))}<br />{t(centralMissing ? 'deviceSync.centralMissingHelp' : 'deviceSync.sourceIssueHelp')}{centralMissing ? <><br /><code>{skill.central_path}</code></> : null}</p> : null}
       {targets.map((target, index) => <p key={index}><strong>{tools.find(tool => tool.id === target.tool)?.label || target.tool}</strong><span>{t(issueReasonKey(target.last_error))}<br />{t('deviceSync.toolIssueHelp')}</span></p>)}
     </div>
   if (!compact) return <details className="skill-issue-notice">

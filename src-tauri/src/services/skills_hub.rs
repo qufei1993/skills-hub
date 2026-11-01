@@ -312,9 +312,15 @@ impl SkillsHubService {
                 name: tag.name,
             })
             .collect();
-        let source_error = source_check
-            .and_then(|check| check.0.as_deref())
-            .map(crate::core::skill_issues::safe_output);
+        let central_issue =
+            crate::core::skill_issues::central_content_issue(Path::new(&record.central_path));
+        let source_error = central_issue
+            .map(|code| format!("SKILL_ISSUE|{code}"))
+            .or_else(|| {
+                source_check
+                    .and_then(|check| check.0.as_deref())
+                    .map(crate::core::skill_issues::safe_output)
+            });
         let content_status = if source_error.is_some() {
             "error".to_string()
         } else {
@@ -365,6 +371,9 @@ pub(crate) fn content_status(skill: &SkillRecord) -> String {
 }
 
 fn content_status_in(skill: &SkillRecord, home_root: &Path) -> String {
+    if crate::core::skill_issues::central_content_issue(Path::new(&skill.central_path)).is_some() {
+        return "error".into();
+    }
     if skill.status != "ok" || skill.source_type != "local" || skill.has_unbound_local_source() {
         return skill.status.clone();
     }

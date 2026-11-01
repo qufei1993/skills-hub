@@ -46,6 +46,8 @@ Source repair can rebind a moved or failed source without replacing central cont
 <a id="data-integrity-and-compatibility"></a>
 ## Data integrity and compatibility
 
+Missing central directories are reported as current Skill errors, including for disabled Skills. Device-sync checks, manual and scheduled runs, conflict resolution and legacy baseline repair stop when registered central content is unavailable; they do not interpret the missing directory as a deliberate deletion or restore it automatically. Users restore the directory themselves or explicitly remove the unwanted record. Removing a missing-content record preserves physical tool paths and original sources, creates no empty recycle-bin entry, and remains subject to stale-plan checks. A modified tool copy still blocks ordinary deletion, with deletion-specific English, Simplified Chinese and Korean messages describing retained content and retry steps.
+
 The central Skill UUID identifies content. A logical deployment is the Skill, tool, scope and canonical project path; the target UUID identifies its generation. Registered adapters determine physical paths, and shared physical paths do not imply shared logical ownership. Home expansion, path-alias handling and parent-directory checks preserve the existing deployment boundaries.
 
 Preset definitions, operation journals and check summaries use additive workspace documents with the `schema.workspace` feature marker. The shared database remains at `PRAGMA user_version=6`; existing Skill and target identities are preserved. Presets are local only: this implementation adds neither preset synchronization nor preset CLI commands.

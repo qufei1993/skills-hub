@@ -1928,6 +1928,7 @@ fn get_managed_skills_impl_maps_targets() {
 #[test]
 fn managed_skill_status_keeps_existing_local_sources_healthy() {
     let source = tempfile::tempdir().unwrap();
+    let central = tempfile::tempdir().unwrap();
     let skill = SkillRecord {
         id: "s1".to_string(),
         name: "S1".to_string(),
@@ -1936,7 +1937,7 @@ fn managed_skill_status_keeps_existing_local_sources_healthy() {
         source_ref: Some(source.path().to_string_lossy().to_string()),
         source_subpath: None,
         source_revision: None,
-        central_path: "/tmp/central".to_string(),
+        central_path: central.path().to_string_lossy().into_owned(),
         content_hash: None,
         created_at: 1,
         updated_at: 1,
@@ -2199,4 +2200,32 @@ fn desktop_confirmed_shared_tool_failure_rolls_back_all_tool_records() {
         .targets
         .is_empty());
     assert!(!project.path().join(".agents/skills/demo").exists());
+}
+
+#[test]
+fn deletion_conflicts_use_delete_copy_without_changing_other_operation_errors() {
+    use crate::services::error::{ErrorCode, ServiceError};
+    for reason in ["target_modified", "modified_target"] {
+        let error = ServiceError::new(
+            ErrorCode::TargetConflict,
+            "a managed target contains user changes",
+            serde_json::json!({"reason":reason,"path":"/tools/modified"}),
+        );
+        assert_eq!(
+            format_service_error(error.clone()),
+            "TARGET_MODIFIED|/tools/modified"
+        );
+        assert_eq!(
+            format_delete_error(error),
+            "DELETE_TARGET_MODIFIED|/tools/modified"
+        );
+    }
+    let stale = ServiceError::new(ErrorCode::PlanStale, "state changed", serde_json::json!({}));
+    assert_eq!(format_delete_error(stale), "PLAN_STALE|state changed");
+    let conflict = ServiceError::new(
+        ErrorCode::TargetConflict,
+        "unsafe path",
+        serde_json::json!({"reason":"unmanaged_target","path":"/tools/unsafe"}),
+    );
+    assert_eq!(format_delete_error(conflict), "TARGET_EXISTS|/tools/unsafe");
 }

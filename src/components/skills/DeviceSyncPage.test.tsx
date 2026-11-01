@@ -13,6 +13,26 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => undefi
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
 
 describe('DeviceSyncPage', () => {
+  it('keeps a missing-central check failure visible until a successful recheck', async () => {
+    let missing = true
+    invokeMock.mockImplementation((command: string) => {
+      if (command === 'get_device_sync_config') return Promise.resolve({ provider: 'gitee', remote_url: 'https://gitee.com/example/sync.git', branch: 'main', has_credential: true, visibility: 'private', auto_check: false, auto_sync: false })
+      if (command === 'get_device_sync_status') return Promise.resolve({ configured: true, is_running: false, last_run_status: 'success', last_run_at: 1000, conflict_count: 0 })
+      if (command === 'get_device_sync_pending_oauth') return Promise.resolve(null)
+      if (command === 'check_device_sync') return missing ? Promise.reject('DEVICE_SYNC_FAILURE_centralMissing') : Promise.resolve({ items: [], added: 0, updated: 0, deleted: 0, conflicted: 0 })
+      return Promise.resolve([])
+    })
+    render(<DeviceSyncPage active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} onOpenToolIssues={vi.fn()} t={((key: string) => key) as TFunction} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'deviceSync.check' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('deviceSync.failureReasons.centralMissing')
+    expect(screen.getByText('deviceSync.visualState.failed')).toBeTruthy()
+    expect(invokeMock.mock.calls.some(([command]) => command === 'run_device_sync')).toBe(false)
+    missing = false
+    await waitFor(() => expect(screen.getByRole('button', { name: 'deviceSync.check' }).hasAttribute('disabled')).toBe(false))
+    fireEvent.click(screen.getByRole('button', { name: 'deviceSync.check' }))
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+  })
+
   it('shows a background credential failure without opening settings or requesting credentials', async () => {
     invokeMock.mockImplementation((command: string) => {
       if (command === 'get_device_sync_config') return Promise.resolve({ provider: 'gitee', remote_url: 'https://gitee.com/example/sync.git', branch: 'main', has_credential: true, visibility: 'private', auto_check: false, auto_sync: true, auto_sync_schedule: { mode: 'interval', minutes: 5 } })
