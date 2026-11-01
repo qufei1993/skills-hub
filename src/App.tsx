@@ -211,6 +211,7 @@ function App() {
   const [localCandidates, setLocalCandidates] = useState<LocalSkillCandidate[]>([])
   const [localCandidatesBasePath, setLocalCandidatesBasePath] = useState('')
   const [showLocalPickModal, setShowLocalPickModal] = useState(false)
+  const [localInstallErrors, setLocalInstallErrors] = useState<string[]>([])
   const [localCandidateSelected, setLocalCandidateSelected] = useState<
     Record<string, boolean>
   >({})
@@ -420,11 +421,17 @@ function App() {
       if (raw.includes('CANCELLED|')) {
         return '' // Silently ignore cancelled operations
       }
+      if (raw.startsWith('CENTRAL_SKILL_MANAGED|')) {
+        return t('errors.centralSkillManaged', { path: raw.slice('CENTRAL_SKILL_MANAGED|'.length) })
+      }
+      if (raw.startsWith('CENTRAL_SKILL_UNMANAGED|')) {
+        return t('errors.centralSkillUnmanaged', { path: raw.slice('CENTRAL_SKILL_UNMANAGED|'.length) })
+      }
       if (raw.includes('skill already exists in central repo')) {
         // Extract skill name from path like: skill already exists in central repo: "/path/to/react-best-practices"
         const pathMatch = raw.match(/central repo:\s*"?([^"]+)"?/)
         if (pathMatch) {
-          const skillName = pathMatch[1].split('/').pop() ?? ''
+          const skillName = pathMatch[1].split(/[\\/]/).pop() ?? ''
           if (skillName) {
             return t('errors.skillExistsInHubNamed', { name: skillName })
           }
@@ -518,12 +525,6 @@ function App() {
     },
     [formatErrorMessage, openSourceConflict, t],
   )
-  const isSkillNameTaken = useCallback(
-    (name: string) =>
-      managedSkills.some((skill) => skill.name.toLowerCase() === name.toLowerCase()),
-    [managedSkills],
-  )
-
   const formatRelative = (ms: number | null | undefined) => {
     if (!ms) return t('relative.empty')
     const diff = Date.now() - ms
@@ -2908,6 +2909,7 @@ function App() {
       }
       setAddModalTab('local')
       setLocalCandidatesBasePath(basePath)
+      setLocalInstallErrors([])
       setLocalCandidates(candidates)
       setLocalCandidateSelected(Object.fromEntries(candidates.map(c => [c.subpath, c.valid && (basePath === localCandidatesBasePath ? localCandidateSelected[c.subpath] ?? true : true)])))
       setShowAddModal(false)
@@ -3022,6 +3024,7 @@ function App() {
   }, [exploreInstallTrigger])
 
   const handleInstallSelectedLocalCandidates = async (subpaths: string[]) => {
+    setLocalInstallErrors([])
     const requestedSubpaths = new Set(subpaths)
     const selected = localCandidates.filter(
       (c) => c.valid && localCandidateSelected[c.subpath] && requestedSubpaths.has(c.subpath),
@@ -3050,13 +3053,11 @@ function App() {
       selected.length === 1 && localName.trim()
         ? localName.trim()
         : selected[0].name
-    if (selected.length === 1 && isSkillNameTaken(desiredName)) {
-      setError(t('errors.skillAlreadyExists', { name: desiredName }))
-      return
-    }
-    const duplicated = selected.find((c) => isSkillNameTaken(c.name))
-    if (selected.length > 1 && duplicated) {
-      setError(t('errors.skillAlreadyExists', { name: duplicated.name }))
+    const existing = managedSkills.find(skill => selected.some(candidate =>
+      skill.name.toLowerCase() === (selected.length === 1 ? desiredName : candidate.name).toLowerCase(),
+    ))
+    if (existing) {
+      setLocalInstallErrors([t('errors.centralSkillManaged', { path: existing.central_path })])
       return
     }
 
@@ -3097,8 +3098,8 @@ function App() {
         }
       }
 
+      setLocalInstallErrors(collectedErrors.map(error => error.message))
       if (installedCount === 0 && collectedErrors.length > 0) {
-        showActionErrors(collectedErrors)
         setActionMessage(null)
         return
       }
@@ -4379,6 +4380,7 @@ function App() {
           installDisabledReason={installationProjectRequired ? t('projectSync.projectRequired') : t('installFlow.confirmTools')}
           open={showLocalPickModal}
           loading={loading}
+          errors={localInstallErrors.map(formatErrorMessage)}
           localCandidates={localCandidates}
           localCandidateSelected={localCandidateSelected}
           onRequestClose={handleCloseLocalPick}

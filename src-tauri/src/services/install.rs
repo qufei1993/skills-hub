@@ -1058,6 +1058,7 @@ fn map_install_error(error: anyhow::Error) -> ServiceError {
             "the skill already exists in the Skills Hub library",
             json!({
                 "legacy_category": "skill_exists",
+                "reason": if conflict.is_managed() { "central_managed" } else { "central_unmanaged" },
                 "path": conflict.central_path().to_string_lossy().into_owned(),
             }),
         );

@@ -1656,6 +1656,8 @@ export const ko = {
     "claudePluginSourceWithVersion": "클로드 코드 플러그인 · {{plugin}} · v{{version}} · 사용자",
     "errors": {
       "notTauri": "현재 환경은 타우리가 아닙니다. `npm run tauri dev`을(를) 실행하세요.",
+      "centralSkillManaged": "설치를 중지했습니다. 이 중앙 디렉터리는 이미 Skills Hub에서 관리 중입니다({{path}}). 기존 콘텐츠는 변경되지 않았습니다. 내 Skills에서 기존 Skill을 확인하고 관리하세요.",
+      "centralSkillUnmanaged": "설치를 중지했습니다. 이 중앙 디렉터리에 등록되지 않은 콘텐츠가 있습니다({{path}}). 기존 콘텐츠는 변경되지 않았습니다. 백업한 후 중앙 라이브러리 밖으로 옮긴 후 로컬 디렉터리에서 추가하세요.",
       "skillExistsInHub": "중앙 저장소 폴더는 Skills Hub에서 관리하며 수동 배치에 사용할 수 없습니다. 이 스킬을 다른 곳으로 옮긴 다음 로컬 디렉터리에서 다시 추가하세요.",
       "skillExistsInHubNamed": "중앙 저장소 폴더는 Skills Hub에서 관리하며 수동 배치에 사용할 수 없습니다. \"{{name}}\"을 다른 곳으로 이동한 다음 로컬 디렉터리에서 다시 추가하세요.",
       "targetExists": "대상 폴더가 이미 존재합니다. 제거한 후 다시 시도해 주세요.",

@@ -6,6 +6,7 @@ import type { TFunction } from 'i18next'
 import type { LocalSkillCandidate } from '../types'
 
 type LocalPickModalProps = {
+  errors?: string[]
   actionMessage?: string | null
   onCancelOperation?: () => void
   settings?: ReactNode
@@ -24,6 +25,7 @@ type LocalPickModalProps = {
 }
 
 const LocalPickModal = ({
+  errors,
   actionMessage,
   onCancelOperation,
   settings,
@@ -88,6 +90,7 @@ const LocalPickModal = ({
         </div>
         {settings && <InstallFlowSteps step={step} t={t} />}
         <div className="modal-body">
+          {errors?.map((error, index) => <p className="install-source-error" role="alert" key={index}>{error}</p>)}
           <div className="install-selection-page" hidden={Boolean(settings) && step === 2}>
           {!settings && <p className="label">{t('localPickBody')}</p>}
           <SkillSelectionList query={query} onQueryChange={setQuery} disabled={loading} t={t}

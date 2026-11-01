@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Central-folder collision guidance**: Distinguish already managed Skills from unregistered central content during installation, preserve existing files, and keep recovery guidance visible in the local installation dialog. Support Windows paths and English, Simplified Chinese and Korean messages. ([#121](https://github.com/qufei1993/skills-hub/pull/121))
+
 - **Adopted Skill source takeover**: Deploy identical adopted copies back to their source tools. Open the conflict dialog directly when sync detects differing copies, retaining a reopening action after closing. Resolve them with a labeled file comparison and an explicit choice of the central or tool version, then apply the selected version and take over the source folder. Keeping the tool version updates active global and project deployments together; modified copies, stale previews and protected overlaps remain guarded, and failed operations roll back files and records. Keep committed results available for safe confirmation retries. ([#206](https://github.com/qufei1993/skills-hub/issues/206))
 
 ## [1.1.0]

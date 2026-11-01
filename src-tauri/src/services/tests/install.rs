@@ -424,6 +424,7 @@ fn duplicate_install_carries_only_the_safe_local_target_path() {
         error.details,
         json!({
             "legacy_category": "skill_exists",
+            "reason": "central_managed",
             "path": fixture.paths.default_central_repo.join("duplicate-demo"),
         })
     );
