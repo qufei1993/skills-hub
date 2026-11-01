@@ -176,7 +176,7 @@ fn start_linux_host_monitor<R: Runtime>(app: &tauri::AppHandle<R>) {
                         std::time::Duration::from_millis(300),
                     );
                     proxy
-                        .get::<bool>(*service, "IsStatusNotifierHostRegistered")
+                        .get::<bool>(service, "IsStatusNotifierHostRegistered")
                         .unwrap_or(false)
                 })
             });
