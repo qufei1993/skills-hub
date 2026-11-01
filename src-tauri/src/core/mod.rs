@@ -36,3 +36,4 @@ mod runtime_paths_tests;
 pub mod workspace;
 
 pub mod content_recovery;
+pub mod source_conflict;

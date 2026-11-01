@@ -285,6 +285,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::workspace::workspace_recheck,
             commands::workspace::workspace_content_preview,
+            commands::source_conflict::source_conflict_preview,
+            commands::source_conflict::source_conflict_execute,
             commands::content_check::workspace_content_check,
             commands::content_check::workspace_content_check_cached,
             commands::content_check::workspace_content_check_cancel,

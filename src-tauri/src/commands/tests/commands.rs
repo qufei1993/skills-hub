@@ -1960,6 +1960,11 @@ fn deployment_errors_preserve_desktop_prefixes() {
     use crate::services::error::{ErrorCode, ServiceError};
     for (code, details, expected) in [
         (
+            ErrorCode::TargetConflict,
+            serde_json::json!({"path":"/tools/demo","reason":"source_content_differs"}),
+            "SKILL_SOURCE_TARGET_DIFFERS|/tools/demo",
+        ),
+        (
             ErrorCode::AgentNotFound,
             serde_json::json!({"agent":"cursor"}),
             "TOOL_NOT_INSTALLED|cursor",

@@ -1256,6 +1256,7 @@ impl SkillStore {
         &self,
         upserts: &[(SkillTargetRecord, String)],
         deletions: &[SkillTargetRecord],
+        source_takeover: Option<(&SkillRecord, &str)>,
         validate: impl FnOnce() -> Result<()>,
     ) -> Result<()> {
         self.with_conn(|conn| {
@@ -1265,11 +1266,55 @@ impl SkillStore {
                 tx.execute("DELETE FROM settings WHERE key=?1", params![format!("device_sync.target_baseline.{}", record.id)])?;
             }
             for (record, hash) in upserts {
-                upsert_skill_target_with_conn(&tx, record)?;
-                tx.execute("INSERT INTO workspace_documents(kind,id,payload,updated_at) VALUES ('target-use',?1,?2,?3) ON CONFLICT(kind,id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at",params![record.id,serde_json::to_string(&Uuid::new_v4().to_string())?,now_ms()])?;
-                tx.execute("INSERT INTO settings (key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                    params![format!("device_sync.target_baseline.{}", record.id), serde_json::to_string(&(&record.target_path, hash))?])?;
+                upsert_deployment_target_with_conn(&tx, record, hash)?;
             }
+            if let Some((previous, source_hash)) = source_takeover {
+                let mut managed = previous.clone();
+                managed.source_ref = Some(managed.central_path.clone());
+                let baseline = SourceBaseline::from_skill(&managed, source_hash.to_string())
+                    .context("missing takeover source")?;
+                let changed = tx.execute(
+                    "UPDATE skills SET source_ref=central_path,status='ok',updated_at=?4 WHERE id=?1 AND source_type='local' AND source_ref=?2 AND central_path=?3",
+                    params![previous.id, previous.source_ref, previous.central_path, now_ms()],
+                )?;
+                anyhow::ensure!(changed == 1, "PLAN_STALE");
+                tx.execute("INSERT INTO settings(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![format!("device_sync.source_baseline.{}",previous.id),serde_json::to_string(&baseline)?])?;
+                tx.execute("INSERT INTO skill_source_checks(skill_id,error_code,checked_at) VALUES (?1,NULL,?2) ON CONFLICT(skill_id) DO UPDATE SET error_code=NULL,checked_at=excluded.checked_at",params![previous.id,now_ms()])?;
+                tx.execute("DELETE FROM workspace_documents WHERE kind='content-recovery' AND id=?1", [&previous.id])?;
+            }
+            validate()?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    pub(crate) fn commit_source_conflict(
+        &self,
+        records: (&SkillRecord, &SkillRecord),
+        targets: &[(SkillTargetRecord, String)],
+        plan_id: &str,
+        outcome: &serde_json::Value,
+        validate: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        self.with_conn(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            let (before, current) = records;
+            let source: Option<(String, Option<String>, String)> = tx.query_row(
+                "SELECT source_type,source_ref,central_path FROM skills WHERE id=?1", [&before.id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            ).optional()?;
+            anyhow::ensure!(source == Some((before.source_type.clone(), before.source_ref.clone(), before.central_path.clone())), "PLAN_STALE");
+            upsert_skill_with_conn(&tx, current)?;
+            for (target, hash) in targets {
+                upsert_deployment_target_with_conn(&tx, target, hash)?;
+            }
+            let baseline = SourceBaseline::from_skill(current, current.content_hash.clone().context("missing resolved content hash")?).context("missing resolved source")?;
+            tx.execute("INSERT INTO settings(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![format!("device_sync.source_baseline.{}",current.id),serde_json::to_string(&baseline)?])?;
+            tx.execute("INSERT INTO skill_source_checks(skill_id,error_code,checked_at) VALUES (?1,NULL,?2) ON CONFLICT(skill_id) DO UPDATE SET error_code=NULL,checked_at=excluded.checked_at",params![current.id,now_ms()])?;
+            tx.execute("DELETE FROM workspace_documents WHERE kind='content-recovery' AND id=?1", [&current.id])?;
+            tx.execute("DELETE FROM settings WHERE key=?1", [format!("workspace.update_hold.{}", current.id)])?;
+            tx.execute("INSERT INTO workspace_documents(kind,id,payload,updated_at) VALUES ('source-conflict-result',?1,?2,?3)",params![plan_id,serde_json::to_string(outcome)?,now_ms()])?;
+            tx.execute("DELETE FROM workspace_documents WHERE kind='source-conflict-preview' AND id=?1", [plan_id])?;
             validate()?;
             tx.commit()?;
             Ok(())
@@ -2140,6 +2185,18 @@ fn upsert_skill_with_conn(conn: &Connection, record: &SkillRecord) -> Result<()>
             record.status
         ],
     )?;
+    Ok(())
+}
+
+fn upsert_deployment_target_with_conn(
+    conn: &Connection,
+    record: &SkillTargetRecord,
+    hash: &str,
+) -> Result<()> {
+    upsert_skill_target_with_conn(conn, record)?;
+    conn.execute("INSERT INTO workspace_documents(kind,id,payload,updated_at) VALUES ('target-use',?1,?2,?3) ON CONFLICT(kind,id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at",params![record.id,serde_json::to_string(&Uuid::new_v4().to_string())?,now_ms()])?;
+    conn.execute("INSERT INTO settings (key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    params![format!("device_sync.target_baseline.{}", record.id), serde_json::to_string(&(&record.target_path, hash))?])?;
     Ok(())
 }
 

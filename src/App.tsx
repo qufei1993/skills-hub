@@ -2,6 +2,7 @@ import ContentReview from './components/skills/workspace/ContentReview'
 import { useUpdateCheck } from './components/skills/workspace/useUpdateCheck'
 import type { CheckSources, ContentCheckProgress, ContentCheckRunResult } from './components/skills/workspace/contentCheck'
 import SourceRepair from './components/skills/workspace/SourceRepair'
+import SourceConflictDialog from './components/skills/workspace/SourceConflictDialog'
 import { open as openDirectoryDialog } from '@tauri-apps/plugin-dialog'
 import PresetPage from './components/skills/workspace/PresetPage'
 import type { WorkspaceIntent, WorkspaceScope, PresetMember } from './components/skills/types'
@@ -18,7 +19,7 @@ import {
   type MutableRefObject,
   type SetStateAction,
 } from 'react'
-import { AlertTriangle, ArrowRight, ArrowLeft } from 'lucide-react'
+import { AlertTriangle, ArrowRight, ArrowLeft, X } from 'lucide-react'
 import type { DownloadOptions, Update } from '@tauri-apps/plugin-updater'
 import './App.css'
 import './figma.css'
@@ -184,6 +185,8 @@ function App() {
   const [plan, setPlan] = useState<OnboardingPlan | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [sourceConflictPath, setSourceConflictPath] = useState<string | null>(null)
+  const [sourceConflictDialogPath, setSourceConflictDialogPath] = useState<string | null>(null)
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [variantChoice, setVariantChoice] = useState<Record<string, string>>({})
   const [syncTargets, setSyncTargets] = useState<Record<string, boolean>>({})
@@ -407,6 +410,11 @@ function App() {
 
   useEffect(() => { void refreshRecycleBinCount() }, [refreshRecycleBinCount])
 
+  const openSourceConflict = useCallback((path: string) => {
+    setSourceConflictPath(path)
+    setSourceConflictDialogPath(path)
+  }, [])
+
   const formatErrorMessage = useCallback(
     (raw: string) => {
       if (raw.includes('CANCELLED|')) {
@@ -445,6 +453,10 @@ function App() {
       }
       if (raw.startsWith('DELETE_TARGET_MODIFIED|')) {
         return t('errors.deleteTargetModified', { path: raw.slice('DELETE_TARGET_MODIFIED|'.length) })
+      }
+      if (raw.startsWith('SKILL_SOURCE_TARGET_DIFFERS|')) {
+        const path = raw.slice('SKILL_SOURCE_TARGET_DIFFERS|'.length)
+        return t('errors.sourceTargetDiffers', { path })
       }
       if (raw.startsWith('TARGET_MODIFIED|')) {
         const path = raw.slice('TARGET_MODIFIED|'.length)
@@ -488,10 +500,14 @@ function App() {
   const showActionErrors = useCallback(
     (errors: { title: string; message: string }[]) => {
       if (errors.length === 0) return
-      const head = errors[0]
+      const sourceConflict = errors.find(item => item.message.startsWith('SKILL_SOURCE_TARGET_DIFFERS|'))
+      if (sourceConflict) openSourceConflict(sourceConflict.message.slice('SKILL_SOURCE_TARGET_DIFFERS|'.length))
+      const otherErrors = errors.filter(item => item.message !== sourceConflict?.message)
+      if (otherErrors.length === 0) return
+      const head = otherErrors[0]
       const more =
-        errors.length > 1
-          ? t('errors.moreCount', { count: errors.length - 1 })
+        otherErrors.length > 1
+          ? t('errors.moreCount', { count: otherErrors.length - 1 })
           : ''
       const message = formatErrorMessage(head.message)
       if (!message) return
@@ -500,7 +516,7 @@ function App() {
         duration: 3200,
       })
     },
-    [formatErrorMessage, t],
+    [formatErrorMessage, openSourceConflict, t],
   )
   const isSkillNameTaken = useCallback(
     (name: string) =>
@@ -614,6 +630,7 @@ function App() {
       const result = await invokeTauri<ManagedSkill[]>('get_managed_skills')
       if (sequence !== skillsReadSequence.current) return
       setManagedSkills(result)
+      setSourceConflictPath(current => current && result.some(skill => skill.source_ref === current) ? current : null)
       setManagedSkillsReady(true)
       setDetailSkill(current => current ? result.find(skill => skill.id === current.id) ?? null : null)
       return true
@@ -853,11 +870,15 @@ function App() {
 
   useEffect(() => {
     if (!error) return
-    const msg = formatErrorMessage(error)
-    if (msg) toast.error(msg, { duration: 2600 })
+    if (error.startsWith('SKILL_SOURCE_TARGET_DIFFERS|')) {
+      openSourceConflict(error.slice('SKILL_SOURCE_TARGET_DIFFERS|'.length))
+    } else {
+      const msg = formatErrorMessage(error)
+      if (msg) toast.error(msg, { duration: 2600 })
+    }
     setError(null)
     setActionMessage(null)
-  }, [error, formatErrorMessage])
+  }, [error, formatErrorMessage, openSourceConflict])
 
   const toolInfos = useMemo(() => toolStatus?.tools ?? [], [toolStatus])
   const enabledToolInfos = useMemo(
@@ -3732,6 +3753,7 @@ function App() {
         await loadManagedSkills()
       }} /> : null}
       {repairSourceSkill ? <SourceRepair skill={repairSourceSkill} invokeTauri={invokeTauri} onChanged={loadManagedSkills} onClose={() => setRepairSourceSkill(null)} t={t} /> : null}
+      {sourceConflictDialogPath ? <SourceConflictDialog key={sourceConflictDialogPath} sourcePath={sourceConflictDialogPath} invokeTauri={invokeTauri} onChanged={reloadAfterContentUpdate} onClose={() => setSourceConflictDialogPath(null)} t={t} /> : null}
       <ConfirmActionModal open={workspaceNavigation !== null} loading={false} title={t('workspace110.discard')} body={t('workspace110.discardHint')} cancelLabel={t('workspace110.cancel')} confirmLabel={t('workspace110.confirm')} onRequestClose={() => setWorkspaceNavigation(null)} onConfirm={() => { workspaceDirty.current = false; setWorkspaceIntent(undefined); setWorkspaceKey(key => key + 1); workspaceNavigation?.action(); setWorkspaceNavigation(null) }} />
       <Toaster
         position="top-right"
@@ -3852,6 +3874,12 @@ function App() {
               />
             </div> : null}
             <div className="skills-library-notices">
+              {sourceConflictPath ? <div className="library-notice source-takeover-conflict" role="alert">
+                <span className="library-notice-icon"><AlertTriangle size={18} aria-hidden="true" /></span>
+                <div className="library-notice-copy"><p>{t('errors.sourceTargetDiffers', { path: sourceConflictPath })}</p></div>
+                <button className="library-notice-action" type="button" disabled={loading} onClick={() => openSourceConflict(sourceConflictPath)}>{t('sourceConflict.title')}</button>
+                <button className="library-notice-close" type="button" aria-label={t('close')} onClick={() => setSourceConflictPath(null)}><X size={16} aria-hidden="true" /></button>
+              </div> : null}
               <AiManagementNotice isTauri={isTauri} invokeTauri={invokeTauri} skills={managedSkills} onStatusChanged={setAiManagementStatus} onOpen={() => {
                 setFocusAiManagement(true)
                 setActiveView('settings')
