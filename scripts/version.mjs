@@ -4,7 +4,6 @@ import path from "node:path";
 import process from "node:process";
 
 const ROOT = process.cwd();
-
 function read(filePath) {
   return fs.readFileSync(path.join(ROOT, filePath), "utf8");
 }
@@ -15,7 +14,8 @@ function write(filePath, contents) {
 
 function replaceJsonStringProp(filePath, propName, newValue) {
   const original = read(filePath);
-  const re = new RegExp(`("${propName}"\\s*:\\s*")([^"]*)(")`);
+  const escapedPropName = propName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`("${escapedPropName}"\\s*:\\s*")([^"]*)(")`);
   const m = original.match(re);
   if (!m) throw new Error(`Cannot find "${propName}" in ${filePath}`);
   const updated = original.replace(re, `$1${newValue}$3`);
@@ -59,12 +59,24 @@ function setPackageJsonVersion(newVersion) {
   return replaceJsonStringProp("package.json", "version", newVersion);
 }
 
+function syncLockfiles(version) {
+  const lock = JSON.parse(read("package-lock.json"));
+  lock.version = version;
+  lock.packages[""].version = version;
+  write("package-lock.json", `${JSON.stringify(lock, null, 2)}\n`);
+  const cargo = read("src-tauri/Cargo.lock");
+  const pattern = /(\[\[package\]\]\r?\nname = "app"\r?\nversion = ")[^"]+(")/;
+  if (!pattern.test(cargo)) throw new Error("src-tauri/Cargo.lock missing app package");
+  write("src-tauri/Cargo.lock", cargo.replace(pattern, `$1${version}$2`));
+}
+
 function syncFromPackageJson() {
   const version = getPackageJsonVersion();
   const results = [];
   results.push({ file: "package.json", ...(replaceJsonStringProp("package.json", "version", version)) });
   results.push({ file: "src-tauri/tauri.conf.json", ...(replaceJsonStringProp("src-tauri/tauri.conf.json", "version", version)) });
   results.push({ file: "src-tauri/Cargo.toml", ...(replaceCargoPackageVersion("src-tauri/Cargo.toml", version)) });
+  syncLockfiles(version);
   return { version, results };
 }
 
@@ -90,6 +102,15 @@ function checkInSync() {
   const cargoVersion = m[1];
   if (cargoVersion !== version) {
     mismatches.push(`src-tauri/Cargo.toml version=${cargoVersion} (expected ${version})`);
+  }
+
+  const lock = JSON.parse(read("package-lock.json"));
+  if (lock.version !== version || lock.packages?.[""]?.version !== version) {
+    mismatches.push(`package-lock.json product versions do not match ${version}`);
+  }
+  const lockedCargoVersion = read("src-tauri/Cargo.lock").match(/\[\[package\]\]\r?\nname = "app"\r?\nversion = "([^"]+)"/)?.[1];
+  if (lockedCargoVersion !== version) {
+    mismatches.push(`src-tauri/Cargo.lock version=${lockedCargoVersion} (expected ${version})`);
   }
 
   return { version, mismatches };
@@ -146,4 +167,3 @@ main().catch((err) => {
   console.error(err?.stack || String(err));
   process.exit(1);
 });
-

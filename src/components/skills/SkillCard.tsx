@@ -1,5 +1,6 @@
 import { hasUnboundLocalSource } from './skillSourceState'
-import { memo } from 'react'
+import { Fragment, memo, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Copy, Folder, Github, RefreshCw, Tag, Trash2 } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { toast } from 'sonner'
@@ -11,6 +12,10 @@ import SkillIssueNotice from './SkillIssueNotice'
 type GithubInfo = { label: string; href: string }
 
 type SkillCardProps = {
+  onRepairSource?: (skill: ManagedSkill) => void
+  onRepairTargets?: (skill: ManagedSkill) => void
+  projectContext?: boolean
+  onRemoveProject?: (skill: ManagedSkill) => void
   skill: ManagedSkill
   installedTools: ToolOption[]
   loading: boolean
@@ -34,6 +39,10 @@ type SkillCardProps = {
 
 const SkillCard = ({
   skill,
+  onRepairSource,
+  onRepairTargets,
+  projectContext = false,
+  onRemoveProject,
   installedTools,
   loading,
   bulkMode,
@@ -54,6 +63,22 @@ const SkillCard = ({
   t,
 }: SkillCardProps) => {
   const unboundSource = hasUnboundLocalSource(skill)
+  const [toolHint, setToolHint] = useState<{ toolId: string; left: number; top: number } | null>(null)
+  const showToolHint = (button: HTMLElement, toolId: string) => {
+    const rect = button.getBoundingClientRect()
+    setToolHint({ toolId, left: rect.left + rect.width / 2, top: rect.top })
+  }
+
+  useEffect(() => {
+    if (!toolHint) return
+    const hide = () => setToolHint(null)
+    window.addEventListener('scroll', hide, true)
+    window.addEventListener('resize', hide)
+    return () => {
+      window.removeEventListener('scroll', hide, true)
+      window.removeEventListener('resize', hide)
+    }
+  }, [toolHint])
   const github = getGithubInfo(skill.source_ref)
   const isGit = skill.source_type.toLowerCase().includes('git')
   const sourceLabel = github?.label ?? getSkillSourceLabel(skill)
@@ -62,7 +87,8 @@ const SkillCard = ({
   const scope = getSkillScope(skill)
   const projectCount = getSkillProjects(skill).length
   const enabled = skill.enabled !== false
-  const syncedToolCount = getFullySyncedTools(skill, installedTools, scope).length
+  // The list already narrows targets for a selected scope or project.
+  const syncedToolCount = getFullySyncedTools(skill, installedTools, 'all').length
   const handleCopySource = async () => {
     if (!copyValue) return
     try {
@@ -107,7 +133,7 @@ const SkillCard = ({
               >
                 <Copy size={12} />
               </button>
-              <SkillIssueNotice compact skill={skill} tools={installedTools} t={t} />
+              <SkillIssueNotice onRepairSource={() => onRepairSource?.(skill)} onRepairTargets={() => onRepairTargets ? onRepairTargets(skill) : onOpenScope(skill)} compact skill={skill} tools={installedTools} t={t} />
             </div>
             <div className={`skill-description${skill.description?.trim() ? '' : ' empty'}`} title={description}>
               {description}
@@ -116,13 +142,13 @@ const SkillCard = ({
           </div>
         </div>
 
-        <button
+        {projectContext ? <button className="btn btn-secondary skill-manage-targets" onClick={event => { event.currentTarget.focus(); onOpenScope(skill) }}>{t('workspace110.manageTargets')}</button> : <button
           className={`skill-switch${enabled ? ' enabled' : ''}`}
           type="button"
           onClick={() => onToggleEnabled(skill)}
           disabled={loading}
           aria-label={enabled ? t('disableSkill') : t('enableSkill')}
-        ><span /></button>
+        ><span /></button>}
       </div>
 
       <div className="skill-card-meta">
@@ -134,8 +160,8 @@ const SkillCard = ({
           )) : <span className="table-empty">{t('untagged')}</span>}
         </div>
 
-        <button className={`scope-badge ${scope}`} type="button" onClick={() => onOpenScope(skill)}>
-          {scope === 'project' ? t('scope.projectCount', { count: projectCount }) : t('scope.globalBadge')}
+        <button className={`scope-badge ${scope}`} type="button" onClick={event => { event.currentTarget.focus(); onOpenScope(skill) }}>
+          {skill.targets.some(target => target.scope === 'global') && projectCount > 0 ? t('workspace110.mixedScope', { count: projectCount }) : scope === 'project' ? t('scope.projectCount', { count: projectCount }) : t('scope.globalBadge')}
         </button>
 
         <div className="skill-updated">{formatRelative(skill.updated_at)}</div>
@@ -151,7 +177,7 @@ const SkillCard = ({
           </span>
           <div className="skill-tool-avatars">
             {installedTools.map((tool) => {
-              const syncState = getToolSyncState(skill, tool.id, scope)
+              const syncState = getToolSyncState(skill, tool.id, 'all')
               const synced = syncState === 'synced'
               const stateLabel =
                 syncState === 'failed'
@@ -161,23 +187,37 @@ const SkillCard = ({
                     : synced
                       ? t('toolManagement.synced')
                       : t('toolManagement.notSynced')
+              const toolLabel = `${tool.label} · ${stateLabel}`
               return (
-                <button
-                  key={tool.id}
-                  className={syncState}
-                  type="button"
-                  title={`${tool.label} · ${stateLabel}`}
-                  aria-label={`${tool.label} · ${stateLabel}`}
-                  aria-pressed={synced}
-                  onClick={() => enabled && onToggleTool(skill, tool.id)}
-                  disabled={!enabled}
-                >
-                  <ToolIcon
-                    toolKey={tool.id}
-                    label={tool.label}
-                    avatar={tool.avatar}
-                  />
-                </button>
+                <Fragment key={tool.id}>
+                  <button
+                    className={syncState}
+                    type="button"
+                    title={enabled ? undefined : toolLabel}
+                    aria-label={toolLabel}
+                    aria-pressed={synced}
+                    onClick={event => { if (enabled) { event.currentTarget.focus(); onToggleTool(skill, tool.id) } }}
+                    onMouseEnter={(event) => showToolHint(event.currentTarget, tool.id)}
+                    onFocus={(event) => showToolHint(event.currentTarget, tool.id)}
+                    onMouseLeave={() => setToolHint(null)}
+                    onBlur={() => setToolHint(null)}
+                    disabled={!enabled}
+                  >
+                    <ToolIcon
+                      toolKey={tool.id}
+                      label={tool.label}
+                      avatar={tool.avatar}
+                    />
+                  </button>
+                  {enabled && toolHint?.toolId === tool.id
+                    ? createPortal(
+                        <span className="skill-tool-tooltip" role="tooltip" style={{ left: toolHint.left, top: toolHint.top }}>
+                          {toolLabel}
+                        </span>,
+                        document.body,
+                      )
+                    : null}
+                </Fragment>
               )
             })}
           </div>
@@ -186,7 +226,7 @@ const SkillCard = ({
         <div className="skill-actions-col">
           <button type="button" onClick={() => onEditTags(skill)} disabled={loading} aria-label={t('editTags')}><Tag size={16} /></button>
           <button type="button" onClick={() => onUpdate(skill)} disabled={loading || !enabled || unboundSource} title={unboundSource ? t('deviceSync.unboundSourceHelp') : t('update')} aria-label={t('update')}><RefreshCw size={16} /></button>
-          <button type="button" onClick={() => onDelete(skill.id)} disabled={loading} aria-label={t('remove')}><Trash2 size={16} /></button>
+          <button type="button" onClick={event => { if (projectContext) { event.currentTarget.focus(); onRemoveProject?.(skill) } else onDelete(skill.id) }} disabled={loading} aria-label={t(projectContext ? 'workspace110.removeTargets' : 'remove')}><Trash2 size={16} /></button>
         </div>
       </div>
     </div>

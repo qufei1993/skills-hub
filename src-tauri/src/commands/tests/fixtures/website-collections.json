@@ -1,0 +1,610 @@
+[
+  {
+    "slug": "engineering",
+    "manifest": {
+      "v": 1,
+      "title": "Skills for Real Engineers",
+      "sources": [
+        {
+          "repo": "mattpocock/skills",
+          "ref": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60"
+        }
+      ],
+      "skills": [
+        {
+          "name": "ask-matt",
+          "path": "skills/engineering/ask-matt",
+          "source": 0
+        },
+        {
+          "name": "setup-matt-pocock-skills",
+          "path": "skills/engineering/setup-matt-pocock-skills",
+          "source": 0
+        },
+        {
+          "name": "grill-me",
+          "path": "skills/productivity/grill-me",
+          "source": 0
+        },
+        {
+          "name": "to-spec",
+          "path": "skills/engineering/to-spec",
+          "source": 0
+        },
+        {
+          "name": "implement-spec",
+          "path": "skills/engineering/implement-spec",
+          "source": 0
+        },
+        {
+          "name": "tdd",
+          "path": "skills/engineering/tdd",
+          "source": 0
+        },
+        {
+          "name": "code-review",
+          "path": "skills/engineering/code-review",
+          "source": 0
+        },
+        {
+          "name": "diagnosing-bugs",
+          "path": "skills/engineering/diagnosing-bugs",
+          "source": 0
+        },
+        {
+          "name": "codebase-design",
+          "path": "skills/engineering/codebase-design",
+          "source": 0
+        },
+        {
+          "name": "domain-modeling",
+          "path": "skills/engineering/domain-modeling",
+          "source": 0
+        },
+        {
+          "name": "grill-with-docs",
+          "path": "skills/engineering/grill-with-docs",
+          "source": 0
+        },
+        {
+          "name": "implement",
+          "path": "skills/engineering/implement",
+          "source": 0
+        },
+        {
+          "name": "improve-codebase-architecture",
+          "path": "skills/engineering/improve-codebase-architecture",
+          "source": 0
+        },
+        {
+          "name": "pr",
+          "path": "skills/engineering/pr",
+          "source": 0
+        },
+        {
+          "name": "prototype",
+          "path": "skills/engineering/prototype",
+          "source": 0
+        },
+        {
+          "name": "research",
+          "path": "skills/engineering/research",
+          "source": 0
+        },
+        {
+          "name": "retro",
+          "path": "skills/engineering/retro",
+          "source": 0
+        },
+        {
+          "name": "to-tickets",
+          "path": "skills/engineering/to-tickets",
+          "source": 0
+        },
+        {
+          "name": "triage",
+          "path": "skills/engineering/triage",
+          "source": 0
+        },
+        {
+          "name": "wayfinder",
+          "path": "skills/engineering/wayfinder",
+          "source": 0
+        },
+        {
+          "name": "wizard",
+          "path": "skills/engineering/wizard",
+          "source": 0
+        },
+        {
+          "name": "git-guardrails-claude-code",
+          "path": "skills/misc/git-guardrails-claude-code",
+          "source": 0
+        },
+        {
+          "name": "migrate-to-shoehorn",
+          "path": "skills/misc/migrate-to-shoehorn",
+          "source": 0
+        },
+        {
+          "name": "scaffold-exercises",
+          "path": "skills/misc/scaffold-exercises",
+          "source": 0
+        },
+        {
+          "name": "setup-pre-commit",
+          "path": "skills/misc/setup-pre-commit",
+          "source": 0
+        },
+        {
+          "name": "grilling",
+          "path": "skills/productivity/grilling",
+          "source": 0
+        },
+        {
+          "name": "handoff",
+          "path": "skills/productivity/handoff",
+          "source": 0
+        },
+        {
+          "name": "teach",
+          "path": "skills/productivity/teach",
+          "source": 0
+        },
+        {
+          "name": "to-questionnaire",
+          "path": "skills/productivity/to-questionnaire",
+          "source": 0
+        },
+        {
+          "name": "wait-what",
+          "path": "skills/productivity/wait-what",
+          "source": 0
+        },
+        {
+          "name": "writing-for-agents",
+          "path": "skills/productivity/writing-for-agents",
+          "source": 0
+        }
+      ]
+    }
+  },
+  {
+    "slug": "marketing",
+    "manifest": {
+      "v": 1,
+      "title": "产品营销与增长",
+      "sources": [
+        {
+          "repo": "coreyhaines31/marketingskills",
+          "ref": "5b2c0007766c6a1cf1d53fd8fc73e979e0821022"
+        }
+      ],
+      "skills": [
+        {
+          "name": "ab-testing",
+          "path": "skills/ab-testing",
+          "source": 0
+        },
+        {
+          "name": "ad-creative",
+          "path": "skills/ad-creative",
+          "source": 0
+        },
+        {
+          "name": "ads",
+          "path": "skills/ads",
+          "source": 0
+        },
+        {
+          "name": "ai-seo",
+          "path": "skills/ai-seo",
+          "source": 0
+        },
+        {
+          "name": "analytics",
+          "path": "skills/analytics",
+          "source": 0
+        },
+        {
+          "name": "aso",
+          "path": "skills/aso",
+          "source": 0
+        },
+        {
+          "name": "attribution",
+          "path": "skills/attribution",
+          "source": 0
+        },
+        {
+          "name": "churn-prevention",
+          "path": "skills/churn-prevention",
+          "source": 0
+        },
+        {
+          "name": "co-marketing",
+          "path": "skills/co-marketing",
+          "source": 0
+        },
+        {
+          "name": "cold-email",
+          "path": "skills/cold-email",
+          "source": 0
+        },
+        {
+          "name": "community-marketing",
+          "path": "skills/community-marketing",
+          "source": 0
+        },
+        {
+          "name": "competitor-profiling",
+          "path": "skills/competitor-profiling",
+          "source": 0
+        },
+        {
+          "name": "competitors",
+          "path": "skills/competitors",
+          "source": 0
+        },
+        {
+          "name": "content-strategy",
+          "path": "skills/content-strategy",
+          "source": 0
+        },
+        {
+          "name": "copy-editing",
+          "path": "skills/copy-editing",
+          "source": 0
+        },
+        {
+          "name": "copywriting",
+          "path": "skills/copywriting",
+          "source": 0
+        },
+        {
+          "name": "cro",
+          "path": "skills/cro",
+          "source": 0
+        },
+        {
+          "name": "customer-research",
+          "path": "skills/customer-research",
+          "source": 0
+        },
+        {
+          "name": "directory-submissions",
+          "path": "skills/directory-submissions",
+          "source": 0
+        },
+        {
+          "name": "emails",
+          "path": "skills/emails",
+          "source": 0
+        },
+        {
+          "name": "events",
+          "path": "skills/events",
+          "source": 0
+        },
+        {
+          "name": "free-tools",
+          "path": "skills/free-tools",
+          "source": 0
+        },
+        {
+          "name": "image",
+          "path": "skills/image",
+          "source": 0
+        },
+        {
+          "name": "influencer-marketing",
+          "path": "skills/influencer-marketing",
+          "source": 0
+        },
+        {
+          "name": "launch",
+          "path": "skills/launch",
+          "source": 0
+        },
+        {
+          "name": "lead-magnets",
+          "path": "skills/lead-magnets",
+          "source": 0
+        },
+        {
+          "name": "marketing-council",
+          "path": "skills/marketing-council",
+          "source": 0
+        },
+        {
+          "name": "marketing-ideas",
+          "path": "skills/marketing-ideas",
+          "source": 0
+        },
+        {
+          "name": "marketing-loops",
+          "path": "skills/marketing-loops",
+          "source": 0
+        },
+        {
+          "name": "marketing-plan",
+          "path": "skills/marketing-plan",
+          "source": 0
+        },
+        {
+          "name": "marketing-psychology",
+          "path": "skills/marketing-psychology",
+          "source": 0
+        },
+        {
+          "name": "offers",
+          "path": "skills/offers",
+          "source": 0
+        },
+        {
+          "name": "onboarding",
+          "path": "skills/onboarding",
+          "source": 0
+        },
+        {
+          "name": "paywalls",
+          "path": "skills/paywalls",
+          "source": 0
+        },
+        {
+          "name": "popups",
+          "path": "skills/popups",
+          "source": 0
+        },
+        {
+          "name": "pricing",
+          "path": "skills/pricing",
+          "source": 0
+        },
+        {
+          "name": "product-marketing",
+          "path": "skills/product-marketing",
+          "source": 0
+        },
+        {
+          "name": "programmatic-seo",
+          "path": "skills/programmatic-seo",
+          "source": 0
+        },
+        {
+          "name": "prospecting",
+          "path": "skills/prospecting",
+          "source": 0
+        },
+        {
+          "name": "public-relations",
+          "path": "skills/public-relations",
+          "source": 0
+        },
+        {
+          "name": "referrals",
+          "path": "skills/referrals",
+          "source": 0
+        },
+        {
+          "name": "revops",
+          "path": "skills/revops",
+          "source": 0
+        },
+        {
+          "name": "sales-enablement",
+          "path": "skills/sales-enablement",
+          "source": 0
+        },
+        {
+          "name": "schema",
+          "path": "skills/schema",
+          "source": 0
+        },
+        {
+          "name": "seo-audit",
+          "path": "skills/seo-audit",
+          "source": 0
+        },
+        {
+          "name": "signup",
+          "path": "skills/signup",
+          "source": 0
+        },
+        {
+          "name": "site-architecture",
+          "path": "skills/site-architecture",
+          "source": 0
+        },
+        {
+          "name": "sms",
+          "path": "skills/sms",
+          "source": 0
+        },
+        {
+          "name": "social",
+          "path": "skills/social",
+          "source": 0
+        },
+        {
+          "name": "video",
+          "path": "skills/video",
+          "source": 0
+        }
+      ]
+    }
+  },
+  {
+    "slug": "product-video",
+    "manifest": {
+      "v": 1,
+      "title": "产品宣传视频",
+      "sources": [
+        {
+          "repo": "obra/superpowers",
+          "ref": "8ca22dba9a94f28898bbce59f2537ff4d87c747d"
+        },
+        {
+          "repo": "remotion-dev/skills",
+          "ref": "a1b09e904a995f8bbf6d3b865fc612eedf7a4c43"
+        },
+        {
+          "repo": "nextlevelbuilder/ui-ux-pro-max-skill",
+          "ref": "09170eec67eefd46a7ae85de61b40c194020f997"
+        }
+      ],
+      "skills": [
+        {
+          "name": "brainstorming",
+          "path": "skills/brainstorming",
+          "source": 0
+        },
+        {
+          "name": "remotion-best-practices",
+          "path": "skills/remotion-best-practices",
+          "source": 1
+        },
+        {
+          "name": "remotion-captions",
+          "path": "skills/remotion-captions",
+          "source": 1
+        },
+        {
+          "name": "remotion-create",
+          "path": "skills/remotion-create",
+          "source": 1
+        },
+        {
+          "name": "remotion-docs",
+          "path": "skills/remotion-docs",
+          "source": 1
+        },
+        {
+          "name": "remotion-interactivity",
+          "path": "skills/remotion-interactivity",
+          "source": 1
+        },
+        {
+          "name": "remotion-maps",
+          "path": "skills/remotion-maps",
+          "source": 1
+        },
+        {
+          "name": "remotion-markup",
+          "path": "skills/remotion-markup",
+          "source": 1
+        },
+        {
+          "name": "remotion-multimedia",
+          "path": "skills/remotion-multimedia",
+          "source": 1
+        },
+        {
+          "name": "remotion-render",
+          "path": "skills/remotion-render",
+          "source": 1
+        },
+        {
+          "name": "remotion-saas",
+          "path": "skills/remotion-saas",
+          "source": 1
+        },
+        {
+          "name": "remotion-studio",
+          "path": "skills/remotion-studio",
+          "source": 1
+        },
+        {
+          "name": "remotion-upgrade",
+          "path": "skills/remotion-upgrade",
+          "source": 1
+        },
+        {
+          "name": "ui-ux-pro-max",
+          "path": ".claude/skills/ui-ux-pro-max",
+          "source": 2
+        }
+      ]
+    }
+  },
+  {
+    "slug": "taste",
+    "manifest": {
+      "v": 1,
+      "title": "Taste Skill · 前端设计",
+      "sources": [
+        {
+          "repo": "Leonxlnx/taste-skill",
+          "ref": "ce26fc25c0e5e8cab638f883de62d9a86ee5e45b"
+        }
+      ],
+      "skills": [
+        {
+          "name": "design-taste-frontend",
+          "path": "skills/taste-skill",
+          "source": 0
+        },
+        {
+          "name": "redesign-existing-projects",
+          "path": "skills/redesign-skill",
+          "source": 0
+        },
+        {
+          "name": "high-end-visual-design",
+          "path": "skills/soft-skill",
+          "source": 0
+        },
+        {
+          "name": "image-to-code",
+          "path": "skills/image-to-code-skill",
+          "source": 0
+        },
+        {
+          "name": "imagegen-frontend-web",
+          "path": "skills/imagegen-frontend-web",
+          "source": 0
+        },
+        {
+          "name": "minimalist-ui",
+          "path": "skills/minimalist-skill",
+          "source": 0
+        },
+        {
+          "name": "brandkit",
+          "path": "skills/brandkit",
+          "source": 0
+        },
+        {
+          "name": "industrial-brutalist-ui",
+          "path": "skills/brutalist-skill",
+          "source": 0
+        },
+        {
+          "name": "gpt-taste",
+          "path": "skills/gpt-tasteskill",
+          "source": 0
+        },
+        {
+          "name": "imagegen-frontend-mobile",
+          "path": "skills/imagegen-frontend-mobile",
+          "source": 0
+        },
+        {
+          "name": "full-output-enforcement",
+          "path": "skills/output-skill",
+          "source": 0
+        },
+        {
+          "name": "stitch-design-taste",
+          "path": "skills/stitch-skill",
+          "source": 0
+        },
+        {
+          "name": "design-taste-frontend-v1",
+          "path": "skills/taste-skill-v1",
+          "source": 0
+        }
+      ]
+    }
+  }
+]

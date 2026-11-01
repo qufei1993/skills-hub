@@ -1,0 +1,1043 @@
+use std::fs;
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::path::Path;
+
+use rusqlite::Connection;
+use serde_json::json;
+use tempfile::TempDir;
+
+use crate::core::cancel_token::CancelToken;
+use crate::core::network_proxy::set_github_proxy_url;
+use crate::core::runtime_paths::{RuntimePaths, RuntimeProfile};
+use crate::core::skill_store::SkillTargetRecord;
+use crate::services::error::ErrorCode;
+use crate::services::install::{InstallAction, InstallRequest};
+use crate::services::operation_lock::{OperationKind, OperationLock};
+use crate::services::skills_hub::SkillsHubService;
+use crate::services::workflows::{SelectionOutcome, SkillSelection};
+
+struct Fixture {
+    _home: TempDir,
+    _data: TempDir,
+    paths: RuntimePaths,
+}
+
+impl Fixture {
+    fn new() -> Self {
+        let home = TempDir::new().unwrap();
+        let data = TempDir::new().unwrap();
+        let paths = RuntimePaths::from_roots(RuntimeProfile::Test, home.path(), data.path());
+        Self {
+            _home: home,
+            _data: data,
+            paths,
+        }
+    }
+
+    fn open(&self) -> SkillsHubService {
+        SkillsHubService::open(self.paths.clone()).unwrap()
+    }
+}
+
+fn write_skill(dir: &Path, name: &str) {
+    fs::create_dir_all(dir).unwrap();
+    fs::write(
+        dir.join("SKILL.md"),
+        format!("---\nname: {name}\ndescription: Test skill\n---\n\nBody\n"),
+    )
+    .unwrap();
+}
+
+fn init_git_repo(dir: &Path) {
+    let repo = git2::Repository::init(dir).unwrap();
+    let signature = git2::Signature::now("Skills Hub Test", "test@example.com").unwrap();
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+        .unwrap();
+}
+
+fn assert_legacy_multi_skill_zero_match_is_safe(update: bool) {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("multi-source");
+    write_skill(&source.join("alpha"), "alpha");
+    write_skill(&source.join("beta"), "beta");
+    init_git_repo(&source);
+    let service = fixture.open();
+    let installed = service
+        .install(InstallRequest::local(source.join("alpha")))
+        .unwrap();
+    let mut record = service
+        .store()
+        .get_skill_by_id(&installed.id)
+        .unwrap()
+        .unwrap();
+    record.name = "retired-unmatched".into();
+    record.source_type = "git".into();
+    record.source_ref = Some(source.to_string_lossy().into_owned());
+    record.source_subpath = None;
+    service.store().upsert_skill(&record).unwrap();
+    let before = crate::core::content_hash::hash_dir(Path::new(&installed.central_path)).unwrap();
+
+    let error = if update {
+        service.update(installed.id.clone().into()).unwrap_err()
+    } else {
+        service
+            .check_updates(installed.id.clone().into())
+            .unwrap_err()
+    };
+    assert_eq!(error.code, ErrorCode::InvalidSource);
+    assert_eq!(error.details["reason"], "source_selection_required");
+    assert_eq!(
+        crate::core::content_hash::hash_dir(Path::new(&installed.central_path)).unwrap(),
+        before
+    );
+    assert_eq!(
+        service
+            .store()
+            .get_skill_by_id(&installed.id)
+            .unwrap()
+            .unwrap()
+            .source_subpath,
+        None
+    );
+}
+
+#[test]
+fn legacy_multi_skill_zero_match_check_returns_safe_error() {
+    assert_legacy_multi_skill_zero_match_is_safe(false);
+}
+
+#[test]
+fn legacy_multi_skill_zero_match_update_returns_safe_error() {
+    assert_legacy_multi_skill_zero_match_is_safe(true);
+}
+
+#[test]
+fn local_install_is_visible_after_reopen_and_never_deploys() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("source-skill");
+    write_skill(&source, "local-demo");
+    let service = fixture.open();
+
+    let installed = service.install(InstallRequest::local(&source)).unwrap();
+
+    assert!(installed.targets.is_empty());
+    let reopened = fixture.open();
+    let shown = reopened.show_skill(installed.id.into()).unwrap();
+    assert_eq!(shown.source.kind, "local");
+    assert!(shown.targets.is_empty());
+}
+
+#[test]
+fn source_parser_is_deterministic_and_does_not_guess_bare_local_names() {
+    let local = InstallRequest::parse("./relative-skill").unwrap();
+    let prefixed_local = InstallRequest::parse("local:relative-skill").unwrap();
+    let git = InstallRequest::parse("git@example.com:owner/repo.git").unwrap();
+    let marketplace = InstallRequest::parse("owner/repo").unwrap();
+    let error = InstallRequest::parse("relative-skill").unwrap_err();
+
+    assert!(local.source.is_local());
+    assert!(prefixed_local.source.is_local());
+    assert!(git.source.is_git());
+    assert!(marketplace.source.is_git());
+    assert_eq!(error.code, ErrorCode::InvalidSource);
+}
+
+#[test]
+fn marketplace_shorthand_requires_a_complete_safe_ref_and_optional_tree_path() {
+    for valid in [
+        "owner/repo",
+        "owner/repo.git",
+        "owner/repo/tree/main",
+        "owner/repo/tree/main/skills/demo",
+        "owner/repo/blob/main/skills/demo/SKILL.md",
+    ] {
+        assert!(
+            InstallRequest::parse(valid).is_ok(),
+            "expected valid shorthand: {valid}"
+        );
+    }
+
+    for invalid in [
+        "owner/repo/tree",
+        "owner/repo/tree/",
+        "owner/repo/blob/main",
+        "owner/repo/tree/main/",
+        "owner/repo/tree//skills/demo",
+        "owner/repo/tree/main/../demo",
+        "owner/repo/blob/main/skills/demo?raw=1",
+        "owner/repo/tree/main/skill name",
+        "owner/..",
+    ] {
+        let error = InstallRequest::parse(invalid).unwrap_err();
+        assert_eq!(
+            error.code,
+            ErrorCode::InvalidSource,
+            "expected invalid shorthand: {invalid}"
+        );
+    }
+}
+
+#[test]
+fn install_checks_database_compatibility_before_writing() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("future-source");
+    write_skill(&source, "future-demo");
+    let service = fixture.open();
+    Connection::open(&fixture.paths.database_path)
+        .unwrap()
+        .execute_batch("PRAGMA user_version = 99;")
+        .unwrap();
+
+    let error = service.install(InstallRequest::local(&source)).unwrap_err();
+
+    assert_eq!(error.code, ErrorCode::IncompatibleDatabase);
+    assert!(!fixture
+        .paths
+        .default_central_repo
+        .join("future-demo")
+        .exists());
+}
+
+#[test]
+fn install_uses_the_shared_operation_lock() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("busy-source");
+    write_skill(&source, "busy-demo");
+    let service = fixture.open();
+    let _guard = OperationLock::acquire(&fixture.paths, OperationKind::Update).unwrap();
+
+    let error = service.install(InstallRequest::local(&source)).unwrap_err();
+
+    assert_eq!(error.code, ErrorCode::OperationBusy);
+    assert_eq!(error.details, json!({ "operation": "install" }));
+    assert!(!fixture
+        .paths
+        .default_central_repo
+        .join("busy-demo")
+        .exists());
+}
+
+#[test]
+fn rejected_git_credentials_do_not_cross_the_service_error_boundary() {
+    let fixture = Fixture::new();
+    let service = fixture.open();
+    let secret = "do-not-leak";
+
+    let error = service
+        .install(InstallRequest::git(format!(
+            "https://user:{secret}@example.com/repo.git?token={secret}"
+        )))
+        .unwrap_err();
+
+    assert_eq!(error.code, ErrorCode::InvalidSource);
+    assert!(!serde_json::to_string(&error).unwrap().contains(secret));
+}
+
+#[test]
+fn git_subpath_install_persists_the_selected_source_path() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("git-source");
+    write_skill(&repo.join("skills/alpha"), "alpha");
+    write_skill(&repo.join("skills/beta"), "beta");
+    init_git_repo(&repo);
+    let repo_url = format!("file://{}", repo.display());
+    let service = fixture.open();
+
+    let installed = service
+        .install(InstallRequest::git(repo_url).with_subpath("skills/beta"))
+        .unwrap();
+    let shown = service.show_skill(installed.id.into()).unwrap();
+
+    assert_eq!(shown.name, "beta");
+    assert_eq!(shown.source.kind, "git");
+    assert_eq!(shown.source.subpath.as_deref(), Some("skills/beta"));
+    assert!(shown.targets.is_empty());
+}
+
+#[test]
+fn cancelled_git_candidate_discovery_does_not_install_the_single_candidate() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("cancel-candidate-source");
+    write_skill(&repo, "cancel-candidate");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    let cancel = CancelToken::new();
+    cancel.cancel();
+
+    let error = service
+        .install_with_cancel(
+            InstallRequest::git(format!("file://{}", repo.display())),
+            Some(&cancel),
+        )
+        .unwrap_err();
+
+    assert_eq!(error.details["legacy_category"], "cancelled");
+    assert!(!fixture
+        .paths
+        .default_central_repo
+        .join("cancel-candidate")
+        .exists());
+}
+
+#[test]
+fn cancelled_git_selection_stops_before_installing_the_selected_skill() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("cancel-selection-source");
+    write_skill(&repo.join("skills/selected"), "cancel-selection");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    let cancel = CancelToken::new();
+    cancel.cancel();
+
+    let error = service
+        .install_with_cancel(
+            InstallRequest::git(format!("file://{}", repo.display()))
+                .with_subpath("skills/selected"),
+            Some(&cancel),
+        )
+        .unwrap_err();
+
+    assert_eq!(error.details["legacy_category"], "cancelled");
+    assert!(!fixture
+        .paths
+        .default_central_repo
+        .join("cancel-selection")
+        .exists());
+}
+
+#[test]
+fn install_rejects_a_subpath_that_escapes_the_declared_source() {
+    let fixture = Fixture::new();
+    let base = fixture.paths.app_data_dir.join("declared-source");
+    let outside = fixture.paths.app_data_dir.join("outside-skill");
+    fs::create_dir_all(&base).unwrap();
+    write_skill(&outside, "outside");
+    let service = fixture.open();
+
+    let error = service
+        .install(InstallRequest::local(&base).with_subpath("../outside-skill"))
+        .unwrap_err();
+
+    assert_eq!(error.code, ErrorCode::InvalidSource);
+    assert!(!fixture.paths.default_central_repo.join("outside").exists());
+}
+
+#[test]
+fn install_rejects_a_skill_name_that_escapes_the_central_library() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("malicious-name-source");
+    write_skill(&source, "../escaped");
+    let service = fixture.open();
+
+    let error = service.install(InstallRequest::local(&source)).unwrap_err();
+
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+    assert!(!fixture
+        .paths
+        .default_central_repo
+        .parent()
+        .unwrap()
+        .join("escaped")
+        .exists());
+}
+
+#[test]
+fn multi_skill_git_source_returns_safe_structured_candidates() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("multi-source");
+    write_skill(&repo.join("skills/alpha"), "alpha");
+    write_skill(&repo.join("skills/beta"), "beta");
+    init_git_repo(&repo);
+    let service = fixture.open();
+
+    let error = service
+        .install(InstallRequest::git(format!("file://{}", repo.display())))
+        .unwrap_err();
+
+    assert_eq!(error.code, ErrorCode::MultiSkills);
+    assert_eq!(
+        error.details,
+        json!({
+            "candidates": [
+                { "name": "alpha", "description": "Test skill", "subpath": "skills/alpha" },
+                { "name": "beta", "description": "Test skill", "subpath": "skills/beta" }
+            ]
+        })
+    );
+    let serialized = serde_json::to_string(&error).unwrap();
+    assert!(!serialized.contains(repo.to_string_lossy().as_ref()));
+}
+
+#[test]
+fn multi_skill_local_source_keeps_the_complete_desktop_candidate_shape() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("multi-local-source");
+    write_skill(&source.join("skills/alpha"), "alpha");
+    write_skill(&source.join("skills/beta"), "beta");
+    let service = fixture.open();
+
+    let error = service.install(InstallRequest::local(&source)).unwrap_err();
+
+    assert_eq!(error.code, ErrorCode::MultiSkills);
+    assert_eq!(
+        error.details,
+        json!({
+            "candidates": [
+                {
+                    "name": "alpha",
+                    "description": "Test skill",
+                    "subpath": "skills/alpha",
+                    "valid": true,
+                    "reason": null
+                },
+                {
+                    "name": "beta",
+                    "description": "Test skill",
+                    "subpath": "skills/beta",
+                    "valid": true,
+                    "reason": null
+                }
+            ]
+        })
+    );
+}
+
+#[test]
+fn duplicate_install_carries_only_the_safe_local_target_path() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("duplicate-source");
+    write_skill(&source, "duplicate-demo");
+    let service = fixture.open();
+    service.install(InstallRequest::local(&source)).unwrap();
+
+    let error = service.install(InstallRequest::local(&source)).unwrap_err();
+
+    assert_eq!(error.code, ErrorCode::TargetConflict);
+    assert_eq!(
+        error.details,
+        json!({
+            "legacy_category": "skill_exists",
+            "reason": "central_managed",
+            "path": fixture.paths.default_central_repo.join("duplicate-demo"),
+        })
+    );
+    assert!(!serde_json::to_string(&error)
+        .unwrap()
+        .contains(source.to_string_lossy().as_ref()));
+}
+
+#[test]
+fn search_uses_the_saved_application_proxy() {
+    let fixture = Fixture::new();
+    let service = fixture.open();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let proxy_url = format!("http://{}", listener.local_addr().unwrap());
+    set_github_proxy_url(service.store(), &proxy_url).unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0_u8; 2048];
+        let count = stream.read(&mut request).unwrap();
+        stream
+            .write_all(
+                b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )
+            .unwrap();
+        String::from_utf8_lossy(&request[..count]).into_owned()
+    });
+
+    let error = service.search("proxy-boundary", 3).unwrap_err();
+    let request = server.join().unwrap();
+
+    assert_eq!(error.code, ErrorCode::NetworkError);
+    assert!(request.starts_with("CONNECT skills.sh:443"));
+    assert!(!serde_json::to_string(&error).unwrap().contains(&proxy_url));
+}
+
+#[test]
+fn source_mirror_update_removes_files_missing_from_source() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("update-source");
+    write_skill(&source, "update-demo");
+    fs::write(source.join("keep-me.txt"), "original").unwrap();
+    let service = fixture.open();
+    let installed = service.install(InstallRequest::local(&source)).unwrap();
+    fs::remove_file(source.join("keep-me.txt")).unwrap();
+
+    let check = service.check_updates(installed.id.clone().into()).unwrap();
+    let updated = service.update(installed.id.clone().into()).unwrap();
+
+    assert!(check.update_available);
+    assert!(!check.held_back);
+    assert_eq!(check.removal_count, 1);
+    assert!(updated.changed);
+    assert!(!Path::new(&installed.central_path)
+        .join("keep-me.txt")
+        .exists());
+    let unchanged = service.show_skill(installed.id.into()).unwrap();
+    assert_eq!(unchanged.content_status, "ok");
+    assert!(unchanged.source_error.is_none());
+}
+
+#[test]
+fn source_mirror_update_refreshes_deployed_copies_after_source_deletion() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("copy-source");
+    write_skill(&source, "copy-demo");
+    let service = fixture.open();
+    fs::write(source.join("obsolete.txt"), "old source file").unwrap();
+    let installed = service.install(InstallRequest::local(&source)).unwrap();
+    let target = fixture.paths.app_data_dir.join("deployed-copy");
+    fs::create_dir_all(fixture._home.path().join(".codex")).unwrap();
+    write_skill(&target, "copy-demo");
+    fs::write(target.join("obsolete.txt"), "old source file").unwrap();
+    fs::remove_file(source.join("obsolete.txt")).unwrap();
+    service
+        .store()
+        .upsert_skill_target(&SkillTargetRecord {
+            id: "copy-target".to_string(),
+            skill_id: installed.id.clone(),
+            tool: "codex".to_string(),
+            scope: "global".to_string(),
+            project_path: None,
+            target_path: target.to_string_lossy().into_owned(),
+            mode: "copy".to_string(),
+            status: "ok".to_string(),
+            last_error: None,
+            synced_at: None,
+        })
+        .unwrap();
+    fs::write(
+        source.join("SKILL.md"),
+        "---\nname: copy-demo\ndescription: Updated\n---\n\nChanged\n",
+    )
+    .unwrap();
+
+    let check = service.check_updates(installed.id.clone().into()).unwrap();
+    let updated = service.update(installed.id.clone().into()).unwrap();
+
+    assert!(!check.held_back);
+    assert_eq!(check.removal_count, 2);
+    assert!(updated.changed);
+    assert_eq!(updated.updated_targets, vec!["codex"]);
+    assert!(updated.pending_targets.is_empty());
+    for directory in [Path::new(&installed.central_path), target.as_path()] {
+        assert_eq!(
+            fs::read_to_string(directory.join("SKILL.md")).unwrap(),
+            "---\nname: copy-demo\ndescription: Updated\n---\n\nChanged\n"
+        );
+        assert!(!directory.join("obsolete.txt").exists());
+    }
+}
+
+#[test]
+fn non_destructive_update_returns_the_shared_outcome() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("safe-update-source");
+    write_skill(&source, "safe-update");
+    let service = fixture.open();
+    let installed = service.install(InstallRequest::local(&source)).unwrap();
+    fs::write(source.join("new-file.txt"), "new").unwrap();
+
+    let check = service.check_updates(installed.id.clone().into()).unwrap();
+    let updated = service.update(installed.id.clone().into()).unwrap();
+
+    assert!(check.update_available);
+    assert!(!check.held_back);
+    assert_eq!(updated.id, installed.id);
+    assert!(updated.changed);
+    assert!(Path::new(&installed.central_path)
+        .join("new-file.txt")
+        .exists());
+}
+
+fn commit_git_changes(dir: &Path) {
+    let repo = git2::Repository::open(dir).unwrap();
+    let signature = git2::Signature::now("Skills Hub Test", "test@example.com").unwrap();
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let parent = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        "update",
+        &tree,
+        &[&parent],
+    )
+    .unwrap();
+}
+
+#[test]
+fn git_incremental_install_updates_existing_and_installs_new_skills() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("incremental-source");
+    write_skill(&repo.join("skills/alpha-dir"), "alpha");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    service
+        .store()
+        .set_setting("git_cache_ttl_secs", "0")
+        .unwrap();
+    let url = format!("file://{}", repo.display());
+    let request = InstallRequest::git(&url).with_subpath("skills/alpha-dir");
+    let first = service.install(request.clone()).unwrap();
+    assert_eq!(first.action, InstallAction::Installed);
+    let tag = service.store().create_tag("retained").unwrap();
+    service
+        .store()
+        .set_skill_tags(&first.id, &[tag.id])
+        .unwrap();
+    let before = service.store().get_skill_by_id(&first.id).unwrap().unwrap();
+    let mut disabled = before.clone();
+    disabled.enabled = false;
+    service.store().upsert_skill(&disabled).unwrap();
+    fs::write(repo.join("skills/alpha-dir/new.txt"), "updated").unwrap();
+    write_skill(&repo.join("skills/beta"), "beta");
+    commit_git_changes(&repo);
+
+    let updated = service.install(request.clone()).unwrap();
+    assert_eq!(updated.id, first.id);
+    assert_eq!(updated.action, InstallAction::Updated);
+    assert_eq!(
+        service.show_skill(first.id.clone().into()).unwrap().tags[0].name,
+        "retained"
+    );
+    assert_eq!(
+        fs::read_to_string(Path::new(&updated.central_path).join("new.txt")).unwrap(),
+        "updated"
+    );
+    let after = service.store().get_skill_by_id(&first.id).unwrap().unwrap();
+    assert_eq!(after.created_at, before.created_at);
+    assert!(!after.enabled);
+    let unchanged = service.install(request).unwrap();
+    assert_eq!(unchanged.id, first.id);
+    assert_eq!(unchanged.action, InstallAction::Unchanged);
+    let added = service
+        .install(InstallRequest::git(url).with_subpath("skills/beta"))
+        .unwrap();
+    assert_ne!(added.id, first.id);
+    assert_eq!(service.store().list_skills().unwrap().len(), 2);
+    assert!(!fixture
+        .paths
+        .default_central_repo
+        .join("alpha-dir")
+        .exists());
+}
+
+#[test]
+fn git_incremental_install_rejects_same_name_from_another_path_or_source() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("conflict-source");
+    write_skill(&repo.join("skills/one"), "shared-name");
+    write_skill(&repo.join("skills/two"), "shared-name");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    let url = format!("file://{}", repo.display());
+    let first = service
+        .install(InstallRequest::git(&url).with_subpath("skills/one"))
+        .unwrap();
+    let error = service
+        .install(InstallRequest::git(&url).with_subpath("skills/two"))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::TargetConflict);
+    let other = fixture.paths.app_data_dir.join("other-source");
+    write_skill(&other, "shared-name");
+    init_git_repo(&other);
+    let error = service
+        .install(InstallRequest::git(format!("file://{}", other.display())))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::TargetConflict);
+    assert_eq!(service.store().list_skills().unwrap().len(), 1);
+    assert!(Path::new(&first.central_path).join("SKILL.md").exists());
+}
+
+#[test]
+fn git_incremental_install_preserves_local_edits_and_allows_other_skills() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("edited-source");
+    write_skill(&repo.join("alpha"), "alpha");
+    write_skill(&repo.join("beta"), "beta");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    let url = format!("file://{}", repo.display());
+    let request = InstallRequest::git(&url).with_subpath("alpha");
+    let first = service.install(request.clone()).unwrap();
+    let edited = Path::new(&first.central_path).join("SKILL.md");
+    fs::write(&edited, "my local changes").unwrap();
+    let error = service.install(request).unwrap_err();
+    assert_eq!(error.code, ErrorCode::TargetConflict);
+    assert_eq!(error.details["reason"], "target_modified");
+    assert_eq!(fs::read_to_string(edited).unwrap(), "my local changes");
+    service
+        .install(InstallRequest::git(url).with_subpath("beta"))
+        .unwrap();
+    assert_eq!(service.store().list_skills().unwrap().len(), 2);
+}
+
+#[test]
+fn git_incremental_preview_classifies_sources_and_revalidates_on_install() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("preview-source");
+    write_skill(&repo.join("alpha"), "alpha");
+    write_skill(&repo.join("beta"), "beta");
+    write_skill(&repo.join("gamma"), "gamma");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    let url = format!("file://{}", repo.display());
+    service
+        .install(InstallRequest::git(&url).with_subpath("alpha"))
+        .unwrap();
+    let local = fixture.paths.app_data_dir.join("local-beta");
+    write_skill(&local, "beta");
+    service.install(InstallRequest::local(&local)).unwrap();
+    let preview = service
+        .git_install_preview_with_cancel(&url, None, None)
+        .unwrap();
+    assert_eq!(
+        preview
+            .iter()
+            .map(|item| (item.candidate.name.as_str(), item.status))
+            .collect::<Vec<_>>(),
+        vec![
+            ("alpha", "update"),
+            ("beta", "conflict"),
+            ("gamma", "install")
+        ]
+    );
+    let local_gamma = fixture.paths.app_data_dir.join("local-gamma");
+    write_skill(&local_gamma, "gamma");
+    let local_installed = service.install(InstallRequest::local(local_gamma)).unwrap();
+    let error = service
+        .install(InstallRequest::git(&url).with_subpath("gamma"))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::TargetConflict);
+    assert_eq!(
+        service
+            .show_skill(local_installed.id.into())
+            .unwrap()
+            .source
+            .kind,
+        "local"
+    );
+}
+
+#[test]
+fn git_incremental_install_reuses_renamed_skills_and_honors_explicit_names() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("renamed-source");
+    write_skill(&repo, "original");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    let url = format!("file://{}", repo.display());
+    let first = service
+        .install(InstallRequest::git(&url).with_name(Some("custom".into())))
+        .unwrap();
+    let repeated = service.install(InstallRequest::git(&url)).unwrap();
+    assert_eq!(repeated.id, first.id);
+    assert_eq!(repeated.name, "custom");
+    assert_eq!(repeated.action, InstallAction::Unchanged);
+    let separate = service
+        .install(InstallRequest::git(&url).with_name(Some("separate".into())))
+        .unwrap();
+    assert_ne!(separate.id, first.id);
+    assert_eq!(separate.name, "separate");
+}
+
+#[test]
+fn source_mirror_update_via_git_incremental_install_removes_obsolete_files() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("destructive-source");
+    write_skill(&repo.join("alpha"), "alpha");
+    fs::write(repo.join("alpha/keep.txt"), "keep").unwrap();
+    init_git_repo(&repo);
+    let service = fixture.open();
+    service
+        .store()
+        .set_setting("git_cache_ttl_secs", "0")
+        .unwrap();
+    let request = InstallRequest::git(format!("file://{}", repo.display())).with_subpath("alpha");
+    let first = service.install(request.clone()).unwrap();
+    fs::remove_file(repo.join("alpha/keep.txt")).unwrap();
+    commit_git_changes(&repo);
+    let updated = service.install(request).unwrap();
+    assert_eq!(updated.id, first.id);
+    assert_eq!(updated.action, InstallAction::Updated);
+    assert!(!Path::new(&first.central_path).join("keep.txt").exists());
+}
+
+#[test]
+fn git_incremental_install_supports_release_records_without_a_content_hash() {
+    for locally_modified in [false, true] {
+        let fixture = Fixture::new();
+        let repo = fixture.paths.app_data_dir.join("release-source");
+        write_skill(&repo.join("alpha"), "alpha");
+        init_git_repo(&repo);
+        let service = fixture.open();
+        service
+            .store()
+            .set_setting("git_cache_ttl_secs", "0")
+            .unwrap();
+        let request =
+            InstallRequest::git(format!("file://{}", repo.display())).with_subpath("alpha");
+        let first = service.install(request.clone()).unwrap();
+        let mut record = service.store().get_skill_by_id(&first.id).unwrap().unwrap();
+        record.content_hash = None;
+        service.store().upsert_skill(&record).unwrap();
+        if locally_modified {
+            fs::write(
+                Path::new(&first.central_path).join("SKILL.md"),
+                "local edit",
+            )
+            .unwrap();
+        }
+        fs::write(repo.join("alpha/new.txt"), "upstream addition").unwrap();
+        commit_git_changes(&repo);
+        let result = service.install(request);
+        if locally_modified {
+            assert_eq!(result.unwrap_err().code, ErrorCode::TargetConflict);
+            assert_eq!(
+                fs::read_to_string(Path::new(&first.central_path).join("SKILL.md")).unwrap(),
+                "local edit"
+            );
+        } else {
+            let updated = result.unwrap();
+            assert_eq!(updated.id, first.id);
+            assert_eq!(updated.action, InstallAction::Updated);
+            assert!(service
+                .store()
+                .get_skill_by_id(&first.id)
+                .unwrap()
+                .unwrap()
+                .content_hash
+                .is_some());
+        }
+    }
+}
+
+#[test]
+fn git_incremental_install_accepts_explicit_unscanned_subpaths() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("deep-source");
+    write_skill(&repo.join("packages/foo"), "foo");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    let url = format!("file://{}", repo.display());
+    let first = service
+        .install(InstallRequest::git(&url).with_subpath("./packages/foo"))
+        .unwrap();
+    let repeated = service
+        .install(InstallRequest::git(&url).with_subpath("packages/foo"))
+        .unwrap();
+    assert_eq!(first.id, repeated.id);
+    assert_eq!(repeated.action, InstallAction::Unchanged);
+}
+
+#[test]
+fn cancelled_git_update_does_not_change_content_or_source_health() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("cancelled-update-source");
+    write_skill(&repo.join("alpha"), "alpha");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    let first = service
+        .install(InstallRequest::git(format!("file://{}", repo.display())).with_subpath("alpha"))
+        .unwrap();
+    let cancel = CancelToken::new();
+    cancel.cancel();
+    let result = crate::core::installer::update_managed_skill_from_source_with_cancel(
+        service.paths(),
+        service.store(),
+        &first.id,
+        Some(&cancel),
+    );
+    assert!(matches!(result, Err(error) if error.to_string().starts_with("CANCELLED|")));
+    let after = service.show_skill(first.id.into()).unwrap();
+    assert_eq!(after.content_status, "ok");
+    assert!(after.source_error.is_none());
+    assert_eq!(
+        crate::core::content_hash::hash_dir(Path::new(&first.central_path)).unwrap(),
+        first.content_hash.unwrap()
+    );
+}
+
+#[test]
+fn collection_preview_identifies_renamed_source_instead_of_name_collision() {
+    let fixture = Fixture::new();
+    let repo = fixture.paths.app_data_dir.join("collection-source");
+    write_skill(&repo, "design");
+    init_git_repo(&repo);
+    let service = fixture.open();
+    let url = format!("file://{}", repo.display());
+    let original = service
+        .install(InstallRequest::git(&url).with_name(Some("design-custom".into())))
+        .unwrap();
+    let local = fixture.paths.app_data_dir.join("unrelated");
+    write_skill(&local, "design");
+    let other = service.install(InstallRequest::local(&local)).unwrap();
+    let preview = service
+        .git_install_preview_with_cancel(&url, None, None)
+        .unwrap();
+    let value = serde_json::to_value(&preview[0]).unwrap();
+    assert_eq!(value["existing_skill_id"], original.id);
+    assert_ne!(value["existing_skill_id"], other.id);
+    fs::remove_dir_all(&repo).unwrap();
+    let local_preview = service
+        .git_install_local_preview(
+            &url,
+            vec![
+                crate::core::installer::GitSkillCandidate {
+                    name: "design".into(),
+                    subpath: ".".into(),
+                    description: None,
+                },
+                crate::core::installer::GitSkillCandidate {
+                    name: "design".into(),
+                    subpath: "other".into(),
+                    description: None,
+                },
+                crate::core::installer::GitSkillCandidate {
+                    name: "new-skill".into(),
+                    subpath: "new".into(),
+                    description: None,
+                },
+            ],
+            None,
+        )
+        .unwrap();
+    assert_eq!(local_preview[0].status, "update");
+    assert_eq!(
+        local_preview[0].existing_skill_id.as_deref(),
+        Some(original.id.as_str())
+    );
+    assert_eq!(local_preview[1].status, "conflict");
+    assert_eq!(local_preview[2].status, "install");
+}
+
+#[test]
+fn source_mirror_update_replaces_local_library_changes() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("mirror-source");
+    write_skill(&source, "mirror-demo");
+    let service = fixture.open();
+    let installed = service.install(InstallRequest::local(&source)).unwrap();
+    let central = Path::new(&installed.central_path);
+    fs::write(central.join("SKILL.md"), "local edit").unwrap();
+    fs::write(central.join("extra.txt"), "local addition").unwrap();
+
+    let updated = service.update(installed.id.into()).unwrap();
+
+    assert!(updated.changed);
+    assert!(!central.join("extra.txt").exists());
+    assert_eq!(
+        fs::read_to_string(central.join("SKILL.md")).unwrap(),
+        "---\nname: mirror-demo\ndescription: Test skill\n---\n\nBody\n"
+    );
+}
+
+#[test]
+fn source_mirror_update_rejects_source_without_skill_md() {
+    let fixture = Fixture::new();
+    let source = fixture.paths.app_data_dir.join("invalid-source");
+    write_skill(&source, "invalid-demo");
+    let service = fixture.open();
+    let installed = service.install(InstallRequest::local(&source)).unwrap();
+    fs::remove_file(source.join("SKILL.md")).unwrap();
+
+    let check_error = service
+        .check_updates(installed.id.clone().into())
+        .unwrap_err();
+    let update_error = service.update(installed.id.into()).unwrap_err();
+
+    assert_eq!(check_error.code, ErrorCode::InvalidSource);
+    assert_eq!(update_error.code, ErrorCode::InvalidSource);
+    assert_eq!(
+        fs::read_to_string(Path::new(&installed.central_path).join("SKILL.md")).unwrap(),
+        "---\nname: invalid-demo\ndescription: Test skill\n---\n\nBody\n"
+    );
+}
+
+#[test]
+fn source_mirror_update_batch_applies_source_deletions() {
+    let fixture = Fixture::new();
+    let service = fixture.open();
+    let mut central_paths = Vec::new();
+    for name in ["batch-alpha", "batch-beta"] {
+        let source = fixture.paths.app_data_dir.join(name);
+        write_skill(&source, name);
+        fs::write(source.join("obsolete.txt"), "old").unwrap();
+        let installed = service.install(InstallRequest::local(&source)).unwrap();
+        central_paths.push(installed.central_path);
+        fs::remove_file(source.join("obsolete.txt")).unwrap();
+    }
+
+    let SelectionOutcome::All(updated) = service.update_selection(SkillSelection::All).unwrap()
+    else {
+        panic!("expected batch outcome");
+    };
+
+    assert_eq!(updated.len(), 2);
+    assert!(updated.iter().all(|outcome| outcome.changed));
+    for central in central_paths {
+        assert!(!Path::new(&central).join("obsolete.txt").exists());
+        assert!(Path::new(&central).join("SKILL.md").is_file());
+    }
+}
+
+#[test]
+fn latest_collection_preview_preserves_old_pinned_sources_without_changing_git_install_policy() {
+    let fixture = Fixture::new();
+    let local = fixture.paths.app_data_dir.join("local-collection-skill");
+    write_skill(&local, "design");
+    let service = fixture.open();
+    let installed = service.install(InstallRequest::local(&local)).unwrap();
+    let mut record = service
+        .store()
+        .list_skills()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == installed.id)
+        .unwrap();
+    record.source_type = "git".into();
+    record.source_ref = Some(format!(
+        "https://github.com/owner/repo/tree/{}",
+        "a".repeat(40)
+    ));
+    record.source_subpath = Some("skills/design".into());
+    service.store().upsert_skill(&record).unwrap();
+    let candidates = vec![crate::core::installer::GitSkillCandidate {
+        name: "design".into(),
+        subpath: "skills/design".into(),
+        description: None,
+    }];
+    let collection = service
+        .collection_install_preview("https://github.com/owner/repo", candidates.clone())
+        .unwrap();
+    assert_eq!(collection[0].status, "update");
+    assert_eq!(
+        collection[0].existing_skill_id.as_deref(),
+        Some(installed.id.as_str())
+    );
+    let ordinary = service
+        .git_install_local_preview("https://github.com/owner/repo", candidates.clone(), None)
+        .unwrap();
+    assert_eq!(ordinary[0].status, "conflict");
+    let different = service
+        .collection_install_preview("https://github.com/other/repo", candidates)
+        .unwrap();
+    assert_eq!(different[0].status, "conflict");
+    assert_eq!(
+        service.store().list_skills().unwrap()[0].source_ref,
+        record.source_ref
+    );
+}

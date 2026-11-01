@@ -125,6 +125,7 @@ impl<'a> DeviceSyncService<'a> {
         let Some(mut config) = self.store.get_device_sync_config()? else {
             return Ok(false);
         };
+        manifest::ensure_library_content(self.store)?;
         let conflicts = self.store.list_device_sync_conflicts()?;
         let Some(remote_commit) = conflicts
             .first()
@@ -185,6 +186,7 @@ impl<'a> DeviceSyncService<'a> {
 
     pub fn check(&self) -> Result<SyncChangeSummary> {
         let _guard = try_lock_device_sync()?;
+        manifest::ensure_library_content(self.store)?;
         let config = self.require_config()?;
         let proxy_url = get_github_proxy_url(self.store)?;
         let token = self.read_token(&config, &proxy_url)?;
@@ -299,6 +301,7 @@ impl<'a> DeviceSyncService<'a> {
         resolution: ConflictResolution,
     ) -> Result<()> {
         let _guard = try_lock_device_sync()?;
+        manifest::ensure_library_content(self.store)?;
         let conflict = self
             .store
             .list_device_sync_conflicts()?
@@ -485,6 +488,7 @@ impl<'a> DeviceSyncService<'a> {
     }
 
     fn sync_attempt(&self) -> Result<SyncRunResult> {
+        manifest::ensure_library_content(self.store)?;
         let mut config = self.require_config()?;
         let pending_conflicts = self.store.list_device_sync_conflicts()?;
         if !pending_conflicts.is_empty() {
@@ -551,6 +555,8 @@ impl<'a> DeviceSyncService<'a> {
                 message: "device sync requires conflict resolution".to_string(),
             });
         }
+        // Recheck before publishing: content may disappear while fetching or exporting.
+        manifest::ensure_library_content(self.store)?;
         apply_plan_to_repository(&plan, &local, &export, &mut remote, &repo_path)?;
         remote.write(&repo_path)?;
         registry.record(&device);
@@ -928,7 +934,14 @@ impl<'a> DeviceSyncService<'a> {
             }
             let existing = self.store.get_skill_by_id(id)?;
             let destination = match &existing {
-                Some(record) => PathBuf::from(&record.central_path),
+                Some(record) => {
+                    if let Some(code) = crate::core::skill_issues::central_content_issue(Path::new(
+                        &record.central_path,
+                    )) {
+                        bail!("DEVICE_SYNC_FAILURE_{code}");
+                    }
+                    PathBuf::from(&record.central_path)
+                }
                 None => unique_skill_path_reserved(&self.central_root, &skill.name, id, &reserved)?,
             };
             reserved.insert(destination.clone());
@@ -950,7 +963,8 @@ impl<'a> DeviceSyncService<'a> {
                     true,
                 )?);
             }
-            let mut record = manifest::record_from_portable(skill, &destination, now_ms());
+            let mut record =
+                manifest::record_from_portable(skill, &destination, new_hash, now_ms());
             if let Some(existing) = existing {
                 if existing
                     .source_ref
@@ -1357,6 +1371,190 @@ mod tests {
     use git2::Repository;
 
     static TEST_SYNC_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn missing_central_blocks_check_and_sync_without_remote_deletion() {
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let (bare, config) = seed_remote(root.path());
+        let credentials = MemoryCredentialStore::default();
+        let store = make_store(root.path(), "missing-central", &config);
+        let central = root.path().join("central");
+        add_skill_in_directory(&store, &central, "one", "one", "# Saved");
+        let service = DeviceSyncService::new(
+            &store,
+            &credentials,
+            root.path().join("workspace"),
+            central.clone(),
+        );
+        add_skill_in_directory(&store, &central, "two", "two", "# Healthy");
+        service.sync().unwrap();
+        let before = store
+            .get_device_sync_config()
+            .unwrap()
+            .unwrap()
+            .last_synced_commit;
+        let remote = Repository::open_bare(&bare).unwrap();
+        let head = remote.refname_to_id("refs/heads/main").unwrap();
+        fs::remove_dir_all(central.join("one")).unwrap();
+
+        fs::write(central.join("two/SKILL.md"), "# Pending healthy edit").unwrap();
+        let repository_path = service.workspace_root.join("repository");
+        let incoming = SyncManifest::read(&repository_path).unwrap();
+        assert_eq!(
+            errors::format_error(
+                service
+                    .apply_repository_to_library(&incoming, &repository_path, &BTreeSet::new())
+                    .unwrap_err()
+            ),
+            "DEVICE_SYNC_FAILURE_centralMissing"
+        );
+        assert!(!central.join("one").exists());
+        let check = service.check();
+        let sync = service.sync();
+        let after = remote.refname_to_id("refs/heads/main").unwrap();
+        let manifest = git_repo::manifest_at(&remote, after).unwrap();
+
+        assert!(
+            check.is_err(),
+            "a missing central folder must stop checking instead of planning a deletion"
+        );
+        assert!(sync.is_err(), "sync must stop before publishing deletions");
+        assert!(manifest.skills.contains_key("one"));
+        assert_eq!(head, after);
+        assert_eq!(
+            store
+                .get_device_sync_config()
+                .unwrap()
+                .unwrap()
+                .last_synced_commit,
+            before
+        );
+        assert!(store.get_skill_by_id("one").unwrap().is_some());
+        assert!(
+            !central.join("one").exists(),
+            "sync must not restore content automatically"
+        );
+        fs::create_dir_all(central.join("one")).unwrap();
+        fs::write(central.join("one/SKILL.md"), "# Manually restored").unwrap();
+        assert_eq!(service.sync().unwrap().status, "success");
+        assert_eq!(
+            fs::read_to_string(central.join("one/SKILL.md")).unwrap(),
+            "# Manually restored"
+        );
+        store.delete_skill("one").unwrap();
+        fs::remove_dir_all(central.join("one")).unwrap();
+        assert_eq!(service.sync().unwrap().changes.deleted, 1);
+        let final_head = remote.refname_to_id("refs/heads/main").unwrap();
+        assert!(!git_repo::manifest_at(&remote, final_head)
+            .unwrap()
+            .skills
+            .contains_key("one"));
+    }
+
+    #[test]
+    fn missing_central_blocks_scheduled_sync_before_credentials_and_export() {
+        struct NoCredentials;
+        impl CredentialStore for NoCredentials {
+            fn get(&self, _: &str) -> Result<Option<String>> {
+                panic!("unexpected credential read")
+            }
+            fn set(&self, _: &str, _: &str) -> Result<()> {
+                panic!("unexpected credential write")
+            }
+            fn delete(&self, _: &str) -> Result<()> {
+                panic!("unexpected credential delete")
+            }
+        }
+        let _guard = TEST_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|lock| lock.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let config = DeviceSyncConfig {
+            remote_url: "https://example.invalid/private.git".into(),
+            credential_key: Some("must-not-read".into()),
+            visibility: types::RepositoryVisibility::Private,
+            auto_sync: true,
+            auto_sync_schedule: Some(scheduler::SyncSchedule::Interval { minutes: 5 }),
+            ..Default::default()
+        };
+        let store = make_store(root.path(), "blocked", &config);
+        let central = root.path().join("central");
+        add_skill(&store, &central, "one", "# Saved");
+        let mut record = store.get_skill_by_id("one").unwrap().unwrap();
+        record.enabled = false;
+        store.upsert_skill(&record).unwrap();
+        fs::remove_dir_all(&record.central_path).unwrap();
+        let workspace = root.path().join("workspace");
+        let service = DeviceSyncService::new(&store, &NoCredentials, workspace.clone(), central);
+        for error in [
+            service.check().unwrap_err(),
+            service.repair_legacy_same_device_conflicts().unwrap_err(),
+            service.sync_scheduled(&config).unwrap_err(),
+            service
+                .resolve_conflict("unused", ConflictResolution::UseRemote)
+                .unwrap_err(),
+        ] {
+            assert_eq!(
+                errors::format_error(error),
+                "DEVICE_SYNC_FAILURE_centralMissing"
+            );
+        }
+        assert!(!workspace.exists());
+        let export = root.path().join("export");
+        assert!(manifest::export_library(&store, &export).is_err());
+        assert!(!export.exists());
+        let history = store.list_device_sync_history(10).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(
+            history[0].error.as_deref(),
+            Some("DEVICE_SYNC_FAILURE_centralMissing")
+        );
+        assert!(store
+            .get_device_sync_config()
+            .unwrap()
+            .unwrap()
+            .last_synced_commit
+            .is_none());
+    }
+
+    #[test]
+    fn device_sync_import_records_local_hash_for_official_skill_enable() {
+        use crate::core::runtime_paths::{RuntimePaths, RuntimeProfile};
+        use crate::services::skills_hub::SkillsHubService;
+        let home = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        fs::create_dir(home.path().join(".codex")).unwrap();
+        let paths = RuntimePaths::from_roots(RuntimeProfile::Test, home.path(), data.path());
+        let app = SkillsHubService::open(paths.clone()).unwrap();
+        app.enable_ai_management().unwrap();
+        let incoming = tempfile::tempdir().unwrap();
+        let remote = manifest::export_library(app.store(), incoming.path()).unwrap();
+        let credentials = MemoryCredentialStore::default();
+        let sync = DeviceSyncService::new(
+            app.store(),
+            &credentials,
+            data.path().join("workspace"),
+            paths.default_central_repo,
+        );
+        sync.apply_repository_to_library(&remote, incoming.path(), &BTreeSet::new())
+            .unwrap();
+        let skill = app.store().list_skills().unwrap().remove(0);
+        assert_eq!(
+            skill.content_hash,
+            Some(
+                crate::core::content_hash::hash_dir_strict(Path::new(&skill.central_path)).unwrap()
+            )
+        );
+        assert_ne!(
+            skill.content_hash.as_ref(),
+            Some(&remote.skills[&skill.id].content_hash)
+        );
+        app.preflight_ai_management().unwrap();
+        assert_eq!(app.enable_ai_management().unwrap().central_reason, None);
+    }
 
     #[test]
     fn repository_visibility_controls_read_credentials_but_not_write_credentials() {
@@ -2647,12 +2845,13 @@ mod tests {
         store
             .delete_setting("device_sync.source_baseline.one")
             .unwrap();
-        let app = tauri::test::mock_app();
+        let paths = crate::core::runtime_paths::RuntimePaths::from_roots(
+            crate::core::runtime_paths::RuntimeProfile::Test,
+            root.path().join("home"),
+            root.path().join("runtime"),
+        );
         let result = crate::core::installer::update_managed_skill_from_source_with_lock_held(
-            app.handle(),
-            &store,
-            "one",
-            true,
+            &paths, &store, "one", true,
         )
         .unwrap();
         assert!(!result.changed);
@@ -2662,10 +2861,7 @@ mod tests {
         );
         fs::write(source.join("SKILL.md"), "local new").unwrap();
         let result = crate::core::installer::update_managed_skill_from_source_with_lock_held(
-            app.handle(),
-            &store,
-            "one",
-            true,
+            &paths, &store, "one", true,
         )
         .unwrap();
         assert!(result.changed);
@@ -2839,8 +3035,12 @@ mod tests {
         sb.sync().unwrap();
         assert_eq!(b.get_skill_by_id("one").unwrap().unwrap().status, "ok");
         assert!(b.source_checks().unwrap().get("one").unwrap().0.is_none());
-        let app = tauri::test::mock_app();
-        let err = crate::core::installer::update_managed_skill_from_source(app.handle(), &b, "one")
+        let paths = crate::core::runtime_paths::RuntimePaths::from_roots(
+            crate::core::runtime_paths::RuntimeProfile::Test,
+            root.path().join("home"),
+            root.path().join("runtime"),
+        );
+        let err = crate::core::installer::update_managed_skill_from_source(&paths, &b, "one")
             .err()
             .unwrap();
         assert!(err.to_string().starts_with("SKILL_SOURCE_UNBOUND|"));

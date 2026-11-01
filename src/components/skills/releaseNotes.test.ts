@@ -55,4 +55,28 @@ describe('selectLocalizedReleaseNotes', () => {
 
     expect(selectLocalizedReleaseNotes(emptyChinese, 'zh')).toBe(emptyChinese)
   })
+
+  it('removes release-page downloads while preserving localized changes and other tables', () => {
+    const notes = [
+      '## 中文', '', '### 下载安装', '', '| Linux | 下载链接 |', '',
+      '桌面用户只需下载安装包，CLI 会在启用 AI 管理时自动下载。', '',
+      '### 修复', '- 中文修复', '',
+      '## English', '', '### Downloads', '', '| Linux | download-link |', '',
+      'Desktop users only need the installer.', '',
+      '### Fixed', '- English fix', '', '### Formats', '| Name | Value |',
+    ].join('\n')
+    expect(selectLocalizedReleaseNotes(notes, 'zh-CN')).toBe('### 修复\n- 中文修复')
+    expect(selectLocalizedReleaseNotes(notes, 'ko')).toBe('### Fixed\n- English fix\n\n### Formats\n| Name | Value |')
+  })
+
+  it('removes downloads from legacy and download-only bodies without hiding following headings', () => {
+    const notes = 'Introduction\n\n### Downloads\n\ninstaller-link\n\n## Changes\n\n- Keep this fix'
+    expect(selectLocalizedReleaseNotes(notes, 'en')).toBe('Introduction\n\n## Changes\n\n- Keep this fix')
+    expect(selectLocalizedReleaseNotes('### 下载安装\n\ninstaller-link', 'zh')).toBe('')
+  })
+
+  it('preserves download headings inside fenced code and unrelated download documentation', () => {
+    const notes = '### Fixed\n\n```md\n### Downloads\nexample\n```\n\n### Download API\nAPI changes'
+    expect(selectLocalizedReleaseNotes(notes, 'en')).toBe(notes)
+  })
 })

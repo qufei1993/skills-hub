@@ -26,6 +26,13 @@ describe('Skill deletion confirmations', () => {
     expect(onConfirm).toHaveBeenCalledOnce()
   })
 
+  it('explains that deleting missing-content records preserves tool paths without a recycle backup', () => {
+    const { container } = render(<DeleteModal open loading={false} centralMissing skillName="missing" onRequestClose={vi.fn()} onConfirm={vi.fn()} t={i18n.getFixedT('zh')} />)
+    expect(screen.getByText(/只删除管理记录/).textContent).toContain('无法生成回收站备份')
+    expect(container.querySelector('.modal-recoverable-delete')).toBeNull()
+    expect(screen.queryByText(/文件和本机配置保留 30 天/)).toBeNull()
+  })
+
   it('prevents dismissal while deleting', () => {
     const close = vi.fn()
     const { container } = render(<DeleteModal open loading skillName="demo" onRequestClose={close} onConfirm={vi.fn()} t={i18n.getFixedT('zh')} />)
@@ -33,4 +40,12 @@ describe('Skill deletion confirmations', () => {
     fireEvent.click(container.querySelector('.modal-backdrop')!)
     expect(close).not.toHaveBeenCalled()
   })
+})
+
+it('bulk deletion of only missing-content records does not promise a recycle backup', () => {
+  const { container } = render(<BulkDeleteModal open loading={false} skillNames={["missing"]} missingCentralCount={1} onRequestClose={vi.fn()} onConfirm={vi.fn()} t={i18n.getFixedT('zh')} />)
+  expect(screen.getByText(/只删除管理记录/)).toBeTruthy()
+  expect(container.querySelector('.modal-recoverable-delete')).toBeNull()
+  expect(container.querySelector('.delete-warning')).toBeNull()
+  expect(screen.queryByText(/30 天/)).toBeNull()
 })

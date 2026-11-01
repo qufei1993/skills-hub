@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -29,7 +29,30 @@ export function resolveOAuthClientIds(env, contents = '') {
   return Object.fromEntries(oauthClientIdKeys.map(key => [key, resolveOAuthClientId(key, env, contents)]))
 }
 
-function main(args) {
+export function clearDesktopBundle({ root, target, debug }) {
+  if (!/^(?:aarch64|x86_64)-(?:apple-darwin|unknown-linux-gnu|pc-windows-msvc)$/.test(target)) throw new Error('Invalid desktop bundle target.')
+  rmSync(path.join(root, 'src-tauri', 'target', target, debug ? 'debug' : 'release', 'bundle'), { recursive: true, force: true })
+}
+
+export function missingCliManifestMessage(platform = process.platform) {
+  const suffix = { darwin: 'mac:dmg', win32: 'win:exe', linux: 'linux:appimage' }[platform]
+  const localCommand = `npm run tauri:build:local${suffix ? `:${suffix}` : ''}`
+  return `CLI_MANIFEST_REQUIRED: Release packaging requires --cli-manifest <path> (or SKILLS_HUB_CLI_MANIFEST_PATH) for the matching published CLI.
+For development, use npm run tauri:dev. To test an installed app with an unpublished local CLI, use ${localCommand}.`
+}
+
+export function localTestBuildConfig(windows = [{}]) {
+  return {
+    productName: 'Skills Hub Local Test',
+    mainBinaryName: 'skills-hub-local-test',
+    identifier: 'com.qufei1993.skillshub.local-test',
+    app: { windows: windows.map(window => ({ ...window, title: 'Skills Hub Local Test' })) },
+    bundle: { createUpdaterArtifacts: false, externalBin: [] },
+    plugins: { updater: { endpoints: [] } },
+  }
+}
+
+async function main(args) {
   let contents = ''
   const index = args.indexOf('--oauth-env-file')
   let oauthFilename
@@ -58,12 +81,72 @@ function main(args) {
   }
   const devIndex = args.indexOf('--dev')
   const command = devIndex === -1 ? 'build' : 'dev'
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const env = { ...process.env, ...clientIds }
+  delete env.SKILLS_HUB_PREPARE_CLI_SIDECAR
+  const { desktopSidecarOptions, prepareCliSidecar } = await import('./prepare-cli-sidecar.mjs')
+  const localIndex = args.indexOf('--local-test')
+  const localTest = localIndex !== -1
+  if (localTest) {
+    if (args.lastIndexOf('--local-test') !== localIndex || command !== 'build' || args.some(arg => ['--debug', '-d', '--release'].includes(arg))) {
+      throw new Error('Local test packaging requires a release build; do not combine --local-test with --dev or debug flags.')
+    }
+    args.splice(localIndex, 1)
+  }
+  const tauriArgs = args.slice(0, args.indexOf('--') === -1 ? args.length : args.indexOf('--'))
+  const features = []
+  for (let index = 0; index < tauriArgs.length; index++) {
+    if (tauriArgs[index].startsWith('--features=')) features.push(...tauriArgs[index].slice('--features='.length).split(/[\s,]+/))
+    if (['--features', '-f'].includes(tauriArgs[index])) {
+      for (let next = index + 1; next < tauriArgs.length && !tauriArgs[next].startsWith('-'); next++) {
+        features.push(...tauriArgs[next].split(/[\s,]+/))
+      }
+    }
+  }
+  if (!localTest && features.includes('local-test')) {
+    throw new Error('The local-test feature requires npm run tauri:build:local so the app identity and updater configuration stay separate.')
+  }
+  const options = desktopSidecarOptions(args)
+  const manifestIndex = args.indexOf('--cli-manifest')
+  let manifestPath = env.SKILLS_HUB_CLI_MANIFEST_PATH
+  if (manifestIndex !== -1) {
+    const supplied = args[manifestIndex + 1]
+    if (!supplied || supplied.startsWith('--') || args.lastIndexOf('--cli-manifest') !== manifestIndex) throw new Error('Missing or invalid --cli-manifest path.')
+    manifestPath = path.resolve(root, supplied)
+    args.splice(manifestIndex, 2)
+  }
+  if (localTest) {
+    if (manifestPath) throw new Error('Local test CLI must be prepared locally; remove --cli-manifest and SKILLS_HUB_CLI_MANIFEST_PATH.')
+    const prepared = prepareCliSidecar({ root, env, ...options, localTest: true })
+    manifestPath = prepared.metadataPath
+    const config = JSON.parse(readFileSync(path.join(root, 'src-tauri/tauri.conf.json'), 'utf8'))
+    const boundary = args.indexOf('--')
+    args.splice(boundary === -1 ? args.length : boundary, 0, '--features', 'local-test', '--config', JSON.stringify(localTestBuildConfig(config.app.windows)))
+    console.log('Building Skills Hub Local Test with the local CLI. Credentials and CLI use the development namespace; Skill data and settings are shared.')
+  } else if (options.debug) {
+    if (manifestPath) throw new Error('Development CLI must be prepared locally.')
+    manifestPath = prepareCliSidecar({ root, env, ...options }).metadataPath
+  } else if (!manifestPath) {
+    throw new Error(missingCliManifestMessage())
+  }
+  env.SKILLS_HUB_CLI_MANIFEST_PATH = manifestPath
+  if (command === 'build') clearDesktopBundle({ root, ...options })
   if (devIndex !== -1) args.splice(devIndex, 1)
+  if (command === 'build') {
+    const targetArgs = args.slice(0, args.indexOf('--') === -1 ? args.length : args.indexOf('--'))
+    if (!targetArgs.some(arg => arg === '--target' || arg === '-t' || arg.startsWith('--target='))) {
+      const boundary = args.indexOf('--')
+      args.splice(boundary === -1 ? args.length : boundary, 0, '--target', options.target)
+    }
+    const runnerIndex = args.indexOf('--')
+    if (runnerIndex === -1) args.push('--', '--bin', 'app')
+    else args.splice(runnerIndex + 1, 0, '--bin', 'app')
+  }
   const require = createRequire(import.meta.url)
   const cli = path.join(path.dirname(require.resolve('@tauri-apps/cli/package.json')), 'tauri.js')
   const result = spawnSync(process.execPath, [cli, command, ...args], {
-    cwd: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
-    env: { ...process.env, ...clientIds },
+    cwd: root,
+    env,
     stdio: 'inherit',
   })
   if (result.error) throw new Error(`Unable to start Tauri ${command}.`)
@@ -71,7 +154,7 @@ function main(args) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  try { main(process.argv.slice(2)) } catch (error) {
+  try { await main(process.argv.slice(2)) } catch (error) {
     console.error(error.message)
     process.exitCode = 1
   }

@@ -1,0 +1,612 @@
+{
+  "v": 1,
+  "title": "Aaron 营销技能合集",
+  "sources": [
+    {
+      "repo": "aaron-he-zhu/aaron-marketing-skills",
+      "ref": "9c7e1cebeabca15e0af0ce856799361a0f5d35d7"
+    }
+  ],
+  "skills": [
+    {
+      "name": "ad-account-auditor",
+      "path": "ad/activate/ad-account-auditor",
+      "source": 0
+    },
+    {
+      "name": "conversion-signal-qa",
+      "path": "ad/activate/conversion-signal-qa",
+      "source": 0
+    },
+    {
+      "name": "conversion-value-mapper",
+      "path": "ad/activate/conversion-value-mapper",
+      "source": 0
+    },
+    {
+      "name": "placement-exclusion-manager",
+      "path": "ad/activate/placement-exclusion-manager",
+      "source": 0
+    },
+    {
+      "name": "ad-creative-builder",
+      "path": "ad/orchestrate/ad-creative-builder",
+      "source": 0
+    },
+    {
+      "name": "ad-test-designer",
+      "path": "ad/orchestrate/ad-test-designer",
+      "source": 0
+    },
+    {
+      "name": "bid-strategy-planner",
+      "path": "ad/orchestrate/bid-strategy-planner",
+      "source": 0
+    },
+    {
+      "name": "landing-experience-checker",
+      "path": "ad/orchestrate/landing-experience-checker",
+      "source": 0
+    },
+    {
+      "name": "audience-segment-builder",
+      "path": "ad/research/audience-segment-builder",
+      "source": 0
+    },
+    {
+      "name": "campaign-architect",
+      "path": "ad/research/campaign-architect",
+      "source": 0
+    },
+    {
+      "name": "product-feed-optimizer",
+      "path": "ad/research/product-feed-optimizer",
+      "source": 0
+    },
+    {
+      "name": "search-term-miner",
+      "path": "ad/research/search-term-miner",
+      "source": 0
+    },
+    {
+      "name": "attribution-reconciler",
+      "path": "ad/scale/attribution-reconciler",
+      "source": 0
+    },
+    {
+      "name": "budget-pacing-monitor",
+      "path": "ad/scale/budget-pacing-monitor",
+      "source": 0
+    },
+    {
+      "name": "fatigue-frequency-manager",
+      "path": "ad/scale/fatigue-frequency-manager",
+      "source": 0
+    },
+    {
+      "name": "paid-measurement-loop",
+      "path": "ad/scale/paid-measurement-loop",
+      "source": 0
+    },
+    {
+      "name": "cold-outbound-sequencer",
+      "path": "email/deliver/cold-outbound-sequencer",
+      "source": 0
+    },
+    {
+      "name": "email-quality-auditor",
+      "path": "email/deliver/email-quality-auditor",
+      "source": 0
+    },
+    {
+      "name": "inbox-placement-monitor",
+      "path": "email/deliver/inbox-placement-monitor",
+      "source": 0
+    },
+    {
+      "name": "send-experiment-designer",
+      "path": "email/deliver/send-experiment-designer",
+      "source": 0
+    },
+    {
+      "name": "dynamic-content-personalizer",
+      "path": "email/engage/dynamic-content-personalizer",
+      "source": 0
+    },
+    {
+      "name": "email-creative-builder",
+      "path": "email/engage/email-creative-builder",
+      "source": 0
+    },
+    {
+      "name": "email-render-builder",
+      "path": "email/engage/email-render-builder",
+      "source": 0
+    },
+    {
+      "name": "subject-line-lab",
+      "path": "email/engage/subject-line-lab",
+      "source": 0
+    },
+    {
+      "name": "email-sequence-designer",
+      "path": "email/nurture/email-sequence-designer",
+      "source": 0
+    },
+    {
+      "name": "newsletter-monetization-planner",
+      "path": "email/nurture/newsletter-monetization-planner",
+      "source": 0
+    },
+    {
+      "name": "preference-frequency-manager",
+      "path": "email/nurture/preference-frequency-manager",
+      "source": 0
+    },
+    {
+      "name": "reactivation-specialist",
+      "path": "email/nurture/reactivation-specialist",
+      "source": 0
+    },
+    {
+      "name": "deliverability-qa",
+      "path": "email/setup/deliverability-qa",
+      "source": 0
+    },
+    {
+      "name": "list-growth-designer",
+      "path": "email/setup/list-growth-designer",
+      "source": 0
+    },
+    {
+      "name": "list-hygiene-monitor",
+      "path": "email/setup/list-hygiene-monitor",
+      "source": 0
+    },
+    {
+      "name": "list-segment-builder",
+      "path": "email/setup/list-segment-builder",
+      "source": 0
+    },
+    {
+      "name": "content-amplifier",
+      "path": "influencer/activate/content-amplifier",
+      "source": 0
+    },
+    {
+      "name": "contract-helper",
+      "path": "influencer/activate/contract-helper",
+      "source": 0
+    },
+    {
+      "name": "creator-content-auditor",
+      "path": "influencer/activate/creator-content-auditor",
+      "source": 0
+    },
+    {
+      "name": "outreach-manager",
+      "path": "influencer/activate/outreach-manager",
+      "source": 0
+    },
+    {
+      "name": "landing-optimizer",
+      "path": "influencer/report/landing-optimizer",
+      "source": 0
+    },
+    {
+      "name": "performance-analyzer",
+      "path": "influencer/report/performance-analyzer",
+      "source": 0
+    },
+    {
+      "name": "report-generator",
+      "path": "influencer/report/report-generator",
+      "source": 0
+    },
+    {
+      "name": "roi-calculator",
+      "path": "influencer/report/roi-calculator",
+      "source": 0
+    },
+    {
+      "name": "audience-mapper",
+      "path": "influencer/scout/audience-mapper",
+      "source": 0
+    },
+    {
+      "name": "fit-scorer",
+      "path": "influencer/scout/fit-scorer",
+      "source": 0
+    },
+    {
+      "name": "influencer-discovery",
+      "path": "influencer/scout/influencer-discovery",
+      "source": 0
+    },
+    {
+      "name": "trend-spotter",
+      "path": "influencer/scout/trend-spotter",
+      "source": 0
+    },
+    {
+      "name": "brief-generator",
+      "path": "influencer/target/brief-generator",
+      "source": 0
+    },
+    {
+      "name": "budget-optimizer",
+      "path": "influencer/target/budget-optimizer",
+      "source": 0
+    },
+    {
+      "name": "campaign-planner",
+      "path": "influencer/target/campaign-planner",
+      "source": 0
+    },
+    {
+      "name": "competitor-tracker",
+      "path": "influencer/target/competitor-tracker",
+      "source": 0
+    },
+    {
+      "name": "launch-asset-packager",
+      "path": "launch/assemble/launch-asset-packager",
+      "source": 0
+    },
+    {
+      "name": "message-house-builder",
+      "path": "launch/assemble/message-house-builder",
+      "source": 0
+    },
+    {
+      "name": "pricing-packaging-planner",
+      "path": "launch/assemble/pricing-packaging-planner",
+      "source": 0
+    },
+    {
+      "name": "sales-enablement-kit",
+      "path": "launch/assemble/sales-enablement-kit",
+      "source": 0
+    },
+    {
+      "name": "community-launch-runner",
+      "path": "launch/mobilize/community-launch-runner",
+      "source": 0
+    },
+    {
+      "name": "launch-day-conductor",
+      "path": "launch/mobilize/launch-day-conductor",
+      "source": 0
+    },
+    {
+      "name": "launch-readiness-auditor",
+      "path": "launch/mobilize/launch-readiness-auditor",
+      "source": 0
+    },
+    {
+      "name": "press-media-relations",
+      "path": "launch/mobilize/press-media-relations",
+      "source": 0
+    },
+    {
+      "name": "launch-feedback-synthesizer",
+      "path": "launch/prove/launch-feedback-synthesizer",
+      "source": 0
+    },
+    {
+      "name": "launch-monitor",
+      "path": "launch/prove/launch-monitor",
+      "source": 0
+    },
+    {
+      "name": "launch-retro-analyzer",
+      "path": "launch/prove/launch-retro-analyzer",
+      "source": 0
+    },
+    {
+      "name": "momentum-planner",
+      "path": "launch/prove/momentum-planner",
+      "source": 0
+    },
+    {
+      "name": "early-access-designer",
+      "path": "launch/research/early-access-designer",
+      "source": 0
+    },
+    {
+      "name": "launch-tier-planner",
+      "path": "launch/research/launch-tier-planner",
+      "source": 0
+    },
+    {
+      "name": "launch-window-planner",
+      "path": "launch/research/launch-window-planner",
+      "source": 0
+    },
+    {
+      "name": "positioning-mapper",
+      "path": "launch/research/positioning-mapper",
+      "source": 0
+    },
+    {
+      "name": "brand-language-codifier",
+      "path": "narrative/architect/brand-language-codifier",
+      "source": 0
+    },
+    {
+      "name": "message-system-architect",
+      "path": "narrative/architect/message-system-architect",
+      "source": 0
+    },
+    {
+      "name": "story-bank-builder",
+      "path": "narrative/architect/story-bank-builder",
+      "source": 0
+    },
+    {
+      "name": "strategic-narrative-designer",
+      "path": "narrative/architect/strategic-narrative-designer",
+      "source": 0
+    },
+    {
+      "name": "message-test-designer",
+      "path": "narrative/evaluate/message-test-designer",
+      "source": 0
+    },
+    {
+      "name": "narrative-drift-monitor",
+      "path": "narrative/evaluate/narrative-drift-monitor",
+      "source": 0
+    },
+    {
+      "name": "narrative-quality-auditor",
+      "path": "narrative/evaluate/narrative-quality-auditor",
+      "source": 0
+    },
+    {
+      "name": "narrative-resonance-monitor",
+      "path": "narrative/evaluate/narrative-resonance-monitor",
+      "source": 0
+    },
+    {
+      "name": "narrative-cascade-planner",
+      "path": "narrative/land/narrative-cascade-planner",
+      "source": 0
+    },
+    {
+      "name": "narrative-enablement-kit",
+      "path": "narrative/land/narrative-enablement-kit",
+      "source": 0
+    },
+    {
+      "name": "pitch-narrative-builder",
+      "path": "narrative/land/pitch-narrative-builder",
+      "source": 0
+    },
+    {
+      "name": "proof-point-packager",
+      "path": "narrative/land/proof-point-packager",
+      "source": 0
+    },
+    {
+      "name": "audience-belief-mapper",
+      "path": "narrative/trace/audience-belief-mapper",
+      "source": 0
+    },
+    {
+      "name": "category-narrative-mapper",
+      "path": "narrative/trace/category-narrative-mapper",
+      "source": 0
+    },
+    {
+      "name": "narrative-baseline-mapper",
+      "path": "narrative/trace/narrative-baseline-mapper",
+      "source": 0
+    },
+    {
+      "name": "positioning-truth-tracer",
+      "path": "narrative/trace/positioning-truth-tracer",
+      "source": 0
+    },
+    {
+      "name": "channel-registry",
+      "path": "protocol/channel-registry",
+      "source": 0
+    },
+    {
+      "name": "consent-registry",
+      "path": "protocol/consent-registry",
+      "source": 0
+    },
+    {
+      "name": "creator-registry",
+      "path": "protocol/creator-registry",
+      "source": 0
+    },
+    {
+      "name": "entity-registry",
+      "path": "protocol/entity-registry",
+      "source": 0
+    },
+    {
+      "name": "launch-registry",
+      "path": "protocol/launch-registry",
+      "source": 0
+    },
+    {
+      "name": "memory-management",
+      "path": "protocol/memory-management",
+      "source": 0
+    },
+    {
+      "name": "narrative-registry",
+      "path": "protocol/narrative-registry",
+      "source": 0
+    },
+    {
+      "name": "offer-claims-registry",
+      "path": "protocol/offer-claims-registry",
+      "source": 0
+    },
+    {
+      "name": "domain-authority-auditor",
+      "path": "seo-geo/evaluate/domain-authority-auditor",
+      "source": 0
+    },
+    {
+      "name": "offsite-signal-analyzer",
+      "path": "seo-geo/evaluate/offsite-signal-analyzer",
+      "source": 0
+    },
+    {
+      "name": "performance-monitor",
+      "path": "seo-geo/evaluate/performance-monitor",
+      "source": 0
+    },
+    {
+      "name": "rank-tracker",
+      "path": "seo-geo/evaluate/rank-tracker",
+      "source": 0
+    },
+    {
+      "name": "content-writer",
+      "path": "seo-geo/implement/content-writer",
+      "source": 0
+    },
+    {
+      "name": "geo-content-optimizer",
+      "path": "seo-geo/implement/geo-content-optimizer",
+      "source": 0
+    },
+    {
+      "name": "page-play-builder",
+      "path": "seo-geo/implement/page-play-builder",
+      "source": 0
+    },
+    {
+      "name": "serp-markup-builder",
+      "path": "seo-geo/implement/serp-markup-builder",
+      "source": 0
+    },
+    {
+      "name": "competitor-analysis",
+      "path": "seo-geo/survey/competitor-analysis",
+      "source": 0
+    },
+    {
+      "name": "content-gap-analysis",
+      "path": "seo-geo/survey/content-gap-analysis",
+      "source": 0
+    },
+    {
+      "name": "keyword-research",
+      "path": "seo-geo/survey/keyword-research",
+      "source": 0
+    },
+    {
+      "name": "serp-analysis",
+      "path": "seo-geo/survey/serp-analysis",
+      "source": 0
+    },
+    {
+      "name": "content-quality-auditor",
+      "path": "seo-geo/tune/content-quality-auditor",
+      "source": 0
+    },
+    {
+      "name": "on-page-seo-checker",
+      "path": "seo-geo/tune/on-page-seo-checker",
+      "source": 0
+    },
+    {
+      "name": "site-structure-optimizer",
+      "path": "seo-geo/tune/site-structure-optimizer",
+      "source": 0
+    },
+    {
+      "name": "technical-seo-checker",
+      "path": "seo-geo/tune/technical-seo-checker",
+      "source": 0
+    },
+    {
+      "name": "advocacy-program-designer",
+      "path": "social/craft/advocacy-program-designer",
+      "source": 0
+    },
+    {
+      "name": "short-video-scripter",
+      "path": "social/craft/short-video-scripter",
+      "source": 0
+    },
+    {
+      "name": "social-calendar-builder",
+      "path": "social/craft/social-calendar-builder",
+      "source": 0
+    },
+    {
+      "name": "social-creative-builder",
+      "path": "social/craft/social-creative-builder",
+      "source": 0
+    },
+    {
+      "name": "channel-portfolio-planner",
+      "path": "social/explore/channel-portfolio-planner",
+      "source": 0
+    },
+    {
+      "name": "participation-warmup-planner",
+      "path": "social/explore/participation-warmup-planner",
+      "source": 0
+    },
+    {
+      "name": "platform-norm-profiler",
+      "path": "social/explore/platform-norm-profiler",
+      "source": 0
+    },
+    {
+      "name": "voice-dossier-builder",
+      "path": "social/explore/voice-dossier-builder",
+      "source": 0
+    },
+    {
+      "name": "crisis-response-planner",
+      "path": "social/host/crisis-response-planner",
+      "source": 0
+    },
+    {
+      "name": "engagement-inbox-manager",
+      "path": "social/host/engagement-inbox-manager",
+      "source": 0
+    },
+    {
+      "name": "social-quality-auditor",
+      "path": "social/host/social-quality-auditor",
+      "source": 0
+    },
+    {
+      "name": "social-selling-planner",
+      "path": "social/host/social-selling-planner",
+      "source": 0
+    },
+    {
+      "name": "dark-social-attributor",
+      "path": "social/observe/dark-social-attributor",
+      "source": 0
+    },
+    {
+      "name": "share-of-voice-tracker",
+      "path": "social/observe/share-of-voice-tracker",
+      "source": 0
+    },
+    {
+      "name": "social-measurement-loop",
+      "path": "social/observe/social-measurement-loop",
+      "source": 0
+    },
+    {
+      "name": "social-pulse-monitor",
+      "path": "social/observe/social-pulse-monitor",
+      "source": 0
+    }
+  ]
+}

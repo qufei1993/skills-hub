@@ -53,8 +53,8 @@
 
 ## 参考文档
 
-- 设计文档：[安装时选择全局或项目范围](../superpowers/specs/2026-06-19-install-scope-design.md)
-- 实现计划：[Install Scope Selection Implementation Plan](../superpowers/plans/2026-06-19-install-scope.md)
+- 设计文档：[安装时选择全局或项目范围](../../superpowers/specs/2026-06-19-install-scope-design.md)
+- 原实现计划未随仓库归档。
 
 ## 验证
 

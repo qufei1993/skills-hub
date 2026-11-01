@@ -235,3 +235,54 @@ fn linux_start_args_start_service_for_immediate_test() {
         vec!["--user", "start", "com.skillshub.autoupdate.service"]
     );
 }
+
+#[cfg(target_os = "windows")]
+#[test]
+fn windows_scheduler_decodes_localized_errors() {
+    use crate::core::system_scheduler::decode_windows_output_with_code_page;
+
+    let cases: &[(u32, &[u8], &str)] = &[
+        (
+            936,
+            b"\xb4\xed\xce\xf3: \xbe\xdc\xbe\xf8\xb7\xc3\xce\xca\xa1\xa3",
+            "错误: 拒绝访问。",
+        ),
+        (949, b"\xbf\xc0\xb7\xf9", "오류"),
+        (850, b"Acc\x8as refus\x82", "Accès refusé"),
+    ];
+    for &(code_page, bytes, expected) in cases {
+        assert_eq!(
+            decode_windows_output_with_code_page(bytes, code_page),
+            expected
+        );
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn windows_scheduler_preserves_utf8_and_empty_output() {
+    use crate::core::system_scheduler::decode_windows_output_with_code_page;
+
+    for text in [
+        "",
+        "ERROR: Access is denied.\r\n",
+        "错误: 拒绝访问。\r\n",
+        "오류",
+    ] {
+        assert_eq!(
+            decode_windows_output_with_code_page(text.as_bytes(), 936),
+            text
+        );
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn windows_scheduler_handles_invalid_code_page_without_panicking() {
+    use crate::core::system_scheduler::decode_windows_output_with_code_page;
+
+    assert_eq!(
+        decode_windows_output_with_code_page(b"\xff", u32::MAX),
+        "\u{fffd}"
+    );
+}

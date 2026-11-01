@@ -416,6 +416,45 @@ fn current_uid() -> Result<u32> {
 }
 
 #[cfg(target_os = "windows")]
+fn decode_windows_output(bytes: &[u8]) -> String {
+    use windows_sys::Win32::Globalization::GetOEMCP;
+
+    decode_windows_output_with_code_page(bytes, unsafe { GetOEMCP() })
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn decode_windows_output_with_code_page(bytes: &[u8], code_page: u32) -> String {
+    use windows_sys::Win32::Globalization::MultiByteToWideChar;
+
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return text.to_owned();
+    }
+    let Ok(len) = i32::try_from(bytes.len()) else {
+        return String::from_utf8_lossy(bytes).into_owned();
+    };
+    let required =
+        unsafe { MultiByteToWideChar(code_page, 0, bytes.as_ptr(), len, std::ptr::null_mut(), 0) };
+    if required <= 0 {
+        return String::from_utf8_lossy(bytes).into_owned();
+    }
+    let mut wide = vec![0u16; required as usize];
+    let written = unsafe {
+        MultiByteToWideChar(
+            code_page,
+            0,
+            bytes.as_ptr(),
+            len,
+            wide.as_mut_ptr(),
+            required,
+        )
+    };
+    if written <= 0 {
+        return String::from_utf8_lossy(bytes).into_owned();
+    }
+    String::from_utf16_lossy(&wide[..written as usize])
+}
+
+#[cfg(target_os = "windows")]
 fn install_windows_task(config: &SchedulerConfig) -> Result<()> {
     let out = background_command("schtasks")
         .args(windows_schtasks_args(config)?)
@@ -424,7 +463,7 @@ fn install_windows_task(config: &SchedulerConfig) -> Result<()> {
     if !out.status.success() {
         anyhow::bail!(
             "schtasks create failed: {}",
-            String::from_utf8_lossy(&out.stderr)
+            decode_windows_output(&out.stderr)
         );
     }
     Ok(())
@@ -437,7 +476,7 @@ fn uninstall_windows_task() -> Result<()> {
         .output()
         .context("schtasks delete")?;
     if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr);
+        let stderr = decode_windows_output(&out.stderr);
         if !stderr.contains("cannot find") {
             anyhow::bail!("schtasks delete failed: {}", stderr);
         }
@@ -457,7 +496,7 @@ fn get_windows_task_status() -> SchedulerTaskStatus {
         },
         Ok(out) => SchedulerTaskStatus {
             registered: false,
-            detail: String::from_utf8_lossy(&out.stderr).trim().to_string(),
+            detail: decode_windows_output(&out.stderr).trim().to_string(),
         },
         Err(err) => SchedulerTaskStatus {
             registered: false,
@@ -479,7 +518,7 @@ fn trigger_windows_task_now() -> Result<()> {
     if !out.status.success() {
         anyhow::bail!(
             "schtasks run failed: {}",
-            String::from_utf8_lossy(&out.stderr)
+            decode_windows_output(&out.stderr)
         );
     }
     Ok(())

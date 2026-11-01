@@ -1,3 +1,37 @@
+export type AgentAccessReason = 'CENTRAL_MISSING' | 'CENTRAL_MODIFIED' | 'CENTRAL_IO_ERROR' | 'CENTRAL_UNSAFE_PATH' | 'RECORD_ERROR' | 'TARGET_MISSING' | 'TARGET_MODIFIED' | 'TARGET_OWNERSHIP' | 'VERSION_MISMATCH'
+
+export type AgentAccessAgentDto = {
+  key: string
+  label: string
+  detected: boolean
+  enabled: boolean
+  deployed: boolean
+  needsRepair: boolean
+  reason: AgentAccessReason | null
+  path: string
+}
+
+export type AgentAccessStatusDto = {
+  skillId: string | null
+  skillEnabled: boolean
+  terminalReady: boolean
+  terminalPathConflict: boolean
+  officialState: 'missing' | 'healthy' | 'needs_repair' | 'name_conflict'
+  conflict: { sourceKind: 'local' | 'git' | 'other'; centralPath: string } | null
+  bridge: {
+    status: 'missing' | 'valid' | 'damaged'
+    reason: 'DIRECTORY_MISSING' | 'BINARY_MISSING' | 'STAMP_MISSING' | 'VERSION_MISMATCH' | 'HASH_MISMATCH' | 'NOT_EXECUTABLE' | 'INVALID_METADATA' | 'SOURCE_MISSING' | 'IO_ERROR' | 'PUBLICATION_IN_PROGRESS' | null
+    path: string
+    version: string | null
+  }
+  bundledVersion: string
+  installedVersion: string | null
+  skillUpdateAvailable?: boolean
+  installed: boolean
+  centralReason: AgentAccessReason | null
+  agents: AgentAccessAgentDto[]
+}
+
 export type OnboardingVariant = {
   tool: string
   name: string
@@ -41,6 +75,13 @@ export type TagWithCountDto = TagDto & {
   updated_at: number
 }
 
+export type ContentEntryMetadata = { kind: 'file' | 'directory' | 'symlink'; mode?: number; readonly?: boolean }
+export type ContentFileChange = { path: string; kind: string; before: string | null; after: string | null; beforeMetadata?: ContentEntryMetadata | null; afterMetadata?: ContentEntryMetadata | null }
+export type SourceConflictChoice = 'central' | 'tool'
+export type SourceConflictOption = { targets: string[]; blocked: { code: string; path: string | null } | null }
+export type SourceConflictPreview = { id: string; skillId: string; name: string; centralPath: string; sourcePath: string; changes: ContentFileChange[]; central: SourceConflictOption; tool: SourceConflictOption }
+export type SourceConflictOutcome = { id: string; skillId: string; name: string; choice: SourceConflictChoice; targets: string[] }
+
 export type ManagedSkill = {
   source_error?: string | null
   source_checked_at?: number | null
@@ -49,6 +90,9 @@ export type ManagedSkill = {
   description?: string | null
   source_type: string
   source_ref?: string | null
+  source_revision?: string | null
+  source_subpath?: string | null
+  content_hash?: string | null
   central_path: string
   created_at: number
   updated_at: number
@@ -69,6 +113,8 @@ export type ManagedSkill = {
 }
 
 export type GitSkillCandidate = {
+  existing_skill_id?: string
+  status?: 'install' | 'update' | 'conflict'
   name: string
   description?: string | null
   subpath: string
@@ -83,11 +129,16 @@ export type LocalSkillCandidate = {
 }
 
 export type InstallResultDto = {
+  action?: 'installed' | 'updated' | 'unchanged'
+  pending_targets?: string[]
   skill_id: string
   name: string
   central_path: string
   content_hash?: string | null
 }
+
+// Discovery imports return null when the selected source is already managed.
+export type DiscoveredSkillImportResultDto = InstallResultDto | null
 
 export type ToolInfoDto = {
   key: string
@@ -222,15 +273,6 @@ export type AutoUpdateProgressSnapshotDto = {
   failed: AutoUpdateSkillProgressDto[]
   running?: AutoUpdateSkillProgressDto | null
   pending: AutoUpdateSkillProgressDto[]
-}
-
-export type FeaturedSkillDto = {
-  slug: string
-  name: string
-  summary: string
-  downloads: number
-  stars: number
-  source_url: string
 }
 
 export type OnlineSkillDto = {
@@ -420,3 +462,31 @@ export type RecycleBinLocations = {
   manual_backup: string
   sync_backup: string
 }
+
+export type CliPreparationProgress = {
+  operationId: string
+  phase: 'preparing' | 'downloading' | 'verifying' | 'installing' | 'configuring'
+  downloadedBytes: number
+  totalBytes: number | null
+}
+
+export type CollectionManifest = {
+  v: 1
+  title: string
+  sources: { repo: string; ref: string }[]
+  skills: { name: string; path: string; source: number }[]
+}
+export type CollectionResult = { state: 'installed' | 'existing' | 'failed'; message?: string }
+
+export type PresetMember = { skillId: string; tools: string[] }
+export type SkillPreset = { id: string; name: string; description: string; members: PresetMember[]; revision: number }
+export type WorkspaceScope = { kind: 'global' } | { kind: 'project'; path: string }
+export type ApplicationItem = {
+  skillId: string; name: string; tools: string[]; scope: WorkspaceScope
+  targets: { agents: string[]; affected_agents: string[]; path: string; mode: SyncMode; exists: boolean }[]
+  action: string; status: string; reason: string | null
+  conflict?: { agent: string; path: string; reason: string } | null
+}
+export type ApplicationRecord = { id: string; preset: SkillPreset | null; createdAt: number; confirmed: boolean; remove: boolean; items: ApplicationItem[]; undoTargetCount: number }
+export type WorkspaceUndoItem = { targetId: string; skillId: string; path: string; tool: string; scope: WorkspaceScope; canRemove: boolean; reason: string }
+export type WorkspaceIntent = { mode: 'edit' | 'select'; operation?: 'tool' | 'targets' | 'repair'; members: PresetMember[]; scope?: WorkspaceScope; remove?: boolean }

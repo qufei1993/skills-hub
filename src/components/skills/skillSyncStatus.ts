@@ -19,8 +19,9 @@ export const isSuccessfulSkillTarget = (target: SkillTarget) =>
   target.status === 'ok'
 
 export function getSkillSyncState(
-  skill: Pick<ManagedSkill, 'enabled' | 'status' | 'targets'>,
+  skill: Pick<ManagedSkill, 'enabled' | 'status' | 'targets' | 'source_error'>,
 ): SkillSyncState {
+  if (skill.source_error === 'SKILL_ISSUE|centralMissing') return 'source-error'
   if (!skill.enabled) return 'disabled'
   if (skill.status !== 'ok') return 'source-error'
   const activeTargets = skill.targets.filter(isActiveSkillTarget)
@@ -34,12 +35,12 @@ export function getSkillSyncState(
 export function getToolSyncState(
   skill: Pick<ManagedSkill, 'targets'>,
   toolId: string,
-  scope: 'global' | 'project',
+  scope: 'all' | 'global' | 'project',
 ): ToolSyncState {
   const targets = skill.targets.filter(
     (target) =>
       target.tool === toolId &&
-      (target.scope ?? 'global') === scope &&
+      (scope === 'all' || (target.scope ?? 'global') === scope) &&
       isActiveSkillTarget(target),
   )
   if (targets.length === 0) return 'not-synced'
@@ -52,7 +53,7 @@ export function getToolSyncState(
 export function getFullySyncedTools<T extends { id: string }>(
   skill: Pick<ManagedSkill, 'targets'>,
   tools: T[],
-  scope: 'global' | 'project',
+  scope: 'all' | 'global' | 'project',
 ): T[] {
   return tools.filter(
     (tool) => getToolSyncState(skill, tool.id, scope) === 'synced',

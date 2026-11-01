@@ -1,121 +1,112 @@
+pub mod cli;
 mod commands;
-mod core;
+pub mod core;
+pub mod services;
+mod window_lifecycle;
+
+const _: () = assert!(
+    cfg!(debug_assertions) == (env!("SKILLS_HUB_EXPECT_DEBUG_ASSERTIONS").as_bytes()[0] == b'1'),
+    "CLI_BRIDGE_PROFILE_MISMATCH"
+);
+
+#[cfg(test)]
+#[path = "../cli_sidecar_profile.rs"]
+mod cli_bridge_profile;
 
 use std::sync::Arc;
 
 use core::cancel_token::CancelToken;
-use core::skill_store::{default_db_path, migrate_legacy_db_if_needed, SkillStore};
-use tauri::menu::{Menu, MenuItem};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use core::runtime_paths::open_store;
+pub use core::runtime_paths::{RuntimePaths, RuntimeProfile};
+use services::operation_lock::{OperationKind, OperationLock};
+use services::skills_hub::SkillsHubService;
 use tauri::Manager;
 use tauri_plugin_log::{Target, TargetKind};
 
-fn runtime_context() -> tauri::Context<tauri::Wry> {
-    let context = tauri::generate_context!();
-    #[cfg(debug_assertions)]
-    let context = {
-        let mut context: tauri::Context<tauri::Wry> = context;
-        if !context.config().identifier.ends_with(".dev") {
-            context.config_mut().identifier.push_str(".dev");
+fn is_background_update_args(args: impl IntoIterator<Item = String>) -> bool {
+    args.into_iter()
+        .collect::<Vec<_>>()
+        .windows(2)
+        .any(|pair| pair[0] == "--background-task" && pair[1] == "update-skills")
+}
+
+fn runtime_context(is_background_update: bool) -> tauri::Context<tauri::Wry> {
+    let mut context = tauri::generate_context!();
+    if is_background_update {
+        for window in &mut context.config_mut().app.windows {
+            window.create = false;
         }
-        context
-    };
+    }
     context
 }
 
-const TRAY_ID: &str = "skills-hub-tray";
-const TRAY_MENU_SHOW: &str = "tray-show";
-const TRAY_MENU_QUIT: &str = "tray-quit";
-
-/// The tray menu is native window-manager text, so it cannot come from the web i18n
-/// bundle. The frontend pushes the active interface language once it has loaded.
-fn tray_labels(language: &str) -> (&'static str, &'static str) {
-    match language {
-        "zh" => ("显示主窗口", "退出 Skills Hub"),
-        "ko" => ("Skills Hub 열기", "Skills Hub 종료"),
-        _ => ("Show Skills Hub", "Quit Skills Hub"),
+fn runtime_paths<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> anyhow::Result<RuntimePaths> {
+    #[cfg(debug_assertions)]
+    if let Some(root) = std::env::var_os("SKILLSHUB_DESKTOP_TEST_ROOT") {
+        return RuntimePaths::from_desktop_test_root(std::path::PathBuf::from(root));
     }
+    if cfg!(feature = "local-test") {
+        return RuntimePaths::for_cli(RuntimeProfile::Development);
+    }
+    let app_data_dir = app.path().app_data_dir()?;
+    let home_root = dirs::home_dir().unwrap_or_else(|| app_data_dir.clone());
+    Ok(RuntimePaths::from_tauri(
+        RuntimeProfile::current(),
+        home_root,
+        app_data_dir,
+        app.path().app_cache_dir()?,
+    ))
 }
 
-fn build_tray_menu<R: tauri::Runtime>(
+pub(crate) fn runtime_paths_for_tauri<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
-    language: &str,
-) -> tauri::Result<Menu<R>> {
-    let (show, quit) = tray_labels(language);
-    let show_item = MenuItem::with_id(app, TRAY_MENU_SHOW, show, true, None::<&str>)?;
-    let quit_item = MenuItem::with_id(app, TRAY_MENU_QUIT, quit, true, None::<&str>)?;
-    Menu::with_items(app, &[&show_item, &quit_item])
-}
-
-fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
+) -> anyhow::Result<RuntimePaths> {
+    if let Some(paths) = app.try_state::<RuntimePaths>() {
+        return Ok(paths.inner().clone());
     }
+    runtime_paths(app)
 }
 
-/// The tray must exist before the close button can hide the window, otherwise the app
-/// would become unreachable. Callers therefore treat a missing tray as "not hidden".
-fn setup_tray<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
-    let menu = build_tray_menu(app, "en")?;
-    let mut builder = TrayIconBuilder::with_id(TRAY_ID)
-        .menu(&menu)
-        .show_menu_on_left_click(false)
-        .tooltip("Skills Hub")
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            TRAY_MENU_SHOW => show_main_window(app),
-            TRAY_MENU_QUIT => app.exit(0),
-            _ => {}
-        })
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
-                show_main_window(tray.app_handle());
-            }
-        });
-    if let Some(icon) = app.default_window_icon().cloned() {
-        builder = builder.icon(icon);
+#[cfg(any(target_os = "macos", test))]
+fn activate_collection_link(links: &[String], activate: impl FnOnce()) {
+    if links
+        .iter()
+        .any(|link| commands::collection_link::parse_link(link).is_ok())
+    {
+        activate();
     }
-    builder.build(app)?;
-    Ok(())
-}
-
-/// Re-labels the tray menu for the interface language the web app is currently using.
-pub(crate) fn apply_tray_language<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    language: &str,
-) -> Result<(), String> {
-    let Some(tray) = app.tray_by_id(TRAY_ID) else {
-        return Ok(());
-    };
-    let menu = build_tray_menu(app, language).map_err(|err| err.to_string())?;
-    tray.set_menu(Some(menu)).map_err(|err| err.to_string())
-}
-
-fn init_store<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> anyhow::Result<SkillStore> {
-    let db_path = default_db_path(app)?;
-    migrate_legacy_db_if_needed(&db_path)?;
-    let store = SkillStore::new(db_path);
-    store.ensure_schema()?;
-    store.migrate_device_sync_startup_credential_consent()?;
-    Ok(store)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(debug_assertions)]
     let _ = dotenvy::dotenv();
-    tauri::Builder::default()
+    let is_background_update = is_background_update_args(std::env::args());
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = if std::env::args().any(|arg| arg == "--background-task") {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            if let Err(error) = window_lifecycle::show_main_window(app) {
+                log::warn!("second launch could not restore window: {error:#}");
+            }
+        }))
+    };
+    let app = builder
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .setup(|app| {
+        .plugin(core::app_updater::builder().build())
+        .setup(move |app| {
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
+            if !cfg!(debug_assertions) {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                if app.deep_link().register_all().is_err() {
+                    eprintln!("Could not register the Skills Hub collection link protocol.");
+                }
+            }
             app.handle().plugin(
                 tauri_plugin_log::Builder::default()
                     .level(log::LevelFilter::Info)
@@ -127,24 +118,25 @@ pub fn run() {
                     .build(),
             )?;
 
-            let is_background_update = std::env::args()
-                .collect::<Vec<_>>()
-                .windows(2)
-                .any(|pair| pair[0] == "--background-task" && pair[1] == "update-skills");
             let force_background_update = std::env::args().any(|arg| arg == "--force");
 
-            let store = init_store(app.handle()).map_err(tauri::Error::from)?;
+            let paths = runtime_paths(app.handle()).map_err(tauri::Error::from)?;
+            let store = open_store(&paths).map_err(tauri::Error::from)?;
+            app.manage(paths.clone());
+            app.manage(store.clone());
+            let service = SkillsHubService::from_store(paths.clone(), store.clone());
+            app.manage(service.clone());
 
             if is_background_update {
-                #[cfg(target_os = "macos")]
-                {
-                    app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-                }
-                let run_result = if force_background_update {
-                    core::auto_update::run_auto_update_now(app.handle(), &store).map(Some)
-                } else {
-                    core::auto_update::run_due_auto_update(app.handle(), &store)
-                };
+                let run_result = (|| -> anyhow::Result<_> {
+                    let _operation_lock =
+                        OperationLock::acquire(&paths, OperationKind::AutoUpdate)?;
+                    if force_background_update {
+                        core::auto_update::run_auto_update_now(app.handle(), &store).map(Some)
+                    } else {
+                        core::auto_update::run_due_auto_update(app.handle(), &store)
+                    }
+                })();
                 match run_result {
                     Ok(Some(result)) => {
                         log::info!(
@@ -166,20 +158,26 @@ pub fn run() {
                 return Ok(());
             }
 
-            app.manage(store.clone());
+            if core::window_behavior::uses_desktop_lifecycle(is_background_update) {
+                window_lifecycle::setup(app.handle(), &store);
+            }
             app.manage(Arc::new(CancelToken::new()));
+            app.manage(commands::content_check::ContentCheckRegistry::default());
 
-            let sync_workspace = app.handle().path().app_data_dir()?.join("device-sync");
-            let sync_central = core::central_repo::resolve_central_repo_path(app.handle(), &store)?;
+            let sync_workspace = paths.app_data_dir.join("device-sync");
+            let sync_central = core::central_repo::resolve_central_repo_path(&paths, &store)?;
             let sync_credentials = core::device_sync::credentials::SystemCredentialStore;
-            match core::device_sync::DeviceSyncService::new(
-                &store,
-                &sync_credentials,
-                sync_workspace,
-                sync_central,
-            )
-            .repair_legacy_same_device_conflicts()
-            {
+            let repair_result = (|| -> anyhow::Result<bool> {
+                let _operation_lock = OperationLock::acquire(&paths, OperationKind::DeviceSync)?;
+                core::device_sync::DeviceSyncService::new(
+                    &store,
+                    &sync_credentials,
+                    sync_workspace,
+                    sync_central,
+                )
+                .repair_legacy_same_device_conflicts()
+            })();
+            match repair_result {
                 Ok(true) => {
                     log::info!("recovered same-device sync baseline from repository history")
                 }
@@ -196,9 +194,12 @@ pub fn run() {
                     let store_for_device_sync = store.clone();
                     tauri::async_runtime::spawn(async move {
                         let result = tauri::async_runtime::spawn_blocking(move || {
-                            let workspace = handle.path().app_data_dir()?.join("device-sync");
+                            let paths = handle.state::<RuntimePaths>();
+                            let _operation_lock =
+                                OperationLock::acquire(paths.inner(), OperationKind::DeviceSync)?;
+                            let workspace = paths.app_data_dir.join("device-sync");
                             let central = core::central_repo::resolve_central_repo_path(
-                                &handle,
+                                paths.inner(),
                                 &store_for_device_sync,
                             )?;
                             let credentials = core::device_sync::credentials::SystemCredentialStore;
@@ -228,11 +229,11 @@ pub fn run() {
             // - Only deletes directories that match prefix `skills-hub-git-*`
             // - And contain our marker file `.skills-hub-git-temp`
             // - And are older than the max age.
-            let handle = app.handle().clone();
+            let cleanup_paths = app.state::<RuntimePaths>().inner().clone();
             let store_for_cleanup = store.clone();
             tauri::async_runtime::spawn(async move {
                 let removed = core::temp_cleanup::cleanup_old_git_temp_dirs(
-                    &handle,
+                    &cleanup_paths,
                     std::time::Duration::from_secs(24 * 60 * 60),
                 )
                 .unwrap_or(0);
@@ -246,7 +247,8 @@ pub fn run() {
                     let max_age =
                         std::time::Duration::from_secs(cleanup_days as u64 * 24 * 60 * 60);
                     let removed =
-                        core::cache_cleanup::cleanup_git_cache_dirs(&handle, max_age).unwrap_or(0);
+                        core::cache_cleanup::cleanup_git_cache_dirs(&cleanup_paths, max_age)
+                            .unwrap_or(0);
                     if removed > 0 {
                         log::info!("cleaned up {} git cache dirs", removed);
                     }
@@ -256,21 +258,21 @@ pub fn run() {
             let recycle_handle = app.handle().clone();
             let recycle_store = store.clone();
             std::thread::spawn(move || loop {
-                let root = match recycle_handle.path().app_data_dir() {
-                    Ok(path) => path.join("recycle-bin"),
-                    Err(error) => {
-                        log::warn!("resolve recycle bin directory failed: {error:#}");
-                        std::thread::sleep(std::time::Duration::from_secs(24 * 60 * 60));
-                        continue;
-                    }
-                };
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_millis() as i64;
-                match core::recycle_bin::RecycleBinService::new(&recycle_store, root)
+                let cleanup_result = (|| -> anyhow::Result<usize> {
+                    let paths = recycle_handle.state::<RuntimePaths>();
+                    let _operation_lock =
+                        OperationLock::acquire(paths.inner(), OperationKind::Delete)?;
+                    core::recycle_bin::RecycleBinService::new(
+                        &recycle_store,
+                        paths.recycle_bin_dir.clone(),
+                    )
                     .cleanup_expired(now)
-                {
+                })();
+                match cleanup_result {
                     Ok(removed) if removed > 0 => {
                         log::info!("cleaned up {removed} expired recycle bin items");
                     }
@@ -280,15 +282,31 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(24 * 60 * 60));
             });
 
-            if let Err(error) = setup_tray(app.handle()) {
-                // Without a tray the window must not hide on close, or the app would be
-                // unreachable. `on_window_event` already falls back to quitting.
-                log::warn!("tray icon setup failed: {error:#}");
-            }
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::workspace::workspace_recheck,
+            commands::workspace::workspace_content_preview,
+            commands::source_conflict::source_conflict_preview,
+            commands::source_conflict::source_conflict_execute,
+            commands::content_check::workspace_content_check,
+            commands::content_check::workspace_content_check_cached,
+            commands::content_check::workspace_content_check_cancel,
+            commands::workspace::workspace_content_execute,
+            commands::workspace::workspace_recoveries,
+            commands::workspace::workspace_source_preview,
+            commands::workspace::workspace_source_execute,
+            commands::workspace::workspace_presets,
+            commands::workspace::workspace_save_preset,
+            commands::workspace::workspace_delete_preset,
+            commands::workspace::workspace_preview,
+            commands::workspace::workspace_execute,
+            commands::workspace::workspace_discard,
+            commands::workspace::workspace_history,
+            commands::workspace::workspace_preview_undo,
+            commands::workspace::workspace_undo,
+            commands::collection_link::parse_collection_link,
+            commands::collection_link::validate_collection_manifest,
             commands::get_central_repo_path,
             commands::preview_central_repo_path_change,
             commands::set_central_repo_path,
@@ -297,6 +315,9 @@ pub fn run() {
             commands::get_tool_config,
             commands::set_tool_config,
             commands::get_tool_status,
+            commands::get_agent_access_status,
+            commands::set_agent_access,
+            commands::enable_ai_management,
             commands::get_git_cache_cleanup_days,
             commands::get_git_cache_ttl_secs,
             commands::set_git_cache_cleanup_days,
@@ -315,7 +336,12 @@ pub fn run() {
             commands::install_local_selection,
             commands::install_git,
             commands::list_git_skills_cmd,
+            commands::preview_git_skills_local,
             commands::install_git_selection,
+            commands::resolve_collection_revision,
+            commands::preview_collection_skills_local,
+            commands::list_collection_skills,
+            commands::install_collection_selection,
             commands::sync_skill_dir,
             commands::sync_skill_to_tool,
             commands::unsync_skill_from_tool,
@@ -339,7 +365,8 @@ pub fn run() {
             commands::set_skill_tags,
             commands::get_untagged_skill_ids,
             commands::delete_managed_skill,
-            commands::get_featured_skills,
+            commands::get_website_collections,
+            commands::cache_website_collections,
             commands::search_skills_online,
             commands::list_skill_files,
             commands::read_skill_file,
@@ -371,38 +398,154 @@ pub fn run() {
             commands::restore_device_sync_trash,
             commands::disconnect_device_sync,
             commands::cancel_current_operation,
-            commands::set_tray_language
+            commands::tray::set_tray_language
         ])
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // Closing keeps the app running in the notification area so scheduled
-                // updates and device sync stay alive. Quit from the tray menu instead.
-                if window.app_handle().tray_by_id(TRAY_ID).is_some() {
-                    api.prevent_close();
-                    let _ = window.hide();
-                } else {
-                    window.app_handle().exit(0);
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    let app = window.app_handle();
+                    let hide = app
+                        .try_state::<window_lifecycle::WindowLifecycle>()
+                        .is_some_and(|state| state.should_hide(app));
+                    if hide && window.hide().is_ok() {
+                        api.prevent_close();
+                    } else {
+                        app.exit(0);
+                    }
                 }
             }
         })
-        .build(runtime_context())
-        .expect("error while running tauri application")
-        .run(|_app, _event| {});
+        .build(runtime_context(is_background_update))
+        .expect("error while running tauri application");
+    #[cfg(target_os = "macos")]
+    let app = {
+        let mut app = app;
+        if is_background_update {
+            // Configure the runtime before run(): setup executes after macOS activates the app.
+            app.set_activation_policy(tauri::ActivationPolicy::Prohibited);
+        }
+        app
+    };
+    app.run(move |_app, _event| {
+        if matches!(_event, tauri::RunEvent::Exit) {
+            if let Some(state) = _app.try_state::<window_lifecycle::WindowLifecycle>() {
+                state.stop();
+            }
+        }
+        #[cfg(target_os = "macos")]
+        if matches!(_event, tauri::RunEvent::Reopen { .. }) && !is_background_update {
+            if let Err(error) = window_lifecycle::show_main_window(_app) {
+                log::warn!("Dock reopen could not restore window: {error:#}");
+            }
+        }
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Opened { urls } = _event {
+            let links: Vec<String> = urls.iter().map(ToString::to_string).collect();
+            activate_collection_link(&links, || {
+                let _ = _app.show();
+                if let Some(window) = _app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            });
+        }
+    });
 }
 
 #[cfg(test)]
 mod environment_tests {
     #[test]
-    fn development_data_is_separate_from_packaged_data() {
+    fn collection_open_activates_only_for_valid_install_links() {
+        let manifest = serde_json::json!({"v":1,"title":"Collection","sources":[{"repo":"owner/repo","ref":"a".repeat(40)}],"skills":[{"name":"design","path":"skills/design","source":0}]});
+        let valid = format!(
+            "skills-hub://install?manifest={}",
+            urlencoding::encode(&manifest.to_string())
+        );
+        let activated = std::cell::Cell::new(false);
+        super::activate_collection_link(&[valid], || activated.set(true));
+        assert!(activated.get());
+        activated.set(false);
+        super::activate_collection_link(&["skills-hub://install?manifest=invalid".into()], || {
+            activated.set(true)
+        });
+        assert!(!activated.get());
+    }
+
+    #[test]
+    fn desktop_identity_keeps_the_shared_cli_data_identifier() {
         let packaged: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         let identifier = packaged["identifier"].as_str().unwrap();
-        let runtime = super::runtime_context();
-        if cfg!(debug_assertions) {
-            assert_ne!(runtime.config().identifier, identifier);
-            assert_eq!(runtime.config().identifier, format!("{identifier}.dev"));
+        let runtime = super::runtime_context(false);
+        let expected_identity = if cfg!(skills_hub_local_bundle) {
+            "com.qufei1993.skillshub.local-test"
         } else {
-            assert_eq!(runtime.config().identifier, identifier);
+            identifier
+        };
+        assert_eq!(runtime.config().identifier, expected_identity);
+        assert_eq!(identifier, super::core::runtime_paths::PRODUCT_IDENTIFIER);
+    }
+}
+
+#[cfg(test)]
+mod background_startup_tests {
+    #[test]
+    fn background_update_does_not_create_any_configured_window() {
+        let context = super::runtime_context(true);
+        assert!(!context.config().app.windows.is_empty());
+        assert!(context
+            .config()
+            .app
+            .windows
+            .iter()
+            .all(|window| !window.create));
+    }
+
+    #[test]
+    fn normal_startup_preserves_packaged_windows() {
+        let packaged: tauri::Config =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let context = super::runtime_context(false);
+        assert_eq!(context.config().app.windows, packaged.app.windows);
+        assert!(context
+            .config()
+            .app
+            .windows
+            .iter()
+            .any(|window| window.create && window.visible));
+    }
+
+    #[test]
+    fn only_the_complete_update_task_marker_selects_background_startup() {
+        for (args, expected) in [
+            (vec!["app", "--background-task", "update-skills"], true),
+            (
+                vec!["app", "--background-task", "update-skills", "--force"],
+                true,
+            ),
+            (
+                vec!["app", "--force", "--background-task", "update-skills"],
+                true,
+            ),
+            (vec!["app"], false),
+            (vec!["app", "--force"], false),
+            (vec!["app", "--background-task"], false),
+            (vec!["app", "--background-task", "other"], false),
+            (vec!["app", "update-skills", "--background-task"], false),
+            (
+                vec![
+                    "app",
+                    "skillshub://install-collection?url=https://example.com",
+                ],
+                false,
+            ),
+        ] {
+            assert_eq!(
+                super::is_background_update_args(args.iter().map(|arg| arg.to_string())),
+                expected,
+                "{args:?}"
+            );
         }
     }
 }

@@ -49,6 +49,8 @@ DeepSeek Harness 的本地 provider 默认监视 Skill 根目录并跟随符号�
 
 ## 自定义目录边界
 
+以下为 v0.9.0 的适配范围。v0.11.0 已补齐 `DSH_HOME` 支持及旧部署恢复步骤，见[当前说明](../v0.11.0/README.zh.md#deepseek-harness-自定义目录)。
+
 DeepSeek Harness 的 home path 优先级为显式 `dshHome` 配置、`DSH_HOME` 环境变量、默认 `~/.dsh`。内置适配器面向默认目录 `~/.dsh/skills`；使用自定义 `DSH_HOME`、`DSH_AGENTS_HOME` 或 `customSkillDirs` 的用户，可以在 Skills Hub 管理中心创建自定义工具并填写实际全局及项目目录。
 
 ## 实现范围

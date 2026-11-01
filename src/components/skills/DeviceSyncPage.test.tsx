@@ -13,6 +13,26 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => undefi
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
 
 describe('DeviceSyncPage', () => {
+  it('keeps a missing-central check failure visible until a successful recheck', async () => {
+    let missing = true
+    invokeMock.mockImplementation((command: string) => {
+      if (command === 'get_device_sync_config') return Promise.resolve({ provider: 'gitee', remote_url: 'https://gitee.com/example/sync.git', branch: 'main', has_credential: true, visibility: 'private', auto_check: false, auto_sync: false })
+      if (command === 'get_device_sync_status') return Promise.resolve({ configured: true, is_running: false, last_run_status: 'success', last_run_at: 1000, conflict_count: 0 })
+      if (command === 'get_device_sync_pending_oauth') return Promise.resolve(null)
+      if (command === 'check_device_sync') return missing ? Promise.reject('DEVICE_SYNC_FAILURE_centralMissing') : Promise.resolve({ items: [], added: 0, updated: 0, deleted: 0, conflicted: 0 })
+      return Promise.resolve([])
+    })
+    render(<DeviceSyncPage active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} onOpenToolIssues={vi.fn()} t={((key: string) => key) as TFunction} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'deviceSync.check' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('deviceSync.failureReasons.centralMissing')
+    expect(screen.getByText('deviceSync.visualState.failed')).toBeTruthy()
+    expect(invokeMock.mock.calls.some(([command]) => command === 'run_device_sync')).toBe(false)
+    missing = false
+    await waitFor(() => expect(screen.getByRole('button', { name: 'deviceSync.check' }).hasAttribute('disabled')).toBe(false))
+    fireEvent.click(screen.getByRole('button', { name: 'deviceSync.check' }))
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+  })
+
   it('shows a background credential failure without opening settings or requesting credentials', async () => {
     invokeMock.mockImplementation((command: string) => {
       if (command === 'get_device_sync_config') return Promise.resolve({ provider: 'gitee', remote_url: 'https://gitee.com/example/sync.git', branch: 'main', has_credential: true, visibility: 'private', auto_check: false, auto_sync: true, auto_sync_schedule: { mode: 'interval', minutes: 5 } })
@@ -31,9 +51,13 @@ describe('DeviceSyncPage', () => {
   it('offers credential recovery after manual sync without reading credentials on page load', async () => {
     const error = 'DEVICE_SYNC_READ_CREDENTIAL_REQUIRED'
     const config = { provider: 'gitee', remote_url: 'https://gitee.com/example/sync.git', branch: 'main', has_credential: true, visibility: 'private', auto_check: false, auto_sync: false }
+    let completeRepositoryLoad: () => void = () => undefined
+    const repositoryRequest = new Promise<Array<{ name: string; clone_url: string; web_url: string; visibility: string; private: boolean }>>((resolve) => {
+      completeRepositoryLoad = () => resolve([{ name: 'sync', clone_url: config.remote_url, web_url: config.remote_url, visibility: 'private', private: true }])
+    })
     invokeMock.mockImplementation((command: string) => {
       if (command === 'get_device_sync_config' || command === 'save_device_sync_config') return Promise.resolve(config)
-      if (command === 'list_device_sync_repositories') return Promise.resolve([{ name: 'sync', clone_url: config.remote_url, web_url: config.remote_url, visibility: 'private', private: true }])
+      if (command === 'list_device_sync_repositories') return repositoryRequest
       if (command === 'get_device_sync_status') return Promise.resolve({ configured: true, is_running: false, last_run_status: 'failed', last_run_at: 2000, conflict_count: 0 })
       if (command === 'get_device_sync_history') return Promise.resolve([{ id: 'failure', started_at: 1000, finished_at: 2000, status: 'failed', error: 'DEVICE_SYNC_FAILURE_credentialMissing', added: 0, updated: 0, deleted: 0, conflicted: 0 }])
       if (command === 'get_device_sync_pending_oauth') return Promise.resolve(null)
@@ -42,14 +66,19 @@ describe('DeviceSyncPage', () => {
     })
     render(<DeviceSyncPage active isTauri onSkillsChanged={vi.fn(async () => undefined)} onConflictCountChange={vi.fn()} onOpenToolIssues={vi.fn()} t={((key: string) => key) as TFunction} />)
     fireEvent.click(await screen.findByRole('button', { name: 'deviceSync.syncLocalRepository' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'deviceSync.configureCredentials' }))
+    const recoveryButton = await screen.findByRole('button', { name: 'deviceSync.configureCredentials' })
+    await waitFor(() => expect(recoveryButton.hasAttribute('disabled')).toBe(false))
+    fireEvent.click(recoveryButton)
     const dialog = screen.getByRole('dialog')
     expect(within(dialog).getByText('deviceSync.advancedSettings').closest('details')?.open).toBe(true)
     expect(within(dialog).queryByPlaceholderText('deviceSync.tokenStored')).toBeNull()
     expect(invokeMock.mock.calls.some(([command]) => ['list_device_sync_repositories', 'start_device_sync_oauth', 'disconnect_device_sync'].includes(command))).toBe(false)
     fireEvent.change(within(dialog).getByPlaceholderText('deviceSync.tokenPlaceholder'), { target: { value: 'replacement-test-token' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'deviceSync.loadRepositories' }))
-    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'deviceSync.saveChanges' }).hasAttribute('disabled')).toBe(false))
+    expect(within(dialog).getByText('deviceSync.loadingRepositories')).toBeTruthy()
+    expect(invokeMock.mock.calls.some(([command]) => command === 'save_device_sync_config')).toBe(false)
+    await act(async () => completeRepositoryLoad())
+    expect(await within(dialog).findByRole('radio', { name: 'sync' })).toBeTruthy()
     fireEvent.click(within(dialog).getByRole('button', { name: 'deviceSync.saveChanges' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(screen.queryByRole('button', { name: 'deviceSync.configureCredentials' })).toBeNull()

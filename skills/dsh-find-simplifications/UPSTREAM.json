@@ -1,0 +1,49 @@
+{
+  "version": "1.0.0",
+  "upstream": {
+    "url": "https://github.com/deepseek-ai/deepseek-harness",
+    "commit": "571902028a75c64c1d767f4ae5fd099485f0ddf0"
+  },
+  "files": {
+    ".agents/skills/cordis-styling-nitpicking/SKILL.md": {
+      "sha256": "697bdf8aced2c680b74ceea93cb836d650c85f3f451618891d320327cd74d5b1",
+      "adaptation": "保留通用方法；上游项目的命令、路径和 Cordis API 不作为目标项目要求。"
+    },
+    ".agents/skills/dsh-error-handling/SKILL.md": {
+      "sha256": "fcde7e278056263f7b93b6854fe05d0b492bdf09739f4f4f3537e8ffd30a1c2d",
+      "adaptation": "保留通用方法；上游项目的命令、路径和 Cordis API 不作为目标项目要求。"
+    },
+    ".agents/skills/dsh-find-simplifications/SKILL.md": {
+      "sha256": "09fc14a2f316a635488035a8879428e097ba2f55eeffa39f468182cf70bfd2fb",
+      "adaptation": "保留通用方法；上游项目的命令、路径和 Cordis API 不作为目标项目要求。"
+    },
+    ".agents/skills/dsh-prose-standard/SKILL.md": {
+      "sha256": "df56be84f9ee917a34055c9e229d06c409bce478de7bb0deb233240c1887f2eb",
+      "adaptation": "保留通用方法；上游项目的命令、路径和 Cordis API 不作为目标项目要求。"
+    },
+    "AGENTS.md": {
+      "sha256": "1eea3932544766e8a4ccc2d88dcba14ad0a3bd4e28fa660f920b9183f63e7196",
+      "adaptation": "提炼显式默认值、配置、校验、类型变体、标识符、可撤销注册和独立演进的能力角色；不将 DSH 专用的 TypeScript/Cordis 强制规则套用到其他技术栈。"
+    },
+    "LICENSE": {
+      "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be",
+      "adaptation": "保留通用方法；上游项目的命令、路径和 Cordis API 不作为目标项目要求。"
+    },
+    "docs/AGENTS.md": {
+      "sha256": "cc76a90dfbdcdbf1db71b83675744c1c4039d9ccca8f38ad58a96ab56521578d",
+      "adaptation": "保留通用方法；上游项目的命令、路径和 Cordis API 不作为目标项目要求。"
+    },
+    "docs/defensive-patterns/general.md": {
+      "sha256": "7ebdc210c7de3e632050c6db847486a35332b0572cf17ecd4c0861bd6e018f75",
+      "adaptation": "保留通用方法；上游项目的命令、路径和 Cordis API 不作为目标项目要求。"
+    },
+    "docs/testing.md": {
+      "sha256": "d51726817f87d7599e9d59e376435f3dbdd37fe0bba799ac0def348a0e7b5ea1",
+      "adaptation": "提炼测试层级选择、独立期望、真实入口检查、mock 边界和证据报告；完整检查及覆盖率政策仍以目标项目为准。"
+    },
+    "packages/preset/agent-preset/skills/agent-experience/SKILL.md": {
+      "sha256": "1244928710cb7e399325c416e80312037d4da249559a09fe289515cc66ee1752",
+      "adaptation": "提炼最小上下文、明确发现步骤、本地引用和简洁输出；上游 .agents 入口是指向此受版本管理源文件的符号链接。"
+    }
+  }
+}

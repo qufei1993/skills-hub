@@ -1,0 +1,68 @@
+name: Check release data publishing access
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/release-data-check.yml'
+      - '.github/workflows/publish-release-data.yml'
+      - 'scripts/collect-release-data*'
+      - 'scripts/publish-release-data*'
+      - 'scripts/lib/release-*'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test scripts/collect-release-data.checks.cjs scripts/publish-release-data.checks.mjs
+      - name: Verify Pages token access without deploying
+        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          node --input-type=module <<'JS'
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          if (!token) throw Error('Configure CLOUDFLARE_API_TOKEN in repository Actions secrets.');
+          const response = await fetch('https://api.cloudflare.com/client/v4/accounts/e2238e7536f05ab6dbd4eb993fcfed80/pages/projects/skills-hub-release-data', {
+            headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30000),
+          });
+          const data = await response.json();
+          if (!response.ok || !data.success || data.result?.name !== 'skills-hub-release-data') throw Error('Pages project access verification failed. Check token account and Pages permissions.');
+          console.log('Pages release data project access verified; no deployment performed.');
+          JS
+      - name: Prepare release data for preview verification
+        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+        id: data
+        run: node scripts/publish-release-data.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASES_BASE_URL: https://releases.aiskillshub.link/
+      - name: Verify Pages upload with isolated preview
+        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: e2238e7536f05ab6dbd4eb993fcfed80
+          wranglerVersion: '4.145.0'
+          command: pages deploy ${{ steps.data.outputs.directory }} --project-name=skills-hub-release-data --branch=verify-pr-${{ github.event.number || github.run_id }}
+      - name: Verify preview pointer and catalog
+        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          PREVIEW_BASE: https://verify-pr-${{ github.event.number || github.run_id }}.skills-hub-release-data.pages.dev/
+        run: |
+          node --input-type=module <<'JS'
+          const base = process.env.PREVIEW_BASE;
+          const response = await fetch(new URL('current.json', base), { signal: AbortSignal.timeout(30000) });
+          if (!response.ok) throw Error('Preview pointer verification failed.');
+          const pointer = await response.json();
+          if (!/^snapshots\/[a-f0-9]{64}\/$/.test(pointer.snapshotPath)) throw Error('Invalid preview snapshot.');
+          const catalogResponse = await fetch(new URL(pointer.snapshotPath + 'index.json', base), { signal: AbortSignal.timeout(30000) });
+          const catalog = await catalogResponse.json();
+          if (!catalogResponse.ok || catalog.latest !== pointer.latest) throw Error('Preview catalog verification failed.');
+          console.log('Release data preview upload and catalog verified; production is unchanged.');
+          JS

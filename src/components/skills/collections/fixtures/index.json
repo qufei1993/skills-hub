@@ -1,0 +1,180 @@
+{
+  "schemaVersion": 1,
+  "collections": [
+    {
+      "schemaVersion": 1,
+      "id": "e3a003dc-3ea5-4cc5-b5a4-088d1b74985c",
+      "slug": "taste",
+      "revision": 2,
+      "title": "Taste Skill · 前端设计",
+      "description": "从排版、风格到动效，让 AI 生成的界面更有设计感。",
+      "category": "design",
+      "tags": [
+        "前端设计",
+        "网站改版",
+        "排版",
+        "动效",
+        "视觉参考",
+        "品牌设计"
+      ],
+      "cover": {
+        "kind": "source-image",
+        "url": "/assets/collections/taste.webp",
+        "sourceUrl": "https://github.com/Leonxlnx/taste-skill/blob/ce26fc25c0e5e8cab638f883de62d9a86ee5e45b/README.md",
+        "alt": "Taste Skill · 前端设计 原项目封面",
+        "rightsStatus": "needs-review",
+        "width": 1983,
+        "height": 793,
+        "background": "#f3f0eb",
+        "position": "18% center"
+      },
+      "authorLabel": "Leonxlnx",
+      "itemCount": 13,
+      "installationCount": 13,
+      "searchText": "Taste Skill · 前端设计 从排版、风格到动效，让 AI 生成的界面更有设计感。 design Leonxlnx 前端设计 网站改版 排版 动效 视觉参考 品牌设计 design-taste-frontend 根据需求选择设计方向，为落地页、作品集与改版构建界面。  Leonxlnx/taste-skill redesign-existing-projects 审查现有网站与应用设计，在保留功能的同时改善视觉质量。  Leonxlnx/taste-skill high-end-visual-design 细化字体、留白、阴影与动效，建立精致的网站视觉规范。  Leonxlnx/taste-skill image-to-code 先生成并分析设计图，再按图实现各个网站页面区域。  Leonxlnx/taste-skill imagegen-frontend-web 为网站各个区块单独生成设计参考图，保持统一视觉风格。  Leonxlnx/taste-skill minimalist-ui 用暖色单色系、清晰排版与扁平网格，构建极简编辑式界面。  Leonxlnx/taste-skill brandkit 生成品牌规范、标志系统与视觉提案，统一整体品牌风格。  Leonxlnx/taste-skill industrial-brutalist-ui 以瑞士排版与军事终端风格，设计机械感数据界面。  Leonxlnx/taste-skill gpt-taste 编排编辑式页面布局，并用 GSAP 实现滚动与微动效。  Leonxlnx/taste-skill imagegen-frontend-mobile 生成风格一致的移动应用界面概念图与流程，仅输出图片。  Leonxlnx/taste-skill full-output-enforcement 强制完整输出代码，避免占位内容并处理超长输出分段。  Leonxlnx/taste-skill stitch-design-taste 为 Google Stitch 生成设计规范文档，约束排版、配色与动效。  Leonxlnx/taste-skill design-taste-frontend-v1 保留第一版前端设计行为，供需要兼容旧项目的场景使用。  Leonxlnx/taste-skill Taste Skill · Frontend Design Give AI-generated interfaces a stronger design direction, from typography and visual style to motion. design Leonxlnx Frontend design Website redesign Typography Motion Visual references Brand design design-taste-frontend Choose a design direction from the brief and build interfaces for landing pages, portfolios, and redesigns.  Leonxlnx/taste-skill redesign-existing-projects Review the design of existing websites and apps, improving visual quality while preserving functionality.  Leonxlnx/taste-skill high-end-visual-design Refine typography, spacing, shadows, and motion into a polished visual standard for websites.  Leonxlnx/taste-skill image-to-code Generate and analyze design images first, then implement the website sections to match.  Leonxlnx/taste-skill imagegen-frontend-web Generate separate design references for each website section while keeping a consistent visual style.  Leonxlnx/taste-skill minimalist-ui Build minimalist editorial interfaces with warm monochrome colors, clear typography, and flat grids.  Leonxlnx/taste-skill brandkit Generate brand guidelines, logo systems, and visual proposals with a consistent brand style.  Leonxlnx/taste-skill industrial-brutalist-ui Design mechanical-looking data interfaces inspired by Swiss typography and military terminals.  Leonxlnx/taste-skill gpt-taste Compose editorial page layouts and implement scroll effects and small animations with GSAP.  Leonxlnx/taste-skill imagegen-frontend-mobile Generate consistent mobile interface concepts and flows as images only.  Leonxlnx/taste-skill full-output-enforcement Require complete code output, avoid placeholders, and handle long outputs in parts.  Leonxlnx/taste-skill stitch-design-taste Generate design guidelines for Google Stitch covering typography, colors, and motion.  Leonxlnx/taste-skill design-taste-frontend-v1 Preserve the first version of the frontend design behavior for projects that need backward compatibility.  Leonxlnx/taste-skill",
+      "localizations": {
+        "en": {
+          "title": "Taste Skill · Frontend Design",
+          "description": "Give AI-generated interfaces a stronger design direction, from typography and visual style to motion.",
+          "tags": [
+            "Frontend design",
+            "Website redesign",
+            "Typography",
+            "Motion",
+            "Visual references",
+            "Brand design"
+          ],
+          "coverAlt": "Original Taste Skill frontend design project cover"
+        }
+      },
+      "licenseLabel": "MIT"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "d2ca0659-07ee-44a5-8d99-d3295f5e2f0c",
+      "slug": "engineering",
+      "revision": 2,
+      "title": "Skills for Real Engineers",
+      "description": "从需求澄清到实现与验证，把工程经验带进 Agent 协作。",
+      "category": "development",
+      "tags": [
+        "需求澄清",
+        "代码实现",
+        "测试驱动",
+        "代码评审",
+        "故障诊断",
+        "架构设计"
+      ],
+      "cover": {
+        "kind": "source-image",
+        "url": "/assets/collections/engineering.png",
+        "sourceUrl": "https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/README.md",
+        "alt": "Skills for Real Engineers 原项目封面",
+        "rightsStatus": "needs-review",
+        "width": 738,
+        "height": 388,
+        "background": "#fff"
+      },
+      "authorLabel": "Matt Pocock",
+      "itemCount": 31,
+      "installationCount": 31,
+      "searchText": "Skills for Real Engineers 从需求澄清到实现与验证，把工程经验带进 Agent 协作。 development Matt Pocock 需求澄清 代码实现 测试驱动 代码评审 故障诊断 架构设计 ask-matt 根据当前问题，推荐此仓库中合适的技能或工作流程。  mattpocock/skills setup-matt-pocock-skills 为工程技能配置问题追踪器、分类标签与领域文档结构。  mattpocock/skills grill-me 通过连续深入的追问，帮助细化已有的计划或设计方案。  mattpocock/skills to-spec 将已讨论的内容汇总为规格，发布到项目的问题追踪器。  mattpocock/skills implement-spec 根据规格与任务拆分流程的产出，落实对应代码实现。  mattpocock/skills tdd 以测试先行的方式开发功能或修复问题，并支持集成测试。  mattpocock/skills code-review 并行检查代码规范与需求符合度，对照展示两类审查结果。  mattpocock/skills diagnosing-bugs 系统诊断复杂故障与性能回退，追踪失败或运行缓慢的原因。  mattpocock/skills codebase-design 用深模块设计原则，改进模块接口、边界与代码可测试性。  mattpocock/skills domain-modeling 整理项目领域术语，维护词汇表与架构决策记录。  mattpocock/skills grill-with-docs 通过连续追问细化方案，并同步整理架构决策与领域词汇。  mattpocock/skills implement 根据已有规格或任务清单，完成一项开发工作的代码实现。  mattpocock/skills improve-codebase-architecture 扫描模块改进机会，以可视化报告呈现后深入讨论选定方案。  mattpocock/skills pr 将开发改动整理成可用于提交拉取请求的正文说明。  mattpocock/skills prototype 用一次性原型验证设计问题，探索状态逻辑或界面效果。  mattpocock/skills research 查阅可信的一手资料，并将研究结论保存为项目中的文档。  mattpocock/skills retro 回顾一次编码会话，梳理本次工作的过程与实践。  mattpocock/skills to-tickets 将方案拆成可逐步交付的任务，并记录各项任务的阻塞关系。  mattpocock/skills triage 分类并核验问题与外部拉取请求，整理适合代理执行的说明。  mattpocock/skills wayfinder 把大型工作规划为共享决策任务，逐项澄清通往目标的路径。  mattpocock/skills wizard 为必须由人完成的配置或迁移步骤，生成交互式命令行向导。  mattpocock/skills git-guardrails-claude-code 为 Claude Code 设置安全钩子，在执行前阻止危险 Git 命令。  mattpocock/skills migrate-to-shoehorn 将测试中的类型断言迁移到 shoehorn，构造局部测试数据。  mattpocock/skills scaffold-exercises 创建含章节、题目、解答与讲解的练习目录，并满足检查要求。  mattpocock/skills setup-pre-commit 配置提交前钩子，自动执行格式整理、类型检查与测试。  mattpocock/skills grilling 围绕计划、决策或想法持续追问，检验思路是否经得起推敲。  mattpocock/skills handoff 将当前对话压缩成工作交接文档，方便其他代理继续推进。  mattpocock/skills teach 在当前工作区内，讲解并教授用户新的技能或概念。  mattpocock/skills to-questionnaire 将尚不能完整回答的决策问题，整理成供他人填写的问卷。  mattpocock/skills wait-what 在上一条表达未被理解时暂停推进，重新组织并说明原意。  mattpocock/skills writing-for-agents 编写面向代理的文档，适用于技能与项目协作规则文件。  mattpocock/skills Skills for Real Engineers Bring engineering practice into agent collaboration, from clarifying requirements to implementation and verification. development Matt Pocock Requirements Implementation Test-driven development Code review Debugging Architecture ask-matt Recommend a suitable Skill or workflow from this repository for the current problem.  mattpocock/skills setup-matt-pocock-skills Configure the issue tracker, triage labels, and domain document layout for the engineering Skills.  mattpocock/skills grill-me Refine an existing plan or design through sustained, detailed questioning.  mattpocock/skills to-spec Synthesize the discussion into a specification and publish it to the project's issue tracker.  mattpocock/skills implement-spec Implement the results of the specification and task breakdown workflows in code.  mattpocock/skills tdd Develop features or fix bugs with tests first, including integration tests.  mattpocock/skills code-review Review coding standards and requirement compliance in parallel, presenting the two results side by side.  mattpocock/skills diagnosing-bugs Diagnose difficult bugs and performance regressions to trace failures or slow behavior.  mattpocock/skills codebase-design Improve module interfaces, boundaries, and testability using deep-module design principles.  mattpocock/skills domain-modeling Organize domain terminology and maintain a glossary and architecture decision records.  mattpocock/skills grill-with-docs Refine plans through detailed questioning while documenting architecture decisions and domain terms.  mattpocock/skills implement Implement a piece of work from an existing specification or task list.  mattpocock/skills improve-codebase-architecture Identify module improvement opportunities, present a visual report, and discuss a selected approach in detail.  mattpocock/skills pr Turn development changes into a description for a pull request.  mattpocock/skills prototype Use a throwaway prototype to explore a design question, state logic, or interface behavior.  mattpocock/skills research Consult trusted primary sources and save the findings as a document in the project.  mattpocock/skills retro Review a coding session's process and practices in a retrospective.  mattpocock/skills to-tickets Break a plan into incrementally deliverable tasks and record their blocking relationships.  mattpocock/skills triage Classify and verify issues and external pull requests, preparing briefs that agents can act on.  mattpocock/skills wayfinder Map a large effort into shared decision tasks and clarify the path to the goal one decision at a time.  mattpocock/skills wizard Generate an interactive command-line wizard for setup or migration steps that a human must perform.  mattpocock/skills git-guardrails-claude-code Set up Claude Code safety hooks to block dangerous Git commands before execution.  mattpocock/skills migrate-to-shoehorn Migrate type assertions in tests to shoehorn for constructing partial test data.  mattpocock/skills scaffold-exercises Create exercise directories with sections, problems, solutions, and explanations that pass checks.  mattpocock/skills setup-pre-commit Configure pre-commit hooks to run formatting, type checks, and tests automatically.  mattpocock/skills grilling Question a plan, decision, or idea in depth to test the reasoning behind it.  mattpocock/skills handoff Condense the current conversation into a handoff document so another agent can continue the work.  mattpocock/skills teach Teach the user a new Skill or concept in the current workspace.  mattpocock/skills to-questionnaire Turn a decision that cannot yet be fully answered into a questionnaire for someone else.  mattpocock/skills wait-what Pause when the previous message was misunderstood, then reorganize and explain it again.  mattpocock/skills writing-for-agents Write documentation for agents, including Skill files and project collaboration rules.  mattpocock/skills",
+      "localizations": {
+        "en": {
+          "title": "Skills for Real Engineers",
+          "description": "Bring engineering practice into agent collaboration, from clarifying requirements to implementation and verification.",
+          "tags": [
+            "Requirements",
+            "Implementation",
+            "Test-driven development",
+            "Code review",
+            "Debugging",
+            "Architecture"
+          ],
+          "coverAlt": "Original Skills for Real Engineers project cover"
+        }
+      },
+      "licenseLabel": "MIT"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "de64301b-09cf-4968-9fc2-24ede5cd4dd6",
+      "slug": "product-video",
+      "revision": 2,
+      "title": "产品宣传视频",
+      "description": "先明确需求，再制作画面，用 Skills 配合完成产品宣传视频。",
+      "category": "media",
+      "tags": [
+        "产品宣传",
+        "Remotion",
+        "动画",
+        "需求梳理",
+        "视觉设计"
+      ],
+      "cover": {
+        "kind": "concept",
+        "preset": "video",
+        "alt": "产品视频分镜概念封面，非案例成片"
+      },
+      "authorLabel": "302 AI 推荐",
+      "itemCount": 3,
+      "installationCount": 14,
+      "searchText": "产品宣传视频 先明确需求，再制作画面，用 Skills 配合完成产品宣传视频。 media 302 AI 推荐 产品宣传 Remotion 动画 需求梳理 视觉设计 brainstorming 把产品卖点、目标观众和视频目标讨论清楚，再开始制作。 明确需求 obra/superpowers remotion-best-practices 用 Remotion 构建画面、动画与时间线，预览后继续调整。 制作视频 remotion-dev/skills ui-ux-pro-max 为配色、字体、布局和界面表现提供设计指导。 打磨视觉 nextlevelbuilder/ui-ux-pro-max-skill Product Promo Videos Clarify the brief, build the visuals, and combine Skills to create a product promo video. media 302 AI 推荐 Product promotion Remotion Animation Requirements Visual design brainstorming Clarify the product's selling points, target audience, and video goals before production. Clarify requirements obra/superpowers remotion-best-practices Build visuals, animation, and a timeline with Remotion, then refine them through previews. Create the video remotion-dev/skills ui-ux-pro-max Provide design guidance for colors, typography, layout, and interface presentation. Refine the visuals nextlevelbuilder/ui-ux-pro-max-skill",
+      "localizations": {
+        "en": {
+          "title": "Product Promo Videos",
+          "description": "Clarify the brief, build the visuals, and combine Skills to create a product promo video.",
+          "tags": [
+            "Product promotion",
+            "Remotion",
+            "Animation",
+            "Requirements",
+            "Visual design"
+          ],
+          "coverAlt": "Product video storyboard concept cover, not a finished case-study video"
+        }
+      },
+      "licenseLabel": "许可待核对"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "8110eed5-947d-45d0-adf0-7deb6edce15d",
+      "slug": "marketing",
+      "revision": 2,
+      "title": "产品营销与增长",
+      "description": "从产品定位、文案到搜索与转化，找到当前营销任务需要的 Skills。",
+      "category": "marketing",
+      "tags": [
+        "产品定位",
+        "营销文案",
+        "搜索优化",
+        "转化优化",
+        "产品发布"
+      ],
+      "cover": {
+        "kind": "concept",
+        "preset": "marketing",
+        "alt": "深蓝背景上向上延伸的薄荷绿色阶梯与轨道，表达营销增长"
+      },
+      "authorLabel": "Corey Haines",
+      "itemCount": 50,
+      "installationCount": 50,
+      "searchText": "产品营销与增长 从产品定位、文案到搜索与转化，找到当前营销任务需要的 Skills。 marketing Corey Haines 产品定位 营销文案 搜索优化 转化优化 产品发布 ab-testing 设计对照实验与评估方法。  coreyhaines31/marketingskills ad-creative 生成与迭代广告创意。  coreyhaines31/marketingskills ads 规划和优化付费广告。  coreyhaines31/marketingskills ai-seo 改善内容在 AI 搜索与回答中的可见性。  coreyhaines31/marketingskills analytics 设置和检查营销数据追踪。  coreyhaines31/marketingskills aso 优化应用商店页面。  coreyhaines31/marketingskills attribution 分析不同营销渠道对转化的贡献。  coreyhaines31/marketingskills churn-prevention 减少退订，改善取消与挽留流程。  coreyhaines31/marketingskills co-marketing 寻找合作伙伴并规划联合营销。  coreyhaines31/marketingskills cold-email 撰写 B2B 拓客邮件与跟进序列。  coreyhaines31/marketingskills community-marketing 通过社区建立联系与推动增长。  coreyhaines31/marketingskills competitor-profiling 研究竞争对手，整理竞争信息。  coreyhaines31/marketingskills competitors 制作竞品对比与替代方案页面。  coreyhaines31/marketingskills content-strategy 规划内容主题与发布方向。  coreyhaines31/marketingskills copy-editing 逐轮检查并改善已有营销文案。  coreyhaines31/marketingskills copywriting 撰写首页、落地页和产品页等营销文案。  coreyhaines31/marketingskills cro 发现页面中的转化障碍，提出改进建议。  coreyhaines31/marketingskills customer-research 梳理客户需求与动机，为定位和文案提供依据。  coreyhaines31/marketingskills directory-submissions 规划产品目录提交。  coreyhaines31/marketingskills emails 设计营销邮件与自动化序列。  coreyhaines31/marketingskills events 规划营销活动。  coreyhaines31/marketingskills free-tools 以免费工具吸引潜在用户。  coreyhaines31/marketingskills image 规划与制作营销图片。  coreyhaines31/marketingskills influencer-marketing 规划创作者合作与影响者营销。  coreyhaines31/marketingskills launch 规划产品发布与推广节奏。  coreyhaines31/marketingskills lead-magnets 设计能够吸引潜在客户的资源。  coreyhaines31/marketingskills marketing-council 从不同营销视角评估策略。  coreyhaines31/marketingskills marketing-ideas 为产品寻找可尝试的营销方向。  coreyhaines31/marketingskills marketing-loops 设计可重复运转的增长循环。  coreyhaines31/marketingskills marketing-plan 把营销目标整理成有优先级的行动计划。  coreyhaines31/marketingskills marketing-psychology 将行为心理学用于营销决策。  coreyhaines31/marketingskills offers 打磨产品报价与价值组合。  coreyhaines31/marketingskills onboarding 改善新用户引导与激活体验。  coreyhaines31/marketingskills paywalls 优化升级提示与付费墙。  coreyhaines31/marketingskills popups 设计和优化弹窗转化。  coreyhaines31/marketingskills pricing 设计价格、套餐与收费策略。  coreyhaines31/marketingskills product-marketing 建立产品、受众和定位背景，让后续营销任务有共同依据。  coreyhaines31/marketingskills programmatic-seo 设计可规模化生成的搜索落地页。  coreyhaines31/marketingskills prospecting 寻找和研究潜在客户。  coreyhaines31/marketingskills public-relations 组织公关传播与媒体沟通。  coreyhaines31/marketingskills referrals 设计推荐与口碑增长机制。  coreyhaines31/marketingskills revops 梳理销售线索与营收运营流程。  coreyhaines31/marketingskills sales-enablement 准备销售所需的材料与内容。  coreyhaines31/marketingskills schema 添加和检查页面结构化数据。  coreyhaines31/marketingskills seo-audit 排查影响搜索表现的技术与页面问题。  coreyhaines31/marketingskills signup 优化注册与试用流程。  coreyhaines31/marketingskills site-architecture 梳理网站结构与内部链接。  coreyhaines31/marketingskills sms 规划短信营销与消息内容。  coreyhaines31/marketingskills social 组织社交平台内容与发布策略。  coreyhaines31/marketingskills video 规划与制作营销视频。  coreyhaines31/marketingskills Product Marketing & Growth Find the Skills for your current marketing task, from positioning and copy to search and conversion. marketing Corey Haines Product positioning Marketing copy Search optimization Conversion optimization Product launches ab-testing Design controlled experiments and methods for evaluating results.  coreyhaines31/marketingskills ad-creative Generate and iterate on advertising creative.  coreyhaines31/marketingskills ads Plan and optimize paid advertising.  coreyhaines31/marketingskills ai-seo Improve content visibility in AI search and answers.  coreyhaines31/marketingskills analytics Set up and check marketing analytics tracking.  coreyhaines31/marketingskills aso Optimize app store listings.  coreyhaines31/marketingskills attribution Analyze how marketing channels contribute to conversions.  coreyhaines31/marketingskills churn-prevention Reduce subscription cancellations and improve cancellation and retention flows.  coreyhaines31/marketingskills co-marketing Find partners and plan joint marketing campaigns.  coreyhaines31/marketingskills cold-email Write B2B prospecting emails and follow-up sequences.  coreyhaines31/marketingskills community-marketing Build connections and support growth through communities.  coreyhaines31/marketingskills competitor-profiling Research competitors and organize competitive information.  coreyhaines31/marketingskills competitors Create competitor comparison and alternative pages.  coreyhaines31/marketingskills content-strategy Plan content topics and publishing direction.  coreyhaines31/marketingskills copy-editing Review and improve existing marketing copy in successive passes.  coreyhaines31/marketingskills copywriting Write marketing copy for homepages, landing pages, and product pages.  coreyhaines31/marketingskills cro Identify barriers to conversion on a page and suggest improvements.  coreyhaines31/marketingskills customer-research Understand customer needs and motivations to inform positioning and copy.  coreyhaines31/marketingskills directory-submissions Plan product directory submissions.  coreyhaines31/marketingskills emails Design marketing emails and automated sequences.  coreyhaines31/marketingskills events Plan marketing events.  coreyhaines31/marketingskills free-tools Attract potential users with free tools.  coreyhaines31/marketingskills image Plan and create marketing images.  coreyhaines31/marketingskills influencer-marketing Plan creator partnerships and influencer marketing.  coreyhaines31/marketingskills launch Plan a product launch and its promotion schedule.  coreyhaines31/marketingskills lead-magnets Design resources that attract potential customers.  coreyhaines31/marketingskills marketing-council Evaluate strategy from different marketing perspectives.  coreyhaines31/marketingskills marketing-ideas Find marketing directions to try for a product.  coreyhaines31/marketingskills marketing-loops Design repeatable growth loops.  coreyhaines31/marketingskills marketing-plan Turn marketing goals into a prioritized action plan.  coreyhaines31/marketingskills marketing-psychology Apply behavioral psychology to marketing decisions.  coreyhaines31/marketingskills offers Refine product offers and value packages.  coreyhaines31/marketingskills onboarding Improve new-user onboarding and activation.  coreyhaines31/marketingskills paywalls Optimize upgrade prompts and paywalls.  coreyhaines31/marketingskills popups Design and optimize popups for conversion.  coreyhaines31/marketingskills pricing Design pricing, packages, and charging strategies.  coreyhaines31/marketingskills product-marketing Establish shared product, audience, and positioning context for subsequent marketing tasks.  coreyhaines31/marketingskills programmatic-seo Design search landing pages that can be generated at scale.  coreyhaines31/marketingskills prospecting Find and research potential customers.  coreyhaines31/marketingskills public-relations Organize public relations and media communication.  coreyhaines31/marketingskills referrals Design referral and word-of-mouth growth mechanisms.  coreyhaines31/marketingskills revops Organize lead management and revenue operations workflows.  coreyhaines31/marketingskills sales-enablement Prepare materials and content for sales.  coreyhaines31/marketingskills schema Add and check structured data on pages.  coreyhaines31/marketingskills seo-audit Investigate technical and page issues affecting search performance.  coreyhaines31/marketingskills signup Optimize signup and trial flows.  coreyhaines31/marketingskills site-architecture Organize website structure and internal links.  coreyhaines31/marketingskills sms Plan SMS marketing and message content.  coreyhaines31/marketingskills social Organize social platform content and publishing strategy.  coreyhaines31/marketingskills video Plan and create marketing videos.  coreyhaines31/marketingskills",
+      "localizations": {
+        "en": {
+          "title": "Product Marketing & Growth",
+          "description": "Find the Skills for your current marketing task, from positioning and copy to search and conversion.",
+          "tags": [
+            "Product positioning",
+            "Marketing copy",
+            "Search optimization",
+            "Conversion optimization",
+            "Product launches"
+          ],
+          "coverAlt": "Mint-green steps and tracks rising across a dark blue background to represent marketing growth"
+        }
+      },
+      "licenseLabel": "MIT"
+    }
+  ]
+}

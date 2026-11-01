@@ -150,3 +150,42 @@ fn hash_changes_when_copied_file_permissions_change() {
 
     assert_ne!(before, after);
 }
+
+#[cfg(unix)]
+#[test]
+fn descriptor_hash_matches_path_hash_without_following_links() {
+    use super::{hash_dir_for_sync_conflict, hash_dir_strict, hash_open_dir};
+    #[cfg(target_os = "linux")]
+    use std::os::unix::ffi::OsStrExt;
+    let root = tempfile::tempdir().unwrap();
+    for directory in ["a", "a/b", ".git", "__pycache__", "日本語"] {
+        fs::create_dir_all(root.path().join(directory)).unwrap();
+    }
+    for file in [
+        "a/b/nested",
+        "a.txt",
+        ".git/config",
+        "__pycache__/cache.pyc",
+        "__pycache__/notes.txt",
+        "日本語/文書",
+        "z",
+    ] {
+        fs::write(root.path().join(file), file).unwrap();
+    }
+    #[cfg(target_os = "linux")]
+    fs::write(
+        root.path().join(std::ffi::OsStr::from_bytes(b"\xff")),
+        "raw",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink("/outside/missing", root.path().join("link")).unwrap();
+    let directory = fs::File::open(root.path()).unwrap();
+    assert_eq!(
+        hash_open_dir(&directory, false).unwrap(),
+        hash_dir_strict(root.path()).unwrap()
+    );
+    assert_eq!(
+        hash_open_dir(&directory, true).unwrap(),
+        hash_dir_for_sync_conflict(root.path()).unwrap()
+    );
+}

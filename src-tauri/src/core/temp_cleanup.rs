@@ -2,7 +2,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
-use tauri::Manager;
+
+use super::runtime_paths::RuntimePaths;
 
 const TEMP_PREFIX: &str = "skills-hub-git-";
 const TEMP_MARKER: &str = ".skills-hub-git-temp";
@@ -18,16 +19,12 @@ pub fn mark_temp_dir(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn cleanup_old_git_temp_dirs<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    max_age: Duration,
-) -> Result<usize> {
-    let cache_dir = app
-        .path()
-        .app_cache_dir()
-        .context("failed to resolve app cache dir")?;
-
-    cleanup_old_git_temp_dirs_in(&cache_dir, max_age)
+pub fn cleanup_old_git_temp_dirs(paths: &RuntimePaths, max_age: Duration) -> Result<usize> {
+    let cache_dir = paths
+        .git_cache_dir
+        .parent()
+        .context("git cache directory has no cache root")?;
+    cleanup_old_git_temp_dirs_in(cache_dir, max_age)
 }
 
 fn cleanup_old_git_temp_dirs_in(cache_dir: &Path, max_age: Duration) -> Result<usize> {

@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { prependDownloads } from './release-downloads.mjs'
 
 function normalizeVersion(input) {
   const v = String(input || '').trim()
@@ -78,4 +79,11 @@ if (!section) {
   process.exit(3)
 }
 
-process.stdout.write(section + '\n')
+const assetsIndex = process.argv.indexOf('--assets')
+const languageIndex = process.argv.indexOf('--language')
+const output = assetsIndex < 0 ? section : prependDownloads(section, {
+  tag: `v${version}`,
+  assets: fs.readdirSync(process.argv[assetsIndex + 1]),
+  language: languageIndex < 0 ? 'en' : process.argv[languageIndex + 1],
+})
+process.stdout.write(output + '\n')

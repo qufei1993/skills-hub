@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import assert from 'node:assert/strict'
+const { describe, it } = process.env.VITEST ? await import('vitest') : await import('node:test')
 import { resolveOAuthClientIds } from './build-desktop.mjs'
+import * as desktopBuild from './build-desktop.mjs'
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -28,13 +30,13 @@ describe('desktop OAuth build configuration', () => {
       copyFileSync(fileURLToPath(new URL('./build-desktop.mjs', import.meta.url)), copied)
       const env = withoutOAuthClientIds()
       const run = value => spawnSync(process.execPath, [realpathSync(copied), '--check-oauth-only'], { env: value, encoding: 'utf8' })
-      expect(run(env).status).toBe(1)
-      expect(run({ ...env, [githubKey]: githubId }).stderr).toContain(gitlabKey)
+      assert.equal(run(env).status, 1)
+      assert.ok(run({ ...env, [githubKey]: githubId }).stderr.includes(gitlabKey))
       const configured = run({ ...env, [githubKey]: githubId, [gitlabKey]: gitlabId })
-      expect(configured.status).toBe(0)
-      expect(configured.stdout).toContain('GitHub and GitLab OAuth public Client IDs: configured')
-      expect(configured.stdout + configured.stderr).not.toContain(githubId)
-      expect(configured.stdout + configured.stderr).not.toContain(gitlabId)
+      assert.equal(configured.status, 0)
+      assert.ok(configured.stdout.includes('GitHub and GitLab OAuth public Client IDs: configured'))
+      assert.ok(!(configured.stdout + configured.stderr).includes(githubId))
+      assert.ok(!(configured.stdout + configured.stderr).includes(gitlabId))
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -44,7 +46,7 @@ describe('desktop OAuth build configuration', () => {
     for (const key of [githubKey, gitlabKey]) {
       for (const value of [undefined, '', '  ', 'ghp_this_is_a_user_token', '${SECRET}', 'secret value']) {
         const env = { [githubKey]: githubId, [gitlabKey]: gitlabId, [key]: value }
-        expect(() => resolveOAuthClientIds(env)).toThrow(key)
+        assert.throws(() => resolveOAuthClientIds(env), new RegExp(key))
       }
     }
   })
@@ -56,7 +58,7 @@ describe('desktop OAuth build configuration', () => {
       `export ${githubKey}="${githubId}" # public`,
       `${gitlabKey}='${gitlabId}'`,
     ].join('\n')
-    expect(resolveOAuthClientIds({}, contents)).toEqual({
+    assert.deepEqual(resolveOAuthClientIds({}, contents), {
       [githubKey]: githubId,
       [gitlabKey]: gitlabId,
     })
@@ -65,10 +67,10 @@ describe('desktop OAuth build configuration', () => {
   it('uses build environment per key and falls back to the file only for a missing key', () => {
     const fromFileGithub = 'Ov23liFromFile12345'
     const fromFileGitlab = 'b1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde'
-    expect(resolveOAuthClientIds(
+    assert.deepEqual(resolveOAuthClientIds(
       { [githubKey]: githubId },
       `${githubKey}=${fromFileGithub}\n${gitlabKey}=${fromFileGitlab}`,
-    )).toEqual({ [githubKey]: githubId, [gitlabKey]: fromFileGitlab })
+    ), { [githubKey]: githubId, [gitlabKey]: fromFileGitlab })
   })
 
   it('does not read an explicit fallback file when both environment values are configured', () => {
@@ -87,8 +89,8 @@ describe('desktop OAuth build configuration', () => {
         env: { ...withoutOAuthClientIds(), [githubKey]: githubId, [gitlabKey]: gitlabId },
         encoding: 'utf8',
       })
-      expect(result.status).toBe(0)
-      expect(result.stdout).toContain('configured')
+      assert.equal(result.status, 0)
+      assert.ok(result.stdout.includes('configured'))
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -112,8 +114,8 @@ describe('desktop OAuth build configuration', () => {
         env: { ...withoutOAuthClientIds(), [githubKey]: githubId },
         encoding: 'utf8',
       })
-      expect(result.status).toBe(0)
-      expect(result.stdout).toContain('configured')
+      assert.equal(result.status, 0)
+      assert.ok(result.stdout.includes('configured'))
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -132,10 +134,10 @@ describe('desktop OAuth build configuration', () => {
         env: withoutOAuthClientIds(),
         encoding: 'utf8',
       })
-      expect(result.status).toBe(0)
-      expect(result.stdout).toContain('configured')
-      expect(result.stdout + result.stderr).not.toContain(githubId)
-      expect(result.stdout + result.stderr).not.toContain(gitlabId)
+      assert.equal(result.status, 0)
+      assert.ok(result.stdout.includes('configured'))
+      assert.ok(!(result.stdout + result.stderr).includes(githubId))
+      assert.ok(!(result.stdout + result.stderr).includes(gitlabId))
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -151,17 +153,17 @@ describe('desktop OAuth build configuration', () => {
         `${key}="unterminated-private-secret\n${otherKey}=${otherValue}`,
       ]) {
         try { resolveOAuthClientIds({}, file); throw new Error('should fail') } catch (error) {
-          expect(error.message).toContain(key)
-          expect(error.message).not.toContain('private-secret')
+          assert.ok(error.message.includes(key))
+          assert.ok(!error.message.includes('private-secret'))
         }
       }
     }
   })
 
-  it.each([
-    ['build', []],
-    ['dev', ['--dev']],
-  ])('passes both IDs and the %s subcommand to Tauri without importing file secrets', (_, modeArgs) => {
+  for (const modeArgs of [[], ['--dev'], ['--local-test']]) {
+  const devMode = modeArgs.includes('--dev')
+  const localMode = modeArgs.includes('--local-test')
+  it(`passes both IDs and the ${devMode ? 'dev' : localMode ? 'local test build' : 'build'} subcommand to Tauri without importing file secrets`, () => {
     const root = mkdtempSync(path.join(tmpdir(), 'skills-hub-build-'))
     const scripts = path.join(root, 'scripts')
     const cliDir = path.join(root, 'node_modules', '@tauri-apps', 'cli')
@@ -169,6 +171,8 @@ describe('desktop OAuth build configuration', () => {
     try {
       mkdirSync(scripts, { recursive: true })
       mkdirSync(cliDir, { recursive: true })
+      mkdirSync(path.join(root, 'src-tauri'))
+      writeFileSync(path.join(root, 'src-tauri/tauri.conf.json'), JSON.stringify({ app: { windows: [{ width: 1180, title: 'Skills Hub' }] } }))
       copyFileSync(fileURLToPath(new URL('./build-desktop.mjs', import.meta.url)), copied)
       writeFileSync(path.join(root, '.env'), [
         `${githubKey}=${githubId}`,
@@ -176,29 +180,112 @@ describe('desktop OAuth build configuration', () => {
         'SKILLS_HUB_GITHUB_CLIENT_SECRET=must-not-be-imported',
         'USER_TOKEN=must-not-be-imported',
       ].join('\n'))
+      writeFileSync(path.join(scripts, 'prepare-cli-sidecar.mjs'), [
+        "import { writeFileSync } from 'node:fs'",
+        "import path from 'node:path'",
+        "export function desktopSidecarOptions(args) { return { target: 'aarch64-apple-darwin', debug: args.includes('--dev') } }",
+        "export function prepareCliSidecar({ root, target, debug, localTest }) { writeFileSync(path.join(root, 'prepared.json'), JSON.stringify({ target, debug, localTest })); return { metadataPath: 'debug-manifest.json' } }",
+      ].join('\n'))
       writeFileSync(path.join(cliDir, 'package.json'), '{"name":"@tauri-apps/cli","version":"0.0.0"}')
       writeFileSync(path.join(cliDir, 'tauri.js'), [
+        "const { readFileSync } = require('node:fs')",
         'const picked = {',
         '  args: process.argv.slice(2),',
         `  github: process.env.${githubKey},`,
         `  gitlab: process.env.${gitlabKey},`,
         '  githubSecret: process.env.SKILLS_HUB_GITHUB_CLIENT_SECRET,',
         '  userToken: process.env.USER_TOKEN,',
+        "  prepared: require('node:fs').existsSync('prepared.json') ? JSON.parse(readFileSync('prepared.json', 'utf8')) : null,",
+        "  manifest: process.env.SKILLS_HUB_CLI_MANIFEST_PATH,",
         '}',
         'console.log(JSON.stringify(picked))',
       ].join('\n'))
-      const result = spawnSync(process.execPath, [realpathSync(copied), ...modeArgs, '--config', 'test.json'], {
+      const result = spawnSync(process.execPath, [realpathSync(copied), ...modeArgs, ...(modeArgs.length ? [] : ['--cli-manifest', 'release-manifest.json']), '--config', 'test.json'], {
         env: withoutOAuthClientIds({ PATH: process.env.PATH }),
         encoding: 'utf8',
       })
-      expect(result.status).toBe(0)
-      expect(JSON.parse(result.stdout.trim())).toEqual({
-        args: [modeArgs.length ? 'dev' : 'build', '--config', 'test.json'],
+      assert.equal(result.status, 0, result.stderr)
+      assert.deepEqual(JSON.parse(result.stdout.trim().split('\n').at(-1)), {
+        args: [devMode ? 'dev' : 'build', '--config', 'test.json', ...(localMode ? ['--features', 'local-test', '--config', JSON.stringify(desktopBuild.localTestBuildConfig([{ width: 1180, title: 'Skills Hub' }]))] : []), ...(devMode ? [] : ['--target', 'aarch64-apple-darwin', '--', '--bin', 'app'])],
         github: githubId,
         gitlab: gitlabId,
+        prepared: modeArgs.length ? { target: 'aarch64-apple-darwin', debug: devMode, ...(localMode ? { localTest: true } : {}) } : null,
+        manifest: modeArgs.length ? 'debug-manifest.json' : path.resolve(realpathSync(root), 'release-manifest.json'),
       })
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
   })
+  }
+})
+
+it('clears stale bundle contents before packaging without deleting compiled executables', () => {
+  assert.equal(typeof desktopBuild.clearDesktopBundle, 'function')
+  const root = mkdtempSync(path.join(tmpdir(), 'stale-desktop-bundle-'))
+  try {
+    const output = path.join(root, 'src-tauri/target/aarch64-apple-darwin/release')
+    const bundle = path.join(output, 'bundle/macos/Skills Hub.app/Contents/MacOS')
+    mkdirSync(bundle, { recursive: true })
+    writeFileSync(path.join(bundle, 'skillshub-cli'), 'stale sidecar')
+    writeFileSync(path.join(output, 'app'), 'compiled desktop')
+    desktopBuild.clearDesktopBundle({ root, target: 'aarch64-apple-darwin', debug: false })
+    assert.equal(existsSync(path.join(output, 'bundle')), false)
+    assert.equal(existsSync(path.join(output, 'app')), true)
+    assert.throws(() => desktopBuild.clearDesktopBundle({ root, target: '../../unsafe', debug: false }))
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+
+describe('local test packaging', () => {
+  it('keeps platform-specific recovery instructions for release builds', () => {
+    for (const [platform, command] of [['darwin', 'mac:dmg'], ['win32', 'win:exe'], ['linux', 'linux:appimage']]) {
+      assert.equal(typeof desktopBuild.missingCliManifestMessage, 'function')
+      const message = desktopBuild.missingCliManifestMessage(platform)
+      assert.match(message, /--cli-manifest/)
+      assert.match(message, /npm run tauri:dev/)
+      assert.ok(message.includes(`npm run tauri:build:local:${command}`))
+    }
+  })
+
+  it('uses an explicit release test mode with separate identity and no production updater', () => {
+    assert.equal(typeof desktopBuild.localTestBuildConfig, 'function')
+    const config = desktopBuild.localTestBuildConfig()
+    assert.equal(config.productName, 'Skills Hub Local Test')
+    assert.equal(config.mainBinaryName, 'skills-hub-local-test')
+    assert.equal(config.identifier, 'com.qufei1993.skillshub.local-test')
+    assert.equal(config.app.windows[0].title, 'Skills Hub Local Test')
+    assert.equal(config.bundle.createUpdaterArtifacts, false)
+    assert.deepEqual(config.plugins.updater.endpoints, [])
+  })
+})
+
+
+it('rejects conflicting local test modes before preparing a CLI or launching Tauri', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'local-test-invalid-'))
+  try {
+    mkdirSync(path.join(root, 'scripts'))
+    const copied = path.join(root, 'scripts/build-desktop.mjs')
+    copyFileSync(fileURLToPath(new URL('./build-desktop.mjs', import.meta.url)), copied)
+    copyFileSync(fileURLToPath(new URL('./prepare-cli-sidecar.mjs', import.meta.url)), path.join(root, 'scripts/prepare-cli-sidecar.mjs'))
+    copyFileSync(fileURLToPath(new URL('./cli-manifest.mjs', import.meta.url)), path.join(root, 'scripts/cli-manifest.mjs'))
+    const env = { PATH: process.env.PATH, [githubKey]: githubId, [gitlabKey]: gitlabId }
+    for (const extra of [['--dev'], ['--debug'], ['-d'], ['--local-test'], ['--cli-manifest', 'release.json']]) {
+      const result = spawnSync(process.execPath, [realpathSync(copied), '--local-test', ...extra], { env, encoding: 'utf8' })
+      assert.equal(result.status, 1)
+      assert.match(result.stderr, /Local test/)
+      assert.equal(existsSync(path.join(root, 'src-tauri')), false)
+    }
+    const result = spawnSync(process.execPath, [realpathSync(copied), '--local-test'], { env: { ...env, SKILLS_HUB_CLI_MANIFEST_PATH: 'release.json' }, encoding: 'utf8' })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /remove --cli-manifest/)
+    for (const featureArgs of [['--features', 'local-test'], ['--features=local-test'], ['-f', 'cli,local-test']]) {
+      const bypass = spawnSync(process.execPath, [realpathSync(copied), ...featureArgs, '--cli-manifest', 'local.json'], { env, encoding: 'utf8' })
+      assert.equal(bypass.status, 1)
+      assert.match(bypass.stderr, /local-test feature requires npm run tauri:build:local/)
+    }
+    const release = spawnSync(process.execPath, [realpathSync(copied)], { env, encoding: 'utf8' })
+    assert.equal(release.status, 1)
+    assert.match(release.stderr, /CLI_MANIFEST_REQUIRED/)
+    assert.ok(release.stderr.includes(desktopBuild.missingCliManifestMessage()))
+  } finally { rmSync(root, { recursive: true, force: true }) }
 })

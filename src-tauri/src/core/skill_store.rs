@@ -1,8 +1,8 @@
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
-use tauri::Manager;
 use uuid::Uuid;
 
 use super::device_sync::types::{
@@ -25,6 +25,24 @@ const RECYCLE_BIN_SCHEMA_VERSION: &str = "1";
 pub const DEVICE_SYNC_HISTORY_LIMIT: usize = 100;
 const DEVICE_SYNC_STARTUP_CREDENTIAL_CONSENT_MIGRATION: &str =
     "migration.device_sync_startup_credential_consent_v1";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IncompatibleDatabaseError {
+    pub found_version: i32,
+    pub supported_version: i32,
+}
+
+impl fmt::Display for IncompatibleDatabaseError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "database schema version {} is newer than app supports {}",
+            self.found_version, self.supported_version
+        )
+    }
+}
+
+impl std::error::Error for IncompatibleDatabaseError {}
 
 const DEVICE_SYNC_SCHEMA_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS device_sync_config (
@@ -295,6 +313,36 @@ impl SkillStore {
         &self.db_path
     }
 
+    pub(crate) fn ensure_compatible_readonly(&self) -> Result<()> {
+        if !self.db_path.try_exists()? {
+            return Ok(());
+        }
+        // Even a read-only SQLite connection can change the source WAL index.
+        // Inspect a private snapshot so opening an unknown schema changes no files.
+        let snapshot = tempfile::tempdir().context("create schema inspection snapshot")?;
+        let database = snapshot.path().join(DB_FILE_NAME);
+        std::fs::copy(&self.db_path, &database)
+            .context("snapshot database for schema inspection")?;
+        let mut wal = self.db_path.as_os_str().to_os_string();
+        wal.push("-wal");
+        let wal = PathBuf::from(wal);
+        if wal.try_exists()? {
+            std::fs::copy(wal, snapshot.path().join("skills_hub.db-wal"))
+                .context("snapshot WAL for schema inspection")?;
+        }
+        let conn =
+            Connection::open_with_flags(database, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        if version > SCHEMA_VERSION && version != PRE_RELEASE_DEVICE_SYNC_SCHEMA_VERSION {
+            return Err(IncompatibleDatabaseError {
+                found_version: version,
+                supported_version: SCHEMA_VERSION,
+            }
+            .into());
+        }
+        Ok(())
+    }
+
     pub fn ensure_schema(&self) -> Result<()> {
         self.with_conn(|conn| {
             conn.execute_batch("PRAGMA foreign_keys = ON;")?;
@@ -329,15 +377,16 @@ impl SkillStore {
             } else if user_version > SCHEMA_VERSION
                 && user_version != PRE_RELEASE_DEVICE_SYNC_SCHEMA_VERSION
             {
-                anyhow::bail!(
-                    "database schema version {} is newer than app supports {}",
-                    user_version,
-                    SCHEMA_VERSION
-                );
+                return Err(IncompatibleDatabaseError {
+                    found_version: user_version,
+                    supported_version: SCHEMA_VERSION,
+                }
+                .into());
             }
 
             conn.execute_batch(DEVICE_SYNC_SCHEMA_V1)?;
             ensure_recycle_bin_schema(conn)?;
+            super::workspace::migrate(conn)?;
             conn.execute_batch("CREATE TABLE IF NOT EXISTS skill_source_checks (
                 skill_id TEXT PRIMARY KEY REFERENCES skills(id) ON DELETE CASCADE,
                 error_code TEXT NULL, checked_at INTEGER NOT NULL
@@ -394,6 +443,52 @@ impl SkillStore {
                 params![key, value],
             )?;
             Ok(())
+        })
+    }
+
+    pub(crate) fn set_settings(&self, settings: &[(&str, &str)]) -> Result<()> {
+        self.with_conn(|conn| {
+            let transaction = conn.unchecked_transaction()?;
+            for (key, value) in settings {
+                transaction.execute(
+                    "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![key, value],
+                )?;
+            }
+            transaction.commit()?;
+            Ok(())
+        })
+    }
+
+    pub fn replace_setting(&self, key: &str, value: &str) -> Result<Option<String>> {
+        self.with_conn(|conn| {
+            conn.execute_batch("BEGIN IMMEDIATE;")?;
+            let result = (|| -> Result<Option<String>> {
+                let previous = conn
+                    .query_row(
+                        "SELECT value FROM settings WHERE key = ?1",
+                        params![key],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                conn.execute(
+                    "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![key, value],
+                )?;
+                Ok(previous)
+            })();
+            match result {
+                Ok(previous) => {
+                    conn.execute_batch("COMMIT;")?;
+                    Ok(previous)
+                }
+                Err(error) => {
+                    let _ = conn.execute_batch("ROLLBACK;");
+                    Err(error)
+                }
+            }
         })
     }
 
@@ -1157,10 +1252,89 @@ impl SkillStore {
         })
     }
 
+    pub(crate) fn commit_deployment_targets(
+        &self,
+        upserts: &[(SkillTargetRecord, String)],
+        deletions: &[SkillTargetRecord],
+        source_takeover: Option<(&SkillRecord, &str)>,
+        validate: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        self.with_conn(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            for record in deletions {
+                tx.execute("DELETE FROM skill_targets WHERE id=?1", params![record.id])?;
+                tx.execute("DELETE FROM settings WHERE key=?1", params![format!("device_sync.target_baseline.{}", record.id)])?;
+            }
+            for (record, hash) in upserts {
+                upsert_deployment_target_with_conn(&tx, record, hash)?;
+            }
+            if let Some((previous, source_hash)) = source_takeover {
+                let mut managed = previous.clone();
+                managed.source_ref = Some(managed.central_path.clone());
+                let baseline = SourceBaseline::from_skill(&managed, source_hash.to_string())
+                    .context("missing takeover source")?;
+                let changed = tx.execute(
+                    "UPDATE skills SET source_ref=central_path,status='ok',updated_at=?4 WHERE id=?1 AND source_type='local' AND source_ref=?2 AND central_path=?3",
+                    params![previous.id, previous.source_ref, previous.central_path, now_ms()],
+                )?;
+                anyhow::ensure!(changed == 1, "PLAN_STALE");
+                tx.execute("INSERT INTO settings(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![format!("device_sync.source_baseline.{}",previous.id),serde_json::to_string(&baseline)?])?;
+                tx.execute("INSERT INTO skill_source_checks(skill_id,error_code,checked_at) VALUES (?1,NULL,?2) ON CONFLICT(skill_id) DO UPDATE SET error_code=NULL,checked_at=excluded.checked_at",params![previous.id,now_ms()])?;
+                tx.execute("DELETE FROM workspace_documents WHERE kind='content-recovery' AND id=?1", [&previous.id])?;
+            }
+            validate()?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    pub(crate) fn commit_source_conflict(
+        &self,
+        records: (&SkillRecord, &SkillRecord),
+        targets: &[(SkillTargetRecord, String)],
+        plan_id: &str,
+        outcome: &serde_json::Value,
+        validate: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        self.with_conn(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            let (before, current) = records;
+            let source: Option<(String, Option<String>, String)> = tx.query_row(
+                "SELECT source_type,source_ref,central_path FROM skills WHERE id=?1", [&before.id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            ).optional()?;
+            anyhow::ensure!(source == Some((before.source_type.clone(), before.source_ref.clone(), before.central_path.clone())), "PLAN_STALE");
+            upsert_skill_with_conn(&tx, current)?;
+            for (target, hash) in targets {
+                upsert_deployment_target_with_conn(&tx, target, hash)?;
+            }
+            let baseline = SourceBaseline::from_skill(current, current.content_hash.clone().context("missing resolved content hash")?).context("missing resolved source")?;
+            tx.execute("INSERT INTO settings(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![format!("device_sync.source_baseline.{}",current.id),serde_json::to_string(&baseline)?])?;
+            tx.execute("INSERT INTO skill_source_checks(skill_id,error_code,checked_at) VALUES (?1,NULL,?2) ON CONFLICT(skill_id) DO UPDATE SET error_code=NULL,checked_at=excluded.checked_at",params![current.id,now_ms()])?;
+            tx.execute("DELETE FROM workspace_documents WHERE kind='content-recovery' AND id=?1", [&current.id])?;
+            tx.execute("DELETE FROM settings WHERE key=?1", [format!("workspace.update_hold.{}", current.id)])?;
+            tx.execute("INSERT INTO workspace_documents(kind,id,payload,updated_at) VALUES ('source-conflict-result',?1,?2,?3)",params![plan_id,serde_json::to_string(outcome)?,now_ms()])?;
+            tx.execute("DELETE FROM workspace_documents WHERE kind='source-conflict-preview' AND id=?1", [plan_id])?;
+            validate()?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
     pub fn commit_skill_update(
         &self,
         skill: &SkillRecord,
         targets: &[SkillTargetRecord],
+    ) -> Result<()> {
+        self.commit_skill_update_with_recovery(skill, targets, None, false)
+    }
+
+    pub(crate) fn commit_skill_update_with_recovery(
+        &self,
+        skill: &SkillRecord,
+        targets: &[SkillTargetRecord],
+        recovery: Option<&super::content_recovery::Recovery>,
+        restored: bool,
     ) -> Result<()> {
         self.with_conn(|conn| {
             let transaction = conn.unchecked_transaction()?;
@@ -1177,6 +1351,50 @@ impl SkillStore {
                 ON CONFLICT(skill_id) DO UPDATE SET error_code=NULL,checked_at=excluded.checked_at", params![skill.id, now_ms()])?;
             for target in targets {
                 upsert_skill_target_with_conn(&transaction, target)?;
+            }
+            if let Some(recovery) = recovery {
+                if restored {
+                    transaction.execute("DELETE FROM workspace_documents WHERE kind='content-recovery' AND id=?1", [&skill.id])?;
+                    transaction.execute("INSERT INTO settings(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![format!("workspace.update_hold.{}",skill.id), recovery.after_content_hash])?;
+                    let key = format!("device_sync.source_baseline.{}",skill.id);
+                    if let Some(baseline) = &recovery.before_baseline {
+                        transaction.execute("INSERT INTO settings(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![key,baseline])?;
+                    } else { transaction.execute("DELETE FROM settings WHERE key=?1",[key])?; }
+                } else {
+                    transaction.execute("INSERT INTO workspace_documents(kind,id,payload,updated_at) VALUES ('content-recovery',?1,?2,?3) ON CONFLICT(kind,id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at",params![skill.id,serde_json::to_string(recovery)?,now_ms()])?;
+                    transaction.execute("DELETE FROM settings WHERE key=?1",[format!("workspace.update_hold.{}",skill.id)])?;
+                }
+            }
+            transaction.commit()?;
+            Ok(())
+        })
+    }
+
+    pub(crate) fn commit_skill_updates(&self, skills: &[SkillRecord]) -> Result<()> {
+        self.with_conn(|conn| {
+            let transaction = conn.unchecked_transaction()?;
+            for skill in skills {
+                upsert_skill_with_conn(&transaction, skill)?;
+                if let Some(baseline) = skill
+                    .content_hash
+                    .clone()
+                    .and_then(|hash| SourceBaseline::from_skill(skill, hash))
+                {
+                    transaction.execute(
+                        "INSERT INTO settings (key,value) VALUES (?1,?2)
+                         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                        params![
+                            format!("device_sync.source_baseline.{}", skill.id),
+                            serde_json::to_string(&baseline)?
+                        ],
+                    )?;
+                }
+                transaction.execute(
+                    "INSERT INTO skill_source_checks (skill_id,error_code,checked_at)
+                     VALUES (?1,NULL,?2)
+                     ON CONFLICT(skill_id) DO UPDATE SET error_code=NULL,checked_at=excluded.checked_at",
+                    params![skill.id, now_ms()],
+                )?;
             }
             transaction.commit()?;
             Ok(())
@@ -1223,6 +1441,22 @@ impl SkillStore {
         self.get_setting(&format!("device_sync.source_baseline.{id}"))?
             .map(|value| serde_json::from_str(&value).context("read Skill source baseline"))
             .transpose()
+    }
+
+    pub(crate) fn commit_source_repair(
+        &self,
+        skill: &SkillRecord,
+        source_hash: String,
+    ) -> Result<()> {
+        let baseline = SourceBaseline::from_skill(skill, source_hash).context("missing source")?;
+        self.with_conn(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute("UPDATE skills SET source_type=?2,source_ref=?3,source_subpath=?4,source_revision=?5,status='ok' WHERE id=?1",params![skill.id,skill.source_type,skill.source_ref,skill.source_subpath,skill.source_revision])?;
+            tx.execute("INSERT INTO settings(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![format!("device_sync.source_baseline.{}",skill.id),serde_json::to_string(&baseline)?])?;
+            tx.execute("INSERT INTO skill_source_checks(skill_id,error_code,checked_at) VALUES (?1,NULL,?2) ON CONFLICT(skill_id) DO UPDATE SET error_code=NULL,checked_at=excluded.checked_at",params![skill.id,now_ms()])?;
+            tx.execute("DELETE FROM workspace_documents WHERE kind='content-recovery' AND id=?1",[&skill.id])?;
+            tx.commit()?; Ok(())
+        })
     }
 
     pub(crate) fn record_source_check_success(
@@ -1573,6 +1807,16 @@ impl SkillStore {
         })
     }
 
+    pub(crate) fn list_tag_skill_ids(&self, tag_id: i64) -> Result<Vec<String>> {
+        self.with_conn(|conn| {
+            let mut statement = conn.prepare(
+                "SELECT skill_id FROM skill_tag_links WHERE tag_id = ?1 ORDER BY skill_id ASC",
+            )?;
+            let rows = statement.query_map(params![tag_id], |row| row.get(0))?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
+
     pub fn get_skill_tags(&self, skill_id: &str) -> Result<Vec<TagRecord>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
@@ -1810,6 +2054,7 @@ impl SkillStore {
         })
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn get_skill_target(
         &self,
         skill_id: &str,
@@ -1846,6 +2091,7 @@ impl SkillStore {
         })
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn delete_skill_target(
         &self,
         skill_id: &str,
@@ -1939,6 +2185,18 @@ fn upsert_skill_with_conn(conn: &Connection, record: &SkillRecord) -> Result<()>
             record.status
         ],
     )?;
+    Ok(())
+}
+
+fn upsert_deployment_target_with_conn(
+    conn: &Connection,
+    record: &SkillTargetRecord,
+    hash: &str,
+) -> Result<()> {
+    upsert_skill_target_with_conn(conn, record)?;
+    conn.execute("INSERT INTO workspace_documents(kind,id,payload,updated_at) VALUES ('target-use',?1,?2,?3) ON CONFLICT(kind,id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at",params![record.id,serde_json::to_string(&Uuid::new_v4().to_string())?,now_ms()])?;
+    conn.execute("INSERT INTO settings (key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    params![format!("device_sync.target_baseline.{}", record.id), serde_json::to_string(&(&record.target_path, hash))?])?;
     Ok(())
 }
 
@@ -2078,16 +2336,7 @@ fn now_ms() -> i64 {
     now.as_millis() as i64
 }
 
-pub fn default_db_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf> {
-    let app_dir = app
-        .path()
-        .app_data_dir()
-        .context("failed to resolve app data dir")?;
-    std::fs::create_dir_all(&app_dir)
-        .with_context(|| format!("failed to create app data dir {:?}", app_dir))?;
-    Ok(app_dir.join(DB_FILE_NAME))
-}
-
+#[allow(dead_code)]
 pub fn migrate_legacy_db_if_needed(target_db_path: &Path) -> Result<()> {
     let Some(data_dir) = dirs::data_dir() else {
         return Ok(());
@@ -2096,7 +2345,10 @@ pub fn migrate_legacy_db_if_needed(target_db_path: &Path) -> Result<()> {
     migrate_legacy_db_if_needed_in_data_dir(target_db_path, &data_dir)
 }
 
-fn migrate_legacy_db_if_needed_in_data_dir(target_db_path: &Path, data_dir: &Path) -> Result<()> {
+pub(crate) fn migrate_legacy_db_if_needed_in_data_dir(
+    target_db_path: &Path,
+    data_dir: &Path,
+) -> Result<()> {
     let legacy_db_paths = LEGACY_APP_IDENTIFIERS
         .iter()
         .map(|id| data_dir.join(id).join(DB_FILE_NAME))

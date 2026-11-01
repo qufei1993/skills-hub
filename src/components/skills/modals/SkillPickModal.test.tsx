@@ -24,10 +24,10 @@ const candidates = [
   { name: 'testing', subpath: 'skills/testing', description: null, valid: true },
 ]
 
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 describe.each(['git', 'local'] as const)('%s skill picker', (kind) => {
-  function setup({ invalid = false, loading = false } = {}) {
+  function setup({ invalid = false, loading = false, wizard = false } = {}) {
     const onInstall = vi.fn()
     const items = invalid
       ? [...candidates, { name: 'broken', subpath: 'skills/broken', valid: false, reason: 'missing_skill_md' }]
@@ -37,6 +37,7 @@ describe.each(['git', 'local'] as const)('%s skill picker', (kind) => {
         Object.fromEntries(items.map((c) => [c.subpath, true])),
       )
       const props = {
+        settings: wizard ? <input aria-label="Settings input" /> : undefined,
         open: true,
         loading,
         onRequestClose: vi.fn(),
@@ -57,6 +58,21 @@ describe.each(['git', 'local'] as const)('%s skill picker', (kind) => {
       install: () => fireEvent.click(screen.getByRole('button', { name: 'Install selected' })),
     }
   }
+
+  it('preserves search and settings between steps and submits only the visible selection', () => {
+    const { search, onInstall } = setup({ wizard: true })
+    search('review')
+    fireEvent.click(screen.getByRole('button', { name: 'installFlow.next' }))
+    expect(onInstall).not.toHaveBeenCalled()
+    expect(screen.getByPlaceholderText('pickSearchPlaceholder').closest('[hidden]')).not.toBeNull()
+    fireEvent.change(screen.getByRole('textbox', { name: 'Settings input' }), { target: { value: 'retained' } })
+    fireEvent.click(screen.getByRole('button', { name: 'installFlow.back' }))
+    expect((screen.getByPlaceholderText('pickSearchPlaceholder') as HTMLInputElement).value).toBe('review')
+    fireEvent.click(screen.getByRole('button', { name: 'installFlow.next' }))
+    expect((screen.getByRole('textbox', { name: 'Settings input' }) as HTMLInputElement).value).toBe('retained')
+    fireEvent.click(screen.getByRole('button', { name: 'Install selected' }))
+    expect(onInstall).toHaveBeenCalledExactlyOnceWith(['skills/review'])
+  })
 
   it.each([' acad ', 'LEARNING', 'skills/academy'])('submits only the visible selection when searching %s', (query) => {
     const { search, install, onInstall } = setup()
@@ -117,4 +133,67 @@ describe.each(['git', 'local'] as const)('%s skill picker', (kind) => {
       ])
     })
   }
+})
+
+
+it('keeps same-source updates selectable and excludes conflicts from select all', () => {
+  const onInstall = vi.fn()
+  render(<GitPickModal
+    open loading={false}
+    gitCandidates={[
+      { name: 'existing', subpath: 'a', status: 'update' },
+      { name: 'new', subpath: 'b', status: 'install' },
+      { name: 'conflict', subpath: 'c', status: 'conflict' },
+    ]}
+    gitCandidateSelected={{ a: true, b: true, c: true }}
+    onRequestClose={vi.fn()} onCancel={vi.fn()} onToggleCandidate={vi.fn()}
+    onInstall={onInstall} t={i18n.t}
+  />)
+  expect(screen.getByText('gitInstall.update')).toBeTruthy()
+  expect(screen.getByText('gitInstall.conflict')).toBeTruthy()
+  const checkboxes = screen.getAllByRole('checkbox') as HTMLInputElement[]
+  expect(checkboxes[3].disabled).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'gitInstall.submit' }))
+  expect(onInstall).toHaveBeenCalledExactlyOnceWith(['a', 'b'])
+})
+
+
+it('expands and collapses overflowing descriptions without enabling a conflicting skill', () => {
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(48)
+  vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(160)
+  const onToggleCandidate = vi.fn()
+  render(<GitPickModal open loading={false}
+    gitCandidates={[{ name: 'conflict', subpath: 'a', status: 'conflict', description: 'Long skill description' }]}
+    gitCandidateSelected={{ a: false }} onToggleCandidate={onToggleCandidate}
+    onRequestClose={vi.fn()} onCancel={vi.fn()} onInstall={vi.fn()} t={i18n.t}
+  />)
+  const expand = screen.getByRole('button', { name: 'gitInstall.expandDescription' })
+  expect(expand.getAttribute('aria-expanded')).toBe('false')
+  const contentId = expand.getAttribute('aria-controls')!
+  expect(document.getElementById(contentId)?.textContent).toBe('Long skill description')
+  fireEvent.click(expand)
+  const collapse = screen.getByRole('button', { name: 'gitInstall.collapseDescription' })
+  expect(collapse.getAttribute('aria-expanded')).toBe('true')
+  expect((screen.getByRole('checkbox', { name: 'conflict' }) as HTMLInputElement).disabled).toBe(true)
+  expect(onToggleCandidate).not.toHaveBeenCalled()
+  fireEvent.click(collapse)
+  expect(screen.getByRole('button', { name: 'gitInstall.expandDescription' }).getAttribute('aria-expanded')).toBe('false')
+})
+
+it('only offers description expansion when the text overflows the available width', () => {
+  let height = 32
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(48)
+  vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(() => height)
+  render(<GitPickModal open loading={false}
+    gitCandidates={[{ name: 'short', subpath: 'a', description: 'Skill description' }]}
+    gitCandidateSelected={{ a: true }} onToggleCandidate={vi.fn()}
+    onRequestClose={vi.fn()} onCancel={vi.fn()} onInstall={vi.fn()} t={i18n.t}
+  />)
+  expect(screen.queryByRole('button', { name: 'gitInstall.expandDescription' })).toBeNull()
+  height = 120
+  fireEvent(window, new Event('resize'))
+  expect(screen.getByRole('button', { name: 'gitInstall.expandDescription' })).toBeTruthy()
+  height = 32
+  fireEvent(window, new Event('resize'))
+  expect(screen.queryByRole('button', { name: 'gitInstall.expandDescription' })).toBeNull()
 })

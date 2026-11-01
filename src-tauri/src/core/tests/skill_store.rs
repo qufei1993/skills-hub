@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use crate::core::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
+use crate::core::skill_store::{
+    IncompatibleDatabaseError, SkillRecord, SkillStore, SkillTargetRecord,
+};
 use crate::core::{
     device_sync::{
         credentials::MemoryCredentialStore,
@@ -965,6 +967,39 @@ fn error_context_includes_db_path() {
     let err = store.ensure_schema().unwrap_err();
     let msg = format!("{:#}", err);
     assert!(msg.contains("failed to open db at"), "{msg}");
+}
+
+#[test]
+fn replacing_a_setting_returns_the_previous_value_atomically() {
+    let (_dir, store) = make_store();
+    store.set_setting("agent_state", "old").unwrap();
+
+    let previous = store
+        .replace_setting("agent_state", "new")
+        .expect("replace setting");
+
+    assert_eq!(previous.as_deref(), Some("old"));
+    assert_eq!(
+        store.get_setting("agent_state").unwrap().as_deref(),
+        Some("new")
+    );
+}
+
+#[test]
+fn future_schema_returns_a_typed_compatibility_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("future.db");
+    let connection = Connection::open(&db_path).unwrap();
+    connection.pragma_update(None, "user_version", 99).unwrap();
+    drop(connection);
+
+    let error = SkillStore::new(db_path).ensure_schema().unwrap_err();
+    let compatibility = error
+        .downcast_ref::<IncompatibleDatabaseError>()
+        .expect("typed compatibility error");
+
+    assert_eq!(compatibility.found_version, 99);
+    assert_eq!(compatibility.supported_version, 6);
 }
 
 #[test]

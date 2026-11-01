@@ -22,24 +22,11 @@ const renderModal = ({
       addModalTab={addModalTab}
       localPath={localPath}
       gitUrl={gitUrl}
-      tags={[]}
-      selectedTagIds={[]}
-      syncTargets={{}}
-      installedTools={[]}
-      toolStatus={null}
-      installScope="global"
-      installProjects={[]}
-      recentProjects={[]}
       onRequestClose={vi.fn()}
       onTabChange={vi.fn()}
       onLocalPathChange={vi.fn()}
       onPickLocalPath={vi.fn()}
       onGitUrlChange={vi.fn()}
-      onToggleTag={vi.fn()}
-      onSyncTargetChange={vi.fn()}
-      onInstallScopeChange={vi.fn()}
-      onInstallProjectsChange={vi.fn()}
-      onPickProject={vi.fn()}
       onSubmit={vi.fn()}
       t={translate}
     />,
@@ -53,7 +40,7 @@ describe('AddSkillModal source validation', () => {
     const markup = renderModal({ addModalTab, ...source })
 
     expect(markup).toMatch(
-      /<button class="btn btn-primary" disabled="">(?:install|create)<\/button>/,
+      /<button type="submit" class="btn btn-primary" disabled="">installFlow.detect<\/button>/,
     )
   })
 
@@ -64,7 +51,7 @@ describe('AddSkillModal source validation', () => {
     const markup = renderModal({ addModalTab, ...source })
 
     expect(markup).toMatch(
-      /<button class="btn btn-primary">(?:install|create)<\/button>/,
+      /<button type="submit" class="btn btn-primary">installFlow.detect<\/button>/,
     )
   })
 })

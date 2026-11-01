@@ -6,11 +6,13 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::content_hash::hash_dir_for_sync_conflict;
 use super::device_sync::types::TrashEntry;
 use super::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
 use super::sync_engine::{
-    copy_dir_recursive, ensure_paths_do_not_overlap, path_is_protected_real_content, paths_overlap,
-    remove_path_permanently as remove_path, sync_dir_with_mode_with_overwrite, SyncMode,
+    copy_dir_recursive, ensure_paths_do_not_overlap, path_for_comparison,
+    path_is_protected_real_content, paths_overlap, remove_path_permanently as remove_path,
+    sync_dir_with_mode_with_overwrite, SyncMode,
 };
 
 pub const RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
@@ -66,6 +68,82 @@ impl<'a> RecycleBinService<'a> {
         Self { store, trash_root }
     }
 
+    pub(crate) fn validate_archive(
+        &self,
+        skill: &SkillRecord,
+        targets: &[SkillTargetRecord],
+    ) -> Result<()> {
+        let source = PathBuf::from(&skill.central_path);
+        let source_metadata = fs::symlink_metadata(&source)
+            .with_context(|| format!("Skill content is missing: {:?}", source))?;
+        anyhow::ensure!(
+            source_metadata.is_dir() && !source_metadata.file_type().is_symlink(),
+            "unsafe central Skill path"
+        );
+        let source_hash = hash_dir_for_sync_conflict(&source)?;
+        let mut protected = vec![source.clone()];
+        if let Some(original) = skill.external_local_source() {
+            protected.push(PathBuf::from(original));
+        }
+        let protected_physical = protected
+            .iter()
+            .filter_map(|path| path_for_comparison(path).ok())
+            .collect::<Vec<_>>();
+
+        for target in targets {
+            if target.status == "disabled" {
+                continue;
+            }
+            let path = PathBuf::from(&target.target_path);
+            let metadata = match fs::symlink_metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+            };
+            if self
+                .store
+                .is_target_used_by_other_skill(&target.target_path, &skill.id)?
+            {
+                anyhow::bail!("UNSAFE_TARGET|{}", path.to_string_lossy());
+            }
+            if metadata.file_type().is_symlink() {
+                let destination = fs::read_link(&path)?;
+                let destination = if destination.is_absolute() {
+                    destination
+                } else {
+                    path.parent().unwrap_or(Path::new(".")).join(destination)
+                };
+                let physical = path_for_comparison(&destination)?;
+                if !protected_physical.contains(&physical) {
+                    anyhow::bail!("TARGET_MODIFIED|{}", path.to_string_lossy());
+                }
+                continue;
+            }
+            if path_is_protected_real_content(&path, &protected)? {
+                continue;
+            }
+            if !metadata.is_dir() {
+                anyhow::bail!("UNSAFE_TARGET|{}", path.to_string_lossy());
+            }
+            let actual = hash_dir_for_sync_conflict(&path)?;
+            let baseline = self
+                .store
+                .get_setting(&format!("device_sync.target_baseline.{}", target.id))?;
+            let trusted = actual == source_hash
+                || baseline.as_deref().is_some_and(|value| {
+                    super::tool_distribution::matches_saved_target_baseline(
+                        value,
+                        &path,
+                        Some(&actual),
+                    )
+                });
+            if !trusted {
+                anyhow::bail!("TARGET_MODIFIED|{}", path.to_string_lossy());
+            }
+        }
+        Ok(())
+    }
+
     pub fn archive(
         &self,
         skill_id: &str,
@@ -86,6 +164,7 @@ impl<'a> RecycleBinService<'a> {
             .map(|tag| tag.name)
             .collect::<Vec<_>>();
         let targets = self.store.list_skill_targets(skill_id)?;
+        self.validate_archive(&skill, &targets)?;
         let snapshot = RecycleBinSnapshot {
             skill: skill.clone(),
             tags: tags.clone(),
@@ -117,6 +196,9 @@ impl<'a> RecycleBinService<'a> {
         }
         let mut cleanup_paths = Vec::new();
         for target in &targets {
+            if target.status == "disabled" {
+                continue;
+            }
             let target_path = PathBuf::from(&target.target_path);
             if !path_is_protected_real_content(&target_path, &protected)? {
                 cleanup_paths.push(target_path);

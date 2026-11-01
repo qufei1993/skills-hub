@@ -13,9 +13,9 @@ const LEGACY_GITHUB_TOKEN_SETTING: &str = "github_token";
 const GITHUB_TOKEN_SECURE_CLEANUP_PENDING_SETTING: &str = "github_token_secure_cleanup_pending";
 const GITHUB_TOKEN_CONFIGURED_SETTING: &str = "github_token_configured_v1";
 pub const GITHUB_TOKEN_CREDENTIAL_KEY: &str = "github-search-personal-access-token-v1";
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, feature = "local-test"))]
 pub(crate) const GITHUB_TOKEN_KEYRING_SERVICE: &str = "com.skills-hub.github-token.dev";
-#[cfg(not(debug_assertions))]
+#[cfg(not(any(debug_assertions, feature = "local-test")))]
 pub(crate) const GITHUB_TOKEN_KEYRING_SERVICE: &str = "com.skills-hub.github-token";
 static GITHUB_TOKEN_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
