@@ -1,11 +1,11 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
 
 use crate::core::content_hash::hash_dir_strict;
 use crate::core::runtime_paths::{RuntimePaths, RuntimeProfile};
-use crate::services::deployment::{DeploymentRequest, DeploymentScope};
+use crate::services::deployment::DeploymentRequest;
 use crate::services::error::ErrorCode;
 use crate::services::skills_hub::SkillsHubService;
 use crate::services::source_conflict::SourceConflictChoice::{Central, Tool};
@@ -98,7 +98,7 @@ fn source_conflict_preview_is_read_only_and_labels_complete_differences() {
     assert!(preview
         .changes
         .iter()
-        .any(|change| change.path == ".git/config"));
+        .any(|change| Path::new(&change.path) == Path::new(".git/config")));
     assert!(preview
         .changes
         .iter()
@@ -448,6 +448,7 @@ fn source_conflict_does_not_write_through_a_redirected_central_parent() {
 #[cfg(unix)]
 #[test]
 fn source_conflict_updates_existing_project_copy_alongside_global_deployments() {
+    use crate::services::deployment::DeploymentScope;
     let f = Fixture::new();
     let project = TempDir::new().unwrap();
     let mut request = DeploymentRequest::global("demo", ["cursor"]);
