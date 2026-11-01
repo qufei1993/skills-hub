@@ -3,10 +3,11 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import type { TFunction } from 'i18next'
 import type { ManagedSkill } from './types'
 import SkillIssueNotice from './SkillIssueNotice'
+import i18n from '../../i18n'
 
 afterEach(cleanup)
 const t = ((key: string) => key) as TFunction
@@ -71,4 +72,17 @@ it('does not consume the detail workspace height when the source is missing', ()
   expect(getComputedStyle(notice!).marginBottom).toBe('10px')
   expect(getComputedStyle(notice!).flexBasis).toBe('auto')
   expect(screen.getByTestId('detail-content')).toBeTruthy()
+})
+
+it('shows missing central content and the manual recovery path even for disabled Skills', () => {
+  const skill: ManagedSkill = { id: 'missing', name: 'missing', enabled: false, status: 'error', source_error: 'SKILL_ISSUE|centralMissing', source_type: 'local', central_path: '/central/missing', created_at: 0, updated_at: 0, tags: [], targets: [] }
+  const repair = vi.fn()
+  const { rerender } = render(<SkillIssueNotice skill={skill} tools={[]} t={i18n.getFixedT('zh')} onRepairSource={repair} onRepairTargets={repair} />)
+  expect(screen.getByText('中心内容缺失')).toBeTruthy()
+  expect(screen.getByText('/central/missing')).toBeTruthy()
+  expect(screen.getByText(/设备同步已阻止/).textContent).toContain('应用不会自动恢复内容')
+  expect(screen.queryByRole('button')).toBeNull()
+  expect(repair).not.toHaveBeenCalled()
+  rerender(<SkillIssueNotice skill={{ ...skill, status: 'ok', source_error: null }} tools={[]} t={i18n.getFixedT('zh')} />)
+  expect(screen.queryByText('中心内容缺失')).toBeNull()
 })

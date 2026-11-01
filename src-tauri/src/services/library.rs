@@ -170,7 +170,7 @@ impl RemoveRequest {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RemoveOutcome {
     pub skill_id: String,
-    pub item: RecycleBinItem,
+    pub item: Option<RecycleBinItem>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -207,6 +207,7 @@ struct PathSnapshot {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 struct RemoveSnapshot {
     operation: &'static str,
+    central_missing: bool,
     skill: SkillRecord,
     tags: Vec<String>,
     targets: Vec<SkillTargetRecord>,
@@ -577,9 +578,20 @@ impl SkillsHubService {
         } else {
             None
         };
-        let item = RecycleBinService::new(self.store(), self.paths().recycle_bin_dir.clone())
-            .archive(&snapshot.skill.id, DeletionSource::Manual, now_ms())
-            .map_err(map_confirmed_archive_error)?;
+        let item = if snapshot.central_missing {
+            // No central backup can be made. Preserve every physical source and tool
+            // path so the user can recover content; only remove the management record.
+            self.store().delete_skill(&snapshot.skill.id).map_err(|_| {
+                ServiceError::internal("failed to remove the missing-content record")
+            })?;
+            None
+        } else {
+            Some(
+                RecycleBinService::new(self.store(), self.paths().recycle_bin_dir.clone())
+                    .archive(&snapshot.skill.id, DeletionSource::Manual, now_ms())
+                    .map_err(map_confirmed_archive_error)?,
+            )
+        };
         self.library_plans.remove(&request.plan_id);
         Ok(RemoveOutcome {
             skill_id: snapshot.skill.id,
@@ -752,14 +764,25 @@ impl SkillsHubService {
             .map_err(|_| ServiceError::internal("failed to inspect skill targets"))?;
         targets.sort_by(|left, right| left.id.cmp(&right.id));
         let recycle = RecycleBinService::new(self.store(), self.paths().recycle_bin_dir.clone());
-        recycle
-            .validate_archive(&skill, &targets)
-            .map_err(map_archive_error)?;
+        let central_missing = match std::fs::symlink_metadata(&skill.central_path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+            Err(_) => {
+                return Err(ServiceError::internal(
+                    "failed to inspect central Skill content",
+                ))
+            }
+            Ok(_) => false,
+        };
+        if !central_missing {
+            recycle
+                .validate_archive(&skill, &targets)
+                .map_err(map_archive_error)?;
+        }
         let mut paths = vec![PathBuf::from(&skill.central_path)];
         paths.extend(
             targets
                 .iter()
-                .filter(|target| target.status != "disabled")
+                .filter(|target| !central_missing && target.status != "disabled")
                 .map(|target| PathBuf::from(&target.target_path)),
         );
         let files = paths
@@ -775,6 +798,7 @@ impl SkillsHubService {
             .collect::<Result<Vec<_>, _>>()?;
         Ok(RemoveSnapshot {
             operation: "remove",
+            central_missing,
             skill,
             tags,
             targets,
@@ -929,6 +953,7 @@ fn remove_plan(id: &str, snapshot: &RemoveSnapshot) -> RemovePlan {
         targets: snapshot
             .targets
             .iter()
+            .filter(|_| !snapshot.central_missing)
             .map(|target| RemoveTarget {
                 id: target.id.clone(),
                 agent: target.tool.clone(),
@@ -937,7 +962,7 @@ fn remove_plan(id: &str, snapshot: &RemoveSnapshot) -> RemovePlan {
                 target_path: target.target_path.clone(),
             })
             .collect(),
-        creates_recycle_bin_entry: true,
+        creates_recycle_bin_entry: !snapshot.central_missing,
     }
 }
 

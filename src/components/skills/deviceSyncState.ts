@@ -237,7 +237,7 @@ export const getDeviceSyncControls = ({
   canCreateRepository: !busy && (hasCredential || token.trim().length > 0),
 })
 export const getSyncFailureKind = (error?: string | null) => {
-  const kinds = ['network', 'tls', 'auth', 'credential', 'credentialMissing', 'visibility', 'publicUpload', 'privateKey', 'integrity', 'disk', 'permission', 'push', 'fetch', 'storage', 'targetModified', 'unknown']
+  const kinds = ['centralMissing', 'network', 'tls', 'auth', 'credential', 'credentialMissing', 'visibility', 'publicUpload', 'privateKey', 'integrity', 'disk', 'permission', 'push', 'fetch', 'storage', 'targetModified', 'unknown']
   const kind = error?.startsWith('DEVICE_SYNC_FAILURE_') ? error.slice('DEVICE_SYNC_FAILURE_'.length) : ''
   return kinds.includes(kind) ? kind : 'unknown'
 }

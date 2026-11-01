@@ -1,5 +1,6 @@
 const PREFIX: &str = "DEVICE_SYNC_FAILURE_";
 const KINDS: &[&str] = &[
+    "centralMissing",
     "network",
     "tls",
     "auth",

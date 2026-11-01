@@ -19,8 +19,9 @@ export const isSuccessfulSkillTarget = (target: SkillTarget) =>
   target.status === 'ok'
 
 export function getSkillSyncState(
-  skill: Pick<ManagedSkill, 'enabled' | 'status' | 'targets'>,
+  skill: Pick<ManagedSkill, 'enabled' | 'status' | 'targets' | 'source_error'>,
 ): SkillSyncState {
+  if (skill.source_error === 'SKILL_ISSUE|centralMissing') return 'source-error'
   if (!skill.enabled) return 'disabled'
   if (skill.status !== 'ok') return 'source-error'
   const activeTargets = skill.targets.filter(isActiveSkillTarget)

@@ -20,6 +20,7 @@ import {
 } from './deviceSyncState'
 
 it('recognizes protected tool edits without exposing raw paths', () => {
+  expect(getSyncFailureKind('DEVICE_SYNC_FAILURE_centralMissing')).toBe('centralMissing')
   expect(getSyncFailureKind('DEVICE_SYNC_FAILURE_targetModified')).toBe('targetModified')
   expect(getSyncFailureKind('TARGET_MODIFIED|/private/path')).toBe('unknown')
 })

@@ -119,9 +119,11 @@ fn selector_matches_unicode_names_case_insensitively() {
 fn list_and_status_include_source_tags_targets_scope_and_content_state() {
     let fixture = Fixture::new();
     let service = fixture.open();
+    let central = fixture.paths.default_central_repo.join("demo");
+    std::fs::create_dir_all(&central).unwrap();
     service
         .store()
-        .upsert_skill(&skill("demo", "Demo", "/central/demo"))
+        .upsert_skill(&skill("demo", "Demo", central.to_str().unwrap()))
         .unwrap();
     let tag = service.store().create_tag("Frontend").unwrap();
     service.store().set_skill_tags("demo", &[tag.id]).unwrap();
@@ -171,7 +173,9 @@ fn list_and_status_include_source_tags_targets_scope_and_content_state() {
 fn source_dto_redacts_credentials_and_sensitive_query_values() {
     let fixture = Fixture::new();
     let service = fixture.open();
-    let mut record = skill("private", "Private", "/central/private");
+    let central = fixture.paths.default_central_repo.join("private");
+    std::fs::create_dir_all(&central).unwrap();
+    let mut record = skill("private", "Private", central.to_str().unwrap());
     record.source_ref = Some(
         "https://user:password@example.com/private.git?code=oauth-secret&oauth_code=second-secret&custom=future-secret#access_token=fragment-secret"
             .to_string(),

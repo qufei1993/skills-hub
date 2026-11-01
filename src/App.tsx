@@ -443,6 +443,9 @@ function App() {
         const path = raw.split('|')[1] ?? ''
         return t('errors.targetOverlapsSource', { path })
       }
+      if (raw.startsWith('DELETE_TARGET_MODIFIED|')) {
+        return t('errors.deleteTargetModified', { path: raw.slice('DELETE_TARGET_MODIFIED|'.length) })
+      }
       if (raw.startsWith('TARGET_MODIFIED|')) {
         const path = raw.slice('TARGET_MODIFIED|'.length)
         return t('errors.targetModified', { path })
@@ -2396,7 +2399,7 @@ function App() {
         setBulkSelectedIds([])
         setBulkMode(false)
         setSuccessToastMessage(
-          t('bulk.deleteSuccess', { count: bulkSelectedSkills.length }),
+          t(bulkSelectedSkills.some(skill => skill.source_error === 'SKILL_ISSUE|centralMissing') ? 'bulk.deleteRecordsSuccess' : 'bulk.deleteSuccess', { count: bulkSelectedSkills.length }),
         )
       }
     } catch (err) {
@@ -4219,6 +4222,7 @@ function App() {
         open={showBulkDeleteModal}
         loading={loading}
         skillNames={bulkSelectedNames}
+        missingCentralCount={bulkSelectedSkills.filter(skill => skill.source_error === 'SKILL_ISSUE|centralMissing').length}
         onRequestClose={handleCloseBulkDelete}
         onConfirm={handleConfirmBulkDelete}
         t={t}
@@ -4313,6 +4317,7 @@ function App() {
         open={Boolean(pendingDeleteId)}
         loading={loading}
         skillName={pendingDeleteSkill?.name ?? null}
+        centralMissing={pendingDeleteSkill?.source_error === 'SKILL_ISSUE|centralMissing'}
         onRequestClose={handleCloseDelete}
         onConfirm={() => {
           if (pendingDeleteSkill) void handleDeleteManaged(pendingDeleteSkill)

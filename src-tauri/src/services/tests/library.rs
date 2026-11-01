@@ -366,14 +366,13 @@ fn remove_archives_recoverable_source_tags_targets_and_metadata() {
 
     assert!(!fixture.central_skill_exists("demo"));
     assert!(!target_path.exists());
-    assert_eq!(outcome.item.source_type, "git");
-    assert_eq!(outcome.item.source_ref, skill.source_ref);
-    assert_eq!(outcome.item.targets.len(), 1);
-    assert_eq!(outcome.item.tags, vec!["Writing", "内容"]);
-    assert_eq!(outcome.item.description, skill.description);
-    assert!(Path::new(&outcome.item.trash_path)
-        .join("SKILL.md")
-        .is_file());
+    let item = outcome.item.unwrap();
+    assert_eq!(item.source_type, "git");
+    assert_eq!(item.source_ref, skill.source_ref);
+    assert_eq!(item.targets.len(), 1);
+    assert_eq!(item.tags, vec!["Writing", "内容"]);
+    assert_eq!(item.description, skill.description);
+    assert!(Path::new(&item.trash_path).join("SKILL.md").is_file());
 }
 
 #[test]
@@ -1092,4 +1091,158 @@ fn adopt_custom_names_use_cross_platform_safe_filename_rules() {
             .unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidArgument, "{name}");
     }
+}
+
+#[test]
+fn missing_central_is_reported_as_an_error_for_all_source_kinds() {
+    let fixture = Fixture::new();
+    for (index, kind, bound, enabled) in [
+        (0, "git", true, true),
+        (1, "local", false, true),
+        (2, "local", true, false),
+    ] {
+        let id = format!("missing-{index}");
+        let mut skill = fixture.add_skill(&id, &id, "saved");
+        skill.source_type = kind.into();
+        skill.enabled = enabled;
+        let source = fixture._home.path().join(format!("source-{index}"));
+        write_skill(&source, &id, "saved");
+        skill.source_ref = bound.then(|| source.to_string_lossy().into_owned());
+        fixture.service.store().upsert_skill(&skill).unwrap();
+        fs::remove_dir_all(&skill.central_path).unwrap();
+        let shown = fixture.service.show_skill(id.clone().into()).unwrap();
+
+        assert_eq!(shown.content_status, "error");
+        assert_eq!(
+            shown.source_error.as_deref(),
+            Some("SKILL_ISSUE|centralMissing")
+        );
+        assert_eq!(
+            fixture
+                .service
+                .skill_status(id.into())
+                .unwrap()
+                .content_status,
+            "error"
+        );
+    }
+    assert!(fixture
+        .service
+        .list_skills()
+        .unwrap()
+        .iter()
+        .all(|skill| skill.content_status == "error"));
+}
+
+#[test]
+fn missing_central_record_can_be_removed_without_a_recycle_entry() {
+    let fixture = Fixture::new();
+    let skill = fixture.add_skill("missing-id", "missing", "saved");
+    fs::remove_dir_all(&skill.central_path).unwrap();
+    let plan = fixture.service.plan_remove(skill.id.clone().into());
+
+    let plan = plan.expect("missing content must not prevent explicit record deletion");
+    assert!(!plan.creates_recycle_bin_entry);
+    fixture
+        .service
+        .remove(RemoveRequest::confirmed(plan.id))
+        .unwrap();
+    assert!(fixture
+        .service
+        .store()
+        .get_skill_by_id(&skill.id)
+        .unwrap()
+        .is_none());
+    assert!(fixture
+        .service
+        .store()
+        .list_device_sync_trash()
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn missing_central_deletion_preserves_sources_and_tool_content_and_revalidates() {
+    let fixture = Fixture::new();
+    let mut skill = fixture.add_skill("missing-id", "missing", "saved");
+    let source = fixture._home.path().join("original");
+    write_skill(&source, "missing", "source content");
+    skill.source_type = "local".into();
+    skill.source_ref = Some(source.to_string_lossy().into_owned());
+    fixture.service.store().upsert_skill(&skill).unwrap();
+    let copy = fixture._home.path().join("tools/missing");
+    write_skill(&copy, "missing", "independent tool edits");
+    fixture
+        .service
+        .store()
+        .upsert_skill_target(&SkillTargetRecord {
+            id: "copy-id".into(),
+            skill_id: skill.id.clone(),
+            tool: "codex".into(),
+            scope: "global".into(),
+            project_path: None,
+            target_path: copy.to_string_lossy().into_owned(),
+            mode: "copy".into(),
+            status: "ok".into(),
+            last_error: None,
+            synced_at: None,
+        })
+        .unwrap();
+    fs::remove_dir_all(&skill.central_path).unwrap();
+    let plan = fixture
+        .service
+        .plan_remove(skill.id.clone().into())
+        .unwrap();
+    assert!(!plan.creates_recycle_bin_entry);
+    assert!(plan.targets.is_empty());
+    // A manual recovery after confirmation was prepared must invalidate that plan.
+    write_skill(
+        Path::new(&skill.central_path),
+        "missing",
+        "manually restored",
+    );
+    assert_eq!(
+        fixture
+            .service
+            .remove(RemoveRequest::confirmed(plan.id))
+            .unwrap_err()
+            .code,
+        ErrorCode::PlanStale
+    );
+    assert_eq!(
+        fixture
+            .service
+            .show_skill(skill.id.clone().into())
+            .unwrap()
+            .content_status,
+        "ok"
+    );
+    fs::remove_dir_all(&skill.central_path).unwrap();
+    let plan = fixture
+        .service
+        .plan_remove(skill.id.clone().into())
+        .unwrap();
+    let removed = fixture
+        .service
+        .remove(RemoveRequest::confirmed(plan.id))
+        .unwrap();
+    assert!(removed.item.is_none());
+    assert!(fixture
+        .service
+        .store()
+        .get_skill_by_id(&skill.id)
+        .unwrap()
+        .is_none());
+    assert!(fixture
+        .service
+        .store()
+        .list_skill_targets(&skill.id)
+        .unwrap()
+        .is_empty());
+    assert!(fs::read_to_string(copy.join("SKILL.md"))
+        .unwrap()
+        .contains("independent tool edits"));
+    assert!(fs::read_to_string(source.join("SKILL.md"))
+        .unwrap()
+        .contains("source content"));
 }

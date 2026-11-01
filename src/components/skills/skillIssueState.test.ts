@@ -10,6 +10,7 @@ it('does not interpret cloud or tool success as source recovery', () => {
   expect(historicalIssueState({ ...skill, source_checked_at: 50 }, 100)).toBe('unverified')
 })
 it('only renders known diagnostic categories', () => {
+  expect(issueReasonKey('SKILL_ISSUE|centralMissing')).toBe('deviceSync.issueReason.centralMissing')
   expect(issueReasonKey('SKILL_ISSUE|modified')).toBe('deviceSync.issueReason.modified')
   expect(issueReasonKey('https://token:secret@example.com')).toBe('deviceSync.issueReason.unknown')
 })

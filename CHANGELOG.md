@@ -30,6 +30,10 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Deletion conflict wording**: Explain modified tool-copy conflicts with deletion-specific English, Simplified Chinese and Korean messages for both single and bulk deletion, including what was preserved and how to retry.
+
+- **Missing central content**: Mark affected Skills as errors and stop device-sync checks and runs before remote changes or baseline advancement. Content is never restored automatically. Explicit deletion can remove a missing-content record while preserving tool paths and original sources, without an empty recycle-bin entry. Addresses #157 and #158.
+
 - **Shared tool toggles**: Confirmed shared-directory actions now synchronize or unsynchronize every listed tool together in one deployment operation. Register each tool so indicators match the confirmation, preserve other scopes, and roll back the group if the operation fails.
 
 - **Library action routing**: Restore immediate tool-icon synchronization, retry and unsynchronization through the existing commands, without preset, confirmation or result dialogs for ordinary toggles. Preserve current project/global filtering and the existing shared-directory warning. Target management, project removal and failed-target repair stay in the library with contextual copy and scoped operations.

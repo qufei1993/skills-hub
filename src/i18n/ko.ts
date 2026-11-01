@@ -830,8 +830,10 @@ export const ko = {
       "toolUpdatesPending": "확인이 필요한 도구 업데이트 {{count}}개",
       "toolUpdatesSummary": "중앙 라이브러리와 클라우드 동기화에는 영향을 주지 않습니다.",
       "currentIssuesFilter": "현재 문제만 표시",
-      "issueReason": { "sourceMissing": "로컬 소스 디렉터리가 없습니다.", "repoPathMissing": "소스 저장소에서 Skill 경로를 찾을 수 없습니다.", "modified": "별도 수정 사항이 있어 덮어쓰기를 중지했습니다.", "unsafeTarget": "대상 경로가 보호된 콘텐츠와 겹치거나 안전하지 않게 공유됩니다.", "disk": "디스크 공간이 부족합니다.", "permission": "대상에 쓰기 권한이 없습니다.", "auth": "소스 인증에 실패했습니다.", "network": "소스에 연결할 수 없습니다.", "recheck": "이전 소스 오류의 복구가 확인되지 않았습니다. 다시 확인하세요.", "unknown": "작업을 안전하게 완료하지 못했습니다. 소스나 도구 설정을 확인하세요." },
+      "issueReason": { "centralMissing": "Skill의 중앙 디렉터리가 없거나 디렉터리가 아닙니다.", "sourceMissing": "로컬 소스 디렉터리가 없습니다.", "repoPathMissing": "소스 저장소에서 Skill 경로를 찾을 수 없습니다.", "modified": "별도 수정 사항이 있어 덮어쓰기를 중지했습니다.", "unsafeTarget": "대상 경로가 보호된 콘텐츠와 겹치거나 안전하지 않게 공유됩니다.", "disk": "디스크 공간이 부족합니다.", "permission": "대상에 쓰기 권한이 없습니다.", "auth": "소스 인증에 실패했습니다.", "network": "소스에 연결할 수 없습니다.", "recheck": "이전 소스 오류의 복구가 확인되지 않았습니다. 다시 확인하세요.", "unknown": "작업을 안전하게 완료하지 못했습니다. 소스나 도구 설정을 확인하세요." },
       "issueHistory": { "pending": "확인 필요", "recovered": "이후 복구 확인됨", "unverified": "복구 미확인", "disabled": "비활성화됨", "removed": "관리 대상에서 제거됨" },
+      "centralMissingTitle": "중앙 콘텐츠 없음",
+      "centralMissingHelp": "기기 동기화가 차단되었습니다. 중앙 디렉터리를 직접 복구한 후 내 Skills를 새로 고치거나, 필요 없는 기록을 명시적으로 삭제하세요. 콘텐츠는 자동 복구되지 않습니다.",
       "sourceNeedsAttention": "Skill 업데이트 확인 필요",
       "viewIssueReason": "원인 보기",
       "sourceIssueHelp": "이전 소스 업데이트가 실패했습니다. 소스에 접근할 수 있는지 확인한 후 다시 시도하세요.",
@@ -1023,6 +1025,7 @@ export const ko = {
       "noHistory": "아직 동기화 기록이 없습니다.",
       "failureDetails": "실패 이유 보기",
       "failureReasons": {
+        "centralMissing": "중앙 Skill 콘텐츠가 없어 기기 동기화를 중지했습니다. 내 Skills에서 문제가 있는 Skill과 경로를 확인하세요. 디렉터리를 직접 복구하거나 필요 없는 기록을 명시적으로 삭제한 후 다시 시도하세요. 자동 복구는 수행하지 않았습니다.",
         "targetModified": "로컬 스킬 또는 도구 복사본이 변경되어 수정 내용을 보호하기 위해 동기화를 중지했습니다. 변경 사항을 비교하고 백업한 후 다시 시도하세요.",
         "network": "동기화 저장소에 연결할 수 없습니다. 네트워크나 프록시를 확인한 후 다시 시도하세요.",
         "tls": "보안 연결을 설정할 수 없습니다. 시스템 시계, 인증서 또는 프록시를 확인하세요.",
@@ -1153,6 +1156,7 @@ export const ko = {
       "deleteBody": "선택한 스킬을 Skills Hub 휴지통으로 이동하며 30일 동안 복원할 수 있습니다.",
       "deleteConfirm": "삭제",
       "deleteProgress": "{{current}}/{{total}} {{name}} 제거 중...",
+      "deleteRecordsSuccess": "Skill {{count}}개를 삭제했습니다. 콘텐츠가 없는 항목은 관리 기록만 제거했습니다.",
       "deleteSuccess": "{{count}} 스킬을 휴지통으로 옮겼습니다.",
       "moreSelected": "+{{count}} 더 보기"
     },
@@ -1630,6 +1634,7 @@ export const ko = {
       "toolPathChanged": "{{tool}}의 동기화 디렉터리가 {{path}}(으)로 변경되었지만 이전 배포 기록이 아직 정리되지 않았습니다. 이 스킬을 비활성화한 다음 다시 활성화하세요. 계속 실패하면 이 메시지를 알려 주세요.",
       "toolNotWritable": "{{tool}}에 동기화할 수 없습니다. {{path}}에 대한 권한이 거부되었습니다. 디렉터리 권한을 확인하거나 관리자 권한으로 실행하세요.",
       "targetOverlapsSource": "이 동기화 대상은 원래 로컬 소스인 {{path}}와 겹칩니다. 소스를 안전하게 유지하려면 다른 도구 디렉터리를 선택하세요.",
+      "deleteTargetModified": "도구 복사본에 별도 변경 사항이 있어 삭제를 중지했습니다({{path}}). Skill과 도구 복사본은 유지되었습니다. 필요한 변경 사항을 백업하고 도구 복사본을 중앙 콘텐츠와 일치시킨 후 삭제를 다시 시도하세요.",
       "targetModified": "동기화된 복사본이 수정되었기 때문에 업데이트가 중지되었습니다({{path}}). 덮어쓰기 여부를 선택하기 전에 검토하세요.",
       "updateInProgress": "다른 업데이트가 이미 실행 중입니다. 잠시 후 다시 시도해 주세요.",
       "centralModified": "업데이트 중에 중앙 관리 복사본이 변경되어 업데이트가 중지되었습니다({{path}}). 다른 파일 작업이 완료된 후 다시 시도하세요.",
@@ -1691,6 +1696,7 @@ export const ko = {
       "confirmSuffix": "?",
       "warningRemoveFromTools": "동기화된 도구에서 제거",
       "warningDeleteFromHub": "Skills Hub에서 관리 복사본을 제거합니다.",
+      "warningMissingContent": "중앙 콘텐츠가 없으면 관리 기록만 삭제됩니다. 도구 경로와 원본 소스는 수동 복구를 위해 유지되며 휴지통 백업은 만들 수 없습니다. 다음 기기 동기화에서 이 명시적 삭제가 전파됩니다.",
       "warningRecycle": "삭제된 스킬은 Skills Hub의 로컬 휴지통으로 이동하며 파일과 로컬 설정을 30일 동안 복원할 수 있습니다.",
       "warningKeepSource": "원본 로컬 소스 폴더는 보존됩니다.",
       "confirmButton": "삭제"
