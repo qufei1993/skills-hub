@@ -2,7 +2,7 @@
 
 [Chinese](README.zh.md)
 
-Unreleased. This version is being prepared for publication.
+Published on November 14, 2026. [GitHub release](https://github.com/qufei1993/skills-hub/releases/tag/v1.1.1).
 
 ## Bug fixes
 

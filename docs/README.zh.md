@@ -12,9 +12,7 @@
 
 macOS 首次打开若提示“已损坏”或“无法验证开发者”，请查看[安装帮助](https://aiskillshub.link/docs/installation)。
 
-[查看 v1.0.1 发布说明](https://github.com/qufei1993/skills-hub/releases/tag/v1.0.1)
-
-**v1.1.0 准备中**：项目管理、技能预设与内容恢复。详见[版本索引](releases/v1.1.0/README.zh.md)，该版本尚未发布。
+[查看 v1.1.1 发布说明](https://github.com/qufei1993/skills-hub/releases/tag/v1.1.1)
 
 ## 你可以用它做什么
 
@@ -53,7 +51,7 @@ macOS 首次打开若提示“已损坏”或“无法验证开发者”，请�
 - [使用指南](https://aiskillshub.link/docs) · [故障排查](https://aiskillshub.link/docs/settings)
 - [CLI 安装与参考](https://aiskillshub.link/docs/cli)
 - [开发与构建](development.zh.md)
-- [更新日志](CHANGELOG.zh.md) · [v1.0.1 详细说明](releases/v1.0.1/README.zh.md)
+- [更新日志](CHANGELOG.zh.md) · [v1.1.1 详细说明](releases/v1.1.1/README.zh.md)
 - [贡献指南](../CONTRIBUTING.md) · [安全反馈](../SECURITY.md)
 
 合集内容由 [Awesome Skills](https://github.com/qufei1993/awesome-skills) 维护，欢迎贡献。

@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-尚未发布，正在准备本版本的发布内容。
+已于 2026 年 11 月 14 日发布。[GitHub 发布页](https://github.com/qufei1993/skills-hub/releases/tag/v1.1.1)。
 
 ## Bug 修复
 
