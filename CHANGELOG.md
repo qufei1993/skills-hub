@@ -4,11 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.1.1]
+
 ### Fixed
 
 - **Update checks for linked local Skills**: Report updates only when the source content differs, including when the source directory is a Windows junction or a symbolic link. ([#219](https://github.com/qufei1993/skills-hub/issues/219))
 
-- **Device-sync duplicate Skills**: Recognize equivalent Git repository links and selected Skill paths across devices before merging. Keeping the local version or using the repository version retains one Skill and its existing deployments instead of importing a same-name duplicate.
+- **Device-sync duplicate Skills**: Recognize equivalent Git repository links and selected Skill paths across devices before merging. Keeping the local version or using the repository version retains one Skill and its existing deployments instead of importing a same-name duplicate. ([#218](https://github.com/qufei1993/skills-hub/pull/218))
 
 ## [1.1.0]
 
