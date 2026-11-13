@@ -65,6 +65,47 @@ impl Fixture {
     }
 }
 
+#[cfg(any(unix, windows))]
+#[test]
+fn content_check_linked_local_source_detects_only_content_changes() {
+    let f = Fixture::new(1);
+    let id = &f.ids[0];
+    let source = f.data.path().join("source-0");
+    let linked_directory = f.data.path().join("linked-directory");
+    // Keep the registered path and file metadata while replacing its root.
+    fs::rename(&source, &linked_directory).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&linked_directory, &source).unwrap();
+    #[cfg(windows)]
+    junction::create(&linked_directory, &source).unwrap();
+
+    let assert_check = |status, update_available, expected_paths: &[&str]| {
+        let run = f.check(&f.ids);
+        assert_eq!(run.summaries.len(), 1);
+        assert_eq!(run.summaries[0].status, status);
+        let cli = f
+            .service
+            .check_updates(crate::services::types::SkillSelector::Id(id.clone()))
+            .unwrap();
+        assert_eq!(cli.update_available, update_available);
+        let preview = f.service.preview_content(id, false).unwrap();
+        let paths: Vec<_> = preview
+            .changes
+            .iter()
+            .map(|change| change.path.as_str())
+            .collect();
+        assert_eq!(paths, expected_paths);
+    };
+
+    assert_check("unchanged", false, &[]);
+    fs::write(
+        linked_directory.join("SKILL.md"),
+        "---\nname: demo-0\ndescription: Test\n---\nchanged\n",
+    )
+    .unwrap();
+    assert_check("changed", true, &["SKILL.md"]);
+}
+
 #[test]
 fn content_check_persists_lightweight_observations_and_reads_them_without_source_access() {
     let f = Fixture::new(2);
