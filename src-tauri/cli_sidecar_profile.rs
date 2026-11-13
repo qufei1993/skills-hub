@@ -1,3 +1,18 @@
+use std::path::Path;
+
+pub fn output_profile(output: &Path) -> Option<&str> {
+    // Cargo 1.100 adds a package directory under `build`. Both layouts
+    // place the profile immediately above `build`.
+    output
+        .ancestors()
+        .skip(2)
+        .take(2)
+        .find(|path| path.file_name().is_some_and(|name| name == "build"))?
+        .parent()?
+        .file_name()?
+        .to_str()
+}
+
 pub fn validate_profile(sidecar: &str, cargo: &str, output: &str) -> Result<(), &'static str> {
     if ![sidecar, cargo, output]
         .iter()
@@ -13,7 +28,24 @@ pub fn validate_profile(sidecar: &str, cargo: &str, output: &str) -> Result<(), 
 
 #[cfg(test)]
 mod tests {
-    use super::validate_profile;
+    use super::{output_profile, validate_profile};
+    use std::path::Path;
+
+    #[test]
+    fn cli_bridge_profile_reads_both_cargo_build_layouts() {
+        for (path, expected) in [
+            ("target/debug/build/app-abcd/out", "debug"),
+            ("target/debug/build/app/abcd/out", "debug"),
+            (
+                "target/x86_64-pc-windows-msvc/release/build/app/abcd/out",
+                "release",
+            ),
+            ("target/custom/build/app/abcd/out", "custom"),
+        ] {
+            assert_eq!(output_profile(Path::new(path)), Some(expected));
+        }
+        assert_eq!(output_profile(Path::new("target/debug/app/abcd/out")), None);
+    }
 
     #[test]
     fn cli_bridge_profile_rejects_both_mismatched_directions() {

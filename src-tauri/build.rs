@@ -34,12 +34,8 @@ fn prepare_cli_bridge_metadata() {
     println!("cargo:rerun-if-changed=cli_sidecar_profile.rs");
     let profile = env::var("PROFILE").expect("CLI_BRIDGE_UNSUPPORTED_PROFILE");
     let output = PathBuf::from(env::var("OUT_DIR").expect("CLI_BRIDGE_UNSUPPORTED_PROFILE"));
-    let output_profile = output
-        .ancestors()
-        .nth(3)
-        .and_then(|path| path.file_name())
-        .and_then(|name| name.to_str())
-        .expect("CLI_BRIDGE_UNSUPPORTED_PROFILE");
+    let output_profile =
+        cli_sidecar_profile::output_profile(&output).expect("CLI_BRIDGE_UNSUPPORTED_PROFILE");
     cli_sidecar_profile::validate_profile(&profile, &profile, output_profile)
         .unwrap_or_else(|reason| panic!("{reason}"));
     println!(
