@@ -228,6 +228,9 @@ jobs:
       - name: Verify discovery imports preserve managed sources and deployments on Windows
         working-directory: src-tauri
         run: cargo test --locked --features cli --lib services::tests::library
+      - name: Verify update checks for local junction sources on Windows
+        working-directory: src-tauri
+        run: cargo test --locked --features cli --lib content_check_linked_local_source_detects_only_content_changes
       - name: Verify adopted source conflict resolution on Windows
         working-directory: src-tauri
         run: cargo test --locked --features cli --lib services::tests::source_conflict

@@ -168,7 +168,11 @@ pub fn check_batch(
                             .as_deref()
                             .context("missing local source")?,
                     );
-                    let (hash, has_metadata) = super::installer::content_check_source_hash(&path)?;
+                    // Compare the source directory's contents like staging does.
+                    // WalkDir traverses a root link but yields the root as a link.
+                    let directory = path.canonicalize().context("resolve local skill source")?;
+                    let (hash, has_metadata) =
+                        super::installer::content_check_source_hash(&directory)?;
                     (hash, None, has_metadata)
                 }
                 "bundled" => {
