@@ -77,6 +77,17 @@ npm run tauri:build:mac:dmg -- --target aarch64-apple-darwin --cli-manifest /pat
 - Linux（AppImage）：`npm run tauri:build:linux:appimage`
 - Linux（deb+AppImage）：`npm run tauri:build:linux:all`
 
+## 桌面图标
+
+修改 `src/assets/app-icon.svg` 中的原始图稿后，重新生成 2048px 主图和各尺寸桌面图标：
+
+```bash
+node scripts/generate-icon.mjs
+npm run tauri:icon:desktop
+```
+
+主图生成脚本始终读取 SVG，写入 `src-tauri/icons/icon-source.png`，不会再次缩放之前输出的 PNG。它将 SVG 中宽 928px 的图形映射到 1024px 设计画布内宽 824px 的区域。可传入一个输出 PNG 路径用于预览。两个命令均使用已安装的 Tauri CLI，无需 Swift。第二个命令也会重新生成 Windows ICO。
+
 ## 测试（Rust）
 
 ```bash

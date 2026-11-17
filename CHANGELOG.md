@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Desktop icon sizing**: Add consistent transparent margins to the macOS icon and desktop PNGs. Generate the master from the original SVG so repeated generation preserves the artwork size. ([#221](https://github.com/qufei1993/skills-hub/pull/221))
+
 ## [1.1.1]
 
 ### Fixed

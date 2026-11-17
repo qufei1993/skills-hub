@@ -75,6 +75,17 @@ All platform commands below require `-- --cli-manifest <path>`, or `SKILLS_HUB_C
 - Linux (AppImage): `npm run tauri:build:linux:appimage`
 - Linux (deb+AppImage): `npm run tauri:build:linux:all`
 
+## Desktop icons
+
+After editing the original artwork in `src/assets/app-icon.svg`, regenerate the 2048px master and desktop icon sizes:
+
+```bash
+node scripts/generate-icon.mjs
+npm run tauri:icon:desktop
+```
+
+The master generator always reads the SVG and writes `src-tauri/icons/icon-source.png`; it never rescales a previous PNG output. It maps the SVG's 928px artwork box into an 824px box on the 1024px design canvas. An optional output PNG path can be passed for previews. Both commands use the installed Tauri CLI and work without Swift. The second command also regenerates the Windows ICO.
+
 ## Tests (Rust)
 
 ```bash

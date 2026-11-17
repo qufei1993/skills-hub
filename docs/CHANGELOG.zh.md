@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **桌面图标尺寸**：为 macOS 图标和桌面 PNG 添加一致的透明留白。从原始 SVG 生成主图，避免重复生成时图标继续缩小。（[#221](https://github.com/qufei1993/skills-hub/pull/221)）
+
 ## [1.1.1]
 
 ### 修复
