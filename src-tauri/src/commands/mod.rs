@@ -1492,10 +1492,11 @@ pub async fn list_collection_skills(
     service: State<'_, SkillsHubService>,
     repoUrl: String,
     revision: String,
+    selections: Vec<crate::core::installer::GitSkillCandidate>,
 ) -> Result<Vec<GitInstallCandidate>, String> {
     let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        service.list_collection_skills(&repoUrl, &revision)
+        service.list_collection_skills(&repoUrl, &revision, selections)
     })
     .await
     .map_err(|error| error.to_string())?

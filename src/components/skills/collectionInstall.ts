@@ -22,7 +22,8 @@ export async function installCollectionEntry(
   }
   const skill = manifest.skills[index]
   const source = manifest.sources[skill.source]
-  const trackingUrl = `https://github.com/${source.repo.toLowerCase()}`
+  const repository = source.repo.toLowerCase()
+  const trackingUrl = `https://github.com/${repository}`
   let created = previous
   if (!created) {
     let revision = options.revisions?.get(trackingUrl)
@@ -33,10 +34,13 @@ export async function installCollectionEntry(
     const repoUrl = `${trackingUrl}/tree/${revision}`
     let candidates = options.candidates?.get(repoUrl)
     if (!candidates) {
-      candidates = await invoke<GitSkillCandidate[]>('list_collection_skills', { repoUrl: trackingUrl, revision })
+      const selections = manifest.skills
+        .filter(entry => manifest.sources[entry.source].repo.toLowerCase() === repository)
+        .map(entry => ({ name: entry.name, subpath: entry.path }))
+      candidates = await invoke<GitSkillCandidate[]>('list_collection_skills', { repoUrl: trackingUrl, revision, selections })
       options.candidates?.set(repoUrl, candidates)
     }
-    const candidate = candidates.find(item => item.subpath.replace(/\\/g, '/') === skill.path && item.name === skill.name)
+    const candidate = candidates.find(item => item.subpath.replace(/\\/g, '/') === skill.path)
     if (!candidate) throw new Error('collectionInstall.missing')
     if (candidate.status === 'conflict') throw new Error('collectionInstall.conflict')
     if (candidate.status === 'update') {

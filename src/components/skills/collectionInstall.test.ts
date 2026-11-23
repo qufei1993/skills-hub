@@ -26,6 +26,38 @@ describe('website collection installation', () => {
     expect(result.state).toBe('installed')
     expect(calls).toEqual(['list_collection_skills', 'install_collection_selection'])
   })
+  it('installs same-named upstream Skills from different repositories under their collection names', async () => {
+    const batch: CollectionManifest = {
+      ...manifest,
+      sources: [...manifest.sources, { repo: 'owner/repo-cn', ref: 'a'.repeat(40) }],
+      skills: [
+        { name: 'design-global', path: 'skills/design', source: 0 },
+        { name: 'design-china', path: 'skills/design', source: 1 },
+      ],
+    }
+    const scans: unknown[] = []
+    const installs: unknown[] = []
+    const invoke = async <T>(command: string, args?: Record<string, unknown>) => {
+      if (command === 'resolve_collection_revision') return 'b'.repeat(40) as T
+      if (command === 'list_collection_skills') {
+        scans.push(args)
+        return [{ name: 'design', subpath: 'skills/design', status: 'install' }] as T
+      }
+      installs.push(args)
+      return { skill_id: args?.name, name: args?.name, action: 'installed' } as T
+    }
+    for (const index of batch.skills.keys()) {
+      await expect(installCollectionEntry(invoke, batch, index, [])).resolves.toEqual({ state: 'installed' })
+    }
+    expect(scans).toEqual([
+      { repoUrl: 'https://github.com/owner/repo', revision: 'b'.repeat(40), selections: [{ name: 'design-global', subpath: 'skills/design' }] },
+      { repoUrl: 'https://github.com/owner/repo-cn', revision: 'b'.repeat(40), selections: [{ name: 'design-china', subpath: 'skills/design' }] },
+    ])
+    expect(installs).toEqual([
+      { repoUrl: 'https://github.com/owner/repo', revision: 'b'.repeat(40), subpath: 'skills/design', name: 'design-global' },
+      { repoUrl: 'https://github.com/owner/repo-cn', revision: 'b'.repeat(40), subpath: 'skills/design', name: 'design-china' },
+    ])
+  })
   it('rejects a missing or conflicting entry without installing or distributing it', async () => {
     for (const status of ['conflict', 'missing']) {
       const calls: string[] = []
@@ -46,7 +78,7 @@ describe('website collection installation', () => {
     }, manifest, 0, ['cursor'])
     expect(result.state).toBe('installed')
     expect(calls).toEqual([
-      { command: 'list_collection_skills', args: { repoUrl: 'https://github.com/owner/repo', revision: 'b'.repeat(40) } },
+      { command: 'list_collection_skills', args: { repoUrl: 'https://github.com/owner/repo', revision: 'b'.repeat(40), selections: [{ name: 'design', subpath: 'skills/design' }] } },
       { command: 'install_collection_selection', args: { repoUrl: 'https://github.com/owner/repo', revision: 'b'.repeat(40), subpath: 'skills/design', name: 'design' } },
       { command: 'sync_skill_to_tool', args: { sourcePath: '/tmp/test/design', skillId: 'new-id', tool: 'cursor', name: 'design', scope: 'global', overwriteIfSameContent: true } },
     ])

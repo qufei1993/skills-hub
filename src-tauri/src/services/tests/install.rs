@@ -1041,3 +1041,92 @@ fn latest_collection_preview_preserves_old_pinned_sources_without_changing_git_i
         record.source_ref
     );
 }
+
+#[test]
+fn collection_installs_same_named_upstream_skills_at_distinct_local_names() {
+    use crate::core::installer::GitSkillCandidate;
+
+    const TEST: &str = "services::tests::install::collection_installs_same_named_upstream_skills_at_distinct_local_names";
+    const REPOS_ENV: &str = "SKILLS_HUB_TEST_COLLECTION_REPOSITORIES";
+    const REPO_PREFIX: &str = "https://github.com/collection-fixture/";
+    const SUBPATH: &str = "skills/design";
+    let regions = ["global", "china"];
+    let Some(repos) = std::env::var_os(REPOS_ENV) else {
+        let repos = TempDir::new().unwrap();
+        for region in regions {
+            let repo = repos.path().join(format!("{region}.git"));
+            write_skill(&repo.join(SUBPATH), "design");
+            write_skill(&repo.join("skills/other"), "design");
+            fs::write(repo.join(SUBPATH).join("region.txt"), region).unwrap();
+            init_git_repo(&repo);
+        }
+        let local_url = reqwest::Url::from_directory_path(repos.path()).unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", TEST, "--nocapture"])
+            .env(REPOS_ENV, repos.path())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", repos.path().join("empty-config"))
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", format!("url.{local_url}.insteadOf"))
+            .env("GIT_CONFIG_VALUE_0", REPO_PREFIX)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success() && String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    };
+
+    let fixture = Fixture::new();
+    let service = fixture.open();
+    let local = fixture.paths.app_data_dir.join("already-installed");
+    write_skill(&local, "design");
+    service.install(InstallRequest::local(&local)).unwrap();
+    let mut ids = Vec::new();
+    for region in regions {
+        let repo = format!("{REPO_PREFIX}{region}");
+        let source = Path::new(&repos).join(format!("{region}.git"));
+        let git = git2::Repository::open(source).unwrap();
+        let revision = git.head().unwrap().target().unwrap().to_string();
+        let name = format!("design-{region}");
+        let selections = vec![GitSkillCandidate {
+            name: name.clone(),
+            description: None,
+            subpath: SUBPATH.into(),
+        }];
+        let candidates = service
+            .list_collection_skills(&repo, &revision, selections.clone())
+            .unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].candidate.name, name);
+        assert_eq!(candidates[0].status, "install");
+        let installed = service
+            .install_collection_selection(&repo, &revision, SUBPATH, name.clone())
+            .unwrap();
+        assert_eq!(installed.name, name);
+        assert_eq!(installed.action, InstallAction::Installed);
+        assert_eq!(
+            fs::read_to_string(Path::new(&installed.central_path).join("region.txt")).unwrap(),
+            region
+        );
+        let candidates = service
+            .list_collection_skills(&repo, &revision, selections)
+            .unwrap();
+        assert_eq!(candidates[0].status, "update");
+        assert_eq!(
+            candidates[0].existing_skill_id.as_deref(),
+            Some(installed.id.as_str())
+        );
+        let repeated = service
+            .install_collection_selection(&repo, &revision, SUBPATH, name)
+            .unwrap();
+        assert_eq!(repeated.action, InstallAction::Unchanged);
+        assert_eq!(installed.id, repeated.id);
+        ids.push(installed.id);
+    }
+    assert_ne!(ids[0], ids[1]);
+    assert_eq!(service.store().list_skills().unwrap().len(), 3);
+}
