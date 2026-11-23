@@ -36,6 +36,8 @@ export function getSkillsView({
     if (issuesOnly && !['source-error', 'partial', 'failed'].includes(getSkillSyncState(skill))) return false
     if (scopeFilter !== 'all' && !(skill.targets.length ? skill.targets.some(matchesTargetScope) : !projectPath && getSkillScope(skill) === scopeFilter)) return false
     return !query || skill.name.toLowerCase().includes(query) ||
+      skill.display_name?.toLowerCase().includes(query) ||
+      (skill.display_name && skill.source_ref?.toLowerCase().includes(query)) ||
       skill.central_path.toLowerCase().includes(query) ||
       skill.source_type.toLowerCase().includes(query) ||
       skill.tags.some((tag) => tag.name.toLowerCase().includes(query))
@@ -76,7 +78,7 @@ export function getSkillsView({
   const visibleSkills = scopedSkills.filter((skill) =>
     matchesTags(skill) && matchesStatus(skill) && matchesTools(skill),
   ).sort((a, b) => sortBy === 'name'
-    ? a.name.localeCompare(b.name)
+    ? (a.display_name ?? a.name).localeCompare(b.display_name ?? b.name)
     : (b.updated_at ?? 0) - (a.updated_at ?? 0),
   )
   const selectedIds = new Set(bulkSelectedIds)

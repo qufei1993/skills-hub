@@ -1860,6 +1860,53 @@ fn remove_path_any_removes_junction_only() {
 }
 
 #[test]
+fn managed_catalog_skills_recover_author_names_without_renaming_existing_records() {
+    let (dir, store) = make_store();
+    for (name, repository, expected) in [
+        ("kling-ai-606825dcedae", "claude-plugin", Some("kling-ai")),
+        (
+            "kling-ai-d4f037d292a9",
+            "claude-plugin-cn",
+            Some("kling-ai"),
+        ),
+        ("custom-606825dcedae", "claude-plugin-cn", None),
+    ] {
+        let central = dir.path().join(name);
+        std::fs::create_dir_all(&central).unwrap();
+        std::fs::write(
+            central.join("SKILL.md"),
+            "---\nname: kling-ai\ndescription: Test\n---\n",
+        )
+        .unwrap();
+        store
+            .upsert_skill(&SkillRecord {
+                id: name.into(),
+                name: name.into(),
+                description: None,
+                source_type: "git".into(),
+                source_ref: Some(format!("https://github.com/klingai-tech/{repository}")),
+                source_subpath: Some("skills/kling-ai".into()),
+                source_revision: None,
+                central_path: central.to_string_lossy().into_owned(),
+                content_hash: None,
+                created_at: 1,
+                updated_at: 1,
+                last_sync_at: None,
+                last_seen_at: 1,
+                enabled: true,
+                status: "ok".into(),
+            })
+            .unwrap();
+
+        let skills = get_managed_skills_impl(&store).unwrap();
+        let installed = skills.iter().find(|skill| skill.id == name).unwrap();
+        assert_eq!(installed.display_name.as_deref(), expected);
+        assert_eq!(installed.name, name);
+        assert_eq!(installed.central_path, central.to_string_lossy());
+    }
+}
+
+#[test]
 fn get_managed_skills_impl_maps_targets() {
     let (dir, store) = make_store();
     let skill = SkillRecord {

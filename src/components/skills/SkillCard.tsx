@@ -1,5 +1,5 @@
 import { hasUnboundLocalSource } from './skillSourceState'
-import { Fragment, memo, useEffect, useState } from 'react'
+import { Fragment, memo, useEffect, useId, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Copy, Folder, Github, RefreshCw, Tag, Trash2 } from 'lucide-react'
 import type { TFunction } from 'i18next'
@@ -76,6 +76,8 @@ const SkillCard = ({
     }
   }, [toolHint])
   const github = getGithubInfo(skill.source_ref)
+  const repositoryId = useId()
+  const repository = skill.display_name ? github?.label : undefined
   const isGit = skill.source_type.toLowerCase().includes('git')
   const sourceLabel = github?.label ?? getSkillSourceLabel(skill)
   const copyValue = unboundSource ? '' : (github?.href ?? skill.source_ref ?? skill.central_path).trim()
@@ -116,8 +118,8 @@ const SkillCard = ({
           <div className="skill-icon">{isGit ? <Github size={16} /> : <Folder size={16} />}</div>
           <div className="skill-identity-copy">
             <div className="skill-title-line">
-              <button className="skill-name clickable" type="button" onClick={() => onOpenDetail(skill)}>
-                {skill.name}
+              <button className="skill-name clickable" type="button" aria-describedby={repository ? repositoryId : undefined} onClick={() => onOpenDetail(skill)}>
+                {skill.display_name ?? skill.name}
               </button>
               <button
                 className="skill-source-copy"
@@ -131,6 +133,7 @@ const SkillCard = ({
               </button>
               <SkillIssueNotice onRepairSource={() => onRepairSource?.(skill)} onRepairTargets={() => onRepairTargets ? onRepairTargets(skill) : onOpenScope(skill)} compact skill={skill} tools={installedTools} t={t} />
             </div>
+            {repository && <div id={repositoryId} className="skill-source-repository" title={repository}>{repository}</div>}
             <div className={`skill-description${skill.description?.trim() ? '' : ' empty'}`} title={description}>
               {description}
             </div>

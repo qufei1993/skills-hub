@@ -2955,8 +2955,59 @@ pub(crate) fn parse_skill_md(path: &Path) -> Option<(String, Option<String>)> {
     parse_skill_md_with_reason(path).ok()
 }
 
+pub(crate) fn catalog_skill_display_name(
+    name: &str,
+    source: &str,
+    source_subpath: Option<&str>,
+    central: &Path,
+) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    const MAX_SKILL_BYTES: u64 = 1024 * 1024;
+    let (_, suffix) = name.rsplit_once('-')?;
+    if !(12..=64).contains(&suffix.len()) || suffix.len() % 4 != 0 {
+        return None;
+    }
+    let source = parse_github_url(source);
+    let repository = source
+        .clone_url
+        .strip_prefix("https://github.com/")?
+        .strip_suffix(".git")?
+        .to_ascii_lowercase();
+    let entry = match source_subpath.or(source.subpath.as_deref()) {
+        Some(directory) if directory != "." => format!("{}/SKILL.md", directory.replace('\\', "/")),
+        _ => "SKILL.md".to_string(),
+    };
+    // Catalog installation aliases end with a hash of the repository and entry path.
+    let digest = hex::encode(Sha256::digest(format!("{repository}\0{entry}")));
+    if !digest.starts_with(suffix) {
+        return None;
+    }
+
+    let manifest = central.join("SKILL.md");
+    if !std::fs::symlink_metadata(&manifest).ok()?.is_file() {
+        return None;
+    }
+    let mut text = String::new();
+    let bytes = std::fs::File::open(manifest)
+        .ok()?
+        .take(MAX_SKILL_BYTES + 1)
+        .read_to_string(&mut text)
+        .ok()?;
+    if bytes as u64 > MAX_SKILL_BYTES {
+        return None;
+    }
+    let (original_name, _) = parse_skill_frontmatter(&text).ok()?;
+    (!original_name.trim().is_empty() && original_name != name).then_some(original_name)
+}
+
 fn parse_skill_md_with_reason(path: &Path) -> Result<(String, Option<String>), &'static str> {
     let text = std::fs::read_to_string(path).map_err(|_| "read_failed")?;
+    parse_skill_frontmatter(&text)
+}
+
+fn parse_skill_frontmatter(text: &str) -> Result<(String, Option<String>), &'static str> {
     let lines: Vec<&str> = text.lines().collect();
     if lines.first().map(|v| v.trim()) != Some("---") {
         return Err("invalid_frontmatter");

@@ -87,6 +87,7 @@ export type ManagedSkill = {
   source_checked_at?: number | null
   id: string
   name: string
+  display_name?: string
   description?: string | null
   source_type: string
   source_ref?: string | null

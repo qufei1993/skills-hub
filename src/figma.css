@@ -542,6 +542,7 @@
 .skill-source-copy:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent-primary) 30%, transparent); outline-offset: 1px; }
 .skill-source-copy:disabled { cursor: default; }
 .skill-name { max-width: 100%; min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.skill-source-repository { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: 11px; line-height: 16px; }
 .skill-description { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: 11px; line-height: 16px; }
 .skill-description.empty { color: var(--text-tertiary); }
 .skill-card-meta { min-width: 0; min-height: 24px; display: flex; align-items: center; gap: 7px; }

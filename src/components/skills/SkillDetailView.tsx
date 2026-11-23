@@ -576,7 +576,7 @@ const SkillDetailView = ({
         </button>
         <div className="detail-summary">
           <div className="detail-title-row">
-            <div className="detail-skill-name">{skill.name}</div>
+            <div className="detail-skill-name">{skill.display_name ?? skill.name}</div>
             <span className={`detail-sync-status ${syncState}`}>
               <i aria-hidden="true" />
               {syncStatus}
