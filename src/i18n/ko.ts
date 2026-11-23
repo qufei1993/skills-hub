@@ -415,6 +415,7 @@ export const ko = {
   "installCount": "스킬 {{count}}개 설치",
   "selectAll": "전체 선택",
   "selectSkill": "{{name}} 선택",
+  "selectSkillFromRepository": "{{repository}}의 {{name}} 선택",
   "selected": "{{count}} / {{total}} 선택됨",
   "notSelected": "선택 안 됨",
   "retry": "실패한 항목 재시도",

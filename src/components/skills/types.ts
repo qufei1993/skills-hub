@@ -476,6 +476,9 @@ export type CollectionManifest = {
   sources: { repo: string; ref: string }[]
   skills: { name: string; path: string; source: number }[]
 }
+export type CollectionInstallPreview = Omit<CollectionManifest, 'skills'> & {
+  skills: (CollectionManifest['skills'][number] & { displayName?: string })[]
+}
 export type CollectionResult = { state: 'installed' | 'existing' | 'failed'; message?: string }
 
 export type PresetMember = { skillId: string; tools: string[] }

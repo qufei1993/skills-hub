@@ -23,6 +23,39 @@ async function clickInstall() {
 const manifest: CollectionManifest = { v: 1, title: '真实合集', sources: [{ repo: 'author/repo', ref: 'a'.repeat(40) }], skills: [{ name: 'design', path: 'skills/design', source: 0 }] }
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 describe('collection confirmation', () => {
+  it('shows upstream names and their repositories on separate elements and installs with the local names', async () => {
+    await i18n.changeLanguage('zh')
+    const localNames = ['design-global', 'design-china']
+    const batch = {
+      ...manifest,
+      sources: [...manifest.sources, { repo: 'author/repo-cn', ref: 'a'.repeat(40) }],
+      skills: localNames.map((name, source) => ({ name, displayName: 'design', path: 'skills/design', source })),
+    }
+    const installed: unknown[] = []
+    render(<I18nextProvider i18n={i18n}><CollectionInstallModal manifest={batch} tools={[]} invoke={async <T,>(command: string, args?: Record<string, unknown>) => {
+      if (command === 'resolve_collection_revision') return 'b'.repeat(40) as T
+      if (command === 'preview_collection_skills_local') return [] as T
+      if (command === 'list_collection_skills') return [{ name: 'design', subpath: 'skills/design', status: 'install' }] as T
+      if (command === 'install_collection_selection') {
+        installed.push(args?.name)
+        return { skill_id: args?.name, name: args?.name, central_path: '/tmp/design', action: 'installed' } as T
+      }
+      throw new Error(command)
+    }} onComplete={async () => {}} onClose={() => {}} /></I18nextProvider>)
+    expect(screen.getAllByText('design', { selector: 'strong' })).toHaveLength(2)
+    for (const { repo } of batch.sources) {
+      const checkbox = screen.getByRole('checkbox', { name: `选择来自 ${repo} 的 design` })
+      expect(checkbox.closest('li')?.querySelector('.skill-selection-repository')?.textContent).toBe(repo)
+    }
+    expect(screen.queryByText('design-global')).toBeNull()
+    expect(screen.queryByText('design-china')).toBeNull()
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'repo-cn' } })
+    expect(screen.getAllByText('design', { selector: 'strong' })).toHaveLength(1)
+    await clickInstall()
+    await waitFor(() => expect(screen.getByRole('button', { name: '完成' })).toBeTruthy())
+    expect(installed).toEqual(localNames)
+  })
+
   it('displays sources and requires a user click before any download or installation', async () => {
     await i18n.changeLanguage('zh')
     const calls: string[] = []

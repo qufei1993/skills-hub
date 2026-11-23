@@ -6861,6 +6861,13 @@
 .skill-selection-heading > .git-pick-status { flex-shrink: 0; }
 .skill-selection-heading strong { color: var(--text-primary); font-size: 13px; line-height: 1.5; font-weight: 600; min-width: 0; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .skill-selection-path { font: 11px/1.5 var(--font-mono); color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-selection-identity.has-repository { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 4px 16px; }
+.skill-selection-identity.has-repository strong { max-width: none; }
+.skill-selection-source { display: grid; min-width: 0; }
+.skill-selection-repository { color: var(--text-secondary); font-size: 12px; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 560px) {
+  .skill-selection-identity.has-repository { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+}
 .skill-selection-copy > .git-pick-description, .skill-selection-copy > .skill-selection-note { margin-inline-start: 28px; }
 .skill-selection-copy .pick-item-desc { font-size: 12px; line-height: 1.6; }
 .skill-selection-note { margin: 0; font-size: 12px; line-height: 1.6; color: var(--text-secondary); }

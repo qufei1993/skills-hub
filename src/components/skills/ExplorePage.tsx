@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Check, ChevronRight, Code2, Download, Film, Layers, Megaphone, Palette, Search, X } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
-import type { CollectionManifest, ManagedSkill, OnlineSkillDto } from './types'
+import type { CollectionInstallPreview, CollectionManifest, ManagedSkill, OnlineSkillDto } from './types'
 import type { CollectionInvoke } from './collectionInstall'
 import type { Collection, CollectionIndexItem } from './collections/types'
 import { validateDetail, validateIndex } from './collections/validation'
@@ -14,7 +14,7 @@ import DiscoveryHeader from './DiscoveryHeader'
 
 type ExplorePageProps = {
   invoke: CollectionInvoke
-  onInstallCollection: (manifest: CollectionManifest) => void
+  onInstallCollection: (preview: CollectionInstallPreview) => void
   exploreFilter: string
   searchResults: OnlineSkillDto[]
   searchLoading: boolean
@@ -122,7 +122,10 @@ const ExplorePage = ({ invoke, onInstallCollection, exploreFilter, searchResults
     setInstallError(false)
     try {
       const manifest = await invoke<CollectionManifest>('validate_collection_manifest', { manifest: plan.manifest })
-      onInstallCollection(manifest)
+      onInstallCollection({
+        ...manifest,
+        skills: manifest.skills.map((skill, index) => ({ ...skill, displayName: plan.displayNames[index] })),
+      })
     } catch { setInstallError(true) }
     finally { setOpeningInstall(false) }
   }

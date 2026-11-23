@@ -3,7 +3,7 @@ import { getCurrent, onOpenUrl } from '@tauri-apps/plugin-deep-link'
 import { message } from '@tauri-apps/plugin-dialog'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
-import type { CollectionManifest } from './types'
+import type { CollectionInstallPreview, CollectionManifest } from './types'
 import type { CollectionInvoke } from './collectionInstall'
 
 function linkErrorReason(error: unknown) {
@@ -24,7 +24,7 @@ function linkErrorReason(error: unknown) {
 
 export function useCollectionInstallLink(enabled: boolean, invoke: CollectionInvoke, onReceive?: () => void) {
   const { t } = useTranslation()
-  const [manifest, setManifest] = useState<CollectionManifest | null>(null)
+  const [manifest, setManifest] = useState<CollectionInstallPreview | null>(null)
   const occupied = useRef(false)
   const lastLink = useRef('')
   const received = useRef(onReceive)
@@ -75,7 +75,7 @@ export function useCollectionInstallLink(enabled: boolean, invoke: CollectionInv
     return () => { disposed = true; stop?.() }
   }, [enabled, invoke])
   const dismiss = useCallback(() => { setManifest(null); occupied.current = false; lastLink.current = '' }, [])
-  const openManifest = useCallback((value: CollectionManifest) => {
+  const openManifest = useCallback((value: CollectionInstallPreview) => {
     if (occupied.current) { toast.info(translate.current('collectionInstall.busy')); return }
     occupied.current = true
     received.current?.()
