@@ -1,16 +1,13 @@
 import type { Collection, InstallationItem } from "./types.ts";
+import type { CollectionManifest } from "../types";
 
 export type InstallConflict =
   { code: "name"; name: string } | { code: "directory"; directory: string };
 
 export interface InstallPlan {
   items: InstallationItem[];
-  manifest: {
-    v: 1;
-    title: string;
-    sources: { repo: string; ref: string }[];
-    skills: { name: string; path: string; source: number }[];
-  };
+  manifest: CollectionManifest;
+  displayNames: (string | undefined)[];
   conflicts: InstallConflict[];
 }
 
@@ -28,11 +25,18 @@ export function createInstallPlan(
 ): InstallPlan {
   const selected = new Set(selectedIds);
   const installations = new Map<string, InstallationItem>();
+  const authorNames = new Map<string, string>();
   for (const skill of collection.skills) {
     if (!selected.has(skill.id)) continue;
     for (const item of skill.installationItems) {
       const key = installationKey(item);
       if (!installations.has(key)) installations.set(key, item);
+      const entryPoint = item.directory === "." ? item.entryPoint : `${item.directory}/${item.entryPoint}`;
+      if (entryPoint === skill.entry.entryPoint
+        && item.repo.toLowerCase() === skill.entry.repo.toLowerCase()
+        && item.commit.toLowerCase() === skill.entry.commit.toLowerCase()) {
+        authorNames.set(key, skill.name);
+      }
     }
   }
 
@@ -80,6 +84,7 @@ export function createInstallPlan(
   return {
     items,
     manifest: { v: 1, title: collection.title, sources, skills },
+    displayNames: items.map(item => authorNames.get(installationKey(item))),
     conflicts: [...conflicts.values()],
   };
 }

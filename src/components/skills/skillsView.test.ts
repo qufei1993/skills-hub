@@ -19,6 +19,18 @@ const defaults = {
 }
 
 describe('scope-aware Skills view', () => {
+  it('finds installed catalog Skills by their original name and repository', () => {
+    const managedSkills = [
+      { ...skill('kling-ai-d4f037d292a9', []), display_name: 'kling-ai', source_ref: 'https://github.com/klingai-tech/claude-plugin-cn' },
+      { ...skill('kling-ai-606825dcedae', []), display_name: 'kling-ai', source_ref: 'https://github.com/klingai-tech/claude-plugin' },
+      { ...skill('later', []), name: 'z-local-name', display_name: 'a-frontmatter-name' },
+    ]
+    const options = { ...defaults, managedSkills }
+    expect(getSkillsView({ ...options, searchQuery: 'claude-plugin-cn' }).visibleSkills.map(item => item.id)).toEqual(['kling-ai-d4f037d292a9'])
+    expect(getSkillsView({ ...options, searchQuery: 'a-frontmatter' }).visibleSkills.map(item => item.id)).toEqual(['later'])
+    expect(getSkillsView(options).visibleSkills[0].id).toBe('later')
+  })
+
   it('filters current issues without including disabled or healthy Skills', () => {
     const bad = { ...skill('bad', []), status: 'error' };
     const view = getSkillsView({ ...defaults, issuesOnly: true, managedSkills: [bad, { ...bad, id: 'disabled', enabled: false }, skill('good', [])] });

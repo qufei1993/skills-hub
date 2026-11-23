@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -390,11 +391,12 @@ impl SkillsHubService {
             return Err(invalid_source());
         }
         let pinned = format!("{}/tree/{revision}", repo.trim_end_matches('/'));
-        let candidate =
+        let mut candidate =
             git_skill_candidate_from_selection(self.paths(), self.store(), &pinned, subpath, None)
                 .map_err(map_install_error)?;
+        candidate.name.clone_from(&name);
         let (skill, action) = if let Some(existing) =
-            classify_git_candidate_with_policy(self, repo, &candidate, Some(&name), true)?
+            classify_git_candidate_with_policy(self, repo, &candidate, None, true)?
         {
             (
                 self.show_skill(SkillSelector::Id(existing.id))?,
@@ -549,13 +551,25 @@ impl SkillsHubService {
         &self,
         reference: &str,
         revision: &str,
+        selections: Vec<GitSkillCandidate>,
     ) -> Result<Vec<GitInstallCandidate>, ServiceError> {
         validate_collection_repository(reference)?;
         if revision.len() != 40 || !revision.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(invalid_source());
         }
         let pinned = format!("{}/tree/{revision}", reference.trim_end_matches('/'));
-        let candidates = self.git_install_candidates_with_cancel(&pinned, None)?;
+        let mut install_names: HashMap<_, _> = selections
+            .into_iter()
+            .map(|selection| (selection.subpath, selection.name))
+            .collect();
+        let candidates = self
+            .git_install_candidates_with_cancel(&pinned, None)?
+            .into_iter()
+            .filter_map(|candidate| {
+                let name = install_names.remove(&candidate.subpath)?;
+                Some(GitSkillCandidate { name, ..candidate })
+            })
+            .collect();
         self.collection_install_preview(reference, candidates)
     }
 

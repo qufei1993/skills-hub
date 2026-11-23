@@ -40,6 +40,7 @@ it('shows website collections by default, opens details and reuses the collectio
   await act(async () => { finishValidation() })
   expect(install).toHaveBeenCalledOnce()
   expect(install.mock.calls[0][0].skills).toHaveLength(31)
+  expect(install.mock.calls[0][0].skills[0].displayName).toBe(detail.skills[0].name)
   expect(calls).not.toContain('get_featured_skills')
   expect(screen.queryByRole('button', { name: 'Skills 搜索' })).toBeNull()
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: '返回探索' })) })

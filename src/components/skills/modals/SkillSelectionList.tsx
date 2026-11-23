@@ -47,6 +47,7 @@ export type SkillSelectionItem = {
   id: string
   name: string
   path: string
+  repository?: string
   description?: string | null
   selected: boolean
   selectable: boolean
@@ -86,7 +87,15 @@ export default memo(function SkillSelectionList({ items, query, onQueryChange, o
         <div className="skill-selection-copy">
           <div className="skill-selection-heading">
         <input type="checkbox" aria-label={item.selectionLabel ?? item.name} checked={item.selectable && item.selected} disabled={disabled || !item.selectable} onChange={event => onToggle(item.id, event.target.checked)} />
-            <div className="skill-selection-identity"><strong>{item.name}</strong><small className="skill-selection-path" title={item.path}>{item.path}</small></div>{item.status && <span className={`git-pick-status git-pick-status-${item.tone ?? 'neutral'}`}>{item.status}</span>}</div>
+            <div className={`skill-selection-identity${item.repository ? ' has-repository' : ''}`}>
+              <strong title={item.repository ? item.name : undefined}>{item.name}</strong>
+              {item.repository ? <span className="skill-selection-source">
+                <small className="skill-selection-repository" title={item.repository}>{item.repository}</small>
+                <small className="skill-selection-path" title={item.path}>{item.path}</small>
+              </span> : <small className="skill-selection-path" title={item.path}>{item.path}</small>}
+            </div>
+            {item.status && <span className={`git-pick-status git-pick-status-${item.tone ?? 'neutral'}`}>{item.status}</span>}
+          </div>
           {item.description && <SkillDescription text={item.description} t={t} />}
           {item.note && <p className={`skill-selection-note${item.tone === 'error' ? ' is-error' : ''}`}>{item.note}</p>}
         </div>

@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Collection installation**: Install same-named Skills from different repositories separately. Show each original name and its source repository separately in the catalog installer and in My Skills.
+
 - **Desktop icon sizing**: Add consistent transparent margins to the macOS icon and desktop PNGs. Generate the master from the original SVG so repeated generation preserves the artwork size. ([#221](https://github.com/qufei1993/skills-hub/pull/221))
 
 ## [1.1.1]

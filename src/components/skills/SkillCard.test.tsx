@@ -26,6 +26,16 @@ const props = {
 beforeEach(async () => { await i18n.changeLanguage('en') })
 afterEach(cleanup)
 
+it('shows the author name and repository separately for an installed catalog Skill', () => {
+  const source = { label: 'klingai-tech/claude-plugin-cn', href: 'https://github.com/klingai-tech/claude-plugin-cn' }
+  render(<SkillCard {...props} skill={{ ...skill, name: 'kling-ai-d4f037d292a9', display_name: 'kling-ai', source_type: 'git', source_ref: source.href }} getGithubInfo={() => source} t={i18n.t} />)
+  const title = screen.getByRole('button', { name: 'kling-ai' })
+  const repository = screen.getByText(source.label)
+  expect(title.getAttribute('aria-describedby')).toBe(repository.id)
+  expect(repository).not.toBe(title)
+  expect(screen.queryByText('kling-ai-d4f037d292a9')).toBeNull()
+})
+
 it('shows tools from both global and project deployments in an all-scopes card', () => {
   render(<SkillCard {...props} skill={skill} t={i18n.t} />)
   for (const name of ['Codex', 'Cursor']) {

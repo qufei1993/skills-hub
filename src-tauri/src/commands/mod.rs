@@ -1492,10 +1492,11 @@ pub async fn list_collection_skills(
     service: State<'_, SkillsHubService>,
     repoUrl: String,
     revision: String,
+    selections: Vec<crate::core::installer::GitSkillCandidate>,
 ) -> Result<Vec<GitInstallCandidate>, String> {
     let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        service.list_collection_skills(&repoUrl, &revision)
+        service.list_collection_skills(&repoUrl, &revision, selections)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -2013,6 +2014,8 @@ pub async fn import_existing_skill(
 pub struct ManagedSkillDto {
     pub id: String,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     pub description: Option<String>,
     pub source_type: String,
     pub source_ref: Option<String>,
@@ -2059,9 +2062,23 @@ pub struct SkillTargetDto {
 
 impl From<ServiceSkill> for ManagedSkillDto {
     fn from(skill: ServiceSkill) -> Self {
+        let display_name = skill
+            .source
+            .reference
+            .as_deref()
+            .filter(|_| skill.source.kind == "git")
+            .and_then(|source| {
+                crate::core::installer::catalog_skill_display_name(
+                    &skill.name,
+                    source,
+                    skill.source.subpath.as_deref(),
+                    std::path::Path::new(&skill.central_path),
+                )
+            });
         Self {
             id: skill.id,
             name: skill.name,
+            display_name,
             description: skill.description,
             source_type: skill.source.kind,
             source_ref: skill.source.reference,
@@ -2103,13 +2120,18 @@ impl From<ServiceSkill> for ManagedSkillDto {
 }
 
 #[tauri::command]
-pub fn get_managed_skills(
+pub async fn get_managed_skills(
     service: State<'_, SkillsHubService>,
 ) -> Result<Vec<ManagedSkillDto>, String> {
-    service
-        .list_skills()
-        .map(|skills| skills.into_iter().map(ManagedSkillDto::from).collect())
-        .map_err(format_service_error)
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service
+            .list_skills()
+            .map(|skills| skills.into_iter().map(ManagedSkillDto::from).collect())
+            .map_err(format_service_error)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

@@ -10,11 +10,11 @@ import ScopeSelector from '../ScopeSelector'
 import ToolIcon from '../ToolIcon'
 import { isToolUnsupportedForScope, normalizeProjectPaths, normalizeProjectSharedTargets, type InstallScope } from '../installScope'
 import { installCollectionEntry, type CollectionInvoke } from '../collectionInstall'
-import type { CollectionManifest, CollectionResult, GitSkillCandidate, InstallResultDto, TagDto, ToolOption } from '../types'
+import type { CollectionInstallPreview, CollectionResult, GitSkillCandidate, InstallResultDto, TagDto, ToolOption } from '../types'
 
 type CollectionInstallModalProps = {
   open?: boolean
-  manifest: CollectionManifest
+  manifest: CollectionInstallPreview
   tools: ToolOption[]
   tags?: TagDto[]
   recentProjects?: string[]
@@ -135,7 +135,9 @@ export default memo(function CollectionInstallModal({ open = true, manifest, too
   const failed = Object.values(results).filter(result => result.state === 'failed').length
   const finished = Object.values(results).filter(result => result.state !== 'failed').length
   const search = query.trim().toLowerCase()
-  const visible = manifest.skills.map((skill, index) => ({ skill, index })).filter(({ skill }) => `${skill.name} ${skill.path} ${manifest.sources[skill.source].repo}`.toLowerCase().includes(search))
+  const visible = manifest.skills.map((skill, index) => ({
+    skill, index, name: skill.displayName ?? skill.name, repository: manifest.sources[skill.source].repo,
+  })).filter(({ skill, name, repository }) => `${name} ${skill.path} ${repository}`.toLowerCase().includes(search))
   const changeTool = (id: string, checked: boolean) => {
     const shared = (scope === 'project' ? sharedProjectTools : sharedTools)[id] ?? [id]
     const affected = tools.filter(tool => shared.includes(tool.id) && !isToolUnsupportedForScope(tool, scope)).map(tool => tool.id)
@@ -164,11 +166,12 @@ export default memo(function CollectionInstallModal({ open = true, manifest, too
           <SkillSelectionList query={query} onQueryChange={setQuery} searchType="search" searchLabel={t('collectionInstall.search')} disabled={locked} t={t}
             onToggle={(id, checked) => { const index = Number(id); if (!eligibleSkills.includes(index)) return; setSelectedSkills(current => checked ? [...new Set([...current, index])].sort((a, b) => a - b) : current.filter(item => item !== index)) }}
             onToggleAll={checked => { const ids = visible.filter(({ index }) => eligibleSkills.includes(index)).map(({ index }) => index); setSelectedSkills(current => checked ? [...new Set([...current, ...ids])].sort((a, b) => a - b) : current.filter(index => !ids.includes(index))) }}
-            items={visible.map(({ skill, index }) => {
+            items={visible.map(({ skill, index, name, repository }) => {
               const status = preview[index]?.status
               const state: string = active === index ? 'working' : results[index]?.state ?? (checking ? 'checking' : status === 'update' ? 'existing' : 'pending')
-              return { id: String(index), name: skill.name, path: skill.path, description: preview[index]?.description,
-                selected: installSelection.includes(index), selectable: status !== 'conflict', selectionLabel: t('collectionInstall.selectSkill', { name: skill.name }),
+              return { id: String(index), name, repository, path: skill.path, description: preview[index]?.description,
+                selected: installSelection.includes(index), selectable: status !== 'conflict',
+                selectionLabel: skill.displayName ? t('collectionInstall.selectSkillFromRepository', { name, repository }) : t('collectionInstall.selectSkill', { name }),
                 status: status === 'conflict' ? t('gitInstall.conflictLabel') : state === 'pending' ? t('gitInstall.install') : t(`collectionInstall.${state}`),
                 tone: status === 'conflict' ? 'conflict' : state === 'failed' ? 'error' : state === 'existing' ? 'update' : state === 'installed' || state === 'pending' ? 'install' : 'neutral',
                 note: status === 'conflict' ? t('gitInstall.conflict') : results[index]?.message,

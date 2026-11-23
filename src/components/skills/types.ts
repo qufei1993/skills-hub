@@ -87,6 +87,7 @@ export type ManagedSkill = {
   source_checked_at?: number | null
   id: string
   name: string
+  display_name?: string
   description?: string | null
   source_type: string
   source_ref?: string | null
@@ -475,6 +476,9 @@ export type CollectionManifest = {
   title: string
   sources: { repo: string; ref: string }[]
   skills: { name: string; path: string; source: number }[]
+}
+export type CollectionInstallPreview = Omit<CollectionManifest, 'skills'> & {
+  skills: (CollectionManifest['skills'][number] & { displayName?: string })[]
 }
 export type CollectionResult = { state: 'installed' | 'existing' | 'failed'; message?: string }
 
